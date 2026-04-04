@@ -25,7 +25,7 @@ class Config:
     ENTSOE_COUNTRY = 'DE'
 
     APP_VERSION = '1.0.0'
-    GITHUB_REPO = 'robertmanuwald/ev-charge-tracker'
+    GITHUB_REPO = 'robeertm/ev-charge-tracker'
     APP_HOST = '0.0.0.0'
     APP_PORT = 7654
 

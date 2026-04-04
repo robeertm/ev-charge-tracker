@@ -9,7 +9,7 @@ set -e
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 cd "$SCRIPT_DIR"
 
-REPO_NAME="robertmanuwald/ev-charge-tracker"
+REPO_NAME="robeertm/ev-charge-tracker"
 
 echo ""
 echo "⚡ EV Charge Tracker — GitHub Setup"

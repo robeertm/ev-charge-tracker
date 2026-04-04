@@ -15,7 +15,7 @@ Local web application for tracking electric vehicle charging data for a **Kia Ni
 
 ```bash
 # Clone
-git clone https://github.com/robertmanuwald/ev-charge-tracker.git
+git clone https://github.com/robeertm/ev-charge-tracker.git
 cd ev-charge-tracker
 
 # Install dependencies

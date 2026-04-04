@@ -1,92 +1,139 @@
-"""Import charging data from Google Sheet CSV export."""
+"""Import charging data from Google Sheet CSV export.
+
+Handles the raw Google Sheets CSV format (File → Download → CSV):
+- Comma-separated with quoted German decimal numbers ("1,50")
+- Title and summary rows at the top (auto-skipped)
+- Extra summary columns to the right (ignored)
+"""
 import csv
-import io
 import sys
 import os
+import subprocess
+import re
 from datetime import datetime
 
+# ── Auto-setup and activate venv ─────────────────────────
+SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
+VENV_DIR = os.path.join(SCRIPT_DIR, 'venv')
+REQUIREMENTS = os.path.join(SCRIPT_DIR, 'requirements.txt')
+
+if sys.platform == 'win32':
+    VENV_PYTHON = os.path.join(VENV_DIR, 'Scripts', 'python.exe')
+else:
+    VENV_PYTHON = os.path.join(VENV_DIR, 'bin', 'python3')
+
+
+def _ensure_venv():
+    """Create venv and install deps if needed."""
+    if not os.path.exists(VENV_PYTHON):
+        print("📦 Erstelle virtuelle Umgebung...")
+        subprocess.check_call([sys.executable, '-m', 'venv', VENV_DIR])
+    print("📥 Installiere Abhängigkeiten...")
+    subprocess.check_call([VENV_PYTHON, '-m', 'pip', 'install', '-q', '-r', REQUIREMENTS])
+
+
+# Check if we're running inside the venv already
+_in_venv = os.path.realpath(sys.executable) == os.path.realpath(VENV_PYTHON)
+
+if not _in_venv:
+    _ensure_venv()
+    print("🔄 Starte mit virtueller Umgebung...")
+    os.execv(VENV_PYTHON, [VENV_PYTHON] + sys.argv)
+
 # Add project root to path
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+sys.path.insert(0, SCRIPT_DIR)
 
 from app import create_app
 from models.database import db, Charge
 
+# ── Date pattern to detect data rows ─────────────────────
+DATE_PATTERN = re.compile(r'^\d{1,2}/\d{1,2}/\d{4}$')
+
 
 def parse_german_float(s):
-    """Parse German number format (comma as decimal sep)."""
-    if not s or s.strip() == '':
+    """Parse German number format: '1.234,56' → 1234.56, '0,29' → 0.29."""
+    if not s or not s.strip():
         return None
+    s = s.strip()
     try:
+        # German format: dots as thousands sep, comma as decimal
         return float(s.replace('.', '').replace(',', '.'))
     except ValueError:
         return None
 
 
-def parse_german_int(s):
-    """Parse integer, handling German format."""
-    if not s or s.strip() == '':
+def parse_int_safe(s):
+    """Parse integer from string, handling German float format too."""
+    if not s or not s.strip():
         return None
+    s = s.strip()
     try:
-        return int(float(s.replace('.', '').replace(',', '.')))
+        # Try direct int first
+        return int(s)
+    except ValueError:
+        pass
+    try:
+        # Try via German float
+        return int(round(float(s.replace('.', '').replace(',', '.'))))
     except (ValueError, TypeError):
         return None
 
 
+def is_data_row(row):
+    """Check if a CSV row is an actual charge data row (starts with a date)."""
+    if not row or not row[0].strip():
+        return False
+    return bool(DATE_PATTERN.match(row[0].strip()))
+
+
 def import_from_csv(filepath):
-    """Import charges from a semicolon-separated CSV file (German format)."""
+    """Import charges from Google Sheet CSV export (comma-separated, German numbers)."""
     app = create_app()
 
     with app.app_context():
         existing = Charge.query.count()
         if existing > 0:
-            print(f"Database already has {existing} entries.")
-            resp = input("Delete existing and re-import? (y/N): ").strip().lower()
-            if resp != 'y':
-                print("Aborted.")
+            print(f"\n⚠️  Datenbank enthält bereits {existing} Einträge.")
+            resp = input("   Löschen und neu importieren? (j/N): ").strip().lower()
+            if resp not in ('j', 'y'):
+                print("   Abgebrochen.")
                 return
             Charge.query.delete()
             db.session.commit()
-            print("Existing entries deleted.")
+            print("   Bestehende Einträge gelöscht.")
 
         imported = 0
         skipped = 0
+        errors = []
 
         with open(filepath, 'r', encoding='utf-8') as f:
-            reader = csv.reader(f, delimiter=';')
-            header = next(reader)  # Skip header
-            print(f"Header: {header}")
+            reader = csv.reader(f, delimiter=',')
 
             for row in reader:
-                if len(row) < 5 or not row[0].strip():
+                # Skip non-data rows (title, headers, summary, empty)
+                if not is_data_row(row):
                     skipped += 1
                     continue
 
                 try:
-                    # Parse date (M/D/YYYY format from Google Sheets)
                     date_str = row[0].strip()
-                    for fmt in ('%m/%d/%Y', '%d.%m.%Y', '%Y-%m-%d', '%d/%m/%Y'):
-                        try:
-                            charge_date = datetime.strptime(date_str, fmt).date()
-                            break
-                        except ValueError:
-                            continue
-                    else:
-                        print(f"  Skipping row, can't parse date: {date_str}")
-                        skipped += 1
-                        continue
+                    charge_date = datetime.strptime(date_str, '%m/%d/%Y').date()
 
+                    # Columns: 0=Date, 1=€/kWh, 2=kWh, 3=Total€, 4=Type,
+                    #          5=SoC_from%, 6=SoC_to%, 7=SoC_charged%,
+                    #          8=Loss_kWh, 9=Loss_%, 10=CO2_g/kWh, 11=CO2_kg
                     charge = Charge(
                         date=charge_date,
                         eur_per_kwh=parse_german_float(row[1]) if len(row) > 1 else None,
                         kwh_loaded=parse_german_float(row[2]) if len(row) > 2 else None,
                         total_cost=parse_german_float(row[3]) if len(row) > 3 else None,
                         charge_type=row[4].strip().upper() if len(row) > 4 and row[4].strip() else None,
-                        soc_from=parse_german_int(row[5]) if len(row) > 5 else None,
-                        soc_to=parse_german_int(row[6]) if len(row) > 6 else None,
-                        soc_charged=parse_german_int(row[7]) if len(row) > 7 else None,
+                        soc_from=parse_int_safe(row[5]) if len(row) > 5 else None,
+                        soc_to=parse_int_safe(row[6]) if len(row) > 6 else None,
+                        soc_charged=parse_int_safe(row[7]) if len(row) > 7 else None,
                         loss_kwh=parse_german_float(row[8]) if len(row) > 8 else None,
                         loss_pct=parse_german_float(row[9]) if len(row) > 9 else None,
-                        co2_g_per_kwh=parse_german_int(row[10]) if len(row) > 10 else None,
+                        co2_g_per_kwh=parse_int_safe(row[10]) if len(row) > 10 else None,
                         co2_kg=parse_german_float(row[11]) if len(row) > 11 else None,
                     )
 
@@ -98,21 +145,42 @@ def import_from_csv(filepath):
                     imported += 1
 
                 except Exception as e:
-                    print(f"  Error on row: {row[:5]}... -> {e}")
+                    errors.append(f"  Zeile {row[0]}: {e}")
                     skipped += 1
                     continue
 
             db.session.commit()
 
-        print(f"\nImport complete: {imported} entries imported, {skipped} skipped.")
-        print(f"Total entries in database: {Charge.query.count()}")
+        # ── Summary ──────────────────────────────────────────
+        total_kwh = db.session.query(db.func.sum(Charge.kwh_loaded)).scalar() or 0
+        total_cost = db.session.query(db.func.sum(Charge.total_cost)).scalar() or 0
+        total_db = Charge.query.count()
+
+        print(f"\n✅ Import abgeschlossen!")
+        print(f"   {imported} Ladevorgänge importiert, {skipped} Zeilen übersprungen")
+        print(f"   Gesamt in DB: {total_db} Einträge")
+        print(f"   Summe kWh:    {total_kwh:,.1f}")
+        print(f"   Summe Kosten: €{total_cost:,.2f}")
+
+        if errors:
+            print(f"\n⚠️  {len(errors)} Fehler:")
+            for e in errors[:10]:
+                print(e)
+            if len(errors) > 10:
+                print(f"   ... und {len(errors) - 10} weitere")
 
 
 if __name__ == '__main__':
     if len(sys.argv) < 2:
-        print("Usage: python import_gsheet.py <csv_file>")
-        print("  CSV must be semicolon-separated with German number format.")
-        print("  Columns: Datum;EUR/kWh;kWh;Preis;Stromart;Von%;Bis%;Geladen%;Verlust_kWh;Verlust%;CO2_g;CO2_kg")
+        print("Verwendung: python import_gsheet.py <csv_datei>")
+        print("")
+        print("  Akzeptiert den direkten Google Sheets CSV-Export")
+        print("  (Datei → Herunterladen → Kommagetrennte Werte)")
         sys.exit(1)
 
-    import_from_csv(sys.argv[1])
+    filepath = sys.argv[1]
+    if not os.path.exists(filepath):
+        print(f"❌ Datei nicht gefunden: {filepath}")
+        sys.exit(1)
+
+    import_from_csv(filepath)
