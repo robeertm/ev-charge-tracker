@@ -18,13 +18,13 @@ except Exception:
 
 class Config:
     SECRET_KEY = os.environ.get('SECRET_KEY', 'ev-tracker-dev-key-change-me')
-    SQLALCHEMY_DATABASE_URI = f"sqlite:///{os.path.join(DATA_DIR, 'ev_tracker.db')}"
+    SQLALCHEMY_DATABASE_URI = f"sqlite:///{os.path.join(DATA_DIR, 'ev_tracker.db').replace(os.sep, '/')}"
     SQLALCHEMY_TRACK_MODIFICATIONS = False
 
     ENTSOE_API_KEY = os.environ.get('ENTSOE_API_KEY', '')
     ENTSOE_COUNTRY = 'DE'
 
-    APP_VERSION = '1.4.1'
+    APP_VERSION = '1.4.2'
     GITHUB_REPO = 'robeertm/ev-charge-tracker'
     APP_HOST = '0.0.0.0'
     APP_PORT = 7654

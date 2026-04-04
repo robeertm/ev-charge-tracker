@@ -38,7 +38,11 @@ _in_venv = os.path.realpath(sys.executable) == os.path.realpath(VENV_PYTHON)
 if not _in_venv:
     _ensure_venv()
     print("🔄 Starte mit virtueller Umgebung...")
-    os.execv(VENV_PYTHON, [VENV_PYTHON] + sys.argv)
+    if sys.platform == 'win32':
+        result = subprocess.run([VENV_PYTHON] + sys.argv)
+        sys.exit(result.returncode)
+    else:
+        os.execv(VENV_PYTHON, [VENV_PYTHON] + sys.argv)
 
 # Add project root to path
 sys.path.insert(0, SCRIPT_DIR)

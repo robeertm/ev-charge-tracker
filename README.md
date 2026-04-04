@@ -26,13 +26,13 @@ Local web application for tracking electric vehicle charging data. Works with an
 git clone https://github.com/robeertm/ev-charge-tracker.git
 cd ev-charge-tracker
 
-# Install dependencies
+# Quick start (recommended)
+# macOS:   double-click start.command
+# Linux:   ./start.sh
+# Windows: double-click start.bat
+
+# Or manually:
 pip install -r requirements.txt
-
-# (Optional) Import existing Google Sheet data
-python import_gsheet.py path/to/exported.csv
-
-# Run
 python app.py
 ```
 
