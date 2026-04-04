@@ -66,7 +66,7 @@
                 <table class="table table-sm mb-0">
                     <tr><td>Version</td><td>{{ app_version }}</td></tr>
                     <tr><td>Fahrzeug</td><td>{{ car_model }}</td></tr>
-                    <tr><td>GitHub</td><td><a href="https://github.com/robertmanuwald/ev-charge-tracker" target="_blank">robertmanuwald/ev-charge-tracker</a></td></tr>
+                    <tr><td>GitHub</td><td><a href="https://github.com/robeertm/ev-charge-tracker" target="_blank">robertmanuwald/ev-charge-tracker</a></td></tr>
                 </table>
 
                 <hr>
@@ -88,7 +88,7 @@ document.getElementById('btnCheckUpdate').addEventListener('click', async () => 
     btn.disabled = true;
     btn.innerHTML = '<span class="spinner-border spinner-border-sm"></span> Prüfe...';
     try {
-        const resp = await fetch('https://api.github.com/repos/robertmanuwald/ev-charge-tracker/releases/latest');
+        const resp = await fetch('https://api.github.com/repos/robeertm/ev-charge-tracker/releases/latest');
         if (resp.ok) {
             const data = await resp.json();
             const current = '{{ app_version }}';
