@@ -214,6 +214,37 @@
                         </button>
                     </div>
                 </form>
+                {% if co2_missing > 0 %}
+                <hr>
+                <div class="d-flex align-items-center gap-2" id="backfillSection">
+                    <form method="POST" class="d-inline">
+                        <button type="submit" name="action" value="backfill_co2" class="btn btn-outline-info btn-sm" id="btnBackfill">
+                            <i class="bi bi-cloud-download"></i> CO₂ nachladen
+                        </button>
+                    </form>
+                    <span class="text-muted small" id="backfillStatus">{{ co2_missing }} Einträge ohne CO₂-Daten</span>
+                </div>
+                <script>
+                (function() {
+                    let interval = setInterval(async () => {
+                        try {
+                            const r = await fetch('/api/co2/backfill/status');
+                            const d = await r.json();
+                            const el = document.getElementById('backfillStatus');
+                            if (d.running) {
+                                el.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span>' + d.missing + ' verbleibend...';
+                            } else if (d.missing === 0) {
+                                el.textContent = 'Alle CO₂-Daten vorhanden!';
+                                el.classList.add('text-success');
+                                clearInterval(interval);
+                            } else {
+                                el.textContent = d.missing + ' Einträge ohne CO₂-Daten';
+                            }
+                        } catch(e) {}
+                    }, 5000);
+                })();
+                </script>
+                {% endif %}
             </div>
         </div>
 

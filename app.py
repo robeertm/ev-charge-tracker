@@ -262,10 +262,21 @@ def register_routes(app):
                         if result['errors']:
                             msg += f" {len(result['errors'])} Fehler."
                         flash(msg, 'success')
+                        # Auto-start CO2 backfill
+                        from services.co2_backfill import start_backfill
+                        if start_backfill(app):
+                            flash('CO₂-Daten werden im Hintergrund von ENTSO-E geladen...', 'info')
                     except Exception as e:
                         flash(f'Import-Fehler: {e}', 'danger')
                 else:
                     flash('Keine Datei ausgewählt.', 'warning')
+
+            elif action == 'backfill_co2':
+                from services.co2_backfill import start_backfill
+                if start_backfill(app):
+                    flash('CO₂-Daten werden im Hintergrund geladen...', 'info')
+                else:
+                    flash('Backfill läuft bereits oder keine fehlenden Werte.', 'warning')
 
             return redirect(url_for('settings'))
 
@@ -284,6 +295,7 @@ def register_routes(app):
                                pv_price_eur_per_kwh=AppConfig.get('pv_price_eur_per_kwh', '0.00'),
                                thg_quotas=ThgQuota.query.order_by(ThgQuota.year_from).all(),
                                total_charges=Charge.query.count(),
+                               co2_missing=Charge.query.filter(Charge.co2_g_per_kwh.is_(None), Charge.charge_type != 'PV').count(),
                                app_version=Config.APP_VERSION)
 
     # ── API ENDPOINTS ──────────────────────────────────────────
@@ -315,6 +327,14 @@ def register_routes(app):
         charge.odometer = int(data['odometer']) if data.get('odometer') else None
         db.session.commit()
         return jsonify({'ok': True, 'odometer': charge.odometer})
+
+    @app.route('/api/co2/backfill/status')
+    def api_backfill_status():
+        from services.co2_backfill import is_running, get_missing_count
+        return jsonify({
+            'running': is_running(),
+            'missing': get_missing_count(app),
+        })
 
     @app.route('/api/stats')
     def api_stats():
