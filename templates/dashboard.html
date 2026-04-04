@@ -50,8 +50,8 @@
         <div class="card kpi-card border-secondary">
             <div class="card-body text-center p-2">
                 <div class="kpi-label">Ladezyklen</div>
-                <div class="kpi-value text-secondary">{{ stats.charge_cycles }}</div>
-                <div class="kpi-label mt-1" style="text-transform:none; letter-spacing:0">à {{ "{:,.0f}".format(stats.total_kwh / stats.total_charges).replace(",", ".") }} kWh im Schnitt</div>
+                <div class="kpi-value text-secondary">{{ stats.charge_cycles + stats.recup_cycles }}</div>
+                <div class="kpi-label mt-1" style="text-transform:none; letter-spacing:0">{{ stats.charge_cycles }} Laden + {{ stats.recup_cycles }} Rekup.</div>
             </div>
         </div>
     </div>
@@ -83,16 +83,16 @@
             <div class="card-body text-center p-2">
                 <div class="kpi-label">Rekuperation</div>
                 <div class="kpi-value text-success">{{ "{:,.0f}".format(stats.total_recuperation).replace(",", ".") }} kWh</div>
-                <div class="kpi-label mt-1" style="text-transform:none; letter-spacing:0">+{{ "{:,.0f}".format(stats.recup_extra_km).replace(",", ".") }} km extra · {{ stats.recup_cycles }} Zyklen</div>
+                <div class="kpi-label mt-1" style="text-transform:none; letter-spacing:0">{{ stats.recup_cycles }} Zyklen · {{ "%.3f"|format(stats.total_recuperation / stats.total_km) }} kWh/km</div>
             </div>
         </div>
     </div>
     <div class="col-6 col-lg-3">
         <div class="card kpi-card border-secondary">
             <div class="card-body text-center p-2">
-                <div class="kpi-label">Ladezyklen</div>
-                <div class="kpi-value text-secondary">{{ stats.charge_cycles }}</div>
-                <div class="kpi-label mt-1" style="text-transform:none; letter-spacing:0">+ {{ stats.recup_cycles }} Rekup.-Zyklen</div>
+                <div class="kpi-label">km durch Rekuperation</div>
+                <div class="kpi-value text-secondary">{{ "{:,.0f}".format(stats.recup_extra_km).replace(",", ".") }} km</div>
+                <div class="kpi-label mt-1" style="text-transform:none; letter-spacing:0">{{ "%.1f"|format(stats.recup_extra_km / stats.total_km * 100) }}% der Gesamtstrecke</div>
             </div>
         </div>
     </div>
