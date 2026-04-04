@@ -1,5 +1,13 @@
 # Changelog
 
+## v1.4.0 (2026-04-04)
+- **Auto CO2 backfill** — missing CO2 values are automatically fetched from ENTSO-E after CSV import
+- **Manual backfill button** — "CO₂ nachladen" in ENTSO-E settings with live progress
+- **Background processing** — rate-limit aware with automatic retries
+
+## v1.3.1 (2026-04-04)
+- Fix uniform chart heights across all dashboard rows
+
 ## v1.3.0 (2026-04-04)
 
 ### New Features
