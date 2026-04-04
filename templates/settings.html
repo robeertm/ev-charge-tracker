@@ -6,6 +6,100 @@
     <div class="col-lg-8">
         <h4 class="mb-3"><i class="bi bi-gear"></i> Einstellungen</h4>
 
+        <!-- Fahrzeug -->
+        <div class="card mb-4">
+            <div class="card-header bg-white fw-bold">
+                <i class="bi bi-car-front"></i> Fahrzeug
+            </div>
+            <div class="card-body">
+                <form method="POST">
+                    <div class="row g-3 mb-3">
+                        <div class="col-12">
+                            <label for="car_model" class="form-label">Modellbezeichnung</label>
+                            <input type="text" class="form-control" id="car_model" name="car_model"
+                                   value="{{ car_model_val }}" placeholder="z.B. Kia Niro EV 64kWh MY21">
+                        </div>
+                        <div class="col-sm-6">
+                            <label for="battery_kwh" class="form-label">Akkukapazität (kWh)</label>
+                            <input type="number" class="form-control" id="battery_kwh" name="battery_kwh"
+                                   value="{{ battery_kwh }}" step="0.1" min="0">
+                        </div>
+                        <div class="col-sm-6">
+                            <label for="max_ac_kw" class="form-label">Max. AC-Ladeleistung (kW)</label>
+                            <input type="number" class="form-control" id="max_ac_kw" name="max_ac_kw"
+                                   value="{{ max_ac_kw }}" step="0.1" min="0">
+                        </div>
+                    </div>
+                    <button type="submit" name="action" value="save_car" class="btn btn-primary">
+                        <i class="bi bi-save"></i> Speichern
+                    </button>
+                </form>
+            </div>
+        </div>
+
+        <!-- THG-Quote -->
+        <div class="card mb-4">
+            <div class="card-header bg-white fw-bold">
+                <i class="bi bi-cash-coin"></i> THG-Quote
+            </div>
+            <div class="card-body">
+                <p class="text-muted small mb-3">Jährliche Auszahlung für eingesparte CO₂-Emissionen.</p>
+                {% if thg_quotas %}
+                <table class="table table-sm mb-3">
+                    <thead>
+                        <tr><th>Zeitraum</th><th class="text-end">Auszahlung</th><th></th></tr>
+                    </thead>
+                    <tbody>
+                        {% for thg in thg_quotas %}
+                        <tr>
+                            <td>{{ thg.year_from }}/{{ thg.year_to }}</td>
+                            <td class="text-end">{{ "%.2f"|format(thg.amount_eur) }} €</td>
+                            <td class="text-end">
+                                <form method="POST" class="d-inline">
+                                    <input type="hidden" name="thg_id" value="{{ thg.id }}">
+                                    <button type="submit" name="action" value="delete_thg"
+                                            class="btn btn-sm btn-outline-danger" title="Löschen">
+                                        <i class="bi bi-trash"></i>
+                                    </button>
+                                </form>
+                            </td>
+                        </tr>
+                        {% endfor %}
+                        <tr class="fw-bold">
+                            <td>Gesamt</td>
+                            <td class="text-end">{{ "%.2f"|format(thg_quotas|sum(attribute='amount_eur')) }} €</td>
+                            <td></td>
+                        </tr>
+                    </tbody>
+                </table>
+                {% endif %}
+                <form method="POST">
+                    <div class="row g-2 align-items-end">
+                        <div class="col-4 col-sm-3">
+                            <label class="form-label small">Jahr von</label>
+                            <input type="number" class="form-control" name="thg_year_from"
+                                   placeholder="2024" min="2020" max="2040" required>
+                        </div>
+                        <div class="col-4 col-sm-3">
+                            <label class="form-label small">Jahr bis</label>
+                            <input type="number" class="form-control" name="thg_year_to"
+                                   placeholder="2025" min="2020" max="2040" required>
+                        </div>
+                        <div class="col-4 col-sm-3">
+                            <label class="form-label small">Betrag €</label>
+                            <input type="text" class="form-control" name="thg_amount"
+                                   placeholder="75,00" required>
+                        </div>
+                        <div class="col-12 col-sm-3">
+                            <button type="submit" name="action" value="add_thg" class="btn btn-primary w-100">
+                                <i class="bi bi-plus-lg"></i> Hinzufügen
+                            </button>
+                        </div>
+                    </div>
+                </form>
+            </div>
+        </div>
+
         <!-- ENTSO-E API -->
         <div class="card mb-4">
             <div class="card-header bg-white fw-bold">

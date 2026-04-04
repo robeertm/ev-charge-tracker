@@ -73,3 +73,12 @@ class AppConfig(db.Model):
             entry = AppConfig(key=key, value=str(value))
             db.session.add(entry)
         db.session.commit()
+
+
+class ThgQuota(db.Model):
+    __tablename__ = 'thg_quotas'
+
+    id = db.Column(db.Integer, primary_key=True)
+    year_from = db.Column(db.Integer, nullable=False)
+    year_to = db.Column(db.Integer, nullable=False)
+    amount_eur = db.Column(db.Float, nullable=False)

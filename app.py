@@ -4,7 +4,7 @@ import logging
 from datetime import datetime, date
 from flask import Flask, render_template, request, redirect, url_for, flash, jsonify
 
-from models.database import db, Charge, AppConfig
+from models.database import db, Charge, AppConfig, ThgQuota
 from config import Config
 
 logging.basicConfig(level=logging.INFO)
@@ -29,7 +29,7 @@ def register_routes(app):
     def inject_globals():
         return {
             'app_version': Config.APP_VERSION,
-            'car_model': Config.CAR_MODEL,
+            'car_model': AppConfig.get('car_model', Config.CAR_MODEL),
         }
 
     # ── DASHBOARD ──────────────────────────────────────────────
@@ -169,10 +169,40 @@ def register_routes(app):
                 else:
                     flash('Kein API Key hinterlegt.', 'warning')
 
+            elif action == 'save_car':
+                AppConfig.set('car_model', request.form.get('car_model', '').strip())
+                AppConfig.set('battery_kwh', request.form.get('battery_kwh', ''))
+                AppConfig.set('max_ac_kw', request.form.get('max_ac_kw', ''))
+                flash('Fahrzeugdaten gespeichert!', 'success')
+
+            elif action == 'add_thg':
+                try:
+                    thg = ThgQuota(
+                        year_from=int(request.form['thg_year_from']),
+                        year_to=int(request.form['thg_year_to']),
+                        amount_eur=float(request.form['thg_amount'].replace(',', '.')),
+                    )
+                    db.session.add(thg)
+                    db.session.commit()
+                    flash(f'THG-Quote {thg.year_from}/{thg.year_to} hinzugefügt!', 'success')
+                except Exception as e:
+                    flash(f'Fehler: {e}', 'danger')
+
+            elif action == 'delete_thg':
+                thg = ThgQuota.query.get(request.form.get('thg_id'))
+                if thg:
+                    db.session.delete(thg)
+                    db.session.commit()
+                    flash('THG-Quote gelöscht.', 'warning')
+
             return redirect(url_for('settings'))
 
         return render_template('settings.html',
                                entsoe_key=AppConfig.get('entsoe_api_key', ''),
+                               car_model_val=AppConfig.get('car_model', Config.CAR_MODEL),
+                               battery_kwh=AppConfig.get('battery_kwh', str(Config.BATTERY_CAPACITY_KWH)),
+                               max_ac_kw=AppConfig.get('max_ac_kw', ''),
+                               thg_quotas=ThgQuota.query.order_by(ThgQuota.year_from).all(),
                                total_charges=Charge.query.count(),
                                app_version=Config.APP_VERSION)
 
