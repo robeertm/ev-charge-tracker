@@ -86,8 +86,73 @@ def is_data_row(row):
     return bool(DATE_PATTERN.match(row[0].strip()))
 
 
+def import_csv_data(file_obj, replace=False):
+    """Import charges from CSV file object. Returns dict with results.
+    Can be called from CLI or web interface."""
+    imported = 0
+    skipped = 0
+    errors = []
+
+    existing = Charge.query.count()
+    if replace and existing > 0:
+        Charge.query.delete()
+        db.session.commit()
+
+    reader = csv.reader(file_obj, delimiter=',')
+
+    for row in reader:
+        if not is_data_row(row):
+            skipped += 1
+            continue
+
+        try:
+            date_str = row[0].strip()
+            charge_date = datetime.strptime(date_str, '%m/%d/%Y').date()
+
+            charge = Charge(
+                date=charge_date,
+                eur_per_kwh=parse_german_float(row[1]) if len(row) > 1 else None,
+                kwh_loaded=parse_german_float(row[2]) if len(row) > 2 else None,
+                total_cost=parse_german_float(row[3]) if len(row) > 3 else None,
+                charge_type=row[4].strip().upper() if len(row) > 4 and row[4].strip() else None,
+                soc_from=parse_int_safe(row[5]) if len(row) > 5 else None,
+                soc_to=parse_int_safe(row[6]) if len(row) > 6 else None,
+                soc_charged=parse_int_safe(row[7]) if len(row) > 7 else None,
+                loss_kwh=parse_german_float(row[8]) if len(row) > 8 else None,
+                loss_pct=parse_german_float(row[9]) if len(row) > 9 else None,
+                co2_g_per_kwh=parse_int_safe(row[10]) if len(row) > 10 else None,
+                co2_kg=parse_german_float(row[11]) if len(row) > 11 else None,
+            )
+
+            if charge.soc_from is not None and charge.soc_to is not None and charge.soc_charged is None:
+                charge.soc_charged = charge.soc_to - charge.soc_from
+
+            db.session.add(charge)
+            imported += 1
+
+        except Exception as e:
+            errors.append(f"Zeile {row[0]}: {e}")
+            skipped += 1
+            continue
+
+    db.session.commit()
+
+    total_kwh = db.session.query(db.func.sum(Charge.kwh_loaded)).scalar() or 0
+    total_cost = db.session.query(db.func.sum(Charge.total_cost)).scalar() or 0
+    total_db = Charge.query.count()
+
+    return {
+        'imported': imported,
+        'skipped': skipped,
+        'errors': errors,
+        'total_db': total_db,
+        'total_kwh': round(total_kwh, 1),
+        'total_cost': round(total_cost, 2),
+    }
+
+
 def import_from_csv(filepath):
-    """Import charges from Google Sheet CSV export (comma-separated, German numbers)."""
+    """Import charges from Google Sheet CSV export (CLI version)."""
     app = create_app()
 
     with app.app_context():
@@ -98,76 +163,26 @@ def import_from_csv(filepath):
             if resp not in ('j', 'y'):
                 print("   Abgebrochen.")
                 return
-            Charge.query.delete()
-            db.session.commit()
-            print("   Bestehende Einträge gelöscht.")
+            replace = True
+        else:
+            replace = False
 
-        imported = 0
-        skipped = 0
-        errors = []
-
+        import io
         with open(filepath, 'r', encoding='utf-8') as f:
-            reader = csv.reader(f, delimiter=',')
-
-            for row in reader:
-                # Skip non-data rows (title, headers, summary, empty)
-                if not is_data_row(row):
-                    skipped += 1
-                    continue
-
-                try:
-                    date_str = row[0].strip()
-                    charge_date = datetime.strptime(date_str, '%m/%d/%Y').date()
-
-                    # Columns: 0=Date, 1=€/kWh, 2=kWh, 3=Total€, 4=Type,
-                    #          5=SoC_from%, 6=SoC_to%, 7=SoC_charged%,
-                    #          8=Loss_kWh, 9=Loss_%, 10=CO2_g/kWh, 11=CO2_kg
-                    charge = Charge(
-                        date=charge_date,
-                        eur_per_kwh=parse_german_float(row[1]) if len(row) > 1 else None,
-                        kwh_loaded=parse_german_float(row[2]) if len(row) > 2 else None,
-                        total_cost=parse_german_float(row[3]) if len(row) > 3 else None,
-                        charge_type=row[4].strip().upper() if len(row) > 4 and row[4].strip() else None,
-                        soc_from=parse_int_safe(row[5]) if len(row) > 5 else None,
-                        soc_to=parse_int_safe(row[6]) if len(row) > 6 else None,
-                        soc_charged=parse_int_safe(row[7]) if len(row) > 7 else None,
-                        loss_kwh=parse_german_float(row[8]) if len(row) > 8 else None,
-                        loss_pct=parse_german_float(row[9]) if len(row) > 9 else None,
-                        co2_g_per_kwh=parse_int_safe(row[10]) if len(row) > 10 else None,
-                        co2_kg=parse_german_float(row[11]) if len(row) > 11 else None,
-                    )
-
-                    # Calculate missing derived fields
-                    if charge.soc_from is not None and charge.soc_to is not None and charge.soc_charged is None:
-                        charge.soc_charged = charge.soc_to - charge.soc_from
-
-                    db.session.add(charge)
-                    imported += 1
-
-                except Exception as e:
-                    errors.append(f"  Zeile {row[0]}: {e}")
-                    skipped += 1
-                    continue
-
-            db.session.commit()
-
-        # ── Summary ──────────────────────────────────────────
-        total_kwh = db.session.query(db.func.sum(Charge.kwh_loaded)).scalar() or 0
-        total_cost = db.session.query(db.func.sum(Charge.total_cost)).scalar() or 0
-        total_db = Charge.query.count()
+            result = import_csv_data(io.StringIO(f.read()), replace=replace)
 
         print(f"\n✅ Import abgeschlossen!")
-        print(f"   {imported} Ladevorgänge importiert, {skipped} Zeilen übersprungen")
-        print(f"   Gesamt in DB: {total_db} Einträge")
-        print(f"   Summe kWh:    {total_kwh:,.1f}")
-        print(f"   Summe Kosten: €{total_cost:,.2f}")
+        print(f"   {result['imported']} Ladevorgänge importiert, {result['skipped']} Zeilen übersprungen")
+        print(f"   Gesamt in DB: {result['total_db']} Einträge")
+        print(f"   Summe kWh:    {result['total_kwh']:,.1f}")
+        print(f"   Summe Kosten: €{result['total_cost']:,.2f}")
 
-        if errors:
-            print(f"\n⚠️  {len(errors)} Fehler:")
-            for e in errors[:10]:
-                print(e)
-            if len(errors) > 10:
-                print(f"   ... und {len(errors) - 10} weitere")
+        if result['errors']:
+            print(f"\n⚠️  {len(result['errors'])} Fehler:")
+            for e in result['errors'][:10]:
+                print(f"  {e}")
+            if len(result['errors']) > 10:
+                print(f"   ... und {len(result['errors']) - 10} weitere")
 
 
 if __name__ == '__main__':

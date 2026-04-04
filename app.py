@@ -221,6 +221,24 @@ def register_routes(app):
                     db.session.commit()
                     flash('THG-Quote gelöscht.', 'warning')
 
+            elif action == 'import_csv':
+                file = request.files.get('csv_file')
+                if file and file.filename:
+                    try:
+                        import io
+                        from import_gsheet import import_csv_data
+                        replace = 'replace_data' in request.form
+                        stream = io.StringIO(file.stream.read().decode('utf-8'))
+                        result = import_csv_data(stream, replace=replace)
+                        msg = f"{result['imported']} Ladevorgänge importiert, {result['skipped']} Zeilen übersprungen."
+                        if result['errors']:
+                            msg += f" {len(result['errors'])} Fehler."
+                        flash(msg, 'success')
+                    except Exception as e:
+                        flash(f'Import-Fehler: {e}', 'danger')
+                else:
+                    flash('Keine Datei ausgewählt.', 'warning')
+
             return redirect(url_for('settings'))
 
         return render_template('settings.html',

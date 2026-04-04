@@ -156,19 +156,30 @@
             </div>
             <div class="card-body">
                 <p><strong>Einträge:</strong> {{ total_charges }} Ladevorgänge</p>
-                <div class="d-flex gap-2 flex-wrap">
+                <div class="d-flex gap-2 flex-wrap mb-3">
                     <a href="/api/export/csv" class="btn btn-outline-success">
                         <i class="bi bi-download"></i> CSV Export
                     </a>
                 </div>
                 <hr>
-                <h6>Google Sheet Import</h6>
+                <h6><i class="bi bi-upload"></i> Google Sheet Import</h6>
                 <p class="text-muted small">
-                    Exportiere dein Google Sheet als CSV (Datei → Herunterladen → .csv) und dann:
+                    Google Sheet als CSV exportieren (Datei → Herunterladen → .csv) und hier hochladen.
                 </p>
-                <code class="d-block bg-light p-2 rounded">
-                    python import_gsheet.py pfad/zur/datei.csv
-                </code>
+                <form method="POST" enctype="multipart/form-data">
+                    <div class="mb-2">
+                        <input type="file" class="form-control form-control-sm" name="csv_file" accept=".csv" required>
+                    </div>
+                    <div class="form-check mb-2">
+                        <input class="form-check-input" type="checkbox" name="replace_data" id="replaceData">
+                        <label class="form-check-label small text-danger" for="replaceData">
+                            Bestehende Daten vorher löschen
+                        </label>
+                    </div>
+                    <button type="submit" name="action" value="import_csv" class="btn btn-outline-primary btn-sm">
+                        <i class="bi bi-upload"></i> CSV importieren
+                    </button>
+                </form>
             </div>
         </div>
 

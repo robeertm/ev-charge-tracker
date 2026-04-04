@@ -1,5 +1,9 @@
 # Changelog
 
+## v1.2.1 (2026-04-04)
+- **CSV import via web UI** — upload Google Sheet CSV directly in settings (no CLI needed)
+- Refactored import logic into reusable `import_csv_data()` function
+
 ## v1.2.0 (2026-04-04)
 
 ### New Features
