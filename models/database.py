@@ -9,6 +9,8 @@ class Charge(db.Model):
 
     id = db.Column(db.Integer, primary_key=True)
     date = db.Column(db.Date, nullable=False, index=True)
+    charge_hour = db.Column(db.Integer)  # 0-23, hour of charging
+    odometer = db.Column(db.Integer)  # km-Stand bei Ladung
     eur_per_kwh = db.Column(db.Float)
     kwh_loaded = db.Column(db.Float)
     total_cost = db.Column(db.Float)
@@ -23,12 +25,17 @@ class Charge(db.Model):
     notes = db.Column(db.Text)
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
 
-    def calculate_fields(self):
+    def calculate_fields(self, battery_kwh=None):
         """Auto-calculate derived fields."""
         if self.eur_per_kwh is not None and self.kwh_loaded is not None:
             self.total_cost = round(self.eur_per_kwh * self.kwh_loaded, 2)
         if self.soc_from is not None and self.soc_to is not None:
             self.soc_charged = self.soc_to - self.soc_from
+            # Auto-calculate loss if not manually provided
+            if self.loss_kwh is None and battery_kwh and self.kwh_loaded and self.soc_charged > 0:
+                kwh_in_battery = self.soc_charged / 100 * battery_kwh
+                calculated_loss = round(self.kwh_loaded - kwh_in_battery, 3)
+                self.loss_kwh = max(calculated_loss, 0.0)
         if self.loss_kwh is not None and self.kwh_loaded and self.kwh_loaded > 0:
             self.loss_pct = round(self.loss_kwh / self.kwh_loaded * 100, 2)
         if self.co2_g_per_kwh is not None and self.kwh_loaded is not None:
@@ -38,6 +45,8 @@ class Charge(db.Model):
         return {
             'id': self.id,
             'date': self.date.isoformat() if self.date else None,
+            'charge_hour': self.charge_hour,
+            'odometer': self.odometer,
             'eur_per_kwh': self.eur_per_kwh,
             'kwh_loaded': self.kwh_loaded,
             'total_cost': self.total_cost,

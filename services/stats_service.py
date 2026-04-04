@@ -1,7 +1,7 @@
 """Statistics and aggregation service."""
 from datetime import date
 from sqlalchemy import func, extract
-from models.database import db, Charge
+from models.database import db, Charge, ThgQuota, AppConfig
 
 
 def get_summary_stats():
@@ -17,25 +17,70 @@ def get_summary_stats():
     dc_count = sum(1 for c in charges if c.charge_type == 'DC')
     avg_eur = total_cost / total_kwh if total_kwh > 0 else 0
 
-    # CO2 equivalent for fossil car (assuming 120g/km average)
-    # and 19.86 kWh/100km for the EV
-    avg_consumption = total_kwh / 1 if len(charges) == 0 else total_kwh
-    fossil_co2_per_km = 0.12  # 120g CO2/km for average fossil car
-    # Approximate km from kWh (using ~20 kWh/100km)
-    est_km = total_kwh / 0.20
+    total_thg = sum(t.amount_eur for t in ThgQuota.query.all())
+    net_cost = total_cost - total_thg
+
+    # Total km = last (highest) odometer reading
+    odo_values = [c.odometer for c in charges if c.odometer]
+    total_km = max(odo_values) if odo_values else 0
+
+    # Config values
+    try:
+        battery_kwh = float(AppConfig.get('battery_kwh', '64'))
+    except (ValueError, TypeError):
+        battery_kwh = 64.0
+    try:
+        recup_kwh_per_km = float(AppConfig.get('recuperation_kwh_per_km', '0.086'))
+    except (ValueError, TypeError):
+        recup_kwh_per_km = 0.086
+
+    # Recuperation & consumption
+    total_recuperation = round(total_km * recup_kwh_per_km, 1) if total_km > 0 else 0
+    # Verbrauch mit Rekup. = was aus dem Netz geladen wurde pro 100km
+    consumption_with_recup = round(total_kwh / (total_km / 100), 3) if total_km > 0 else 0
+    # Verbrauch ohne Rekup. = tatsächlicher Gesamtverbrauch des Autos pro 100km
+    consumption_without_recup = round((total_kwh + total_recuperation) / (total_km / 100), 3) if total_km > 0 else 0
+    # km extra durch Rekuperation
+    recup_extra_km = round(total_recuperation / (consumption_without_recup / 100), 0) if consumption_without_recup > 0 else 0
+    # Ladezyklen
+    charge_cycles = round(total_kwh / battery_kwh, 1) if battery_kwh > 0 else 0
+    recup_cycles = round(total_recuperation / battery_kwh, 1) if battery_kwh > 0 else 0
+    # Kosten pro 100km
+    cost_per_100km = round(total_cost / total_km * 100, 2) if total_km > 0 else 0
+    net_cost_per_100km = round((total_cost - total_thg) / total_km * 100, 2) if total_km > 0 else 0
+
+    # CO2 comparison — Well-to-Wheel
+    try:
+        fossil_co2_g_per_km = float(AppConfig.get('fossil_co2_per_km', '164'))
+    except (ValueError, TypeError):
+        fossil_co2_g_per_km = 164.0
+    fossil_co2_per_km = fossil_co2_g_per_km / 1000  # g → kg
+    km_for_co2 = total_km if total_km > 0 else total_kwh * 5
+    fossil_co2_kg = km_for_co2 * fossil_co2_per_km
 
     return {
         'total_charges': len(charges),
         'total_kwh': round(total_kwh, 1),
         'total_cost': round(total_cost, 2),
+        'total_thg_eur': round(total_thg, 2),
+        'net_cost': round(net_cost, 2),
         'total_co2_kg': round(total_co2, 2),
-        'fossil_co2_kg': round(est_km * fossil_co2_per_km, 2),
-        'co2_savings_pct': round((1 - total_co2 / (est_km * fossil_co2_per_km)) * 100, 1) if est_km > 0 and total_co2 > 0 else 0,
+        'fossil_co2_kg': round(fossil_co2_kg, 2),
+        'co2_savings_pct': round((1 - total_co2 / fossil_co2_kg) * 100, 1) if fossil_co2_kg > 0 and total_co2 > 0 else 0,
         'avg_eur_per_kwh': round(avg_eur, 2),
         'ac_count': ac_count,
         'dc_count': dc_count,
         'first_charge': min(c.date for c in charges) if charges else None,
         'last_charge': max(c.date for c in charges) if charges else None,
+        'total_km': total_km,
+        'consumption_with_recup': consumption_with_recup,
+        'consumption_without_recup': consumption_without_recup,
+        'total_recuperation': total_recuperation,
+        'recup_extra_km': int(recup_extra_km),
+        'charge_cycles': charge_cycles,
+        'recup_cycles': recup_cycles,
+        'cost_per_100km': cost_per_100km,
+        'net_cost_per_100km': net_cost_per_100km,
     }
 
 
@@ -49,6 +94,8 @@ def get_monthly_stats():
         func.sum(Charge.co2_kg).label('co2'),
         func.count(Charge.id).label('count'),
         func.avg(Charge.loss_pct).label('avg_loss_pct'),
+        func.min(Charge.odometer).label('odo_min'),
+        func.max(Charge.odometer).label('odo_max'),
     ).group_by(
         extract('year', Charge.date),
         extract('month', Charge.date)
@@ -59,6 +106,7 @@ def get_monthly_stats():
 
     months = []
     for r in results:
+        km = (r.odo_max - r.odo_min) if r.odo_min and r.odo_max and r.odo_max > r.odo_min else 0
         months.append({
             'year': int(r.year),
             'month': int(r.month),
@@ -67,6 +115,7 @@ def get_monthly_stats():
             'cost': round(r.cost or 0, 2),
             'co2': round(r.co2 or 0, 2),
             'count': r.count,
+            'km': km,
             'avg_loss_pct': round(r.avg_loss_pct or 0, 1),
             'cost_per_kwh': round((r.cost / r.kwh), 2) if r.kwh and r.kwh > 0 else 0,
         })
@@ -87,12 +136,19 @@ def get_yearly_stats():
         extract('year', Charge.date)
     ).all()
 
+    thg_map = {}
+    for t in ThgQuota.query.all():
+        for y in range(t.year_from, t.year_to + 1):
+            thg_map[y] = thg_map.get(y, 0) + t.amount_eur / (t.year_to - t.year_from + 1)
+
     return [{
         'year': int(r.year),
         'kwh': round(r.kwh or 0, 1),
         'cost': round(r.cost or 0, 2),
         'co2': round(r.co2 or 0, 2),
         'count': r.count,
+        'thg': round(thg_map.get(int(r.year), 0), 2),
+        'net_cost': round((r.cost or 0) - thg_map.get(int(r.year), 0), 2),
     } for r in results]
 
 
@@ -128,13 +184,54 @@ def get_chart_data():
         cum_kwh += m['kwh']
         cumulative.append({'label': m['label'], 'cost': round(cum_cost, 2), 'kwh': round(cum_kwh, 1)})
 
+    # Cumulative CO2 and CO2 savings — Well-to-Wheel
+    try:
+        fossil_co2_g_per_km = float(AppConfig.get('fossil_co2_per_km', '164'))
+    except (ValueError, TypeError):
+        fossil_co2_g_per_km = 164.0
+    fossil_co2_per_km = fossil_co2_g_per_km / 1000  # g → kg
+    total_kwh_all = sum(m['kwh'] for m in monthly)
+    odo_max = 0
+    for c in Charge.query.all():
+        if c.odometer and c.odometer > odo_max:
+            odo_max = c.odometer
+    # km per kWh ratio from odometer, or fallback
+    km_per_kwh = odo_max / total_kwh_all if odo_max > 0 and total_kwh_all > 0 else 5.0
+
+    cum_co2 = 0
+    cum_savings = 0
+    cumulative_co2 = []
+    cumulative_co2_savings = []
+    for m in monthly:
+        cum_co2 += m['co2']
+        est_km = m['kwh'] * km_per_kwh
+        fossil_co2 = est_km * fossil_co2_per_km
+        cum_savings += (fossil_co2 - m['co2'])
+        cumulative_co2.append(round(cum_co2, 2))
+        cumulative_co2_savings.append(round(cum_savings, 2))
+
+    # Battery production CO2 for break-even line
+    try:
+        battery_kwh = float(AppConfig.get('battery_kwh', '64'))
+    except (ValueError, TypeError):
+        battery_kwh = 64.0
+    try:
+        co2_per_kwh = float(AppConfig.get('battery_co2_per_kwh', '100'))
+    except (ValueError, TypeError):
+        co2_per_kwh = 100.0
+    battery_production_co2 = round(battery_kwh * co2_per_kwh, 0)
+
     return {
         'monthly_labels': [m['label'] for m in monthly],
         'monthly_cost': [m['cost'] for m in monthly],
         'monthly_kwh': [m['kwh'] for m in monthly],
+        'monthly_co2': [m['co2'] for m in monthly],
         'monthly_count': [m['count'] for m in monthly],
         'monthly_cost_per_kwh': [m['cost_per_kwh'] for m in monthly],
         'cumulative_labels': [c['label'] for c in cumulative],
         'cumulative_cost': [c['cost'] for c in cumulative],
         'cumulative_kwh': [c['kwh'] for c in cumulative],
+        'cumulative_co2': cumulative_co2,
+        'cumulative_co2_savings': cumulative_co2_savings,
+        'battery_production_co2': battery_production_co2,
     }

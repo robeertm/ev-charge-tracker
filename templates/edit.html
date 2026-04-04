@@ -10,10 +10,27 @@
             </div>
             <div class="card-body">
                 <form method="POST">
+                    <div class="row g-3 mb-3">
+                        <div class="col-7">
+                            <label for="date" class="form-label fw-bold">Datum</label>
+                            <input type="date" class="form-control" id="date" name="date"
+                                   value="{{ charge.date.isoformat() }}" required>
+                        </div>
+                        <div class="col-5">
+                            <label for="charge_hour" class="form-label fw-bold">Uhrzeit</label>
+                            <select class="form-select" id="charge_hour" name="charge_hour">
+                                <option value="">–</option>
+                                {% for h in range(24) %}
+                                <option value="{{ h }}" {% if charge.charge_hour == h %}selected{% endif %}>{{ "%02d"|format(h) }}:00</option>
+                                {% endfor %}
+                            </select>
+                        </div>
+                    </div>
+
                     <div class="mb-3">
-                        <label for="date" class="form-label fw-bold">Datum</label>
-                        <input type="date" class="form-control" id="date" name="date"
-                               value="{{ charge.date.isoformat() }}" required>
+                        <label class="form-label fw-bold">km-Stand</label>
+                        <input type="number" class="form-control" name="odometer"
+                               value="{{ charge.odometer if charge.odometer is not none else '' }}" min="0">
                     </div>
 
                     <div class="mb-3">

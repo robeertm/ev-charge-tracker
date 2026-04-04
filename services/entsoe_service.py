@@ -30,10 +30,11 @@ CO2_FACTORS = {
 }
 
 
-def get_co2_intensity(api_key: str, target_date: datetime, country_code: str = 'DE') -> Optional[int]:
+def get_co2_intensity(api_key: str, target_date: datetime, hour: int = None, country_code: str = 'DE') -> Optional[int]:
     """
     Fetch CO2 intensity (g/kWh) for a given date and country from ENTSO-E.
-    Uses generation per type data to calculate weighted average CO2 intensity.
+    If hour is provided (0-23), returns intensity for that specific hour.
+    Otherwise returns daily average.
     """
     if not api_key:
         logger.warning("No ENTSO-E API key configured")
@@ -60,8 +61,12 @@ def get_co2_intensity(api_key: str, target_date: datetime, country_code: str = '
         else:
             actual = generation
 
-        # Calculate daily average generation per type
-        avg_gen = actual.mean()
+        # Filter to specific hour if provided
+        if hour is not None and 0 <= hour <= 23:
+            hour_data = actual[actual.index.hour == hour]
+            avg_gen = hour_data.mean() if not hour_data.empty else actual.mean()
+        else:
+            avg_gen = actual.mean()
 
         total_gen = 0
         total_co2 = 0
@@ -74,7 +79,8 @@ def get_co2_intensity(api_key: str, target_date: datetime, country_code: str = '
 
         if total_gen > 0:
             intensity = int(round(total_co2 / total_gen))
-            logger.info(f"CO2 intensity for {target_date.date()}: {intensity} g/kWh")
+            label = f"{target_date.date()} {hour}:00" if hour is not None else f"{target_date.date()}"
+            logger.info(f"CO2 intensity for {label}: {intensity} g/kWh")
             return intensity
 
         return None

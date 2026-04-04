@@ -1,0 +1,34 @@
+# Changelog
+
+## v1.2.0 (2026-04-04)
+
+### New Features
+- **Vehicle configuration** — car model, battery capacity, max AC power editable in settings
+- **THG quota management** — add/delete yearly CO2 bonus payouts, deducted from total costs
+- **Odometer tracking** — km field per charge, inline editing in history view
+- **Charging hour** — select hour (00-23) for hour-specific ENTSO-E CO2 data
+- **Recuperation tracking** — configurable kWh/km rate, total energy recovered, extra km, recuperation cycles
+- **CO2 break-even chart** — cumulative CO2 savings vs. battery production with break-even line
+- **Well-to-wheel CO2** — configurable fossil car WTW emissions (default 164 g/km DE average)
+- **Auto-calculated charging losses** — from SoC difference and battery capacity when not manually entered
+- **New dashboard KPIs** — net costs (after THG), consumption kWh/100km, cost per 100km, charge cycles, recuperation stats
+- **CO2 charts** — monthly CO2 emissions bar chart, cumulative CO2 savings line chart
+- **Improved dashboard layout** — AC/DC and yearly tables separated, full-width cost chart
+
+### Fixes
+- Fix ENTSO-E connection test button (hidden input override)
+- Fix GitHub username in settings template and update checker
+- Auto-migrate database schema (adds columns without data loss)
+
+## v1.1.0 (2026-04-04)
+- Vehicle configuration in settings
+- THG quota tracking
+
+## v1.0.2 (2026-04-04)
+- Fix GitHub username in update checker and settings link
+
+## v1.0.1 (2026-04-04)
+- Fix ENTSO-E connection test button
+
+## v1.0.0 (2026-04-04)
+- Initial release

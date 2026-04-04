@@ -52,6 +52,7 @@
                 <th class="text-end">kWh</th>
                 <th class="text-end">€/kWh</th>
                 <th class="text-end">Kosten</th>
+                <th class="text-end d-none d-md-table-cell">km</th>
                 <th class="text-end d-none d-md-table-cell">SoC</th>
                 <th class="text-end d-none d-lg-table-cell">Verluste</th>
                 <th class="text-end d-none d-lg-table-cell">CO₂</th>
@@ -67,6 +68,12 @@
                 <td class="text-end">{{ "%.1f"|format(c.kwh_loaded or 0) }}</td>
                 <td class="text-end">{{ "%.2f"|format(c.eur_per_kwh or 0) }}</td>
                 <td class="text-end fw-bold">€{{ "%.2f"|format(c.total_cost or 0) }}</td>
+                <td class="text-end d-none d-md-table-cell">
+                    <span class="editable-km" data-id="{{ c.id }}" role="button" title="Klicken zum Bearbeiten"
+                          style="cursor:pointer; border-bottom:1px dashed #aaa;">
+                        {% if c.odometer %}{{ "{:,}".format(c.odometer).replace(",", ".") }}{% else %}—{% endif %}
+                    </span>
+                </td>
                 <td class="text-end d-none d-md-table-cell">
                     {% if c.soc_from is not none %}{{ c.soc_from }}→{{ c.soc_to }}%{% else %}—{% endif %}
                 </td>
@@ -125,4 +132,42 @@
 <div class="text-muted text-center small">
     {{ charges.total }} Einträge gesamt
 </div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+document.querySelectorAll('.editable-km').forEach(span => {
+    span.addEventListener('click', function() {
+        const id = this.dataset.id;
+        const current = this.textContent.trim().replace(/\./g, '');
+        const val = current === '—' ? '' : current;
+        const input = document.createElement('input');
+        input.type = 'number';
+        input.className = 'form-control form-control-sm text-end';
+        input.style.width = '90px';
+        input.value = val;
+        input.min = 0;
+        input.inputMode = 'numeric';
+        this.replaceWith(input);
+        input.focus();
+        input.select();
+
+        const save = async () => {
+            const newVal = input.value.trim();
+            try {
+                await fetch('/api/charge/' + id + '/odometer', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({odometer: newVal || null})
+                });
+                location.reload();
+            } catch(e) {
+                alert('Fehler: ' + e.message);
+            }
+        };
+        input.addEventListener('blur', save);
+        input.addEventListener('keydown', e => { if (e.key === 'Enter') input.blur(); });
+    });
+});
+</script>
 {% endblock %}

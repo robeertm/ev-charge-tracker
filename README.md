@@ -5,9 +5,14 @@ Local web application for tracking electric vehicle charging data for a **Kia Ni
 ## Features
 
 - **Mobile-friendly input form** — quickly log charges from your phone
-- **Dashboard** with KPI cards and Chart.js visualizations (monthly costs, cumulative, AC/DC split)
-- **ENTSO-E integration** — automatically fetch CO₂ grid intensity for Germany
-- **History** with filtering, editing, CSV export
+- **Dashboard** with KPI cards and Chart.js visualizations (monthly costs, cumulative, AC/DC split, CO2 charts)
+- **Vehicle configuration** — battery capacity, max AC power, recuperation rate, CO2 production
+- **THG quota tracking** — yearly payouts for saved CO2 emissions, deducted from total costs
+- **Odometer tracking** — log km per charge, inline editing in history, consumption & cost per 100km
+- **CO2 break-even chart** — cumulative savings vs. battery production CO2 (well-to-wheel)
+- **Recuperation stats** — total energy recovered, extra km, recuperation charge cycles
+- **ENTSO-E integration** — fetch hourly CO2 grid intensity for Germany
+- **History** with filtering, inline km editing, CSV export
 - **Auto-updater** via GitHub releases
 - **SQLite database** — all data stays local on your machine
 
@@ -44,6 +49,19 @@ The importer handles German number format (comma as decimal separator) and vario
 1. Register at [transparency.entsoe.eu](https://transparency.entsoe.eu/)
 2. Request an API token via email
 3. Enter the token in Settings within the app
+4. Optionally select the charging hour for hour-specific CO2 data
+
+## Vehicle Settings
+
+Configure in Settings → Fahrzeug:
+
+| Setting | Default | Description |
+|---------|---------|-------------|
+| Akkukapazität | 64 kWh | Battery size for cycle & loss calculation |
+| Max. AC-Ladeleistung | — | Max AC charging power |
+| CO2 Akkuproduktion | 100 kg/kWh | For break-even calculation (MY2021) |
+| Verbrenner CO2 WTW | 164 g/km | Well-to-wheel comparison (DE average) |
+| Rekuperation | 0.086 kWh/km | Energy recovered per km |
 
 ## Tech Stack
 
@@ -53,4 +71,4 @@ The importer handles German number format (comma as decimal separator) and vario
 
 ## License
 
-© Robert Manuwald 2021-2026
+Robert Manuwald 2021-2026

@@ -10,13 +10,38 @@
             </div>
             <div class="card-body">
                 <form method="POST" id="chargeForm">
-                    <!-- Datum -->
+                    <!-- Datum & Uhrzeit -->
+                    <div class="row g-3 mb-3">
+                        <div class="col-7">
+                            <label for="date" class="form-label fw-bold">
+                                <i class="bi bi-calendar3"></i> Datum
+                            </label>
+                            <input type="date" class="form-control form-control-lg" id="date" name="date"
+                                   value="{{ today }}" required>
+                        </div>
+                        <div class="col-5">
+                            <label for="charge_hour" class="form-label fw-bold">
+                                <i class="bi bi-clock"></i> Uhrzeit
+                            </label>
+                            <select class="form-select form-select-lg" id="charge_hour" name="charge_hour">
+                                <option value="">–</option>
+                                {% for h in range(24) %}
+                                <option value="{{ h }}">{{ "%02d"|format(h) }}:00</option>
+                                {% endfor %}
+                            </select>
+                        </div>
+                    </div>
+
+                    <!-- km-Stand -->
                     <div class="mb-3">
-                        <label for="date" class="form-label fw-bold">
-                            <i class="bi bi-calendar3"></i> Datum
+                        <label for="odometer" class="form-label fw-bold">
+                            <i class="bi bi-speedometer"></i> km-Stand
+                            <small class="text-muted fw-normal">optional</small>
                         </label>
-                        <input type="date" class="form-control form-control-lg" id="date" name="date"
-                               value="{{ today }}" required>
+                        <input type="number" class="form-control form-control-lg" id="odometer"
+                               name="odometer" min="0" max="999999"
+                               placeholder="{{ last_charge.odometer if last_charge and last_charge.odometer else '' }}"
+                               inputmode="numeric">
                     </div>
 
                     <!-- Stromart -->
@@ -144,11 +169,14 @@ document.getElementById('kwh_loaded').addEventListener('input', updateCalcPrice)
 document.getElementById('btnFetchCo2').addEventListener('click', async () => {
     const dateVal = document.getElementById('date').value;
     if (!dateVal) { alert('Bitte zuerst ein Datum eingeben.'); return; }
+    const hourVal = document.getElementById('charge_hour').value;
     const btn = document.getElementById('btnFetchCo2');
     btn.innerHTML = '<span class="spinner-border spinner-border-sm"></span>';
     btn.disabled = true;
     try {
-        const resp = await fetch('/api/co2/' + dateVal);
+        let url = '/api/co2/' + dateVal;
+        if (hourVal !== '') url += '?hour=' + hourVal;
+        const resp = await fetch(url);
         const data = await resp.json();
         if (data.co2_g_per_kwh) {
             document.getElementById('co2_g_per_kwh').value = data.co2_g_per_kwh;

@@ -15,72 +15,108 @@
 </div>
 {% else %}
 
-<!-- KPI Cards -->
-<div class="row g-3 mb-4">
-    <div class="col-6 col-md-4 col-lg-2">
+<!-- KPI Cards Row 1 -->
+<div class="row g-2 mb-3">
+    <div class="col-6 col-lg-3">
         <div class="card kpi-card border-primary">
             <div class="card-body text-center p-2">
-                <div class="kpi-label">Gesamtkosten</div>
-                <div class="kpi-value text-primary">€{{ "{:,.2f}".format(stats.total_cost).replace(",", "X").replace(".", ",").replace("X", ".") }}</div>
+                <div class="kpi-label">Ladekosten</div>
+                <div class="kpi-value text-primary">€{{ "{:,.0f}".format(stats.total_cost).replace(",", ".") }}</div>
+                {% if stats.total_thg_eur > 0 %}
+                <div class="kpi-label mt-1" style="text-transform:none; letter-spacing:0">Netto: €{{ "{:,.0f}".format(stats.net_cost).replace(",", ".") }} (THG −€{{ "{:,.0f}".format(stats.total_thg_eur).replace(",", ".") }})</div>
+                {% endif %}
             </div>
         </div>
     </div>
-    <div class="col-6 col-md-4 col-lg-2">
-        <div class="card kpi-card border-success">
-            <div class="card-body text-center p-2">
-                <div class="kpi-label">Gesamt kWh</div>
-                <div class="kpi-value text-success">{{ "{:,.1f}".format(stats.total_kwh).replace(",", "X").replace(".", ",").replace("X", ".") }}</div>
-            </div>
-        </div>
-    </div>
-    <div class="col-6 col-md-4 col-lg-2">
+    <div class="col-6 col-lg-3">
         <div class="card kpi-card border-info">
             <div class="card-body text-center p-2">
-                <div class="kpi-label">Ladevorgänge</div>
-                <div class="kpi-value text-info">{{ stats.total_charges }}</div>
+                <div class="kpi-label">Geladen</div>
+                <div class="kpi-value text-info">{{ "{:,.0f}".format(stats.total_kwh).replace(",", ".") }} kWh</div>
+                <div class="kpi-label mt-1" style="text-transform:none; letter-spacing:0">{{ stats.total_charges }}× · Ø €{{ "%.2f"|format(stats.avg_eur_per_kwh) }}/kWh</div>
             </div>
         </div>
     </div>
-    <div class="col-6 col-md-4 col-lg-2">
-        <div class="card kpi-card border-warning">
-            <div class="card-body text-center p-2">
-                <div class="kpi-label">Ø €/kWh</div>
-                <div class="kpi-value text-warning">€{{ "%.2f"|format(stats.avg_eur_per_kwh) }}</div>
-            </div>
-        </div>
-    </div>
-    <div class="col-6 col-md-4 col-lg-2">
+    <div class="col-6 col-lg-3">
         <div class="card kpi-card border-danger">
             <div class="card-body text-center p-2">
-                <div class="kpi-label">CO₂ gesamt</div>
-                <div class="kpi-value text-danger">{{ "{:,.0f}".format(stats.total_co2_kg) }} kg</div>
+                <div class="kpi-label">CO₂</div>
+                <div class="kpi-value text-danger">{{ "{:,.0f}".format(stats.total_co2_kg).replace(",", ".") }} kg</div>
+                <div class="kpi-label mt-1" style="text-transform:none; letter-spacing:0">{{ stats.co2_savings_pct }}% weniger als Verbrenner</div>
             </div>
         </div>
     </div>
-    <div class="col-6 col-md-4 col-lg-2">
+    <div class="col-6 col-lg-3">
         <div class="card kpi-card border-secondary">
             <div class="card-body text-center p-2">
-                <div class="kpi-label">CO₂ Ersparnis</div>
-                <div class="kpi-value text-success">{{ stats.co2_savings_pct }}%</div>
+                <div class="kpi-label">Ladezyklen</div>
+                <div class="kpi-value text-secondary">{{ stats.charge_cycles }}</div>
+                <div class="kpi-label mt-1" style="text-transform:none; letter-spacing:0">à {{ "{:,.0f}".format(stats.total_kwh / stats.total_charges).replace(",", ".") }} kWh im Schnitt</div>
             </div>
         </div>
     </div>
 </div>
 
-<!-- Charts Row 1 -->
+{% if stats.total_km > 0 %}
+<!-- KPI Cards Row 2: km-basiert -->
+<div class="row g-2 mb-3">
+    <div class="col-6 col-lg-3">
+        <div class="card kpi-card border-primary">
+            <div class="card-body text-center p-2">
+                <div class="kpi-label">Tachostand</div>
+                <div class="kpi-value text-primary">{{ "{:,.0f}".format(stats.total_km).replace(",", ".") }} km</div>
+                <div class="kpi-label mt-1" style="text-transform:none; letter-spacing:0">{{ "%.2f"|format(stats.cost_per_100km) }} €/100km{% if stats.total_thg_eur > 0 %} (netto {{ "%.2f"|format(stats.net_cost_per_100km) }}){% endif %}</div>
+            </div>
+        </div>
+    </div>
+    <div class="col-6 col-lg-3">
+        <div class="card kpi-card border-warning">
+            <div class="card-body text-center p-2">
+                <div class="kpi-label">Verbrauch</div>
+                <div class="kpi-value text-warning">{{ "%.1f"|format(stats.consumption_with_recup) }}<small> kWh/100km</small></div>
+                <div class="kpi-label mt-1" style="text-transform:none; letter-spacing:0">Ohne Rekup.: {{ "%.1f"|format(stats.consumption_without_recup) }} kWh/100km</div>
+            </div>
+        </div>
+    </div>
+    <div class="col-6 col-lg-3">
+        <div class="card kpi-card border-success">
+            <div class="card-body text-center p-2">
+                <div class="kpi-label">Rekuperation</div>
+                <div class="kpi-value text-success">{{ "{:,.0f}".format(stats.total_recuperation).replace(",", ".") }} kWh</div>
+                <div class="kpi-label mt-1" style="text-transform:none; letter-spacing:0">+{{ "{:,.0f}".format(stats.recup_extra_km).replace(",", ".") }} km extra · {{ stats.recup_cycles }} Zyklen</div>
+            </div>
+        </div>
+    </div>
+    <div class="col-6 col-lg-3">
+        <div class="card kpi-card border-secondary">
+            <div class="card-body text-center p-2">
+                <div class="kpi-label">Ladezyklen</div>
+                <div class="kpi-value text-secondary">{{ stats.charge_cycles }}</div>
+                <div class="kpi-label mt-1" style="text-transform:none; letter-spacing:0">+ {{ stats.recup_cycles }} Rekup.-Zyklen</div>
+            </div>
+        </div>
+    </div>
+</div>
+{% endif %}
+
+<!-- Charts Row 1: Monatliche Kosten -->
 <div class="row g-3 mb-4">
-    <div class="col-lg-8">
+    <div class="col-12">
         <div class="card">
             <div class="card-header bg-white fw-bold">
                 <i class="bi bi-graph-up"></i> Monatliche Ladekosten
             </div>
             <div class="card-body">
-                <canvas id="chartMonthlyCost" height="100"></canvas>
+                <canvas id="chartMonthlyCost" height="80"></canvas>
             </div>
         </div>
     </div>
-    <div class="col-lg-4">
-        <div class="card">
+</div>
+
+<!-- Tabellen: AC/DC + Jährlich -->
+<div class="row g-3 mb-4">
+    <div class="col-lg-5">
+        <div class="card h-100">
             <div class="card-header bg-white fw-bold">
                 <i class="bi bi-lightning-charge"></i> AC vs. DC
             </div>
@@ -97,14 +133,26 @@
                     </tbody>
                 </table>
                 {% endif %}
-
-                <hr>
-                <h6 class="fw-bold"><i class="bi bi-calendar3"></i> Jährlich</h6>
+            </div>
+        </div>
+    </div>
+    <div class="col-lg-7">
+        <div class="card h-100">
+            <div class="card-header bg-white fw-bold">
+                <i class="bi bi-calendar3"></i> Jährlich
+            </div>
+            <div class="card-body">
                 <table class="table table-sm mb-0">
-                    <thead><tr><th>Jahr</th><th>kWh</th><th>Kosten</th></tr></thead>
+                    <thead><tr><th>Jahr</th><th>kWh</th><th>Kosten</th><th>THG</th><th>Netto</th></tr></thead>
                     <tbody>
                     {% for y in yearly %}
-                        <tr><td>{{ y.year }}</td><td>{{ "{:,.0f}".format(y.kwh) }}</td><td>€{{ "{:,.0f}".format(y.cost) }}</td></tr>
+                        <tr>
+                            <td>{{ y.year }}</td>
+                            <td>{{ "{:,.0f}".format(y.kwh) }}</td>
+                            <td>€{{ "{:,.0f}".format(y.cost) }}</td>
+                            <td class="text-success">{% if y.thg > 0 %}−€{{ "{:,.0f}".format(y.thg) }}{% else %}–{% endif %}</td>
+                            <td>€{{ "{:,.0f}".format(y.net_cost) }}</td>
+                        </tr>
                     {% endfor %}
                     </tbody>
                 </table>
@@ -132,6 +180,30 @@
             </div>
             <div class="card-body">
                 <canvas id="chartMonthlyKwh" height="120"></canvas>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Charts Row 3: CO2 -->
+<div class="row g-3 mb-4">
+    <div class="col-lg-6">
+        <div class="card">
+            <div class="card-header bg-white fw-bold">
+                <i class="bi bi-cloud-haze2"></i> Monatliche CO₂-Emissionen
+            </div>
+            <div class="card-body">
+                <canvas id="chartMonthlyCo2" height="120"></canvas>
+            </div>
+        </div>
+    </div>
+    <div class="col-lg-6">
+        <div class="card">
+            <div class="card-header bg-white fw-bold">
+                <i class="bi bi-graph-up-arrow"></i> CO₂-Ersparnis vs. Verbrenner
+            </div>
+            <div class="card-body">
+                <canvas id="chartCumulativeCo2" height="120"></canvas>
             </div>
         </div>
     </div>
@@ -218,6 +290,78 @@ new Chart(document.getElementById('chartMonthlyKwh'), {
         scales: {
             x: { ticks: { maxRotation: 45, autoSkip: true, maxTicksLimit: 24 } },
             y: { beginAtZero: true }
+        }
+    }
+});
+
+// Monthly CO2 Chart
+new Chart(document.getElementById('chartMonthlyCo2'), {
+    type: 'bar',
+    data: {
+        labels: labels,
+        datasets: [{
+            label: 'CO₂ (kg)',
+            data: {{ chart_data.monthly_co2 | tojson }},
+            backgroundColor: chartColors.warning,
+            borderRadius: 4,
+        }]
+    },
+    options: {
+        responsive: true,
+        plugins: { legend: { display: false } },
+        scales: {
+            x: { ticks: { maxRotation: 45, autoSkip: true, maxTicksLimit: 24 } },
+            y: { beginAtZero: true, ticks: { callback: v => v + ' kg' } }
+        }
+    }
+});
+
+// Cumulative CO2 Savings vs Battery Production Break-Even
+const batteryProductionCo2 = {{ chart_data.battery_production_co2 }};
+const savingsLabels = {{ chart_data.cumulative_labels | tojson }};
+new Chart(document.getElementById('chartCumulativeCo2'), {
+    type: 'line',
+    data: {
+        labels: savingsLabels,
+        datasets: [{
+            label: 'CO₂-Ersparnis kumuliert (kg)',
+            data: {{ chart_data.cumulative_co2_savings | tojson }},
+            borderColor: chartColors.success,
+            backgroundColor: 'rgba(76, 175, 80, 0.1)',
+            fill: true,
+            tension: 0.3,
+        }, {
+            label: 'Akkuproduktion CO₂ (kg)',
+            data: savingsLabels.map(() => batteryProductionCo2),
+            borderColor: chartColors.danger,
+            borderDash: [8, 4],
+            borderWidth: 2,
+            pointRadius: 0,
+            fill: false,
+        }]
+    },
+    options: {
+        responsive: true,
+        plugins: {
+            legend: { display: true, position: 'bottom' },
+            tooltip: {
+                callbacks: {
+                    afterBody: function(context) {
+                        if (context[0].datasetIndex === 0) {
+                            const savings = context[0].raw;
+                            if (savings >= batteryProductionCo2) {
+                                return 'Break-Even erreicht!';
+                            } else {
+                                return 'Noch ' + (batteryProductionCo2 - savings).toLocaleString('de-DE', {maximumFractionDigits: 0}) + ' kg bis Break-Even';
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        scales: {
+            x: { ticks: { autoSkip: true, maxTicksLimit: 12 } },
+            y: { ticks: { callback: v => v.toLocaleString() + ' kg' } }
         }
     }
 });

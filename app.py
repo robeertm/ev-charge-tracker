@@ -18,9 +18,27 @@ def create_app(config_class=Config):
 
     with app.app_context():
         db.create_all()
+        # Migrate: add charge_hour column if missing
+        from sqlalchemy import inspect, text
+        inspector = inspect(db.engine)
+        columns = [c['name'] for c in inspector.get_columns('charges')]
+        if 'charge_hour' not in columns:
+            db.session.execute(text('ALTER TABLE charges ADD COLUMN charge_hour INTEGER'))
+            db.session.commit()
+        if 'odometer' not in columns:
+            db.session.execute(text('ALTER TABLE charges ADD COLUMN odometer INTEGER'))
+            db.session.commit()
 
     register_routes(app)
     return app
+
+
+def _get_battery_kwh():
+    val = AppConfig.get('battery_kwh')
+    try:
+        return float(val) if val else Config.BATTERY_CAPACITY_KWH
+    except (ValueError, TypeError):
+        return Config.BATTERY_CAPACITY_KWH
 
 
 def register_routes(app):
@@ -51,6 +69,8 @@ def register_routes(app):
             try:
                 charge = Charge(
                     date=datetime.strptime(request.form['date'], '%Y-%m-%d').date(),
+                    charge_hour=_int(request.form.get('charge_hour')),
+                    odometer=_int(request.form.get('odometer')),
                     eur_per_kwh=_float(request.form.get('eur_per_kwh')),
                     kwh_loaded=_float(request.form.get('kwh_loaded')),
                     charge_type=request.form.get('charge_type', 'AC').upper(),
@@ -60,18 +80,19 @@ def register_routes(app):
                     co2_g_per_kwh=_int(request.form.get('co2_g_per_kwh')),
                     notes=request.form.get('notes', '').strip() or None,
                 )
-                charge.calculate_fields()
+                charge.calculate_fields(_get_battery_kwh())
 
                 # If no CO2 provided, try ENTSO-E
                 if charge.co2_g_per_kwh is None:
                     api_key = AppConfig.get('entsoe_api_key', Config.ENTSOE_API_KEY)
                     if api_key:
                         from services.entsoe_service import get_co2_intensity
-                        co2 = get_co2_intensity(api_key, datetime.combine(charge.date, datetime.min.time()))
+                        co2 = get_co2_intensity(api_key, datetime.combine(charge.date, datetime.min.time()), hour=charge.charge_hour)
                         if co2:
                             charge.co2_g_per_kwh = co2
-                            charge.calculate_fields()
-                            flash(f'CO₂-Intensität automatisch von ENTSO-E geholt: {co2} g/kWh', 'info')
+                            charge.calculate_fields(_get_battery_kwh())
+                            hour_label = f" ({charge.charge_hour}:00 Uhr)" if charge.charge_hour is not None else ""
+                            flash(f'CO₂-Intensität automatisch von ENTSO-E geholt: {co2} g/kWh{hour_label}', 'info')
 
                 db.session.add(charge)
                 db.session.commit()
@@ -122,6 +143,8 @@ def register_routes(app):
         if request.method == 'POST':
             try:
                 charge.date = datetime.strptime(request.form['date'], '%Y-%m-%d').date()
+                charge.charge_hour = _int(request.form.get('charge_hour'))
+                charge.odometer = _int(request.form.get('odometer'))
                 charge.eur_per_kwh = _float(request.form.get('eur_per_kwh'))
                 charge.kwh_loaded = _float(request.form.get('kwh_loaded'))
                 charge.charge_type = request.form.get('charge_type', 'AC').upper()
@@ -130,7 +153,7 @@ def register_routes(app):
                 charge.loss_kwh = _float(request.form.get('loss_kwh'))
                 charge.co2_g_per_kwh = _int(request.form.get('co2_g_per_kwh'))
                 charge.notes = request.form.get('notes', '').strip() or None
-                charge.calculate_fields()
+                charge.calculate_fields(_get_battery_kwh())
                 db.session.commit()
                 flash('Eintrag aktualisiert!', 'success')
                 return redirect(url_for('history'))
@@ -173,6 +196,9 @@ def register_routes(app):
                 AppConfig.set('car_model', request.form.get('car_model', '').strip())
                 AppConfig.set('battery_kwh', request.form.get('battery_kwh', ''))
                 AppConfig.set('max_ac_kw', request.form.get('max_ac_kw', ''))
+                AppConfig.set('battery_co2_per_kwh', request.form.get('battery_co2_per_kwh', ''))
+                AppConfig.set('fossil_co2_per_km', request.form.get('fossil_co2_per_km', ''))
+                AppConfig.set('recuperation_kwh_per_km', request.form.get('recuperation_kwh_per_km', ''))
                 flash('Fahrzeugdaten gespeichert!', 'success')
 
             elif action == 'add_thg':
@@ -202,6 +228,9 @@ def register_routes(app):
                                car_model_val=AppConfig.get('car_model', Config.CAR_MODEL),
                                battery_kwh=AppConfig.get('battery_kwh', str(Config.BATTERY_CAPACITY_KWH)),
                                max_ac_kw=AppConfig.get('max_ac_kw', ''),
+                               battery_co2_per_kwh=AppConfig.get('battery_co2_per_kwh', '100'),
+                               fossil_co2_per_km=AppConfig.get('fossil_co2_per_km', '164'),
+                               recuperation_kwh_per_km=AppConfig.get('recuperation_kwh_per_km', '0.086'),
                                thg_quotas=ThgQuota.query.order_by(ThgQuota.year_from).all(),
                                total_charges=Charge.query.count(),
                                app_version=Config.APP_VERSION)
@@ -209,20 +238,32 @@ def register_routes(app):
     # ── API ENDPOINTS ──────────────────────────────────────────
     @app.route('/api/co2/<date_str>')
     def api_get_co2(date_str):
-        """Fetch CO2 intensity for a date via ENTSO-E."""
+        """Fetch CO2 intensity for a date (and optional hour) via ENTSO-E."""
         try:
             target = datetime.strptime(date_str, '%Y-%m-%d')
+            hour = request.args.get('hour', type=int)
             api_key = AppConfig.get('entsoe_api_key', Config.ENTSOE_API_KEY)
             if not api_key:
                 return jsonify({'error': 'No ENTSO-E API key configured'}), 400
 
             from services.entsoe_service import get_co2_intensity
-            co2 = get_co2_intensity(api_key, target)
+            co2 = get_co2_intensity(api_key, target, hour=hour)
             if co2:
-                return jsonify({'co2_g_per_kwh': co2, 'date': date_str})
+                result = {'co2_g_per_kwh': co2, 'date': date_str}
+                if hour is not None:
+                    result['hour'] = hour
+                return jsonify(result)
             return jsonify({'error': 'No data available'}), 404
         except Exception as e:
             return jsonify({'error': str(e)}), 500
+
+    @app.route('/api/charge/<int:charge_id>/odometer', methods=['POST'])
+    def api_update_odometer(charge_id):
+        charge = Charge.query.get_or_404(charge_id)
+        data = request.get_json()
+        charge.odometer = int(data['odometer']) if data.get('odometer') else None
+        db.session.commit()
+        return jsonify({'ok': True, 'odometer': charge.odometer})
 
     @app.route('/api/stats')
     def api_stats():

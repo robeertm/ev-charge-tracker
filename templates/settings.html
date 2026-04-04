@@ -29,6 +29,27 @@
                             <input type="number" class="form-control" id="max_ac_kw" name="max_ac_kw"
                                    value="{{ max_ac_kw }}" step="0.1" min="0">
                         </div>
+                        <div class="col-sm-6">
+                            <label for="battery_co2_per_kwh" class="form-label">CO₂ Akkuproduktion (kg/kWh)</label>
+                            <input type="number" class="form-control" id="battery_co2_per_kwh" name="battery_co2_per_kwh"
+                                   value="{{ battery_co2_per_kwh }}" step="1" min="0"
+                                   placeholder="100">
+                            <div class="form-text">Typisch MY2021: ~100 kg CO₂/kWh</div>
+                        </div>
+                        <div class="col-sm-6">
+                            <label for="fossil_co2_per_km" class="form-label">Verbrenner CO₂ WTW (g/km)</label>
+                            <input type="number" class="form-control" id="fossil_co2_per_km" name="fossil_co2_per_km"
+                                   value="{{ fossil_co2_per_km }}" step="1" min="0"
+                                   placeholder="164">
+                            <div class="form-text">Well-to-Wheel inkl. Förderung, Raffinerie, Transport. Ø DE: ~164 g/km</div>
+                        </div>
+                        <div class="col-sm-6">
+                            <label for="recuperation_kwh_per_km" class="form-label">Rekuperation (kWh/km)</label>
+                            <input type="number" class="form-control" id="recuperation_kwh_per_km" name="recuperation_kwh_per_km"
+                                   value="{{ recuperation_kwh_per_km }}" step="0.001" min="0"
+                                   placeholder="0.086">
+                            <div class="form-text">Kia Niro EV: ~0,086 kWh/km</div>
+                        </div>
                     </div>
                     <button type="submit" name="action" value="save_car" class="btn btn-primary">
                         <i class="bi bi-save"></i> Speichern
