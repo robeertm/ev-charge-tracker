@@ -33,6 +33,19 @@ def create_app(config_class=Config):
     return app
 
 
+def _get_pv_co2():
+    """Calculate PV CO2 in g/kWh from settings."""
+    try:
+        yield_kwp = float(AppConfig.get('pv_yield_per_kwp', '950'))
+        lifetime = float(AppConfig.get('pv_lifetime', '25'))
+        prod_co2 = float(AppConfig.get('pv_production_co2', '1000'))
+        if yield_kwp > 0 and lifetime > 0:
+            return int(round(prod_co2 / (yield_kwp * lifetime)))
+    except (ValueError, TypeError):
+        pass
+    return 42  # fallback
+
+
 def _get_battery_kwh():
     val = AppConfig.get('battery_kwh')
     try:
@@ -82,17 +95,22 @@ def register_routes(app):
                 )
                 charge.calculate_fields(_get_battery_kwh())
 
-                # If no CO2 provided, try ENTSO-E
+                # If no CO2 provided, set automatically
                 if charge.co2_g_per_kwh is None:
-                    api_key = AppConfig.get('entsoe_api_key', Config.ENTSOE_API_KEY)
-                    if api_key:
-                        from services.entsoe_service import get_co2_intensity
-                        co2 = get_co2_intensity(api_key, datetime.combine(charge.date, datetime.min.time()), hour=charge.charge_hour)
-                        if co2:
-                            charge.co2_g_per_kwh = co2
-                            charge.calculate_fields(_get_battery_kwh())
-                            hour_label = f" ({charge.charge_hour}:00 Uhr)" if charge.charge_hour is not None else ""
-                            flash(f'CO₂-Intensität automatisch von ENTSO-E geholt: {co2} g/kWh{hour_label}', 'info')
+                    if charge.charge_type == 'PV':
+                        charge.co2_g_per_kwh = _get_pv_co2()
+                        charge.calculate_fields(_get_battery_kwh())
+                        flash(f'PV CO₂-Wert: {charge.co2_g_per_kwh} g/kWh', 'info')
+                    else:
+                        api_key = AppConfig.get('entsoe_api_key', Config.ENTSOE_API_KEY)
+                        if api_key:
+                            from services.entsoe_service import get_co2_intensity
+                            co2 = get_co2_intensity(api_key, datetime.combine(charge.date, datetime.min.time()), hour=charge.charge_hour)
+                            if co2:
+                                charge.co2_g_per_kwh = co2
+                                charge.calculate_fields(_get_battery_kwh())
+                                hour_label = f" ({charge.charge_hour}:00 Uhr)" if charge.charge_hour is not None else ""
+                                flash(f'CO₂-Intensität automatisch von ENTSO-E geholt: {co2} g/kWh{hour_label}', 'info')
 
                 db.session.add(charge)
                 db.session.commit()
@@ -107,7 +125,9 @@ def register_routes(app):
         last_charge = Charge.query.order_by(Charge.date.desc()).first()
         return render_template('input.html',
                                today=date.today().isoformat(),
-                               last_charge=last_charge)
+                               last_charge=last_charge,
+                               pv_co2=_get_pv_co2(),
+                               pv_price=AppConfig.get('pv_price_eur_per_kwh', '0.00'))
 
     # ── HISTORY ────────────────────────────────────────────────
     @app.route('/history')
@@ -118,7 +138,7 @@ def register_routes(app):
         year = request.args.get('year', '', type=str)
 
         query = Charge.query
-        if charge_type in ('AC', 'DC'):
+        if charge_type in ('AC', 'DC', 'PV'):
             query = query.filter_by(charge_type=charge_type)
         if year and year.isdigit():
             from sqlalchemy import extract
@@ -201,6 +221,14 @@ def register_routes(app):
                 AppConfig.set('recuperation_kwh_per_km', request.form.get('recuperation_kwh_per_km', ''))
                 flash('Fahrzeugdaten gespeichert!', 'success')
 
+            elif action == 'save_pv':
+                AppConfig.set('pv_kwp', request.form.get('pv_kwp', ''))
+                AppConfig.set('pv_yield_per_kwp', request.form.get('pv_yield_per_kwp', ''))
+                AppConfig.set('pv_lifetime', request.form.get('pv_lifetime', ''))
+                AppConfig.set('pv_production_co2', request.form.get('pv_production_co2', ''))
+                AppConfig.set('pv_price_eur_per_kwh', request.form.get('pv_price_eur_per_kwh', ''))
+                flash('PV-Anlage gespeichert!', 'success')
+
             elif action == 'add_thg':
                 try:
                     thg = ThgQuota(
@@ -249,6 +277,11 @@ def register_routes(app):
                                battery_co2_per_kwh=AppConfig.get('battery_co2_per_kwh', '100'),
                                fossil_co2_per_km=AppConfig.get('fossil_co2_per_km', '164'),
                                recuperation_kwh_per_km=AppConfig.get('recuperation_kwh_per_km', '0.086'),
+                               pv_kwp=AppConfig.get('pv_kwp', ''),
+                               pv_yield_per_kwp=AppConfig.get('pv_yield_per_kwp', '950'),
+                               pv_lifetime=AppConfig.get('pv_lifetime', '25'),
+                               pv_production_co2=AppConfig.get('pv_production_co2', '1000'),
+                               pv_price_eur_per_kwh=AppConfig.get('pv_price_eur_per_kwh', '0.00'),
                                thg_quotas=ThgQuota.query.order_by(ThgQuota.year_from).all(),
                                total_charges=Charge.query.count(),
                                app_version=Config.APP_VERSION)

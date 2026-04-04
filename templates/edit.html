@@ -42,6 +42,9 @@
                             <input type="radio" class="btn-check" name="charge_type" id="typeDC" value="DC"
                                    {% if charge.charge_type == 'DC' %}checked{% endif %}>
                             <label class="btn btn-outline-warning" for="typeDC">DC</label>
+                            <input type="radio" class="btn-check" name="charge_type" id="typePV" value="PV"
+                                   {% if charge.charge_type == 'PV' %}checked{% endif %}>
+                            <label class="btn btn-outline-info" for="typePV"><i class="bi bi-sun"></i> PV</label>
                         </div>
                     </div>
 

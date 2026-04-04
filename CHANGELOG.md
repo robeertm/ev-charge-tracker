@@ -1,5 +1,16 @@
 # Changelog
 
+## v1.3.0 (2026-04-04)
+
+### New Features
+- **PV charging** — third charge type "PV (Solar)" alongside AC/DC
+- **PV system configuration** — kWp, annual yield, lifetime, production CO2 in settings
+- **Auto-calculated PV CO2** — from system specs (e.g. 10kWp → ~42 g/kWh)
+- **PV auto-fill** — selecting PV pre-fills CO2 and price fields
+- **AC/DC/PV comparison** — dashboard table includes PV column when data exists
+- **PV filter** — history filterable by PV charge type
+- **Mobile-friendly charts** — responsive sizing, fewer ticks, smaller fonts, shorter legends on small screens
+
 ## v1.2.1 (2026-04-04)
 - **CSV import via web UI** — upload Google Sheet CSV directly in settings (no CLI needed)
 - Refactored import logic into reusable `import_csv_data()` function

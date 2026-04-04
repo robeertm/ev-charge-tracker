@@ -121,6 +121,74 @@
             </div>
         </div>
 
+        <!-- PV-Anlage -->
+        <div class="card mb-4">
+            <div class="card-header bg-white fw-bold">
+                <i class="bi bi-sun"></i> PV-Anlage
+            </div>
+            <div class="card-body">
+                <form method="POST">
+                    <div class="row g-3 mb-3">
+                        <div class="col-sm-6">
+                            <label for="pv_kwp" class="form-label">Anlagengröße (kWp)</label>
+                            <input type="number" class="form-control" id="pv_kwp" name="pv_kwp"
+                                   value="{{ pv_kwp }}" step="0.1" min="0" placeholder="10">
+                        </div>
+                        <div class="col-sm-6">
+                            <label for="pv_yield_per_kwp" class="form-label">Jahresertrag (kWh/kWp)</label>
+                            <input type="number" class="form-control" id="pv_yield_per_kwp" name="pv_yield_per_kwp"
+                                   value="{{ pv_yield_per_kwp }}" step="1" min="0" placeholder="950">
+                            <div class="form-text">DE Durchschnitt: ~950</div>
+                        </div>
+                        <div class="col-sm-6">
+                            <label for="pv_lifetime" class="form-label">Lebensdauer (Jahre)</label>
+                            <input type="number" class="form-control" id="pv_lifetime" name="pv_lifetime"
+                                   value="{{ pv_lifetime }}" step="1" min="1" placeholder="25">
+                        </div>
+                        <div class="col-sm-6">
+                            <label for="pv_production_co2" class="form-label">Herstellungs-CO₂ (kg/kWp)</label>
+                            <input type="number" class="form-control" id="pv_production_co2" name="pv_production_co2"
+                                   value="{{ pv_production_co2 }}" step="1" min="0" placeholder="1000">
+                            <div class="form-text">Inkl. Produktion, Transport, Installation</div>
+                        </div>
+                        <div class="col-sm-6">
+                            <label for="pv_price_eur_per_kwh" class="form-label">PV-Strompreis (€/kWh)</label>
+                            <input type="number" class="form-control" id="pv_price_eur_per_kwh" name="pv_price_eur_per_kwh"
+                                   value="{{ pv_price_eur_per_kwh }}" step="0.01" min="0" placeholder="0.00">
+                            <div class="form-text">Eigenverbrauchskosten (oft €0)</div>
+                        </div>
+                        <div class="col-sm-6">
+                            <label class="form-label">Berechnetes CO₂</label>
+                            <div class="form-control bg-light fw-bold" id="pvCo2Result">—</div>
+                        </div>
+                    </div>
+                    <button type="submit" name="action" value="save_pv" class="btn btn-primary">
+                        <i class="bi bi-save"></i> Speichern
+                    </button>
+                </form>
+                <script>
+                function calcPvCo2() {
+                    const kwp = parseFloat(document.getElementById('pv_kwp').value);
+                    const yield_ = parseFloat(document.getElementById('pv_yield_per_kwp').value);
+                    const lifetime = parseFloat(document.getElementById('pv_lifetime').value);
+                    const prodCo2 = parseFloat(document.getElementById('pv_production_co2').value);
+                    const el = document.getElementById('pvCo2Result');
+                    if (kwp > 0 && yield_ > 0 && lifetime > 0 && prodCo2 > 0) {
+                        const co2 = Math.round(prodCo2 / (yield_ * lifetime));
+                        el.textContent = co2 + ' g CO₂/kWh';
+                        el.classList.add('text-success');
+                    } else {
+                        el.textContent = '—';
+                        el.classList.remove('text-success');
+                    }
+                }
+                ['pv_kwp','pv_yield_per_kwp','pv_lifetime','pv_production_co2'].forEach(id =>
+                    document.getElementById(id).addEventListener('input', calcPvCo2));
+                calcPvCo2();
+                </script>
+            </div>
+        </div>
+
         <!-- ENTSO-E API -->
         <div class="card mb-4">
             <div class="card-header bg-white fw-bold">

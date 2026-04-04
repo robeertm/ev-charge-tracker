@@ -71,10 +71,7 @@ body {
     font-size: 1.3rem;
 }
 
-/* Chart containers */
-canvas {
-    max-height: 300px;
-}
+/* Chart containers — let the wrapper div control size */
 
 /* Badge improvements */
 .badge {

@@ -20,6 +20,7 @@
                     <option value="" {% if not charge_type %}selected{% endif %}>Alle Typen</option>
                     <option value="AC" {% if charge_type == 'AC' %}selected{% endif %}>AC</option>
                     <option value="DC" {% if charge_type == 'DC' %}selected{% endif %}>DC</option>
+                    <option value="PV" {% if charge_type == 'PV' %}selected{% endif %}>PV</option>
                 </select>
             </div>
             <div class="col-auto">
@@ -61,10 +62,10 @@
         </thead>
         <tbody>
             {% for c in charges.items %}
-            <tr class="{{ 'table-success' if c.charge_type == 'AC' else 'table-warning' }}"
+            <tr class="{{ 'table-success' if c.charge_type == 'AC' else ('table-info' if c.charge_type == 'PV' else 'table-warning') }}"
                 style="--bs-table-bg-factor: 0.15;">
                 <td>{{ c.date.strftime('%d.%m.%Y') }}</td>
-                <td><span class="badge bg-{{ 'success' if c.charge_type == 'AC' else 'warning' }}">{{ c.charge_type }}</span></td>
+                <td><span class="badge bg-{{ 'success' if c.charge_type == 'AC' else ('info' if c.charge_type == 'PV' else 'warning') }}">{{ c.charge_type }}</span></td>
                 <td class="text-end">{{ "%.1f"|format(c.kwh_loaded or 0) }}</td>
                 <td class="text-end">{{ "%.2f"|format(c.eur_per_kwh or 0) }}</td>
                 <td class="text-end fw-bold">€{{ "%.2f"|format(c.total_cost or 0) }}</td>

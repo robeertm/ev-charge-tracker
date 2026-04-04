@@ -52,11 +52,15 @@
                         <div class="btn-group w-100" role="group">
                             <input type="radio" class="btn-check" name="charge_type" id="typeAC" value="AC" checked>
                             <label class="btn btn-outline-success btn-lg" for="typeAC">
-                                <i class="bi bi-plug"></i> AC (Wallbox)
+                                <i class="bi bi-plug"></i> AC
                             </label>
                             <input type="radio" class="btn-check" name="charge_type" id="typeDC" value="DC">
                             <label class="btn btn-outline-warning btn-lg" for="typeDC">
-                                <i class="bi bi-lightning"></i> DC (Schnelllader)
+                                <i class="bi bi-lightning"></i> DC
+                            </label>
+                            <input type="radio" class="btn-check" name="charge_type" id="typePV" value="PV">
+                            <label class="btn btn-outline-info btn-lg" for="typePV">
+                                <i class="bi bi-sun"></i> PV
                             </label>
                         </div>
                     </div>
@@ -189,6 +193,19 @@ document.getElementById('btnFetchCo2').addEventListener('click', async () => {
         btn.innerHTML = '<i class="bi bi-cloud-download"></i>';
         btn.disabled = false;
     }
+});
+
+// PV auto-fill CO2 and price
+const pvCo2 = {{ pv_co2 }};
+const pvPrice = {{ pv_price }};
+document.querySelectorAll('input[name="charge_type"]').forEach(radio => {
+    radio.addEventListener('change', function() {
+        if (this.value === 'PV') {
+            document.getElementById('co2_g_per_kwh').value = pvCo2;
+            document.getElementById('eur_per_kwh').value = pvPrice;
+            updateCalcPrice();
+        }
+    });
 });
 </script>
 {% endblock %}

@@ -107,7 +107,7 @@
                 <i class="bi bi-graph-up"></i> Monatliche Ladekosten
             </div>
             <div class="card-body">
-                <canvas id="chartMonthlyCost" height="80"></canvas>
+                <div style="position:relative; height:250px;"><canvas id="chartMonthlyCost"></canvas></div>
             </div>
         </div>
     </div>
@@ -118,18 +118,18 @@
     <div class="col-lg-5">
         <div class="card h-100">
             <div class="card-header bg-white fw-bold">
-                <i class="bi bi-lightning-charge"></i> AC vs. DC
+                <i class="bi bi-lightning-charge"></i> AC / DC / PV
             </div>
             <div class="card-body">
                 {% if acdc %}
                 <table class="table table-sm mb-0">
-                    <thead><tr><th></th><th class="text-success">AC</th><th class="text-warning">DC</th></tr></thead>
+                    <thead><tr><th></th><th class="text-success">AC</th><th class="text-warning">DC</th>{% if acdc.get('PV') %}<th class="text-info">PV</th>{% endif %}</tr></thead>
                     <tbody>
-                        <tr><td>Anzahl</td><td>{{ acdc.get('AC', {}).get('count', 0) }}</td><td>{{ acdc.get('DC', {}).get('count', 0) }}</td></tr>
-                        <tr><td>Ø €/kWh</td><td>{{ "%.2f"|format(acdc.get('AC', {}).get('avg_eur_per_kwh', 0)) }}</td><td>{{ "%.2f"|format(acdc.get('DC', {}).get('avg_eur_per_kwh', 0)) }}</td></tr>
-                        <tr><td>Gesamt kWh</td><td>{{ "{:,.0f}".format(acdc.get('AC', {}).get('total_kwh', 0)) }}</td><td>{{ "{:,.0f}".format(acdc.get('DC', {}).get('total_kwh', 0)) }}</td></tr>
-                        <tr><td>Gesamt €</td><td>{{ "{:,.0f}".format(acdc.get('AC', {}).get('total_cost', 0)) }}</td><td>{{ "{:,.0f}".format(acdc.get('DC', {}).get('total_cost', 0)) }}</td></tr>
-                        <tr><td>Ø Verlust %</td><td>{{ acdc.get('AC', {}).get('avg_loss_pct', '-') }}</td><td>{{ acdc.get('DC', {}).get('avg_loss_pct', '-') }}</td></tr>
+                        <tr><td>Anzahl</td><td>{{ acdc.get('AC', {}).get('count', 0) }}</td><td>{{ acdc.get('DC', {}).get('count', 0) }}</td>{% if acdc.get('PV') %}<td>{{ acdc.PV.count }}</td>{% endif %}</tr>
+                        <tr><td>Ø €/kWh</td><td>{{ "%.2f"|format(acdc.get('AC', {}).get('avg_eur_per_kwh', 0)) }}</td><td>{{ "%.2f"|format(acdc.get('DC', {}).get('avg_eur_per_kwh', 0)) }}</td>{% if acdc.get('PV') %}<td>{{ "%.2f"|format(acdc.PV.avg_eur_per_kwh) }}</td>{% endif %}</tr>
+                        <tr><td>Gesamt kWh</td><td>{{ "{:,.0f}".format(acdc.get('AC', {}).get('total_kwh', 0)) }}</td><td>{{ "{:,.0f}".format(acdc.get('DC', {}).get('total_kwh', 0)) }}</td>{% if acdc.get('PV') %}<td>{{ "{:,.0f}".format(acdc.PV.total_kwh) }}</td>{% endif %}</tr>
+                        <tr><td>Gesamt €</td><td>{{ "{:,.0f}".format(acdc.get('AC', {}).get('total_cost', 0)) }}</td><td>{{ "{:,.0f}".format(acdc.get('DC', {}).get('total_cost', 0)) }}</td>{% if acdc.get('PV') %}<td>{{ "{:,.0f}".format(acdc.PV.total_cost) }}</td>{% endif %}</tr>
+                        <tr><td>Ø Verlust %</td><td>{{ acdc.get('AC', {}).get('avg_loss_pct', '-') }}</td><td>{{ acdc.get('DC', {}).get('avg_loss_pct', '-') }}</td>{% if acdc.get('PV') %}<td>{{ acdc.PV.avg_loss_pct }}</td>{% endif %}</tr>
                     </tbody>
                 </table>
                 {% endif %}
@@ -169,7 +169,7 @@
                 <i class="bi bi-graph-up-arrow"></i> Kumulierte Kosten
             </div>
             <div class="card-body">
-                <canvas id="chartCumulative" height="120"></canvas>
+                <div style="position:relative; height:250px;"><canvas id="chartCumulative"></canvas></div>
             </div>
         </div>
     </div>
@@ -179,7 +179,7 @@
                 <i class="bi bi-lightning"></i> Monatliche kWh
             </div>
             <div class="card-body">
-                <canvas id="chartMonthlyKwh" height="120"></canvas>
+                <div style="position:relative; height:250px;"><canvas id="chartMonthlyKwh"></canvas></div>
             </div>
         </div>
     </div>
@@ -193,7 +193,7 @@
                 <i class="bi bi-cloud-haze2"></i> Monatliche CO₂-Emissionen
             </div>
             <div class="card-body">
-                <canvas id="chartMonthlyCo2" height="120"></canvas>
+                <div style="position:relative; height:250px;"><canvas id="chartMonthlyCo2"></canvas></div>
             </div>
         </div>
     </div>
@@ -203,7 +203,7 @@
                 <i class="bi bi-graph-up-arrow"></i> CO₂-Ersparnis vs. Verbrenner
             </div>
             <div class="card-body">
-                <canvas id="chartCumulativeCo2" height="120"></canvas>
+                <div style="position:relative; height:280px;"><canvas id="chartCumulativeCo2"></canvas></div>
             </div>
         </div>
     </div>
@@ -224,7 +224,18 @@ const chartColors = {
     danger: 'rgba(244, 67, 54, 0.8)',
 };
 
+const isMobile = window.innerWidth < 768;
 const labels = {{ chart_data.monthly_labels | tojson }};
+
+// Shared mobile-friendly options
+const mobileBarTicks = { maxRotation: isMobile ? 90 : 45, autoSkip: true, maxTicksLimit: isMobile ? 8 : 24, font: { size: isMobile ? 9 : 12 } };
+const mobileLineTicks = { autoSkip: true, maxTicksLimit: isMobile ? 6 : 12, font: { size: isMobile ? 9 : 12 } };
+const mobileYTicks = { font: { size: isMobile ? 9 : 12 } };
+const mobilePoint = isMobile ? { pointRadius: 1, borderWidth: 1.5 } : {};
+const mobileLegend = { display: true, position: 'bottom', labels: { font: { size: isMobile ? 10 : 12 }, boxWidth: isMobile ? 12 : 40 } };
+
+Chart.defaults.maintainAspectRatio = false;
+Chart.defaults.responsive = true;
 
 // Monthly Cost Chart
 new Chart(document.getElementById('chartMonthlyCost'), {
@@ -235,15 +246,14 @@ new Chart(document.getElementById('chartMonthlyCost'), {
             label: 'Kosten (€)',
             data: {{ chart_data.monthly_cost | tojson }},
             backgroundColor: chartColors.primary,
-            borderRadius: 4,
+            borderRadius: isMobile ? 2 : 4,
         }]
     },
     options: {
-        responsive: true,
         plugins: { legend: { display: false } },
         scales: {
-            x: { ticks: { maxRotation: 45, autoSkip: true, maxTicksLimit: 24 } },
-            y: { beginAtZero: true, ticks: { callback: v => '€' + v } }
+            x: { ticks: mobileBarTicks },
+            y: { beginAtZero: true, ticks: { ...mobileYTicks, callback: v => '€' + v } }
         }
     }
 });
@@ -260,14 +270,14 @@ new Chart(document.getElementById('chartCumulative'), {
             backgroundColor: 'rgba(244, 67, 54, 0.1)',
             fill: true,
             tension: 0.3,
+            ...mobilePoint,
         }]
     },
     options: {
-        responsive: true,
         plugins: { legend: { display: false } },
         scales: {
-            x: { ticks: { autoSkip: true, maxTicksLimit: 12 } },
-            y: { ticks: { callback: v => '€' + v.toLocaleString() } }
+            x: { ticks: mobileLineTicks },
+            y: { ticks: { ...mobileYTicks, callback: v => '€' + v.toLocaleString() } }
         }
     }
 });
@@ -281,15 +291,14 @@ new Chart(document.getElementById('chartMonthlyKwh'), {
             label: 'kWh geladen',
             data: {{ chart_data.monthly_kwh | tojson }},
             backgroundColor: chartColors.success,
-            borderRadius: 4,
+            borderRadius: isMobile ? 2 : 4,
         }]
     },
     options: {
-        responsive: true,
         plugins: { legend: { display: false } },
         scales: {
-            x: { ticks: { maxRotation: 45, autoSkip: true, maxTicksLimit: 24 } },
-            y: { beginAtZero: true }
+            x: { ticks: mobileBarTicks },
+            y: { beginAtZero: true, ticks: mobileYTicks }
         }
     }
 });
@@ -303,15 +312,14 @@ new Chart(document.getElementById('chartMonthlyCo2'), {
             label: 'CO₂ (kg)',
             data: {{ chart_data.monthly_co2 | tojson }},
             backgroundColor: chartColors.warning,
-            borderRadius: 4,
+            borderRadius: isMobile ? 2 : 4,
         }]
     },
     options: {
-        responsive: true,
         plugins: { legend: { display: false } },
         scales: {
-            x: { ticks: { maxRotation: 45, autoSkip: true, maxTicksLimit: 24 } },
-            y: { beginAtZero: true, ticks: { callback: v => v + ' kg' } }
+            x: { ticks: mobileBarTicks },
+            y: { beginAtZero: true, ticks: { ...mobileYTicks, callback: v => v + ' kg' } }
         }
     }
 });
@@ -324,14 +332,15 @@ new Chart(document.getElementById('chartCumulativeCo2'), {
     data: {
         labels: savingsLabels,
         datasets: [{
-            label: 'CO₂-Ersparnis kumuliert (kg)',
+            label: isMobile ? 'Ersparnis' : 'CO₂-Ersparnis kumuliert (kg)',
             data: {{ chart_data.cumulative_co2_savings | tojson }},
             borderColor: chartColors.success,
             backgroundColor: 'rgba(76, 175, 80, 0.1)',
             fill: true,
             tension: 0.3,
+            ...mobilePoint,
         }, {
-            label: 'Akkuproduktion CO₂ (kg)',
+            label: isMobile ? 'Akkuprod.' : 'Akkuproduktion CO₂ (kg)',
             data: savingsLabels.map(() => batteryProductionCo2),
             borderColor: chartColors.danger,
             borderDash: [8, 4],
@@ -341,9 +350,8 @@ new Chart(document.getElementById('chartCumulativeCo2'), {
         }]
     },
     options: {
-        responsive: true,
         plugins: {
-            legend: { display: true, position: 'bottom' },
+            legend: mobileLegend,
             tooltip: {
                 callbacks: {
                     afterBody: function(context) {
@@ -352,7 +360,7 @@ new Chart(document.getElementById('chartCumulativeCo2'), {
                             if (savings >= batteryProductionCo2) {
                                 return 'Break-Even erreicht!';
                             } else {
-                                return 'Noch ' + (batteryProductionCo2 - savings).toLocaleString('de-DE', {maximumFractionDigits: 0}) + ' kg bis Break-Even';
+                                return 'Noch ' + (batteryProductionCo2 - savings).toLocaleString('de-DE', {maximumFractionDigits: 0}) + ' kg';
                             }
                         }
                     }
@@ -360,8 +368,8 @@ new Chart(document.getElementById('chartCumulativeCo2'), {
             }
         },
         scales: {
-            x: { ticks: { autoSkip: true, maxTicksLimit: 12 } },
-            y: { ticks: { callback: v => v.toLocaleString() + ' kg' } }
+            x: { ticks: mobileLineTicks },
+            y: { ticks: { ...mobileYTicks, callback: v => v.toLocaleString() + ' kg' } }
         }
     }
 });

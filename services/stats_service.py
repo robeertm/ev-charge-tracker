@@ -155,7 +155,7 @@ def get_yearly_stats():
 def get_ac_dc_stats():
     """Get AC vs DC comparison stats."""
     stats = {}
-    for ct in ['AC', 'DC']:
+    for ct in ['AC', 'DC', 'PV']:
         charges = Charge.query.filter_by(charge_type=ct).all()
         if charges:
             total_kwh = sum(c.kwh_loaded or 0 for c in charges)
