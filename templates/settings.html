@@ -1,0 +1,112 @@
+{% extends "base.html" %}
+{% block title %}Einstellungen — EV Charge Tracker{% endblock %}
+
+{% block content %}
+<div class="row justify-content-center">
+    <div class="col-lg-8">
+        <h4 class="mb-3"><i class="bi bi-gear"></i> Einstellungen</h4>
+
+        <!-- ENTSO-E API -->
+        <div class="card mb-4">
+            <div class="card-header bg-white fw-bold">
+                <i class="bi bi-cloud"></i> ENTSO-E API (CO₂-Daten)
+            </div>
+            <div class="card-body">
+                <form method="POST">
+                    <input type="hidden" name="action" value="save_entsoe">
+                    <div class="mb-3">
+                        <label for="entsoe_key" class="form-label">API Key</label>
+                        <input type="password" class="form-control" id="entsoe_key" name="entsoe_key"
+                               value="{{ entsoe_key }}" placeholder="Dein ENTSO-E Security Token">
+                        <div class="form-text">
+                            Token von <a href="https://transparency.entsoe.eu/" target="_blank">transparency.entsoe.eu</a> →
+                            Registrieren → E-Mail mit Token.
+                        </div>
+                    </div>
+                    <div class="d-flex gap-2">
+                        <button type="submit" class="btn btn-primary">
+                            <i class="bi bi-save"></i> Speichern
+                        </button>
+                        <button type="submit" name="action" value="test_entsoe" class="btn btn-outline-secondary">
+                            <i class="bi bi-wifi"></i> Verbindung testen
+                        </button>
+                    </div>
+                </form>
+            </div>
+        </div>
+
+        <!-- Database Info -->
+        <div class="card mb-4">
+            <div class="card-header bg-white fw-bold">
+                <i class="bi bi-database"></i> Datenbank
+            </div>
+            <div class="card-body">
+                <p><strong>Einträge:</strong> {{ total_charges }} Ladevorgänge</p>
+                <div class="d-flex gap-2 flex-wrap">
+                    <a href="/api/export/csv" class="btn btn-outline-success">
+                        <i class="bi bi-download"></i> CSV Export
+                    </a>
+                </div>
+                <hr>
+                <h6>Google Sheet Import</h6>
+                <p class="text-muted small">
+                    Exportiere dein Google Sheet als CSV (Datei → Herunterladen → .csv) und dann:
+                </p>
+                <code class="d-block bg-light p-2 rounded">
+                    python import_gsheet.py pfad/zur/datei.csv
+                </code>
+            </div>
+        </div>
+
+        <!-- App Info -->
+        <div class="card mb-4">
+            <div class="card-header bg-white fw-bold">
+                <i class="bi bi-info-circle"></i> App-Info
+            </div>
+            <div class="card-body">
+                <table class="table table-sm mb-0">
+                    <tr><td>Version</td><td>{{ app_version }}</td></tr>
+                    <tr><td>Fahrzeug</td><td>{{ car_model }}</td></tr>
+                    <tr><td>GitHub</td><td><a href="https://github.com/robertmanuwald/ev-charge-tracker" target="_blank">robertmanuwald/ev-charge-tracker</a></td></tr>
+                </table>
+
+                <hr>
+                <button class="btn btn-outline-primary" id="btnCheckUpdate">
+                    <i class="bi bi-arrow-repeat"></i> Nach Updates suchen
+                </button>
+                <div id="updateResult" class="mt-2"></div>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+document.getElementById('btnCheckUpdate').addEventListener('click', async () => {
+    const btn = document.getElementById('btnCheckUpdate');
+    const result = document.getElementById('updateResult');
+    btn.disabled = true;
+    btn.innerHTML = '<span class="spinner-border spinner-border-sm"></span> Prüfe...';
+    try {
+        const resp = await fetch('https://api.github.com/repos/robertmanuwald/ev-charge-tracker/releases/latest');
+        if (resp.ok) {
+            const data = await resp.json();
+            const current = '{{ app_version }}';
+            if (data.tag_name && data.tag_name.replace('v', '') !== current) {
+                result.innerHTML = `<div class="alert alert-info">Neue Version verfügbar: <strong>${data.tag_name}</strong>
+                    <a href="${data.html_url}" target="_blank" class="btn btn-sm btn-primary ms-2">Download</a></div>`;
+            } else {
+                result.innerHTML = '<div class="alert alert-success">Du hast die aktuelle Version!</div>';
+            }
+        } else {
+            result.innerHTML = '<div class="alert alert-warning">Repository nicht gefunden. Noch nicht auf GitHub veröffentlicht.</div>';
+        }
+    } catch (e) {
+        result.innerHTML = '<div class="alert alert-danger">Fehler: ' + e.message + '</div>';
+    }
+    btn.disabled = false;
+    btn.innerHTML = '<i class="bi bi-arrow-repeat"></i> Nach Updates suchen';
+});
+</script>
+{% endblock %}

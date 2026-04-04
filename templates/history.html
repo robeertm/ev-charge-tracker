@@ -1,0 +1,128 @@
+{% extends "base.html" %}
+{% block title %}Verlauf — EV Charge Tracker{% endblock %}
+
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-3">
+    <h4 class="mb-0"><i class="bi bi-clock-history"></i> Ladeverlauf</h4>
+    <div class="d-flex gap-2">
+        <a href="/api/export/csv" class="btn btn-sm btn-outline-secondary">
+            <i class="bi bi-download"></i> CSV Export
+        </a>
+    </div>
+</div>
+
+<!-- Filters -->
+<div class="card mb-3">
+    <div class="card-body py-2">
+        <form method="GET" class="row g-2 align-items-center">
+            <div class="col-auto">
+                <select name="type" class="form-select form-select-sm">
+                    <option value="" {% if not charge_type %}selected{% endif %}>Alle Typen</option>
+                    <option value="AC" {% if charge_type == 'AC' %}selected{% endif %}>AC</option>
+                    <option value="DC" {% if charge_type == 'DC' %}selected{% endif %}>DC</option>
+                </select>
+            </div>
+            <div class="col-auto">
+                <select name="year" class="form-select form-select-sm">
+                    <option value="" {% if not year %}selected{% endif %}>Alle Jahre</option>
+                    {% for y in years %}
+                    <option value="{{ y }}" {% if year == y %}selected{% endif %}>{{ y }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+            <div class="col-auto">
+                <button type="submit" class="btn btn-sm btn-primary"><i class="bi bi-funnel"></i> Filtern</button>
+            </div>
+            {% if charge_type or year %}
+            <div class="col-auto">
+                <a href="/history" class="btn btn-sm btn-outline-secondary"><i class="bi bi-x"></i> Reset</a>
+            </div>
+            {% endif %}
+        </form>
+    </div>
+</div>
+
+<!-- Table -->
+<div class="table-responsive">
+    <table class="table table-sm table-hover align-middle">
+        <thead class="table-dark">
+            <tr>
+                <th>Datum</th>
+                <th>Typ</th>
+                <th class="text-end">kWh</th>
+                <th class="text-end">€/kWh</th>
+                <th class="text-end">Kosten</th>
+                <th class="text-end d-none d-md-table-cell">SoC</th>
+                <th class="text-end d-none d-lg-table-cell">Verluste</th>
+                <th class="text-end d-none d-lg-table-cell">CO₂</th>
+                <th></th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for c in charges.items %}
+            <tr class="{{ 'table-success' if c.charge_type == 'AC' else 'table-warning' }}"
+                style="--bs-table-bg-factor: 0.15;">
+                <td>{{ c.date.strftime('%d.%m.%Y') }}</td>
+                <td><span class="badge bg-{{ 'success' if c.charge_type == 'AC' else 'warning' }}">{{ c.charge_type }}</span></td>
+                <td class="text-end">{{ "%.1f"|format(c.kwh_loaded or 0) }}</td>
+                <td class="text-end">{{ "%.2f"|format(c.eur_per_kwh or 0) }}</td>
+                <td class="text-end fw-bold">€{{ "%.2f"|format(c.total_cost or 0) }}</td>
+                <td class="text-end d-none d-md-table-cell">
+                    {% if c.soc_from is not none %}{{ c.soc_from }}→{{ c.soc_to }}%{% else %}—{% endif %}
+                </td>
+                <td class="text-end d-none d-lg-table-cell">
+                    {% if c.loss_pct is not none %}{{ "%.1f"|format(c.loss_pct) }}%{% else %}—{% endif %}
+                </td>
+                <td class="text-end d-none d-lg-table-cell">
+                    {% if c.co2_kg is not none %}{{ "%.1f"|format(c.co2_kg) }} kg{% else %}—{% endif %}
+                </td>
+                <td>
+                    <div class="btn-group btn-group-sm">
+                        <a href="/edit/{{ c.id }}" class="btn btn-outline-primary" title="Bearbeiten">
+                            <i class="bi bi-pencil"></i>
+                        </a>
+                        <form method="POST" action="/delete/{{ c.id }}" class="d-inline"
+                              onsubmit="return confirm('Eintrag wirklich löschen?')">
+                            <button type="submit" class="btn btn-outline-danger" title="Löschen">
+                                <i class="bi bi-trash"></i>
+                            </button>
+                        </form>
+                    </div>
+                </td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+</div>
+
+<!-- Pagination -->
+{% if charges.pages > 1 %}
+<nav>
+    <ul class="pagination pagination-sm justify-content-center">
+        {% if charges.has_prev %}
+        <li class="page-item">
+            <a class="page-link" href="?page={{ charges.prev_num }}&type={{ charge_type }}&year={{ year }}">‹</a>
+        </li>
+        {% endif %}
+        {% for p in charges.iter_pages(left_edge=1, right_edge=1, left_current=2, right_current=2) %}
+            {% if p %}
+            <li class="page-item {% if p == charges.page %}active{% endif %}">
+                <a class="page-link" href="?page={{ p }}&type={{ charge_type }}&year={{ year }}">{{ p }}</a>
+            </li>
+            {% else %}
+            <li class="page-item disabled"><span class="page-link">…</span></li>
+            {% endif %}
+        {% endfor %}
+        {% if charges.has_next %}
+        <li class="page-item">
+            <a class="page-link" href="?page={{ charges.next_num }}&type={{ charge_type }}&year={{ year }}">›</a>
+        </li>
+        {% endif %}
+    </ul>
+</nav>
+{% endif %}
+
+<div class="text-muted text-center small">
+    {{ charges.total }} Einträge gesamt
+</div>
+{% endblock %}

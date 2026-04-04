@@ -1,0 +1,166 @@
+{% extends "base.html" %}
+{% block title %}Neue Ladung — EV Charge Tracker{% endblock %}
+
+{% block content %}
+<div class="row justify-content-center">
+    <div class="col-lg-6 col-md-8">
+        <div class="card shadow-sm">
+            <div class="card-header bg-success text-white">
+                <h5 class="mb-0"><i class="bi bi-plus-circle"></i> Neue Ladung erfassen</h5>
+            </div>
+            <div class="card-body">
+                <form method="POST" id="chargeForm">
+                    <!-- Datum -->
+                    <div class="mb-3">
+                        <label for="date" class="form-label fw-bold">
+                            <i class="bi bi-calendar3"></i> Datum
+                        </label>
+                        <input type="date" class="form-control form-control-lg" id="date" name="date"
+                               value="{{ today }}" required>
+                    </div>
+
+                    <!-- Stromart -->
+                    <div class="mb-3">
+                        <label class="form-label fw-bold">
+                            <i class="bi bi-lightning-charge"></i> Stromart
+                        </label>
+                        <div class="btn-group w-100" role="group">
+                            <input type="radio" class="btn-check" name="charge_type" id="typeAC" value="AC" checked>
+                            <label class="btn btn-outline-success btn-lg" for="typeAC">
+                                <i class="bi bi-plug"></i> AC (Wallbox)
+                            </label>
+                            <input type="radio" class="btn-check" name="charge_type" id="typeDC" value="DC">
+                            <label class="btn btn-outline-warning btn-lg" for="typeDC">
+                                <i class="bi bi-lightning"></i> DC (Schnelllader)
+                            </label>
+                        </div>
+                    </div>
+
+                    <!-- Preis & kWh -->
+                    <div class="row g-3 mb-3">
+                        <div class="col-6">
+                            <label for="eur_per_kwh" class="form-label fw-bold">€/kWh</label>
+                            <input type="number" class="form-control form-control-lg" id="eur_per_kwh"
+                                   name="eur_per_kwh" step="0.01" min="0" max="2"
+                                   placeholder="0.30" inputmode="decimal">
+                        </div>
+                        <div class="col-6">
+                            <label for="kwh_loaded" class="form-label fw-bold">kWh geladen</label>
+                            <input type="number" class="form-control form-control-lg" id="kwh_loaded"
+                                   name="kwh_loaded" step="0.001" min="0" max="100"
+                                   placeholder="45.000" required inputmode="decimal">
+                        </div>
+                    </div>
+
+                    <!-- Berechneter Preis -->
+                    <div class="mb-3">
+                        <label class="form-label text-muted">Gesamtpreis (berechnet)</label>
+                        <div class="form-control form-control-lg bg-light" id="calcPrice">—</div>
+                    </div>
+
+                    <!-- SoC -->
+                    <div class="row g-3 mb-3">
+                        <div class="col-6">
+                            <label for="soc_from" class="form-label fw-bold">SoC von %</label>
+                            <input type="number" class="form-control" id="soc_from" name="soc_from"
+                                   min="0" max="100" placeholder="20" inputmode="numeric">
+                        </div>
+                        <div class="col-6">
+                            <label for="soc_to" class="form-label fw-bold">SoC bis %</label>
+                            <input type="number" class="form-control" id="soc_to" name="soc_to"
+                                   min="0" max="100" placeholder="80" inputmode="numeric">
+                        </div>
+                    </div>
+
+                    <!-- Ladeverluste -->
+                    <div class="mb-3">
+                        <label for="loss_kwh" class="form-label">Ladeverluste (kWh)
+                            <small class="text-muted">optional</small>
+                        </label>
+                        <input type="number" class="form-control" id="loss_kwh" name="loss_kwh"
+                               step="0.001" min="0" placeholder="5.200" inputmode="decimal">
+                    </div>
+
+                    <!-- CO2 -->
+                    <div class="mb-3">
+                        <label for="co2_g_per_kwh" class="form-label">
+                            CO₂ (g/kWh) <small class="text-muted">leer lassen = automatisch via ENTSO-E</small>
+                        </label>
+                        <div class="input-group">
+                            <input type="number" class="form-control" id="co2_g_per_kwh" name="co2_g_per_kwh"
+                                   min="0" max="1500" placeholder="automatisch" inputmode="numeric">
+                            <button type="button" class="btn btn-outline-secondary" id="btnFetchCo2"
+                                    title="CO₂ von ENTSO-E holen">
+                                <i class="bi bi-cloud-download"></i>
+                            </button>
+                        </div>
+                    </div>
+
+                    <!-- Notizen -->
+                    <div class="mb-3">
+                        <label for="notes" class="form-label">Notizen <small class="text-muted">optional</small></label>
+                        <input type="text" class="form-control" id="notes" name="notes"
+                               placeholder="z.B. Ladestation, Ort...">
+                    </div>
+
+                    <button type="submit" class="btn btn-success btn-lg w-100">
+                        <i class="bi bi-check-circle"></i> Speichern
+                    </button>
+                </form>
+
+                {% if last_charge %}
+                <div class="mt-3 p-2 bg-light rounded small">
+                    <strong>Letzte Ladung:</strong>
+                    {{ last_charge.date.strftime('%d.%m.%Y') }} —
+                    {{ last_charge.kwh_loaded }} kWh ({{ last_charge.charge_type }}) —
+                    €{{ "%.2f"|format(last_charge.total_cost or 0) }}
+                </div>
+                {% endif %}
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+// Live price calculation
+function updateCalcPrice() {
+    const eur = parseFloat(document.getElementById('eur_per_kwh').value);
+    const kwh = parseFloat(document.getElementById('kwh_loaded').value);
+    const el = document.getElementById('calcPrice');
+    if (!isNaN(eur) && !isNaN(kwh)) {
+        el.textContent = '€' + (eur * kwh).toFixed(2);
+        el.classList.remove('text-muted');
+        el.classList.add('fw-bold', 'text-success');
+    } else {
+        el.textContent = '—';
+    }
+}
+document.getElementById('eur_per_kwh').addEventListener('input', updateCalcPrice);
+document.getElementById('kwh_loaded').addEventListener('input', updateCalcPrice);
+
+// Fetch CO2 from ENTSO-E
+document.getElementById('btnFetchCo2').addEventListener('click', async () => {
+    const dateVal = document.getElementById('date').value;
+    if (!dateVal) { alert('Bitte zuerst ein Datum eingeben.'); return; }
+    const btn = document.getElementById('btnFetchCo2');
+    btn.innerHTML = '<span class="spinner-border spinner-border-sm"></span>';
+    btn.disabled = true;
+    try {
+        const resp = await fetch('/api/co2/' + dateVal);
+        const data = await resp.json();
+        if (data.co2_g_per_kwh) {
+            document.getElementById('co2_g_per_kwh').value = data.co2_g_per_kwh;
+        } else {
+            alert(data.error || 'Keine Daten verfügbar.');
+        }
+    } catch (e) {
+        alert('Fehler: ' + e.message);
+    } finally {
+        btn.innerHTML = '<i class="bi bi-cloud-download"></i>';
+        btn.disabled = false;
+    }
+});
+</script>
+{% endblock %}

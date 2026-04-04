@@ -1,0 +1,7 @@
+Flask==3.1.0
+Flask-SQLAlchemy==3.1.1
+SQLAlchemy==2.0.36
+entsoe-py==0.6.11
+pandas==2.2.3
+gunicorn==23.0.0
+requests==2.32.3

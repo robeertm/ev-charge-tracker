@@ -1,0 +1,226 @@
+{% extends "base.html" %}
+{% block title %}Dashboard — EV Charge Tracker{% endblock %}
+{% block head %}
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.6/dist/chart.umd.min.js"></script>
+{% endblock %}
+
+{% block content %}
+{% if not stats %}
+<div class="text-center py-5">
+    <i class="bi bi-database-x display-1 text-muted"></i>
+    <h3 class="mt-3 text-muted">Noch keine Daten vorhanden</h3>
+    <p class="text-muted">Importiere deine Google Sheet Daten oder erfasse den ersten Ladevorgang.</p>
+    <a href="/input" class="btn btn-primary btn-lg mt-2"><i class="bi bi-plus-circle"></i> Erste Ladung erfassen</a>
+    <a href="/settings" class="btn btn-outline-secondary btn-lg mt-2"><i class="bi bi-gear"></i> Einstellungen</a>
+</div>
+{% else %}
+
+<!-- KPI Cards -->
+<div class="row g-3 mb-4">
+    <div class="col-6 col-md-4 col-lg-2">
+        <div class="card kpi-card border-primary">
+            <div class="card-body text-center p-2">
+                <div class="kpi-label">Gesamtkosten</div>
+                <div class="kpi-value text-primary">€{{ "{:,.2f}".format(stats.total_cost).replace(",", "X").replace(".", ",").replace("X", ".") }}</div>
+            </div>
+        </div>
+    </div>
+    <div class="col-6 col-md-4 col-lg-2">
+        <div class="card kpi-card border-success">
+            <div class="card-body text-center p-2">
+                <div class="kpi-label">Gesamt kWh</div>
+                <div class="kpi-value text-success">{{ "{:,.1f}".format(stats.total_kwh).replace(",", "X").replace(".", ",").replace("X", ".") }}</div>
+            </div>
+        </div>
+    </div>
+    <div class="col-6 col-md-4 col-lg-2">
+        <div class="card kpi-card border-info">
+            <div class="card-body text-center p-2">
+                <div class="kpi-label">Ladevorgänge</div>
+                <div class="kpi-value text-info">{{ stats.total_charges }}</div>
+            </div>
+        </div>
+    </div>
+    <div class="col-6 col-md-4 col-lg-2">
+        <div class="card kpi-card border-warning">
+            <div class="card-body text-center p-2">
+                <div class="kpi-label">Ø €/kWh</div>
+                <div class="kpi-value text-warning">€{{ "%.2f"|format(stats.avg_eur_per_kwh) }}</div>
+            </div>
+        </div>
+    </div>
+    <div class="col-6 col-md-4 col-lg-2">
+        <div class="card kpi-card border-danger">
+            <div class="card-body text-center p-2">
+                <div class="kpi-label">CO₂ gesamt</div>
+                <div class="kpi-value text-danger">{{ "{:,.0f}".format(stats.total_co2_kg) }} kg</div>
+            </div>
+        </div>
+    </div>
+    <div class="col-6 col-md-4 col-lg-2">
+        <div class="card kpi-card border-secondary">
+            <div class="card-body text-center p-2">
+                <div class="kpi-label">CO₂ Ersparnis</div>
+                <div class="kpi-value text-success">{{ stats.co2_savings_pct }}%</div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Charts Row 1 -->
+<div class="row g-3 mb-4">
+    <div class="col-lg-8">
+        <div class="card">
+            <div class="card-header bg-white fw-bold">
+                <i class="bi bi-graph-up"></i> Monatliche Ladekosten
+            </div>
+            <div class="card-body">
+                <canvas id="chartMonthlyCost" height="100"></canvas>
+            </div>
+        </div>
+    </div>
+    <div class="col-lg-4">
+        <div class="card">
+            <div class="card-header bg-white fw-bold">
+                <i class="bi bi-lightning-charge"></i> AC vs. DC
+            </div>
+            <div class="card-body">
+                {% if acdc %}
+                <table class="table table-sm mb-0">
+                    <thead><tr><th></th><th class="text-success">AC</th><th class="text-warning">DC</th></tr></thead>
+                    <tbody>
+                        <tr><td>Anzahl</td><td>{{ acdc.get('AC', {}).get('count', 0) }}</td><td>{{ acdc.get('DC', {}).get('count', 0) }}</td></tr>
+                        <tr><td>Ø €/kWh</td><td>{{ "%.2f"|format(acdc.get('AC', {}).get('avg_eur_per_kwh', 0)) }}</td><td>{{ "%.2f"|format(acdc.get('DC', {}).get('avg_eur_per_kwh', 0)) }}</td></tr>
+                        <tr><td>Gesamt kWh</td><td>{{ "{:,.0f}".format(acdc.get('AC', {}).get('total_kwh', 0)) }}</td><td>{{ "{:,.0f}".format(acdc.get('DC', {}).get('total_kwh', 0)) }}</td></tr>
+                        <tr><td>Gesamt €</td><td>{{ "{:,.0f}".format(acdc.get('AC', {}).get('total_cost', 0)) }}</td><td>{{ "{:,.0f}".format(acdc.get('DC', {}).get('total_cost', 0)) }}</td></tr>
+                        <tr><td>Ø Verlust %</td><td>{{ acdc.get('AC', {}).get('avg_loss_pct', '-') }}</td><td>{{ acdc.get('DC', {}).get('avg_loss_pct', '-') }}</td></tr>
+                    </tbody>
+                </table>
+                {% endif %}
+
+                <hr>
+                <h6 class="fw-bold"><i class="bi bi-calendar3"></i> Jährlich</h6>
+                <table class="table table-sm mb-0">
+                    <thead><tr><th>Jahr</th><th>kWh</th><th>Kosten</th></tr></thead>
+                    <tbody>
+                    {% for y in yearly %}
+                        <tr><td>{{ y.year }}</td><td>{{ "{:,.0f}".format(y.kwh) }}</td><td>€{{ "{:,.0f}".format(y.cost) }}</td></tr>
+                    {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Charts Row 2 -->
+<div class="row g-3 mb-4">
+    <div class="col-lg-6">
+        <div class="card">
+            <div class="card-header bg-white fw-bold">
+                <i class="bi bi-graph-up-arrow"></i> Kumulierte Kosten
+            </div>
+            <div class="card-body">
+                <canvas id="chartCumulative" height="120"></canvas>
+            </div>
+        </div>
+    </div>
+    <div class="col-lg-6">
+        <div class="card">
+            <div class="card-header bg-white fw-bold">
+                <i class="bi bi-lightning"></i> Monatliche kWh
+            </div>
+            <div class="card-body">
+                <canvas id="chartMonthlyKwh" height="120"></canvas>
+            </div>
+        </div>
+    </div>
+</div>
+
+{% endif %}
+{% endblock %}
+
+{% block scripts %}
+{% if stats %}
+<script>
+const chartColors = {
+    primary: 'rgba(33, 150, 243, 0.8)',
+    primaryLight: 'rgba(33, 150, 243, 0.2)',
+    success: 'rgba(76, 175, 80, 0.8)',
+    successLight: 'rgba(76, 175, 80, 0.2)',
+    warning: 'rgba(255, 152, 0, 0.8)',
+    danger: 'rgba(244, 67, 54, 0.8)',
+};
+
+const labels = {{ chart_data.monthly_labels | tojson }};
+
+// Monthly Cost Chart
+new Chart(document.getElementById('chartMonthlyCost'), {
+    type: 'bar',
+    data: {
+        labels: labels,
+        datasets: [{
+            label: 'Kosten (€)',
+            data: {{ chart_data.monthly_cost | tojson }},
+            backgroundColor: chartColors.primary,
+            borderRadius: 4,
+        }]
+    },
+    options: {
+        responsive: true,
+        plugins: { legend: { display: false } },
+        scales: {
+            x: { ticks: { maxRotation: 45, autoSkip: true, maxTicksLimit: 24 } },
+            y: { beginAtZero: true, ticks: { callback: v => '€' + v } }
+        }
+    }
+});
+
+// Cumulative Cost Chart
+new Chart(document.getElementById('chartCumulative'), {
+    type: 'line',
+    data: {
+        labels: {{ chart_data.cumulative_labels | tojson }},
+        datasets: [{
+            label: 'Kumulierte Kosten (€)',
+            data: {{ chart_data.cumulative_cost | tojson }},
+            borderColor: chartColors.danger,
+            backgroundColor: 'rgba(244, 67, 54, 0.1)',
+            fill: true,
+            tension: 0.3,
+        }]
+    },
+    options: {
+        responsive: true,
+        plugins: { legend: { display: false } },
+        scales: {
+            x: { ticks: { autoSkip: true, maxTicksLimit: 12 } },
+            y: { ticks: { callback: v => '€' + v.toLocaleString() } }
+        }
+    }
+});
+
+// Monthly kWh Chart
+new Chart(document.getElementById('chartMonthlyKwh'), {
+    type: 'bar',
+    data: {
+        labels: labels,
+        datasets: [{
+            label: 'kWh geladen',
+            data: {{ chart_data.monthly_kwh | tojson }},
+            backgroundColor: chartColors.success,
+            borderRadius: 4,
+        }]
+    },
+    options: {
+        responsive: true,
+        plugins: { legend: { display: false } },
+        scales: {
+            x: { ticks: { maxRotation: 45, autoSkip: true, maxTicksLimit: 24 } },
+            y: { beginAtZero: true }
+        }
+    }
+});
+</script>
+{% endif %}
+{% endblock %}
