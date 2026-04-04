@@ -238,19 +238,30 @@ Chart.defaults.maintainAspectRatio = false;
 Chart.defaults.responsive = true;
 
 // Monthly Cost Chart
+const monthlyCostData = {{ chart_data.monthly_cost | tojson }};
+const monthlyCostAvg = monthlyCostData.reduce((a, b) => a + b, 0) / (monthlyCostData.length || 1);
 new Chart(document.getElementById('chartMonthlyCost'), {
     type: 'bar',
     data: {
         labels: labels,
         datasets: [{
             label: 'Kosten (€)',
-            data: {{ chart_data.monthly_cost | tojson }},
+            data: monthlyCostData,
             backgroundColor: chartColors.primary,
             borderRadius: isMobile ? 2 : 4,
+        }, {
+            label: 'Ø ' + monthlyCostAvg.toFixed(2) + ' €',
+            data: Array(labels.length).fill(monthlyCostAvg),
+            type: 'line',
+            borderColor: chartColors.danger,
+            borderWidth: 2,
+            borderDash: [6, 4],
+            pointRadius: 0,
+            fill: false,
         }]
     },
     options: {
-        plugins: { legend: { display: false } },
+        plugins: { legend: mobileLegend },
         scales: {
             x: { ticks: mobileBarTicks },
             y: { beginAtZero: true, ticks: { ...mobileYTicks, callback: v => '€' + v } }

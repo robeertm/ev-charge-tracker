@@ -1,5 +1,8 @@
 # Changelog
 
+## v1.4.3 (2026-04-04)
+- **Average line in monthly cost chart** — dashed line showing Ø cost per month
+
 ## v1.4.0 (2026-04-04)
 - **Auto CO2 backfill** — missing CO2 values are automatically fetched from ENTSO-E after CSV import
 - **Manual backfill button** — "CO₂ nachladen" in ENTSO-E settings with live progress
