@@ -1,6 +1,6 @@
 # EV Charge Tracker
 
-Local web application for tracking electric vehicle charging data for a **Kia Niro EV 64kWh (MY21)**.
+Local web application for tracking electric vehicle charging data. Works with any EV — configure your vehicle in settings.
 
 ## Features
 
