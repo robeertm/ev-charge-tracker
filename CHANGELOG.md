@@ -1,5 +1,8 @@
 # Changelog
 
+## v1.4.4 (2026-04-04)
+- **Average lines in all monthly charts** — dashed Ø lines for costs, kWh, and CO2
+
 ## v1.4.3 (2026-04-04)
 - **Average line in monthly cost chart** — dashed line showing Ø cost per month
 

@@ -294,19 +294,30 @@ new Chart(document.getElementById('chartCumulative'), {
 });
 
 // Monthly kWh Chart
+const monthlyKwhData = {{ chart_data.monthly_kwh | tojson }};
+const monthlyKwhAvg = monthlyKwhData.reduce((a, b) => a + b, 0) / (monthlyKwhData.length || 1);
 new Chart(document.getElementById('chartMonthlyKwh'), {
     type: 'bar',
     data: {
         labels: labels,
         datasets: [{
             label: 'kWh geladen',
-            data: {{ chart_data.monthly_kwh | tojson }},
+            data: monthlyKwhData,
             backgroundColor: chartColors.success,
             borderRadius: isMobile ? 2 : 4,
+        }, {
+            label: 'Ø ' + monthlyKwhAvg.toFixed(1) + ' kWh',
+            data: Array(labels.length).fill(monthlyKwhAvg),
+            type: 'line',
+            borderColor: chartColors.danger,
+            borderWidth: 2,
+            borderDash: [6, 4],
+            pointRadius: 0,
+            fill: false,
         }]
     },
     options: {
-        plugins: { legend: { display: false } },
+        plugins: { legend: mobileLegend },
         scales: {
             x: { ticks: mobileBarTicks },
             y: { beginAtZero: true, ticks: mobileYTicks }
@@ -315,19 +326,30 @@ new Chart(document.getElementById('chartMonthlyKwh'), {
 });
 
 // Monthly CO2 Chart
+const monthlyCo2Data = {{ chart_data.monthly_co2 | tojson }};
+const monthlyCo2Avg = monthlyCo2Data.reduce((a, b) => a + b, 0) / (monthlyCo2Data.length || 1);
 new Chart(document.getElementById('chartMonthlyCo2'), {
     type: 'bar',
     data: {
         labels: labels,
         datasets: [{
             label: 'CO₂ (kg)',
-            data: {{ chart_data.monthly_co2 | tojson }},
+            data: monthlyCo2Data,
             backgroundColor: chartColors.warning,
             borderRadius: isMobile ? 2 : 4,
+        }, {
+            label: 'Ø ' + monthlyCo2Avg.toFixed(2) + ' kg',
+            data: Array(labels.length).fill(monthlyCo2Avg),
+            type: 'line',
+            borderColor: chartColors.danger,
+            borderWidth: 2,
+            borderDash: [6, 4],
+            pointRadius: 0,
+            fill: false,
         }]
     },
     options: {
-        plugins: { legend: { display: false } },
+        plugins: { legend: mobileLegend },
         scales: {
             x: { ticks: mobileBarTicks },
             y: { beginAtZero: true, ticks: { ...mobileYTicks, callback: v => v + ' kg' } }
