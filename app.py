@@ -454,6 +454,54 @@ def register_routes(app):
             'missing': get_missing_count(app),
         })
 
+    @app.route('/api/vehicle/install', methods=['POST'])
+    def api_vehicle_install():
+        """Install vehicle API packages via pip."""
+        import subprocess
+        import sys
+
+        PACKAGES = {
+            'hyundai-kia': ['hyundai-kia-connect-api'],
+            'vw': ['carconnectivity', 'carconnectivity-connector-volkswagen'],
+            'skoda': ['carconnectivity', 'carconnectivity-connector-skoda'],
+            'seatcupra': ['carconnectivity', 'carconnectivity-connector-seatcupra'],
+        }
+
+        data = request.get_json() or {}
+        pkg_key = data.get('package', '')
+        packages = PACKAGES.get(pkg_key)
+        if not packages:
+            return jsonify({'success': False, 'error': f'Unbekanntes Paket: {pkg_key}'}), 400
+
+        try:
+            result = subprocess.run(
+                [sys.executable, '-m', 'pip', 'install'] + packages,
+                capture_output=True, text=True, timeout=120,
+            )
+            if result.returncode == 0:
+                # Force re-import of registry to pick up new connectors
+                import importlib
+                import services.vehicle.registry as reg
+                # Try importing the new connectors
+                if pkg_key == 'hyundai-kia':
+                    try:
+                        importlib.import_module('services.vehicle.connector_hyundai_kia')
+                    except Exception:
+                        pass
+                else:
+                    try:
+                        importlib.import_module('services.vehicle.connector_vag')
+                    except Exception:
+                        pass
+                return jsonify({'success': True, 'installed': packages})
+            else:
+                error = result.stderr.strip().split('\n')[-1] if result.stderr else 'pip install fehlgeschlagen'
+                return jsonify({'success': False, 'error': error}), 500
+        except subprocess.TimeoutExpired:
+            return jsonify({'success': False, 'error': 'Timeout — Installation dauert zu lange'}), 500
+        except Exception as e:
+            return jsonify({'success': False, 'error': str(e)}), 500
+
     @app.route('/api/vehicle/sync/status')
     def api_vehicle_sync_status():
         """Return vehicle sync service status."""

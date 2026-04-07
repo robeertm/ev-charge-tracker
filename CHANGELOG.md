@@ -1,5 +1,8 @@
 # Changelog
 
+## v1.5.1 (2026-04-07)
+- **One-click package install** — install vehicle API packages directly from settings UI (no terminal needed)
+
 ## v1.5.0 (2026-04-07)
 
 ### New Features
