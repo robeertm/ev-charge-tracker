@@ -313,7 +313,8 @@ def register_routes(app):
                         from services.vehicle import get_connector
                         creds = _get_vehicle_credentials()
                         connector = get_connector(brand, creds)
-                        if connector.test_connection():
+                        result = connector.test_connection()
+                        if result:
                             status = connector.get_status()
                             parts = []
                             if status.soc_percent is not None:
@@ -454,6 +455,34 @@ def register_routes(app):
             'missing': get_missing_count(app),
         })
 
+    @app.route('/api/vehicle/token/start', methods=['POST'])
+    def api_vehicle_token_start():
+        """Start browser-based OAuth flow to get refresh token."""
+        brand = AppConfig.get('vehicle_api_brand', '')
+        if brand not in ('kia', 'hyundai'):
+            return jsonify({'error': 'Nur für Kia/Hyundai verfügbar'}), 400
+        from services.vehicle.token_fetch import start_fetch
+        if start_fetch(brand):
+            return jsonify({'success': True})
+        return jsonify({'error': 'Läuft bereits'}), 409
+
+    @app.route('/api/vehicle/token/status')
+    def api_vehicle_token_status():
+        """Poll token fetch status."""
+        from services.vehicle.token_fetch import get_state
+        state = get_state()
+        # If token was fetched, auto-save it
+        if state.get('token'):
+            AppConfig.set('vehicle_api_password', state['token'])
+        return jsonify(state)
+
+    @app.route('/api/vehicle/token/cancel', methods=['POST'])
+    def api_vehicle_token_cancel():
+        """Cancel running token fetch."""
+        from services.vehicle.token_fetch import cancel_fetch
+        cancel_fetch()
+        return jsonify({'success': True})
+
     @app.route('/api/vehicle/install', methods=['POST'])
     def api_vehicle_install():
         """Install vehicle API packages via pip."""
@@ -461,7 +490,7 @@ def register_routes(app):
         import sys
 
         PACKAGES = {
-            'hyundai-kia': ['hyundai-kia-connect-api'],
+            'hyundai-kia': ['hyundai-kia-connect-api', 'selenium', 'webdriver-manager'],
             'vw': ['carconnectivity', 'carconnectivity-connector-volkswagen'],
             'skoda': ['carconnectivity', 'carconnectivity-connector-skoda'],
             'seatcupra': ['carconnectivity', 'carconnectivity-connector-seatcupra'],
@@ -479,20 +508,25 @@ def register_routes(app):
                 capture_output=True, text=True, timeout=120,
             )
             if result.returncode == 0:
-                # Force re-import of registry to pick up new connectors
+                # Force reload of connector modules so they re-check for installed packages
                 import importlib
-                import services.vehicle.registry as reg
-                # Try importing the new connectors
-                if pkg_key == 'hyundai-kia':
-                    try:
-                        importlib.import_module('services.vehicle.connector_hyundai_kia')
-                    except Exception:
-                        pass
-                else:
-                    try:
-                        importlib.import_module('services.vehicle.connector_vag')
-                    except Exception:
-                        pass
+                modules_to_reload = [
+                    'services.vehicle.connector_hyundai_kia' if pkg_key == 'hyundai-kia'
+                    else 'services.vehicle.connector_vag',
+                    'services.vehicle.registry',
+                    'services.vehicle',
+                ]
+                for mod_name in modules_to_reload:
+                    if mod_name in sys.modules:
+                        try:
+                            importlib.reload(sys.modules[mod_name])
+                        except Exception:
+                            pass
+                    else:
+                        try:
+                            importlib.import_module(mod_name)
+                        except Exception:
+                            pass
                 return jsonify({'success': True, 'installed': packages})
             else:
                 error = result.stderr.strip().split('\n')[-1] if result.stderr else 'pip install fehlgeschlagen'

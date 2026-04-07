@@ -1,5 +1,10 @@
 # Changelog
 
+## v1.5.2 (2026-04-07)
+- **Kia/Hyundai token fetch** — built-in browser-based OAuth flow to get refresh token (no manual script needed)
+- **Refresh-token auth** — updated for Kia/Hyundai API v4+ (passwords no longer supported due to reCAPTCHA)
+- **Selenium auto-install** — included with Kia/Hyundai package install
+
 ## v1.5.1 (2026-04-07)
 - **One-click package install** — install vehicle API packages directly from settings UI (no terminal needed)
 

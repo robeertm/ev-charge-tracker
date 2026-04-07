@@ -216,9 +216,12 @@
                                    value="{{ vehicle_api_username }}">
                         </div>
                         <div class="col-sm-6">
-                            <label for="vehicle_api_password" class="form-label">Passwort</label>
+                            <label for="vehicle_api_password" class="form-label" id="labelPassword">Passwort</label>
                             <input type="password" class="form-control" id="vehicle_api_password" name="vehicle_api_password"
                                    value="{{ vehicle_api_password }}">
+                            <div class="form-text vehicle-field-token-hint" style="display:none">
+                                <i class="bi bi-info-circle"></i> Kein Passwort — <strong>Refresh-Token</strong> eintragen!
+                            </div>
                         </div>
                         <div class="col-sm-6 vehicle-field-pin" style="display:none">
                             <label for="vehicle_api_pin" class="form-label">PIN</label>
@@ -252,6 +255,79 @@
                         </button>
                     </div>
                 </form>
+                <!-- Token-Fetch (Kia/Hyundai) -->
+                <div id="tokenHintSection" class="mt-3" style="display:none">
+                    <div class="alert alert-info py-2 mb-0 small">
+                        <strong><i class="bi bi-shield-lock"></i> Refresh-Token benötigt</strong><br>
+                        Kia/Hyundai erlaubt kein Passwort-Login (reCAPTCHA). Klicke unten um ein Chrome-Fenster zu öffnen, logge dich dort ein — der Token wird automatisch gespeichert.
+                        <div class="mt-2 d-flex gap-2 align-items-center">
+                            <button type="button" class="btn btn-warning btn-sm" id="btnFetchToken">
+                                <i class="bi bi-key"></i> Token holen (öffnet Chrome)
+                            </button>
+                            <button type="button" class="btn btn-outline-secondary btn-sm" id="btnCancelToken" style="display:none">
+                                <i class="bi bi-x-lg"></i> Abbrechen
+                            </button>
+                            <span class="small" id="tokenFetchStatus"></span>
+                        </div>
+                    </div>
+                </div>
+                <script>
+                (function() {
+                    const btnFetch = document.getElementById('btnFetchToken');
+                    const btnCancel = document.getElementById('btnCancelToken');
+                    const statusEl = document.getElementById('tokenFetchStatus');
+                    let pollInterval = null;
+
+                    function stopPolling() {
+                        if (pollInterval) { clearInterval(pollInterval); pollInterval = null; }
+                        btnFetch.disabled = false;
+                        btnFetch.innerHTML = '<i class="bi bi-key"></i> Token holen (öffnet Chrome)';
+                        btnCancel.style.display = 'none';
+                    }
+
+                    function pollStatus() {
+                        fetch('/api/vehicle/token/status').then(r => r.json()).then(d => {
+                            if (d.token) {
+                                statusEl.innerHTML = '<span class="text-success fw-bold"><i class="bi bi-check-circle"></i> Token gespeichert!</span>';
+                                stopPolling();
+                                setTimeout(() => location.reload(), 1500);
+                            } else if (d.error) {
+                                statusEl.innerHTML = '<span class="text-danger">' + d.error + '</span>';
+                                stopPolling();
+                            } else if (d.running) {
+                                statusEl.innerHTML = '<span class="text-primary"><span class="spinner-border spinner-border-sm me-1"></span>' + d.status + '</span>';
+                            }
+                        }).catch(() => {});
+                    }
+
+                    btnFetch.addEventListener('click', async () => {
+                        btnFetch.disabled = true;
+                        btnFetch.innerHTML = '<span class="spinner-border spinner-border-sm"></span> Starte...';
+                        btnCancel.style.display = '';
+                        statusEl.textContent = '';
+                        try {
+                            const r = await fetch('/api/vehicle/token/start', {method: 'POST'});
+                            const d = await r.json();
+                            if (d.success) {
+                                pollInterval = setInterval(pollStatus, 2000);
+                                pollStatus();
+                            } else {
+                                statusEl.innerHTML = '<span class="text-danger">' + d.error + '</span>';
+                                stopPolling();
+                            }
+                        } catch(e) {
+                            statusEl.innerHTML = '<span class="text-danger">' + e.message + '</span>';
+                            stopPolling();
+                        }
+                    });
+
+                    btnCancel.addEventListener('click', async () => {
+                        await fetch('/api/vehicle/token/cancel', {method: 'POST'});
+                        statusEl.textContent = 'Abgebrochen.';
+                        stopPolling();
+                    });
+                })();
+                </script>
                 <hr>
                 <form method="POST" class="mb-3">
                     <div class="row g-2 align-items-center">
@@ -316,6 +392,9 @@
                     document.querySelectorAll('.vehicle-field-pin').forEach(el => el.style.display = isKiaHyundai ? '' : 'none');
                     document.querySelectorAll('.vehicle-field-region').forEach(el => el.style.display = isKiaHyundai ? '' : 'none');
                     document.querySelectorAll('.vehicle-field-vin').forEach(el => el.style.display = (isVAG || isKiaHyundai) ? '' : 'none');
+                    document.querySelectorAll('.vehicle-field-token-hint').forEach(el => el.style.display = isKiaHyundai ? '' : 'none');
+                    document.getElementById('labelPassword').textContent = isKiaHyundai ? 'Refresh-Token' : 'Passwort';
+                    document.getElementById('tokenHintSection').style.display = isKiaHyundai ? '' : 'none';
                 }
                 updateVehicleFields();
                 </script>
