@@ -90,9 +90,11 @@ def register_routes(app):
         chart_data = get_chart_data()
         acdc = get_ac_dc_stats()
         yearly = get_yearly_stats()
+        vehicle_configured = bool(AppConfig.get('vehicle_api_brand', ''))
         return render_template('dashboard.html',
                                stats=stats, chart_data=chart_data,
-                               acdc=acdc, yearly=yearly)
+                               acdc=acdc, yearly=yearly,
+                               vehicle_configured=vehicle_configured)
 
     # ── EINGABE ────────────────────────────────────────────────
     @app.route('/input', methods=['GET', 'POST'])
@@ -565,50 +567,65 @@ def register_routes(app):
 
     @app.route('/api/vehicle/status')
     def api_vehicle_status():
-        """Fetch current vehicle status (SoC, odometer, charging)."""
+        """Fetch current vehicle status with full details."""
         brand = AppConfig.get('vehicle_api_brand', '')
         if not brand:
             return jsonify({'error': 'not_configured'}), 400
 
-        # Use cached data if less than 30 min old
-        from datetime import timedelta
-        cutoff = datetime.utcnow() - timedelta(minutes=30)
-        cached = VehicleSync.query.filter(VehicleSync.timestamp > cutoff) \
-            .order_by(VehicleSync.timestamp.desc()).first()
-        if cached:
-            return jsonify({
-                'soc': cached.soc_percent,
-                'odometer': cached.odometer_km,
-                'is_charging': cached.is_charging,
-                'range_km': cached.estimated_range_km,
-                'timestamp': cached.timestamp.strftime('%H:%M'),
-                'cached': True,
-            })
-
-        # Live fetch
         try:
             from services.vehicle import get_connector
             import json as _json
             creds = _get_vehicle_credentials()
             connector = get_connector(brand, creds)
-            status = connector.get_status()
+            s = connector.get_status()
             sync = VehicleSync(
-                soc_percent=status.soc_percent,
-                odometer_km=status.odometer_km,
-                is_charging=status.is_charging,
-                charge_power_kw=status.charge_power_kw,
-                estimated_range_km=status.estimated_range_km,
-                raw_json=_json.dumps(status.raw_data),
+                soc_percent=s.soc_percent,
+                odometer_km=s.odometer_km,
+                is_charging=s.is_charging,
+                charge_power_kw=s.charge_power_kw,
+                estimated_range_km=s.estimated_range_km,
+                raw_json=_json.dumps(s.raw_data),
             )
             db.session.add(sync)
             db.session.commit()
             return jsonify({
-                'soc': status.soc_percent,
-                'odometer': status.odometer_km,
-                'is_charging': status.is_charging,
-                'range_km': status.estimated_range_km,
+                'soc': s.soc_percent,
+                'odometer': s.odometer_km,
+                'is_charging': s.is_charging,
+                'is_plugged_in': s.is_plugged_in,
+                'is_locked': s.is_locked,
+                'range_km': s.estimated_range_km,
+                'battery_12v': s.battery_12v_percent,
+                'charge_limit_ac': s.charge_limit_ac,
+                'charge_limit_dc': s.charge_limit_dc,
+                'est_charge_min': s.est_charge_duration_min,
+                'est_fast_charge_min': s.est_fast_charge_duration_min,
+                'climate_temp': s.climate_temp,
+                'climate_on': s.climate_on,
+                'total_consumed_kwh': s.total_power_consumed_kwh,
+                'total_regenerated_kwh': s.total_power_regenerated_kwh,
+                'location_lat': s.location_lat,
+                'location_lon': s.location_lon,
+                'last_updated': s.last_updated,
+                'vehicle_name': s.vehicle_name,
+                'vehicle_model': s.vehicle_model,
+                'doors': {
+                    'fl': s.front_left_door_open, 'fr': s.front_right_door_open,
+                    'bl': s.back_left_door_open, 'br': s.back_right_door_open,
+                    'trunk': s.trunk_open, 'hood': s.hood_open,
+                },
+                'tires': {
+                    'warn': s.tire_warn_all,
+                    'fl': s.tire_warn_fl, 'fr': s.tire_warn_fr,
+                    'rl': s.tire_warn_rl, 'rr': s.tire_warn_rr,
+                },
+                'steering_heater': s.steering_wheel_heater,
+                'rear_window_heater': s.rear_window_heater,
+                'defrost': s.defrost,
+                'consumption_30d': s.consumption_30d_wh_per_km,
+                'est_portable_charge_min': s.est_portable_charge_min,
+                'registration_date': s.registration_date,
                 'timestamp': sync.timestamp.strftime('%H:%M'),
-                'cached': False,
             })
         except Exception as e:
             return jsonify({'error': str(e)}), 500

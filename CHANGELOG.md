@@ -1,5 +1,10 @@
 # Changelog
 
+## v1.5.5 (2026-04-07)
+- **Full vehicle live dashboard** — all available data from Kia/Hyundai displayed in 3-row widget
+- **New data points** — doors/trunk/hood status, tire pressure warnings, 30-day consumption, Schuko charge time, registration date, Google Maps location link
+- **Extended API** — `/api/vehicle/status` returns all vehicle data
+
 ## v1.5.4 (2026-04-07)
 - **One-click Kia/Hyundai token fetch** — opens Chrome with mobile user-agent, user logs in + solves reCAPTCHA, token is auto-captured and saved
 - **Working OAuth flow** — uses `peukiaidm-online-sales` client for initial login, then exchanges for CCSP refresh token

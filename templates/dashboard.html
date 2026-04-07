@@ -15,6 +15,182 @@
 </div>
 {% else %}
 
+<!-- Fahrzeug Live Status -->
+{% if vehicle_configured %}
+<div class="card mb-3 border-info" id="vehicleLiveCard">
+    <div class="card-body p-2">
+        <div class="d-flex align-items-center justify-content-between mb-2">
+            <span class="fw-bold small"><i class="bi bi-car-front"></i> <span id="vName">{{ car_model }}</span></span>
+            <button class="btn btn-outline-info btn-sm py-0 px-2" id="btnRefreshVehicle" style="font-size:0.75rem">
+                <i class="bi bi-arrow-repeat"></i> Aktualisieren
+            </button>
+        </div>
+        <div class="row g-2 text-center" id="vehicleData" style="display:none">
+            <div class="col-4 col-md-2">
+                <div class="small text-muted">Batterie</div>
+                <div class="fw-bold" id="vSoc">—</div>
+                <div class="progress" style="height:6px"><div class="progress-bar bg-success" id="vSocBar" style="width:0%"></div></div>
+            </div>
+            <div class="col-4 col-md-2">
+                <div class="small text-muted">Reichweite</div>
+                <div class="fw-bold" id="vRange">—</div>
+            </div>
+            <div class="col-4 col-md-2">
+                <div class="small text-muted">Tacho</div>
+                <div class="fw-bold" id="vOdo">—</div>
+            </div>
+            <div class="col-4 col-md-2">
+                <div class="small text-muted">Status</div>
+                <div class="fw-bold" id="vStatus">—</div>
+            </div>
+            <div class="col-4 col-md-2">
+                <div class="small text-muted">12V</div>
+                <div class="fw-bold" id="v12v">—</div>
+            </div>
+            <div class="col-4 col-md-2">
+                <div class="small text-muted">Klima</div>
+                <div class="fw-bold" id="vClimate">—</div>
+            </div>
+        </div>
+        <div class="row g-2 text-center mt-1" id="vehicleData2" style="display:none">
+            <div class="col-4 col-md-2">
+                <div class="small text-muted">Ladelimit AC</div>
+                <div class="fw-bold" id="vLimitAC">—</div>
+            </div>
+            <div class="col-4 col-md-2">
+                <div class="small text-muted">Ladelimit DC</div>
+                <div class="fw-bold" id="vLimitDC">—</div>
+            </div>
+            <div class="col-4 col-md-2">
+                <div class="small text-muted">Ladezeit AC</div>
+                <div class="fw-bold" id="vChargeTime">—</div>
+            </div>
+            <div class="col-4 col-md-2">
+                <div class="small text-muted">Ladezeit DC</div>
+                <div class="fw-bold" id="vFastChargeTime">—</div>
+            </div>
+            <div class="col-4 col-md-2">
+                <div class="small text-muted">Verbraucht</div>
+                <div class="fw-bold" id="vConsumed">—</div>
+            </div>
+            <div class="col-4 col-md-2">
+                <div class="small text-muted">Rekuperiert</div>
+                <div class="fw-bold" id="vRegen">—</div>
+            </div>
+        </div>
+        <div class="row g-2 text-center mt-1" id="vehicleData3" style="display:none">
+            <div class="col-4 col-md-2">
+                <div class="small text-muted">Türen</div>
+                <div class="fw-bold" id="vDoors">—</div>
+            </div>
+            <div class="col-4 col-md-2">
+                <div class="small text-muted">Reifen</div>
+                <div class="fw-bold" id="vTires">—</div>
+            </div>
+            <div class="col-4 col-md-2">
+                <div class="small text-muted">Ø 30 Tage</div>
+                <div class="fw-bold" id="vConsumption30d">—</div>
+            </div>
+            <div class="col-4 col-md-2">
+                <div class="small text-muted">Schuko-Ladezeit</div>
+                <div class="fw-bold" id="vPortableCharge">—</div>
+            </div>
+            <div class="col-4 col-md-2">
+                <div class="small text-muted">Zulassung</div>
+                <div class="fw-bold" id="vRegDate">—</div>
+            </div>
+            <div class="col-4 col-md-2">
+                <div class="small text-muted">Standort</div>
+                <div class="fw-bold" id="vLocation">—</div>
+            </div>
+        </div>
+        <div class="text-end mt-1" style="font-size:0.7rem" id="vUpdated"></div>
+    </div>
+</div>
+<script>
+(function() {
+    const btn = document.getElementById('btnRefreshVehicle');
+    async function loadVehicle() {
+        btn.disabled = true;
+        btn.innerHTML = '<span class="spinner-border spinner-border-sm"></span>';
+        try {
+            const r = await fetch('/api/vehicle/status');
+            const d = await r.json();
+            if (d.error) { btn.innerHTML = '<i class="bi bi-exclamation-triangle"></i> ' + d.error; return; }
+            document.getElementById('vehicleData').style.display = '';
+            document.getElementById('vehicleData2').style.display = '';
+            document.getElementById('vehicleData3').style.display = '';
+            if (d.vehicle_name) document.getElementById('vName').textContent = d.vehicle_model || d.vehicle_name;
+            document.getElementById('vSoc').textContent = d.soc != null ? d.soc + '%' : '—';
+            document.getElementById('vSocBar').style.width = (d.soc || 0) + '%';
+            const bar = document.getElementById('vSocBar');
+            bar.className = 'progress-bar ' + (d.soc > 50 ? 'bg-success' : d.soc > 20 ? 'bg-warning' : 'bg-danger');
+            document.getElementById('vRange').textContent = d.range_km != null ? d.range_km + ' km' : '—';
+            document.getElementById('vOdo').textContent = d.odometer != null ? d.odometer.toLocaleString('de') + ' km' : '—';
+            let status = d.is_charging ? '<span class="text-success">Lädt</span>' :
+                         d.is_plugged_in ? '<span class="text-info">Eingesteckt</span>' :
+                         d.is_locked ? '<span class="text-secondary">Verriegelt</span>' : '<span class="text-warning">Offen</span>';
+            document.getElementById('vStatus').innerHTML = status;
+            document.getElementById('v12v').textContent = d.battery_12v != null ? d.battery_12v + '%' : '—';
+            document.getElementById('vClimate').innerHTML = d.climate_on ? '<span class="text-success">' + (d.climate_temp || '') + '°C</span>' : 'Aus';
+            document.getElementById('vLimitAC').textContent = d.charge_limit_ac != null ? d.charge_limit_ac + '%' : '—';
+            document.getElementById('vLimitDC').textContent = d.charge_limit_dc != null ? d.charge_limit_dc + '%' : '—';
+            document.getElementById('vChargeTime').textContent = d.est_charge_min != null ? d.est_charge_min + ' min' : '—';
+            document.getElementById('vFastChargeTime').textContent = d.est_fast_charge_min != null ? d.est_fast_charge_min + ' min' : '—';
+            document.getElementById('vConsumed').textContent = d.total_consumed_kwh != null ? (d.total_consumed_kwh / 10).toFixed(0) + ' kWh' : '—';
+            document.getElementById('vRegen').textContent = d.total_regenerated_kwh != null ? (d.total_regenerated_kwh / 10).toFixed(0) + ' kWh' : '—';
+            // Row 3: Doors, tires, consumption, location
+            if (d.doors) {
+                const dr = d.doors;
+                const anyOpen = dr.fl || dr.fr || dr.bl || dr.br || dr.trunk || dr.hood;
+                if (anyOpen) {
+                    let open = [];
+                    if (dr.fl) open.push('VL');
+                    if (dr.fr) open.push('VR');
+                    if (dr.bl) open.push('HL');
+                    if (dr.br) open.push('HR');
+                    if (dr.trunk) open.push('Kofferr.');
+                    if (dr.hood) open.push('Motorh.');
+                    document.getElementById('vDoors').innerHTML = '<span class="text-danger"><i class="bi bi-exclamation-triangle"></i> ' + open.join(', ') + '</span>';
+                } else {
+                    document.getElementById('vDoors').innerHTML = '<span class="text-success"><i class="bi bi-check-circle"></i> Alle zu</span>';
+                }
+            }
+            if (d.tires) {
+                if (d.tires.warn) {
+                    let warn = [];
+                    if (d.tires.fl) warn.push('VL');
+                    if (d.tires.fr) warn.push('VR');
+                    if (d.tires.rl) warn.push('HL');
+                    if (d.tires.rr) warn.push('HR');
+                    document.getElementById('vTires').innerHTML = '<span class="text-danger"><i class="bi bi-exclamation-triangle"></i> ' + (warn.length ? warn.join(', ') : 'Warnung') + '</span>';
+                } else {
+                    document.getElementById('vTires').innerHTML = '<span class="text-success"><i class="bi bi-check-circle"></i> OK</span>';
+                }
+            }
+            if (d.consumption_30d) {
+                const kwh100 = (d.consumption_30d / 10).toFixed(1);
+                document.getElementById('vConsumption30d').textContent = kwh100 + ' kWh/100km';
+            }
+            document.getElementById('vPortableCharge').textContent = d.est_portable_charge_min != null ? Math.round(d.est_portable_charge_min / 60) + 'h ' + (d.est_portable_charge_min % 60) + 'min' : '—';
+            if (d.registration_date) {
+                const rd = new Date(d.registration_date);
+                document.getElementById('vRegDate').textContent = rd.toLocaleDateString('de');
+            }
+            if (d.location_lat && d.location_lon) {
+                document.getElementById('vLocation').innerHTML = '<a href="https://www.google.com/maps?q=' + d.location_lat + ',' + d.location_lon + '" target="_blank" class="text-decoration-none"><i class="bi bi-geo-alt"></i> Karte</a>';
+            }
+            const upd = d.last_updated ? 'Fahrzeug: ' + new Date(d.last_updated).toLocaleString('de') : '';
+            document.getElementById('vUpdated').innerHTML = '<span class="text-muted">' + upd + '</span>';
+        } catch(e) { console.error(e); }
+        btn.disabled = false;
+        btn.innerHTML = '<i class="bi bi-arrow-repeat"></i> Aktualisieren';
+    }
+    btn.addEventListener('click', loadVehicle);
+})();
+</script>
+{% endif %}
+
 <!-- KPI Cards Row 1 -->
 <div class="row g-2 mb-3">
     <div class="col-6 col-lg-3">
