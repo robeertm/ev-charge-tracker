@@ -332,6 +332,18 @@ def register_routes(app):
                 else:
                     flash('Keine Fahrzeugmarke ausgewählt.', 'warning')
 
+            elif action == 'delete_vehicle_api':
+                for key in ('vehicle_api_brand', 'vehicle_api_username', 'vehicle_api_password',
+                            'vehicle_api_pin', 'vehicle_api_region', 'vehicle_api_vin',
+                            'vehicle_sync_enabled', 'vehicle_sync_interval_hours'):
+                    entry = AppConfig.query.get(key)
+                    if entry:
+                        db.session.delete(entry)
+                db.session.commit()
+                from services.vehicle.sync_service import stop_sync
+                stop_sync()
+                flash('Fahrzeug-API Zugangsdaten gelöscht.', 'warning')
+
             elif action == 'save_vehicle_sync':
                 enabled = 'true' if 'vehicle_sync_enabled' in request.form else 'false'
                 AppConfig.set('vehicle_sync_enabled', enabled)
@@ -385,6 +397,7 @@ def register_routes(app):
             vehicle_brands = get_available_brands()
         except Exception:
             vehicle_brands = []
+        installed_brand_keys = [b['key'] for b in vehicle_brands]
 
         # Last vehicle sync
         last_sync = VehicleSync.query.order_by(VehicleSync.timestamp.desc()).first()
@@ -393,6 +406,7 @@ def register_routes(app):
                                entsoe_key=AppConfig.get('entsoe_api_key', ''),
                                car_model_val=AppConfig.get('car_model', Config.CAR_MODEL),
                                vehicle_brands=vehicle_brands,
+                               installed_brand_keys=installed_brand_keys,
                                vehicle_api_brand=AppConfig.get('vehicle_api_brand', ''),
                                vehicle_api_username=AppConfig.get('vehicle_api_username', ''),
                                vehicle_api_password=AppConfig.get('vehicle_api_password', ''),
@@ -455,34 +469,6 @@ def register_routes(app):
             'missing': get_missing_count(app),
         })
 
-    @app.route('/api/vehicle/token/start', methods=['POST'])
-    def api_vehicle_token_start():
-        """Start browser-based OAuth flow to get refresh token."""
-        brand = AppConfig.get('vehicle_api_brand', '')
-        if brand not in ('kia', 'hyundai'):
-            return jsonify({'error': 'Nur für Kia/Hyundai verfügbar'}), 400
-        from services.vehicle.token_fetch import start_fetch
-        if start_fetch(brand):
-            return jsonify({'success': True})
-        return jsonify({'error': 'Läuft bereits'}), 409
-
-    @app.route('/api/vehicle/token/status')
-    def api_vehicle_token_status():
-        """Poll token fetch status."""
-        from services.vehicle.token_fetch import get_state
-        state = get_state()
-        # If token was fetched, auto-save it
-        if state.get('token'):
-            AppConfig.set('vehicle_api_password', state['token'])
-        return jsonify(state)
-
-    @app.route('/api/vehicle/token/cancel', methods=['POST'])
-    def api_vehicle_token_cancel():
-        """Cancel running token fetch."""
-        from services.vehicle.token_fetch import cancel_fetch
-        cancel_fetch()
-        return jsonify({'success': True})
-
     @app.route('/api/vehicle/install', methods=['POST'])
     def api_vehicle_install():
         """Install vehicle API packages via pip."""
@@ -490,7 +476,7 @@ def register_routes(app):
         import sys
 
         PACKAGES = {
-            'hyundai-kia': ['hyundai-kia-connect-api', 'selenium', 'webdriver-manager'],
+            'hyundai-kia': ['hyundai-kia-connect-api'],
             'vw': ['carconnectivity', 'carconnectivity-connector-volkswagen'],
             'skoda': ['carconnectivity', 'carconnectivity-connector-skoda'],
             'seatcupra': ['carconnectivity', 'carconnectivity-connector-seatcupra'],

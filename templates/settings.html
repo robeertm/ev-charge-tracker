@@ -196,199 +196,163 @@
             </div>
             <div class="card-body">
                 <p class="text-muted small mb-3">Verbinde dein Fahrzeug um SoC, Tachostand und Ladestatus automatisch abzurufen.</p>
-                {% if vehicle_brands %}
                 <form method="POST">
-                    <div class="row g-3 mb-3">
-                        <div class="col-12">
-                            <label for="vehicle_api_brand" class="form-label">Marke</label>
-                            <select class="form-select" id="vehicle_api_brand" name="vehicle_api_brand" onchange="updateVehicleFields()">
-                                <option value="">— Bitte wählen —</option>
-                                {% for brand in vehicle_brands %}
-                                <option value="{{ brand.key }}" {% if brand.key == vehicle_api_brand %}selected{% endif %}>
-                                    {{ brand.name }}
-                                </option>
-                                {% endfor %}
-                            </select>
-                        </div>
-                        <div class="col-sm-6">
-                            <label for="vehicle_api_username" class="form-label">E-Mail / Benutzername</label>
-                            <input type="text" class="form-control" id="vehicle_api_username" name="vehicle_api_username"
-                                   value="{{ vehicle_api_username }}">
-                        </div>
-                        <div class="col-sm-6">
-                            <label for="vehicle_api_password" class="form-label" id="labelPassword">Passwort</label>
-                            <input type="password" class="form-control" id="vehicle_api_password" name="vehicle_api_password"
-                                   value="{{ vehicle_api_password }}">
-                            <div class="form-text vehicle-field-token-hint" style="display:none">
-                                <i class="bi bi-info-circle"></i> Kein Passwort — <strong>Refresh-Token</strong> eintragen!
-                            </div>
-                        </div>
-                        <div class="col-sm-6 vehicle-field-pin" style="display:none">
-                            <label for="vehicle_api_pin" class="form-label">PIN</label>
-                            <input type="password" class="form-control" id="vehicle_api_pin" name="vehicle_api_pin"
-                                   value="{{ vehicle_api_pin }}">
-                        </div>
-                        <div class="col-sm-6 vehicle-field-region" style="display:none">
-                            <label for="vehicle_api_region" class="form-label">Region</label>
-                            <select class="form-select" id="vehicle_api_region" name="vehicle_api_region">
-                                <option value="EU" {% if vehicle_api_region == 'EU' %}selected{% endif %}>Europa</option>
-                                <option value="US" {% if vehicle_api_region == 'US' %}selected{% endif %}>USA</option>
-                                <option value="CA" {% if vehicle_api_region == 'CA' %}selected{% endif %}>Kanada</option>
-                                <option value="KR" {% if vehicle_api_region == 'KR' %}selected{% endif %}>Korea</option>
-                            </select>
-                        </div>
-                        <div class="col-sm-6 vehicle-field-vin" style="display:none">
-                            <label for="vehicle_api_vin" class="form-label">FIN / VIN (optional)</label>
-                            <input type="text" class="form-control" id="vehicle_api_vin" name="vehicle_api_vin"
-                                   value="{{ vehicle_api_vin }}" placeholder="Bei mehreren Fahrzeugen">
-                        </div>
+                    <!-- Markenauswahl -->
+                    <div class="mb-3">
+                        <label for="vehicle_api_brand" class="form-label">Marke</label>
+                        <select class="form-select" id="vehicle_api_brand" name="vehicle_api_brand" onchange="updateVehicleFields()">
+                            <option value="">— Bitte wählen —</option>
+                            {% for brand in vehicle_brands %}
+                            <option value="{{ brand.key }}" {% if brand.key == vehicle_api_brand %}selected{% endif %}>
+                                {{ brand.name }}
+                            </option>
+                            {% endfor %}
+                        </select>
                     </div>
-                    <div class="d-flex gap-2 flex-wrap">
-                        <button type="submit" name="action" value="save_vehicle_api" class="btn btn-primary">
-                            <i class="bi bi-save"></i> Speichern
-                        </button>
-                        <button type="submit" name="action" value="test_vehicle_api" class="btn btn-outline-secondary">
-                            <i class="bi bi-wifi"></i> Verbindung testen
-                        </button>
-                        <button type="submit" name="action" value="sync_vehicle_now" class="btn btn-outline-info">
-                            <i class="bi bi-arrow-repeat"></i> Jetzt synchronisieren
-                        </button>
-                    </div>
-                </form>
-                <!-- Token-Fetch (Kia/Hyundai) -->
-                <div id="tokenHintSection" class="mt-3" style="display:none">
-                    <div class="alert alert-info py-2 mb-0 small">
-                        <strong><i class="bi bi-shield-lock"></i> Refresh-Token benötigt</strong><br>
-                        Kia/Hyundai erlaubt kein Passwort-Login (reCAPTCHA). Klicke unten um ein Chrome-Fenster zu öffnen, logge dich dort ein — der Token wird automatisch gespeichert.
-                        <div class="mt-2 d-flex gap-2 align-items-center">
-                            <button type="button" class="btn btn-warning btn-sm" id="btnFetchToken">
-                                <i class="bi bi-key"></i> Token holen (öffnet Chrome)
+
+                    <!-- Install-Buttons für nicht installierte Pakete -->
+                    {% set missing_packages = [] %}
+                    {% if 'kia' not in installed_brand_keys %}{% set _ = missing_packages.append(('hyundai-kia', 'Kia / Hyundai')) %}{% endif %}
+                    {% if 'vw' not in installed_brand_keys %}{% set _ = missing_packages.append(('vw', 'Volkswagen')) %}{% endif %}
+                    {% if 'skoda' not in installed_brand_keys %}{% set _ = missing_packages.append(('skoda', 'Skoda')) %}{% endif %}
+                    {% if 'seat' not in installed_brand_keys %}{% set _ = missing_packages.append(('seatcupra', 'Seat / Cupra')) %}{% endif %}
+                    {% if missing_packages %}
+                    <div class="mb-3">
+                        <p class="small text-muted mb-2">Weitere Marken verfügbar — Paket installieren:</p>
+                        <div class="d-flex flex-wrap gap-2 mb-2">
+                            {% for pkg_key, pkg_label in missing_packages %}
+                            <button type="button" class="btn btn-outline-primary btn-sm"
+                                    onclick="installPkg('{{ pkg_key }}', this)">
+                                <i class="bi bi-download"></i> {{ pkg_label }}
                             </button>
-                            <button type="button" class="btn btn-outline-secondary btn-sm" id="btnCancelToken" style="display:none">
-                                <i class="bi bi-x-lg"></i> Abbrechen
-                            </button>
-                            <span class="small" id="tokenFetchStatus"></span>
+                            {% endfor %}
                         </div>
+                        <div id="installStatus" class="small"></div>
                     </div>
-                </div>
-                <script>
-                (function() {
-                    const btnFetch = document.getElementById('btnFetchToken');
-                    const btnCancel = document.getElementById('btnCancelToken');
-                    const statusEl = document.getElementById('tokenFetchStatus');
-                    let pollInterval = null;
+                    {% endif %}
 
-                    function stopPolling() {
-                        if (pollInterval) { clearInterval(pollInterval); pollInterval = null; }
-                        btnFetch.disabled = false;
-                        btnFetch.innerHTML = '<i class="bi bi-key"></i> Token holen (öffnet Chrome)';
-                        btnCancel.style.display = 'none';
-                    }
-
-                    function pollStatus() {
-                        fetch('/api/vehicle/token/status').then(r => r.json()).then(d => {
-                            if (d.token) {
-                                statusEl.innerHTML = '<span class="text-success fw-bold"><i class="bi bi-check-circle"></i> Token gespeichert!</span>';
-                                stopPolling();
-                                setTimeout(() => location.reload(), 1500);
-                            } else if (d.error) {
-                                statusEl.innerHTML = '<span class="text-danger">' + d.error + '</span>';
-                                stopPolling();
-                            } else if (d.running) {
-                                statusEl.innerHTML = '<span class="text-primary"><span class="spinner-border spinner-border-sm me-1"></span>' + d.status + '</span>';
-                            }
-                        }).catch(() => {});
-                    }
-
-                    btnFetch.addEventListener('click', async () => {
-                        btnFetch.disabled = true;
-                        btnFetch.innerHTML = '<span class="spinner-border spinner-border-sm"></span> Starte...';
-                        btnCancel.style.display = '';
-                        statusEl.textContent = '';
-                        try {
-                            const r = await fetch('/api/vehicle/token/start', {method: 'POST'});
-                            const d = await r.json();
-                            if (d.success) {
-                                pollInterval = setInterval(pollStatus, 2000);
-                                pollStatus();
-                            } else {
-                                statusEl.innerHTML = '<span class="text-danger">' + d.error + '</span>';
-                                stopPolling();
-                            }
-                        } catch(e) {
-                            statusEl.innerHTML = '<span class="text-danger">' + e.message + '</span>';
-                            stopPolling();
-                        }
-                    });
-
-                    btnCancel.addEventListener('click', async () => {
-                        await fetch('/api/vehicle/token/cancel', {method: 'POST'});
-                        statusEl.textContent = 'Abgebrochen.';
-                        stopPolling();
-                    });
-                })();
-                </script>
-                <hr>
-                <form method="POST" class="mb-3">
-                    <div class="row g-2 align-items-center">
-                        <div class="col-auto">
-                            <div class="form-check form-switch">
-                                <input class="form-check-input" type="checkbox" id="vehicle_sync_enabled"
-                                       name="vehicle_sync_enabled" {% if vehicle_sync_enabled == 'true' %}checked{% endif %}>
-                                <label class="form-check-label" for="vehicle_sync_enabled">Auto-Sync</label>
+                    <!-- Credentials (nur sichtbar wenn Marke gewählt) -->
+                    <div id="vehicleCredentials" style="display:none">
+                        <div class="row g-3 mb-3">
+                            <div class="col-sm-6">
+                                <label for="vehicle_api_username" class="form-label">E-Mail / Benutzername</label>
+                                <input type="text" class="form-control" id="vehicle_api_username" name="vehicle_api_username"
+                                       value="{{ vehicle_api_username }}">
                             </div>
-                        </div>
-                        <div class="col-auto">
-                            <div class="input-group input-group-sm" style="width:160px">
-                                <span class="input-group-text">alle</span>
-                                <select class="form-select form-select-sm" name="vehicle_sync_interval">
-                                    {% for val, label in [('1','1h'),('2','2h'),('4','4h'),('8','8h'),('12','12h')] %}
-                                    <option value="{{ val }}" {% if vehicle_sync_interval == val %}selected{% endif %}>{{ label }}</option>
-                                    {% endfor %}
+                            <div class="col-sm-6">
+                                <label for="vehicle_api_password" class="form-label" id="labelPassword">Passwort</label>
+                                <input type="password" class="form-control" id="vehicle_api_password" name="vehicle_api_password"
+                                       value="{{ vehicle_api_password }}">
+                                <div class="form-text vehicle-field-token-hint" style="display:none">
+                                    <i class="bi bi-info-circle"></i> Kein Passwort — wird automatisch per <strong>Token holen</strong> ausgefüllt.
+                                </div>
+                            </div>
+                            <div class="col-sm-6 vehicle-field-pin" style="display:none">
+                                <label for="vehicle_api_pin" class="form-label">PIN (4-stellig aus Kia Connect App)</label>
+                                <input type="password" class="form-control" id="vehicle_api_pin" name="vehicle_api_pin"
+                                       value="{{ vehicle_api_pin }}">
+                            </div>
+                            <div class="col-sm-6 vehicle-field-region" style="display:none">
+                                <label for="vehicle_api_region" class="form-label">Region</label>
+                                <select class="form-select" id="vehicle_api_region" name="vehicle_api_region">
+                                    <option value="EU" {% if vehicle_api_region == 'EU' %}selected{% endif %}>Europa</option>
+                                    <option value="US" {% if vehicle_api_region == 'US' %}selected{% endif %}>USA</option>
+                                    <option value="CA" {% if vehicle_api_region == 'CA' %}selected{% endif %}>Kanada</option>
+                                    <option value="KR" {% if vehicle_api_region == 'KR' %}selected{% endif %}>Korea</option>
                                 </select>
                             </div>
+                            <div class="col-sm-6 vehicle-field-vin" style="display:none">
+                                <label for="vehicle_api_vin" class="form-label">FIN / VIN (optional)</label>
+                                <input type="text" class="form-control" id="vehicle_api_vin" name="vehicle_api_vin"
+                                       value="{{ vehicle_api_vin }}" placeholder="Bei mehreren Fahrzeugen">
+                            </div>
                         </div>
-                        <div class="col-auto">
-                            <button type="submit" name="action" value="save_vehicle_sync" class="btn btn-sm btn-outline-primary">
-                                <i class="bi bi-save"></i>
+
+                        <!-- Token-Anleitung (Kia/Hyundai) -->
+                        <div id="tokenHintSection" class="mb-3" style="display:none">
+                            <div class="alert alert-info py-2 mb-0 small">
+                                <strong><i class="bi bi-shield-lock"></i> Refresh-Token benötigt</strong><br>
+                                Kia/Hyundai erlaubt keinen Passwort-Login mehr. Du brauchst einen Refresh-Token:
+                                <ol class="mb-1 mt-1">
+                                    <li><code>pip install selenium webdriver-manager</code></li>
+                                    <li><a href="https://github.com/Hyundai-Kia-Connect/hyundai_kia_connect_api/tree/master/Hyundai%20Token%20Solution" target="_blank">Token-Script herunterladen</a> und starten</li>
+                                    <li>Im Chrome-Fenster mit Kia Connect einloggen</li>
+                                    <li>Den ausgegebenen Token oben ins Feld <strong>Refresh-Token</strong> eintragen</li>
+                                </ol>
+                                Der Token ist ca. 1 Jahr gültig.
+                            </div>
+                        </div>
+
+                        <div class="d-flex gap-2 flex-wrap">
+                            <button type="submit" name="action" value="save_vehicle_api" class="btn btn-primary">
+                                <i class="bi bi-save"></i> Speichern
+                            </button>
+                            <button type="submit" name="action" value="test_vehicle_api" class="btn btn-outline-secondary">
+                                <i class="bi bi-wifi"></i> Verbindung testen
+                            </button>
+                            <button type="submit" name="action" value="sync_vehicle_now" class="btn btn-outline-info">
+                                <i class="bi bi-arrow-repeat"></i> Jetzt synchronisieren
+                            </button>
+                            <button type="submit" name="action" value="delete_vehicle_api" class="btn btn-outline-danger"
+                                    onclick="return confirm('Fahrzeug-API Zugangsdaten wirklich löschen?')">
+                                <i class="bi bi-trash"></i> Löschen
                             </button>
                         </div>
-                        <div class="col-auto" id="syncStatusBadge">
-                        </div>
+
                     </div>
                 </form>
-                {% if last_vehicle_sync %}
-                <div class="small text-muted">
-                    <strong>Letzte Synchronisierung:</strong> {{ last_vehicle_sync.timestamp.strftime('%d.%m.%Y %H:%M') }}
-                    {% if last_vehicle_sync.soc_percent is not none %} · SoC: {{ last_vehicle_sync.soc_percent }}%{% endif %}
-                    {% if last_vehicle_sync.odometer_km is not none %} · Tacho: {{ "{:,}".format(last_vehicle_sync.odometer_km).replace(",", ".") }} km{% endif %}
-                    {% if last_vehicle_sync.is_charging %} · <span class="badge bg-success">Lädt</span>{% endif %}
+                <!-- Auto-Sync (separate form, outside credentials form) -->
+                <div id="vehicleSyncSection" style="display:none">
+                    <hr>
+                    <form method="POST" class="mb-3">
+                        <div class="row g-2 align-items-center">
+                            <div class="col-auto">
+                                <div class="form-check form-switch">
+                                    <input class="form-check-input" type="checkbox" id="vehicle_sync_enabled"
+                                           name="vehicle_sync_enabled" {% if vehicle_sync_enabled == 'true' %}checked{% endif %}>
+                                    <label class="form-check-label" for="vehicle_sync_enabled">Auto-Sync</label>
+                                </div>
+                            </div>
+                            <div class="col-auto">
+                                <div class="input-group input-group-sm" style="width:160px">
+                                    <span class="input-group-text">alle</span>
+                                    <select class="form-select form-select-sm" name="vehicle_sync_interval">
+                                        {% for val, label in [('1','1h'),('2','2h'),('4','4h'),('8','8h'),('12','12h')] %}
+                                        <option value="{{ val }}" {% if vehicle_sync_interval == val %}selected{% endif %}>{{ label }}</option>
+                                        {% endfor %}
+                                    </select>
+                                </div>
+                            </div>
+                            <div class="col-auto">
+                                <button type="submit" name="action" value="save_vehicle_sync" class="btn btn-sm btn-outline-primary">
+                                    <i class="bi bi-save"></i>
+                                </button>
+                            </div>
+                            <div class="col-auto" id="syncStatusBadge"></div>
+                        </div>
+                    </form>
+                    {% if last_vehicle_sync %}
+                    <div class="small text-muted">
+                        <strong>Letzte Synchronisierung:</strong> {{ last_vehicle_sync.timestamp.strftime('%d.%m.%Y %H:%M') }}
+                        {% if last_vehicle_sync.soc_percent is not none %} · SoC: {{ last_vehicle_sync.soc_percent }}%{% endif %}
+                        {% if last_vehicle_sync.odometer_km is not none %} · Tacho: {{ "{:,}".format(last_vehicle_sync.odometer_km).replace(",", ".") }} km{% endif %}
+                        {% if last_vehicle_sync.is_charging %} · <span class="badge bg-success">Lädt</span>{% endif %}
+                    </div>
+                    {% endif %}
                 </div>
-                {% endif %}
-                <script>
-                // Poll sync status
-                (function() {
-                    const badge = document.getElementById('syncStatusBadge');
-                    async function checkSync() {
-                        try {
-                            const r = await fetch('/api/vehicle/sync/status');
-                            const d = await r.json();
-                            if (d.running) {
-                                badge.innerHTML = '<span class="badge bg-success">Sync aktiv</span>';
-                            } else {
-                                badge.innerHTML = '<span class="badge bg-secondary">Sync inaktiv</span>';
-                            }
-                        } catch(e) {}
-                    }
-                    checkSync();
-                    setInterval(checkSync, 30000);
-                })();
-                </script>
+
                 <script>
                 function updateVehicleFields() {
                     const brand = document.getElementById('vehicle_api_brand').value;
+                    const hasBrand = brand !== '';
                     const isKiaHyundai = ['kia', 'hyundai'].includes(brand);
                     const isVAG = ['vw', 'skoda', 'seat', 'cupra', 'audi'].includes(brand);
+
+                    // Show/hide entire credentials and sync sections
+                    document.getElementById('vehicleCredentials').style.display = hasBrand ? '' : 'none';
+                    document.getElementById('vehicleSyncSection').style.display = hasBrand ? '' : 'none';
+
+                    // Brand-specific fields
                     document.querySelectorAll('.vehicle-field-pin').forEach(el => el.style.display = isKiaHyundai ? '' : 'none');
                     document.querySelectorAll('.vehicle-field-region').forEach(el => el.style.display = isKiaHyundai ? '' : 'none');
                     document.querySelectorAll('.vehicle-field-vin').forEach(el => el.style.display = (isVAG || isKiaHyundai) ? '' : 'none');
@@ -397,50 +361,31 @@
                     document.getElementById('tokenHintSection').style.display = isKiaHyundai ? '' : 'none';
                 }
                 updateVehicleFields();
+
+
+                // Sync status polling
+                (function() {
+                    const badge = document.getElementById('syncStatusBadge');
+                    if (!badge) return;
+                    async function checkSync() {
+                        try {
+                            const r = await fetch('/api/vehicle/sync/status');
+                            const d = await r.json();
+                            badge.innerHTML = d.running
+                                ? '<span class="badge bg-success">Sync aktiv</span>'
+                                : '<span class="badge bg-secondary">Sync inaktiv</span>';
+                        } catch(e) {}
+                    }
+                    checkSync();
+                    setInterval(checkSync, 30000);
+                })();
                 </script>
-                {% else %}
-                <div class="mb-0">
-                    <p class="small text-muted mb-2">Pakete für deine Fahrzeugmarke installieren:</p>
-                    <div class="d-flex flex-column gap-2" id="installButtons">
-                        <div class="d-flex align-items-center gap-2">
-                            <button class="btn btn-outline-primary btn-sm flex-shrink-0" style="min-width:180px"
-                                    onclick="installPkg('hyundai-kia', this)">
-                                <i class="bi bi-download"></i> Kia / Hyundai
-                            </button>
-                            <small class="text-muted pkg-status" id="status-hyundai-kia"></small>
-                        </div>
-                        <div class="d-flex align-items-center gap-2">
-                            <button class="btn btn-outline-primary btn-sm flex-shrink-0" style="min-width:180px"
-                                    onclick="installPkg('vw', this)">
-                                <i class="bi bi-download"></i> Volkswagen
-                            </button>
-                            <small class="text-muted pkg-status" id="status-vw"></small>
-                        </div>
-                        <div class="d-flex align-items-center gap-2">
-                            <button class="btn btn-outline-primary btn-sm flex-shrink-0" style="min-width:180px"
-                                    onclick="installPkg('skoda', this)">
-                                <i class="bi bi-download"></i> Skoda
-                            </button>
-                            <small class="text-muted pkg-status" id="status-skoda"></small>
-                        </div>
-                        <div class="d-flex align-items-center gap-2">
-                            <button class="btn btn-outline-primary btn-sm flex-shrink-0" style="min-width:180px"
-                                    onclick="installPkg('seatcupra', this)">
-                                <i class="bi bi-download"></i> Seat / Cupra
-                            </button>
-                            <small class="text-muted pkg-status" id="status-seatcupra"></small>
-                        </div>
-                    </div>
-                    <div class="small text-muted mt-2">
-                        <i class="bi bi-info-circle"></i> Nach der Installation Seite neu laden — die App muss <strong>nicht</strong> neugestartet werden.
-                    </div>
-                </div>
                 <script>
                 async function installPkg(pkg, btn) {
-                    const status = document.getElementById('status-' + pkg);
+                    const statusEl = document.getElementById('installStatus');
                     btn.disabled = true;
                     btn.innerHTML = '<span class="spinner-border spinner-border-sm"></span> Installiere...';
-                    status.textContent = '';
+                    statusEl.textContent = '';
                     try {
                         const r = await fetch('/api/vehicle/install', {
                             method: 'POST',
@@ -452,28 +397,25 @@
                             btn.classList.remove('btn-outline-primary');
                             btn.classList.add('btn-success');
                             btn.innerHTML = '<i class="bi bi-check-lg"></i> Installiert';
-                            status.innerHTML = '<span class="text-success">' + d.installed.join(', ') + '</span>';
                             setTimeout(() => location.reload(), 1500);
                         } else {
                             btn.classList.remove('btn-outline-primary');
                             btn.classList.add('btn-outline-danger');
                             btn.innerHTML = '<i class="bi bi-x-lg"></i> Fehler';
-                            status.innerHTML = '<span class="text-danger">' + d.error + '</span>';
+                            statusEl.innerHTML = '<span class="text-danger">' + d.error + '</span>';
                             btn.disabled = false;
                             setTimeout(() => {
                                 btn.classList.remove('btn-outline-danger');
                                 btn.classList.add('btn-outline-primary');
-                                btn.innerHTML = '<i class="bi bi-download"></i> Erneut versuchen';
+                                btn.innerHTML = '<i class="bi bi-download"></i> Erneut';
                             }, 3000);
                         }
                     } catch (e) {
-                        btn.innerHTML = '<i class="bi bi-x-lg"></i> Fehler';
-                        status.innerHTML = '<span class="text-danger">' + e.message + '</span>';
+                        statusEl.innerHTML = '<span class="text-danger">' + e.message + '</span>';
                         btn.disabled = false;
                     }
                 }
                 </script>
-                {% endif %}
             </div>
         </div>
 
