@@ -84,6 +84,19 @@ class AppConfig(db.Model):
         db.session.commit()
 
 
+class VehicleSync(db.Model):
+    __tablename__ = 'vehicle_syncs'
+
+    id = db.Column(db.Integer, primary_key=True)
+    timestamp = db.Column(db.DateTime, nullable=False, default=datetime.utcnow)
+    soc_percent = db.Column(db.Integer)
+    odometer_km = db.Column(db.Integer)
+    is_charging = db.Column(db.Boolean)
+    charge_power_kw = db.Column(db.Float)
+    estimated_range_km = db.Column(db.Integer)
+    raw_json = db.Column(db.Text)
+
+
 class ThgQuota(db.Model):
     __tablename__ = 'thg_quotas'
 

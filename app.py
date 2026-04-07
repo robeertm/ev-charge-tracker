@@ -4,7 +4,7 @@ import logging
 from datetime import datetime, date
 from flask import Flask, render_template, request, redirect, url_for, flash, jsonify
 
-from models.database import db, Charge, AppConfig, ThgQuota
+from models.database import db, Charge, AppConfig, ThgQuota, VehicleSync
 from config import Config
 
 logging.basicConfig(level=logging.INFO)
@@ -30,6 +30,14 @@ def create_app(config_class=Config):
             db.session.commit()
 
     register_routes(app)
+
+    # Auto-start vehicle sync if configured
+    try:
+        from services.vehicle.sync_service import start_sync
+        start_sync(app)
+    except Exception:
+        pass
+
     return app
 
 
@@ -44,6 +52,17 @@ def _get_pv_co2():
     except (ValueError, TypeError):
         pass
     return 42  # fallback
+
+
+def _get_vehicle_credentials():
+    """Build credentials dict from AppConfig for vehicle API."""
+    return {
+        'username': AppConfig.get('vehicle_api_username', ''),
+        'password': AppConfig.get('vehicle_api_password', ''),
+        'pin': AppConfig.get('vehicle_api_pin', ''),
+        'region': AppConfig.get('vehicle_api_region', 'EU'),
+        'vin': AppConfig.get('vehicle_api_vin', ''),
+    }
 
 
 def _get_battery_kwh():
@@ -278,11 +297,110 @@ def register_routes(app):
                 else:
                     flash('Backfill läuft bereits oder keine fehlenden Werte.', 'warning')
 
+            elif action == 'save_vehicle_api':
+                AppConfig.set('vehicle_api_brand', request.form.get('vehicle_api_brand', ''))
+                AppConfig.set('vehicle_api_username', request.form.get('vehicle_api_username', ''))
+                AppConfig.set('vehicle_api_password', request.form.get('vehicle_api_password', ''))
+                AppConfig.set('vehicle_api_pin', request.form.get('vehicle_api_pin', ''))
+                AppConfig.set('vehicle_api_region', request.form.get('vehicle_api_region', 'EU'))
+                AppConfig.set('vehicle_api_vin', request.form.get('vehicle_api_vin', ''))
+                flash('Fahrzeug-API Zugangsdaten gespeichert!', 'success')
+
+            elif action == 'test_vehicle_api':
+                brand = AppConfig.get('vehicle_api_brand', '')
+                if brand:
+                    try:
+                        from services.vehicle import get_connector
+                        creds = _get_vehicle_credentials()
+                        connector = get_connector(brand, creds)
+                        if connector.test_connection():
+                            status = connector.get_status()
+                            parts = []
+                            if status.soc_percent is not None:
+                                parts.append(f'SoC: {status.soc_percent}%')
+                            if status.odometer_km is not None:
+                                parts.append(f'Tacho: {status.odometer_km:,} km')
+                            if status.estimated_range_km is not None:
+                                parts.append(f'Reichweite: {status.estimated_range_km} km')
+                            info = ', '.join(parts) if parts else 'Verbunden'
+                            flash(f'Fahrzeug-API verbunden! {info}', 'success')
+                        else:
+                            flash('Verbindung fehlgeschlagen. Zugangsdaten prüfen.', 'danger')
+                    except Exception as e:
+                        flash(f'Fehler: {e}', 'danger')
+                else:
+                    flash('Keine Fahrzeugmarke ausgewählt.', 'warning')
+
+            elif action == 'save_vehicle_sync':
+                enabled = 'true' if 'vehicle_sync_enabled' in request.form else 'false'
+                AppConfig.set('vehicle_sync_enabled', enabled)
+                AppConfig.set('vehicle_sync_interval_hours', request.form.get('vehicle_sync_interval', '4'))
+                if enabled == 'true':
+                    from services.vehicle.sync_service import start_sync
+                    if start_sync(app):
+                        flash('Automatische Synchronisierung gestartet!', 'success')
+                    else:
+                        flash('Sync-Einstellungen gespeichert.', 'success')
+                else:
+                    from services.vehicle.sync_service import stop_sync
+                    stop_sync()
+                    flash('Automatische Synchronisierung deaktiviert.', 'warning')
+
+            elif action == 'sync_vehicle_now':
+                brand = AppConfig.get('vehicle_api_brand', '')
+                if brand:
+                    try:
+                        from services.vehicle import get_connector
+                        import json as _json
+                        creds = _get_vehicle_credentials()
+                        connector = get_connector(brand, creds)
+                        status = connector.get_status()
+                        sync = VehicleSync(
+                            soc_percent=status.soc_percent,
+                            odometer_km=status.odometer_km,
+                            is_charging=status.is_charging,
+                            charge_power_kw=status.charge_power_kw,
+                            estimated_range_km=status.estimated_range_km,
+                            raw_json=_json.dumps(status.raw_data),
+                        )
+                        db.session.add(sync)
+                        db.session.commit()
+                        parts = []
+                        if status.soc_percent is not None:
+                            parts.append(f'SoC: {status.soc_percent}%')
+                        if status.odometer_km is not None:
+                            parts.append(f'Tacho: {status.odometer_km:,} km')
+                        flash(f'Fahrzeugdaten abgerufen! {", ".join(parts)}', 'success')
+                    except Exception as e:
+                        flash(f'Sync-Fehler: {e}', 'danger')
+                else:
+                    flash('Keine Fahrzeugmarke konfiguriert.', 'warning')
+
             return redirect(url_for('settings'))
+
+        # Vehicle API brands (only those with installed dependencies)
+        try:
+            from services.vehicle import get_available_brands
+            vehicle_brands = get_available_brands()
+        except Exception:
+            vehicle_brands = []
+
+        # Last vehicle sync
+        last_sync = VehicleSync.query.order_by(VehicleSync.timestamp.desc()).first()
 
         return render_template('settings.html',
                                entsoe_key=AppConfig.get('entsoe_api_key', ''),
                                car_model_val=AppConfig.get('car_model', Config.CAR_MODEL),
+                               vehicle_brands=vehicle_brands,
+                               vehicle_api_brand=AppConfig.get('vehicle_api_brand', ''),
+                               vehicle_api_username=AppConfig.get('vehicle_api_username', ''),
+                               vehicle_api_password=AppConfig.get('vehicle_api_password', ''),
+                               vehicle_api_pin=AppConfig.get('vehicle_api_pin', ''),
+                               vehicle_api_region=AppConfig.get('vehicle_api_region', 'EU'),
+                               vehicle_api_vin=AppConfig.get('vehicle_api_vin', ''),
+                               vehicle_sync_enabled=AppConfig.get('vehicle_sync_enabled', 'false'),
+                               vehicle_sync_interval=AppConfig.get('vehicle_sync_interval_hours', '4'),
+                               last_vehicle_sync=last_sync,
                                battery_kwh=AppConfig.get('battery_kwh', str(Config.BATTERY_CAPACITY_KWH)),
                                max_ac_kw=AppConfig.get('max_ac_kw', ''),
                                battery_co2_per_kwh=AppConfig.get('battery_co2_per_kwh', '100'),
@@ -335,6 +453,69 @@ def register_routes(app):
             'running': is_running(),
             'missing': get_missing_count(app),
         })
+
+    @app.route('/api/vehicle/sync/status')
+    def api_vehicle_sync_status():
+        """Return vehicle sync service status."""
+        from services.vehicle.sync_service import is_running
+        last_sync = VehicleSync.query.order_by(VehicleSync.timestamp.desc()).first()
+        return jsonify({
+            'running': is_running(),
+            'last_sync': last_sync.timestamp.strftime('%d.%m.%Y %H:%M') if last_sync else None,
+            'last_soc': last_sync.soc_percent if last_sync else None,
+            'last_odometer': last_sync.odometer_km if last_sync else None,
+            'is_charging': last_sync.is_charging if last_sync else None,
+        })
+
+    @app.route('/api/vehicle/status')
+    def api_vehicle_status():
+        """Fetch current vehicle status (SoC, odometer, charging)."""
+        brand = AppConfig.get('vehicle_api_brand', '')
+        if not brand:
+            return jsonify({'error': 'not_configured'}), 400
+
+        # Use cached data if less than 30 min old
+        from datetime import timedelta
+        cutoff = datetime.utcnow() - timedelta(minutes=30)
+        cached = VehicleSync.query.filter(VehicleSync.timestamp > cutoff) \
+            .order_by(VehicleSync.timestamp.desc()).first()
+        if cached:
+            return jsonify({
+                'soc': cached.soc_percent,
+                'odometer': cached.odometer_km,
+                'is_charging': cached.is_charging,
+                'range_km': cached.estimated_range_km,
+                'timestamp': cached.timestamp.strftime('%H:%M'),
+                'cached': True,
+            })
+
+        # Live fetch
+        try:
+            from services.vehicle import get_connector
+            import json as _json
+            creds = _get_vehicle_credentials()
+            connector = get_connector(brand, creds)
+            status = connector.get_status()
+            sync = VehicleSync(
+                soc_percent=status.soc_percent,
+                odometer_km=status.odometer_km,
+                is_charging=status.is_charging,
+                charge_power_kw=status.charge_power_kw,
+                estimated_range_km=status.estimated_range_km,
+                raw_json=_json.dumps(status.raw_data),
+            )
+            db.session.add(sync)
+            db.session.commit()
+            return jsonify({
+                'soc': status.soc_percent,
+                'odometer': status.odometer_km,
+                'is_charging': status.is_charging,
+                'range_km': status.estimated_range_km,
+                'timestamp': sync.timestamp.strftime('%H:%M'),
+                'cached': False,
+            })
+        except Exception as e:
+            return jsonify({'error': str(e)}), 500
 
     @app.route('/api/stats')
     def api_stats():

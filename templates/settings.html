@@ -189,6 +189,148 @@
             </div>
         </div>
 
+        <!-- Fahrzeug-API -->
+        <div class="card mb-4">
+            <div class="card-header bg-white fw-bold">
+                <i class="bi bi-ev-station"></i> Fahrzeug-API
+            </div>
+            <div class="card-body">
+                <p class="text-muted small mb-3">Verbinde dein Fahrzeug um SoC, Tachostand und Ladestatus automatisch abzurufen.</p>
+                {% if vehicle_brands %}
+                <form method="POST">
+                    <div class="row g-3 mb-3">
+                        <div class="col-12">
+                            <label for="vehicle_api_brand" class="form-label">Marke</label>
+                            <select class="form-select" id="vehicle_api_brand" name="vehicle_api_brand" onchange="updateVehicleFields()">
+                                <option value="">— Bitte wählen —</option>
+                                {% for brand in vehicle_brands %}
+                                <option value="{{ brand.key }}" {% if brand.key == vehicle_api_brand %}selected{% endif %}>
+                                    {{ brand.name }}
+                                </option>
+                                {% endfor %}
+                            </select>
+                        </div>
+                        <div class="col-sm-6">
+                            <label for="vehicle_api_username" class="form-label">E-Mail / Benutzername</label>
+                            <input type="text" class="form-control" id="vehicle_api_username" name="vehicle_api_username"
+                                   value="{{ vehicle_api_username }}">
+                        </div>
+                        <div class="col-sm-6">
+                            <label for="vehicle_api_password" class="form-label">Passwort</label>
+                            <input type="password" class="form-control" id="vehicle_api_password" name="vehicle_api_password"
+                                   value="{{ vehicle_api_password }}">
+                        </div>
+                        <div class="col-sm-6 vehicle-field-pin" style="display:none">
+                            <label for="vehicle_api_pin" class="form-label">PIN</label>
+                            <input type="password" class="form-control" id="vehicle_api_pin" name="vehicle_api_pin"
+                                   value="{{ vehicle_api_pin }}">
+                        </div>
+                        <div class="col-sm-6 vehicle-field-region" style="display:none">
+                            <label for="vehicle_api_region" class="form-label">Region</label>
+                            <select class="form-select" id="vehicle_api_region" name="vehicle_api_region">
+                                <option value="EU" {% if vehicle_api_region == 'EU' %}selected{% endif %}>Europa</option>
+                                <option value="US" {% if vehicle_api_region == 'US' %}selected{% endif %}>USA</option>
+                                <option value="CA" {% if vehicle_api_region == 'CA' %}selected{% endif %}>Kanada</option>
+                                <option value="KR" {% if vehicle_api_region == 'KR' %}selected{% endif %}>Korea</option>
+                            </select>
+                        </div>
+                        <div class="col-sm-6 vehicle-field-vin" style="display:none">
+                            <label for="vehicle_api_vin" class="form-label">FIN / VIN (optional)</label>
+                            <input type="text" class="form-control" id="vehicle_api_vin" name="vehicle_api_vin"
+                                   value="{{ vehicle_api_vin }}" placeholder="Bei mehreren Fahrzeugen">
+                        </div>
+                    </div>
+                    <div class="d-flex gap-2 flex-wrap">
+                        <button type="submit" name="action" value="save_vehicle_api" class="btn btn-primary">
+                            <i class="bi bi-save"></i> Speichern
+                        </button>
+                        <button type="submit" name="action" value="test_vehicle_api" class="btn btn-outline-secondary">
+                            <i class="bi bi-wifi"></i> Verbindung testen
+                        </button>
+                        <button type="submit" name="action" value="sync_vehicle_now" class="btn btn-outline-info">
+                            <i class="bi bi-arrow-repeat"></i> Jetzt synchronisieren
+                        </button>
+                    </div>
+                </form>
+                <hr>
+                <form method="POST" class="mb-3">
+                    <div class="row g-2 align-items-center">
+                        <div class="col-auto">
+                            <div class="form-check form-switch">
+                                <input class="form-check-input" type="checkbox" id="vehicle_sync_enabled"
+                                       name="vehicle_sync_enabled" {% if vehicle_sync_enabled == 'true' %}checked{% endif %}>
+                                <label class="form-check-label" for="vehicle_sync_enabled">Auto-Sync</label>
+                            </div>
+                        </div>
+                        <div class="col-auto">
+                            <div class="input-group input-group-sm" style="width:160px">
+                                <span class="input-group-text">alle</span>
+                                <select class="form-select form-select-sm" name="vehicle_sync_interval">
+                                    {% for val, label in [('1','1h'),('2','2h'),('4','4h'),('8','8h'),('12','12h')] %}
+                                    <option value="{{ val }}" {% if vehicle_sync_interval == val %}selected{% endif %}>{{ label }}</option>
+                                    {% endfor %}
+                                </select>
+                            </div>
+                        </div>
+                        <div class="col-auto">
+                            <button type="submit" name="action" value="save_vehicle_sync" class="btn btn-sm btn-outline-primary">
+                                <i class="bi bi-save"></i>
+                            </button>
+                        </div>
+                        <div class="col-auto" id="syncStatusBadge">
+                        </div>
+                    </div>
+                </form>
+                {% if last_vehicle_sync %}
+                <div class="small text-muted">
+                    <strong>Letzte Synchronisierung:</strong> {{ last_vehicle_sync.timestamp.strftime('%d.%m.%Y %H:%M') }}
+                    {% if last_vehicle_sync.soc_percent is not none %} · SoC: {{ last_vehicle_sync.soc_percent }}%{% endif %}
+                    {% if last_vehicle_sync.odometer_km is not none %} · Tacho: {{ "{:,}".format(last_vehicle_sync.odometer_km).replace(",", ".") }} km{% endif %}
+                    {% if last_vehicle_sync.is_charging %} · <span class="badge bg-success">Lädt</span>{% endif %}
+                </div>
+                {% endif %}
+                <script>
+                // Poll sync status
+                (function() {
+                    const badge = document.getElementById('syncStatusBadge');
+                    async function checkSync() {
+                        try {
+                            const r = await fetch('/api/vehicle/sync/status');
+                            const d = await r.json();
+                            if (d.running) {
+                                badge.innerHTML = '<span class="badge bg-success">Sync aktiv</span>';
+                            } else {
+                                badge.innerHTML = '<span class="badge bg-secondary">Sync inaktiv</span>';
+                            }
+                        } catch(e) {}
+                    }
+                    checkSync();
+                    setInterval(checkSync, 30000);
+                })();
+                </script>
+                <script>
+                function updateVehicleFields() {
+                    const brand = document.getElementById('vehicle_api_brand').value;
+                    const isKiaHyundai = ['kia', 'hyundai'].includes(brand);
+                    const isVAG = ['vw', 'skoda', 'seat', 'cupra', 'audi'].includes(brand);
+                    document.querySelectorAll('.vehicle-field-pin').forEach(el => el.style.display = isKiaHyundai ? '' : 'none');
+                    document.querySelectorAll('.vehicle-field-region').forEach(el => el.style.display = isKiaHyundai ? '' : 'none');
+                    document.querySelectorAll('.vehicle-field-vin').forEach(el => el.style.display = (isVAG || isKiaHyundai) ? '' : 'none');
+                }
+                updateVehicleFields();
+                </script>
+                {% else %}
+                <div class="alert alert-info mb-0">
+                    <i class="bi bi-info-circle"></i> Keine Fahrzeug-API-Pakete installiert.
+                    <div class="small mt-1">
+                        <strong>Kia/Hyundai:</strong> <code>pip install hyundai-kia-connect-api</code><br>
+                        <strong>VW/Skoda/Seat/Cupra:</strong> <code>pip install carconnectivity carconnectivity-connector-volkswagen</code>
+                    </div>
+                </div>
+                {% endif %}
+            </div>
+        </div>
+
         <!-- ENTSO-E API -->
         <div class="card mb-4">
             <div class="card-header bg-white fw-bold">

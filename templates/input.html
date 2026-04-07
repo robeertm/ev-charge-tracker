@@ -38,10 +38,16 @@
                             <i class="bi bi-speedometer"></i> km-Stand
                             <small class="text-muted fw-normal">optional</small>
                         </label>
-                        <input type="number" class="form-control form-control-lg" id="odometer"
-                               name="odometer" min="0" max="999999"
-                               placeholder="{{ last_charge.odometer if last_charge and last_charge.odometer else '' }}"
-                               inputmode="numeric">
+                        <div class="input-group">
+                            <input type="number" class="form-control form-control-lg" id="odometer"
+                                   name="odometer" min="0" max="999999"
+                                   placeholder="{{ last_charge.odometer if last_charge and last_charge.odometer else '' }}"
+                                   inputmode="numeric">
+                            <button type="button" class="btn btn-outline-info" id="btnFetchVehicle"
+                                    title="SoC & km vom Fahrzeug abrufen">
+                                <i class="bi bi-car-front"></i>
+                            </button>
+                        </div>
                     </div>
 
                     <!-- Stromart -->
@@ -191,6 +197,42 @@ document.getElementById('btnFetchCo2').addEventListener('click', async () => {
         alert('Fehler: ' + e.message);
     } finally {
         btn.innerHTML = '<i class="bi bi-cloud-download"></i>';
+        btn.disabled = false;
+    }
+});
+
+// Fetch vehicle status (SoC + odometer)
+document.getElementById('btnFetchVehicle').addEventListener('click', async () => {
+    const btn = document.getElementById('btnFetchVehicle');
+    btn.innerHTML = '<span class="spinner-border spinner-border-sm"></span>';
+    btn.disabled = true;
+    try {
+        const resp = await fetch('/api/vehicle/status');
+        const data = await resp.json();
+        if (data.error) {
+            if (data.error === 'not_configured') {
+                alert('Fahrzeug-API nicht konfiguriert. Bitte unter Einstellungen einrichten.');
+            } else {
+                alert('Fehler: ' + data.error);
+            }
+        } else {
+            if (data.soc !== null && data.soc !== undefined) {
+                document.getElementById('soc_from').value = data.soc;
+            }
+            if (data.odometer !== null && data.odometer !== undefined) {
+                document.getElementById('odometer').value = data.odometer;
+            }
+            let info = [];
+            if (data.soc !== null) info.push('SoC: ' + data.soc + '%');
+            if (data.odometer !== null) info.push('Tacho: ' + data.odometer.toLocaleString('de') + ' km');
+            if (data.is_charging) info.push('Lädt gerade!');
+            if (data.cached) info.push('(Cache ' + data.timestamp + ')');
+            btn.title = info.join(' · ');
+        }
+    } catch (e) {
+        alert('Verbindungsfehler: ' + e.message);
+    } finally {
+        btn.innerHTML = '<i class="bi bi-car-front"></i>';
         btn.disabled = false;
     }
 });

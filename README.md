@@ -16,6 +16,7 @@ Local web application for tracking electric vehicle charging data. Works with an
 - **Auto CO2 backfill** — automatically fetches missing CO2 data from ENTSO-E (rate-limit aware)
 - **CSV import via web UI** — upload Google Sheet CSV directly in settings
 - **History** with filtering, inline km editing, CSV export
+- **Vehicle API** — connect your Kia, Hyundai, VW, Skoda, Seat, Cupra, or Audi to auto-fetch SoC & odometer
 - **Auto-updater** via GitHub releases
 - **SQLite database** — all data stays local on your machine
 
@@ -81,11 +82,26 @@ Configure in Settings → Fahrzeug:
 | Herstellungs-CO₂ | 1000 kg/kWp | Production CO2 incl. transport & installation |
 | PV-Strompreis | €0.00/kWh | Self-consumption cost |
 
+### Vehicle API (Settings → Fahrzeug-API)
+
+Connect your car to automatically fetch SoC, odometer, and charging status. Install the package for your brand:
+
+| Brand | Install Command |
+|-------|----------------|
+| Kia | `pip install hyundai-kia-connect-api` |
+| Hyundai | `pip install hyundai-kia-connect-api` |
+| VW | `pip install carconnectivity carconnectivity-connector-volkswagen` |
+| Skoda | `pip install carconnectivity carconnectivity-connector-skoda` |
+| Seat / Cupra | `pip install carconnectivity carconnectivity-connector-seatcupra` |
+
+After installing, configure credentials in Settings → Fahrzeug-API. Optional background sync polls your vehicle at a configurable interval (1–12h).
+
 ## Tech Stack
 
 - Python 3.10+, Flask, SQLAlchemy, SQLite
 - Bootstrap 5, Chart.js
 - ENTSO-E Transparency Platform API
+- Optional: hyundai-kia-connect-api, CarConnectivity (vehicle APIs)
 
 ## License
 

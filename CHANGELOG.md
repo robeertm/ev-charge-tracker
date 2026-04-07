@@ -1,5 +1,17 @@
 # Changelog
 
+## v1.5.0 (2026-04-07)
+
+### New Features
+- **Vehicle API integration** — connect your car to auto-fetch SoC, odometer, charging status
+- **Supported brands** — Kia (UVO), Hyundai (Bluelink), VW (WeConnect), Skoda (MySkoda), Seat (MyCar), Cupra (MyCupra), Audi (myAudi)
+- **Auto-fill on input** — "Von Fahrzeug abrufen" button fills SoC and odometer from vehicle API
+- **Background sync service** — periodic vehicle status polling (configurable 1h–12h interval)
+- **Vehicle sync history** — all synced data points stored in database
+- **Settings UI** — Fahrzeug-API card with brand selection, credentials, connection test, manual sync, auto-sync toggle
+- **Modular connector architecture** — plugin-based design, new brands can be added easily
+- **Optional dependencies** — vehicle API packages only needed when used (graceful degradation)
+
 ## v1.4.4 (2026-04-04)
 - **Average lines in all monthly charts** — dashed Ø lines for costs, kWh, and CO2
 
