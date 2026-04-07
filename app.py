@@ -469,6 +469,34 @@ def register_routes(app):
             'missing': get_missing_count(app),
         })
 
+    @app.route('/api/vehicle/token/start', methods=['POST'])
+    def api_vehicle_token_start():
+        """Start browser-based token fetch with mobile user-agent."""
+        data = request.get_json() or {}
+        brand = data.get('brand') or AppConfig.get('vehicle_api_brand', '')
+        if brand not in ('kia', 'hyundai'):
+            return jsonify({'error': 'Nur für Kia/Hyundai verfügbar'}), 400
+        AppConfig.set('vehicle_api_brand', brand)
+        from services.vehicle.token_fetch import start_fetch
+        if start_fetch(brand):
+            return jsonify({'success': True})
+        return jsonify({'error': 'Läuft bereits'}), 409
+
+    @app.route('/api/vehicle/token/status')
+    def api_vehicle_token_status():
+        """Poll token fetch status."""
+        from services.vehicle.token_fetch import get_state
+        state = get_state()
+        if state.get('token'):
+            AppConfig.set('vehicle_api_password', state['token'])
+        return jsonify(state)
+
+    @app.route('/api/vehicle/token/cancel', methods=['POST'])
+    def api_vehicle_token_cancel():
+        from services.vehicle.token_fetch import cancel_fetch
+        cancel_fetch()
+        return jsonify({'success': True})
+
     @app.route('/api/vehicle/install', methods=['POST'])
     def api_vehicle_install():
         """Install vehicle API packages via pip."""
@@ -476,7 +504,7 @@ def register_routes(app):
         import sys
 
         PACKAGES = {
-            'hyundai-kia': ['hyundai-kia-connect-api'],
+            'hyundai-kia': ['hyundai-kia-connect-api', 'selenium', 'webdriver-manager'],
             'vw': ['carconnectivity', 'carconnectivity-connector-volkswagen'],
             'skoda': ['carconnectivity', 'carconnectivity-connector-skoda'],
             'seatcupra': ['carconnectivity', 'carconnectivity-connector-seatcupra'],

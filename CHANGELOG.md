@@ -1,10 +1,9 @@
 # Changelog
 
-## v1.5.3 (2026-04-07)
-- **Kia/Hyundai refresh-token auth** — updated for API v4+ (passwords no longer supported by Kia)
-- **Clean settings UI** — brand selection with install buttons for missing packages, delete button to reset
-- **Token instructions** — step-by-step guide for obtaining refresh token via external script
-- **Removed Selenium dependency** — browser-based OAuth not feasible due to Kia cross-domain restrictions
+## v1.5.4 (2026-04-07)
+- **One-click Kia/Hyundai token fetch** — opens Chrome with mobile user-agent, user logs in + solves reCAPTCHA, token is auto-captured and saved
+- **Working OAuth flow** — uses `peukiaidm-online-sales` client for initial login, then exchanges for CCSP refresh token
+- **Clean settings UI** — brand selection, install buttons, delete/reset, manual token entry as fallback
 
 ## v1.5.1 (2026-04-07)
 - **One-click package install** — install vehicle API packages directly from settings UI (no terminal needed)

@@ -268,18 +268,23 @@
                             </div>
                         </div>
 
-                        <!-- Token-Anleitung (Kia/Hyundai) -->
+                        <!-- Token-Fetch (Kia/Hyundai) -->
                         <div id="tokenHintSection" class="mb-3" style="display:none">
                             <div class="alert alert-info py-2 mb-0 small">
                                 <strong><i class="bi bi-shield-lock"></i> Refresh-Token benötigt</strong><br>
-                                Kia/Hyundai erlaubt keinen Passwort-Login mehr. Du brauchst einen Refresh-Token:
-                                <ol class="mb-1 mt-1">
-                                    <li><code>pip install selenium webdriver-manager</code></li>
-                                    <li><a href="https://github.com/Hyundai-Kia-Connect/hyundai_kia_connect_api/tree/master/Hyundai%20Token%20Solution" target="_blank">Token-Script herunterladen</a> und starten</li>
-                                    <li>Im Chrome-Fenster mit Kia Connect einloggen</li>
-                                    <li>Den ausgegebenen Token oben ins Feld <strong>Refresh-Token</strong> eintragen</li>
-                                </ol>
-                                Der Token ist ca. 1 Jahr gültig.
+                                Kia/Hyundai erlaubt keinen Passwort-Login. Klicke den Button — ein Chrome-Fenster öffnet sich (mobiler Modus). Dort einloggen und reCAPTCHA lösen. Der Token wird automatisch gespeichert.
+                                <div class="mt-2 d-flex gap-2 align-items-center flex-wrap">
+                                    <button type="button" class="btn btn-warning btn-sm" id="btnFetchToken">
+                                        <i class="bi bi-key"></i> Token holen
+                                    </button>
+                                    <button type="button" class="btn btn-outline-secondary btn-sm" id="btnCancelToken" style="display:none">
+                                        <i class="bi bi-x-lg"></i> Abbrechen
+                                    </button>
+                                    <span class="small" id="tokenFetchStatus"></span>
+                                </div>
+                                <div class="mt-2 text-muted" style="font-size:0.75rem">
+                                    Oder Token manuell eintragen (z.B. aus <a href="https://github.com/Hyundai-Kia-Connect/hyundai_kia_connect_api/wiki/Kia-Europe-Login-Flow" target="_blank">externem Script</a>). Token ist ca. 1 Jahr gültig.
+                                </div>
                             </div>
                         </div>
 
@@ -362,6 +367,67 @@
                 }
                 updateVehicleFields();
 
+
+                // Token fetch (Kia/Hyundai)
+                (function() {
+                    const btnFetch = document.getElementById('btnFetchToken');
+                    const btnCancel = document.getElementById('btnCancelToken');
+                    const statusEl = document.getElementById('tokenFetchStatus');
+                    if (!btnFetch) return;
+                    let pollInterval = null;
+
+                    function stopPolling() {
+                        if (pollInterval) { clearInterval(pollInterval); pollInterval = null; }
+                        btnFetch.disabled = false;
+                        btnFetch.innerHTML = '<i class="bi bi-key"></i> Token holen';
+                        btnCancel.style.display = 'none';
+                    }
+
+                    function pollStatus() {
+                        fetch('/api/vehicle/token/status').then(r => r.json()).then(d => {
+                            if (d.token) {
+                                statusEl.innerHTML = '<span class="text-success fw-bold"><i class="bi bi-check-circle"></i> Token gespeichert!</span>';
+                                stopPolling();
+                                setTimeout(() => location.reload(), 1500);
+                            } else if (d.error) {
+                                statusEl.innerHTML = '<span class="text-danger">' + d.error + '</span>';
+                                stopPolling();
+                            } else if (d.running) {
+                                statusEl.innerHTML = '<span class="text-primary"><span class="spinner-border spinner-border-sm me-1"></span>' + d.status + '</span>';
+                            }
+                        }).catch(() => {});
+                    }
+
+                    btnFetch.addEventListener('click', async () => {
+                        btnFetch.disabled = true;
+                        btnFetch.innerHTML = '<span class="spinner-border spinner-border-sm"></span> Starte...';
+                        btnCancel.style.display = '';
+                        statusEl.textContent = '';
+                        try {
+                            const brand = document.getElementById('vehicle_api_brand').value;
+                            const r = await fetch('/api/vehicle/token/start', {
+                                method: 'POST', headers: {'Content-Type': 'application/json'},
+                                body: JSON.stringify({brand}),
+                            });
+                            const d = await r.json();
+                            if (d.success) {
+                                pollInterval = setInterval(pollStatus, 2000);
+                            } else {
+                                statusEl.innerHTML = '<span class="text-danger">' + d.error + '</span>';
+                                stopPolling();
+                            }
+                        } catch(e) {
+                            statusEl.innerHTML = '<span class="text-danger">' + e.message + '</span>';
+                            stopPolling();
+                        }
+                    });
+
+                    btnCancel.addEventListener('click', async () => {
+                        await fetch('/api/vehicle/token/cancel', {method: 'POST'});
+                        statusEl.textContent = 'Abgebrochen.';
+                        stopPolling();
+                    });
+                })();
 
                 // Sync status polling
                 (function() {
