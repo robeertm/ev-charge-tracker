@@ -88,11 +88,25 @@ class _HyundaiKiaBase(VehicleConnector):
     def test_connection(self) -> bool:
         return self.authenticate()
 
-    def get_status(self) -> VehicleStatus:
+    def get_status(self, force=False) -> VehicleStatus:
         self._ensure_auth()
         mgr = self._get_manager()
         vehicle = self._get_vehicle()
-        mgr.update_vehicle_with_cached_state(vehicle.id)
+        if force:
+            # Save cached values before force refresh (some may be missing after wake)
+            cached_odometer = vehicle.odometer
+            cached_range = vehicle.ev_driving_range
+            cached_12v = vehicle.car_battery_percentage
+            mgr.force_refresh_vehicle_state(vehicle.id)
+            # Restore missing values from cache
+            if vehicle.odometer is None and cached_odometer is not None:
+                vehicle.odometer = cached_odometer
+            if vehicle.ev_driving_range is None and cached_range is not None:
+                vehicle.ev_driving_range = cached_range
+            if vehicle.car_battery_percentage is None and cached_12v is not None:
+                vehicle.car_battery_percentage = cached_12v
+        else:
+            mgr.update_vehicle_with_cached_state(vehicle.id)
 
         return VehicleStatus(
             soc_percent=vehicle.ev_battery_percentage,

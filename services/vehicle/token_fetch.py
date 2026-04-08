@@ -9,26 +9,32 @@ import threading
 
 logger = logging.getLogger(__name__)
 
-KIA_USER_AGENT = (
+MOBILE_USER_AGENT = (
     "Mozilla/5.0 (Linux; Android 4.1.1; Galaxy Nexus Build/JRO03C) "
     "AppleWebKit/535.19 (KHTML, like Gecko) Chrome/18.0.1025.166 "
     "Mobile Safari/535.19_CCS_APP_AOS"
 )
 
-CLIENT_ID = "fdc85c00-0a2f-4c64-bcb4-2cfb1500730a"
-BASE_URL = "https://idpconnect-eu.kia.com/auth/api/v2/user/oauth2/"
-LOGIN_URL = (
-    f"{BASE_URL}authorize?ui_locales=de&scope=openid%20profile%20email%20phone"
-    f"&response_type=code&client_id=peukiaidm-online-sales"
-    f"&redirect_uri=https://www.kia.com/api/bin/oneid/login"
-    f"&state=aHR0cHM6Ly93d3cua2lhLmNvbS9kZS8=_default"
-)
-REDIRECT_URL_FINAL = "https://prd.eu-ccapi.kia.com:8080/api/v1/user/oauth2/redirect"
-REDIRECT_URL = (
-    f"{BASE_URL}authorize?response_type=code&client_id={CLIENT_ID}"
-    f"&redirect_uri={REDIRECT_URL_FINAL}&lang=de&state=ccsp"
-)
-TOKEN_URL = f"{BASE_URL}token"
+BRAND_CONFIG = {
+    'kia': {
+        'client_id': 'fdc85c00-0a2f-4c64-bcb4-2cfb1500730a',
+        'base_url': 'https://idpconnect-eu.kia.com/auth/api/v2/user/oauth2/',
+        'login_client_id': 'peukiaidm-online-sales',
+        'login_redirect': 'https://www.kia.com/api/bin/oneid/login',
+        'login_state': 'aHR0cHM6Ly93d3cua2lhLmNvbS9kZS8=_default',
+        'redirect_final': 'https://prd.eu-ccapi.kia.com:8080/api/v1/user/oauth2/redirect',
+        'success_selector': "a[class='logout user']",
+    },
+    'hyundai': {
+        'client_id': '6d477c38-3ca4-4cf3-9557-2a1929a94654',
+        'base_url': 'https://idpconnect-eu.hyundai.com/auth/api/v2/user/oauth2/',
+        'login_client_id': 'peuhyundaiidm-online-sales',
+        'login_redirect': 'https://www.hyundai.com/api/bin/oneid/login',
+        'login_state': 'aHR0cHM6Ly93d3cuaHl1bmRhaS5jb20vZGUv_default',
+        'redirect_final': 'https://prd.eu-ccapi.hyundai.com:8080/api/v1/user/oauth2/redirect',
+        'success_selector': "a[class='logout user'], .logged-in, [data-logged-in]",
+    },
+}
 
 _fetch_state = {
     'running': False,
@@ -45,6 +51,23 @@ def get_state():
 def _do_fetch(brand_key):
     global _fetch_state
     _fetch_state = {'running': True, 'status': 'Starte...', 'token': None, 'error': None}
+
+    cfg = BRAND_CONFIG.get(brand_key)
+    if not cfg:
+        _fetch_state.update(running=False, error=f'Unbekannte Marke: {brand_key}')
+        return
+
+    login_url = (
+        f"{cfg['base_url']}authorize?ui_locales=de&scope=openid%20profile%20email%20phone"
+        f"&response_type=code&client_id={cfg['login_client_id']}"
+        f"&redirect_uri={cfg['login_redirect']}"
+        f"&state={cfg['login_state']}"
+    )
+    redirect_url = (
+        f"{cfg['base_url']}authorize?response_type=code&client_id={cfg['client_id']}"
+        f"&redirect_uri={cfg['redirect_final']}&lang=de&state=ccsp"
+    )
+    token_url = f"{cfg['base_url']}token"
 
     try:
         # Auto-install selenium if missing
@@ -70,7 +93,7 @@ def _do_fetch(brand_key):
             service = None
 
         options = webdriver.ChromeOptions()
-        options.add_argument(f'user-agent={KIA_USER_AGENT}')
+        options.add_argument(f'user-agent={MOBILE_USER_AGENT}')
         options.add_argument('--window-size=420,750')
 
         _fetch_state['status'] = 'Browser wird gestartet...'
@@ -78,16 +101,16 @@ def _do_fetch(brand_key):
 
         try:
             _fetch_state['status'] = 'Bitte im Browser einloggen (reCAPTCHA lösen)...'
-            driver.get(LOGIN_URL)
+            driver.get(login_url)
 
-            # Wait for successful login (max 5 min) — look for logout link on kia.com
+            # Wait for successful login (max 5 min)
             wait = WebDriverWait(driver, 300)
-            wait.until(EC.presence_of_element_located((By.CSS_SELECTOR, "a[class='logout user']")))
+            wait.until(EC.presence_of_element_located((By.CSS_SELECTOR, cfg['success_selector'])))
 
             _fetch_state['status'] = 'Login erkannt! Token wird abgerufen...'
 
             # Navigate to CCSP authorize to get the auth code
-            driver.get(REDIRECT_URL)
+            driver.get(redirect_url)
             import time
             time.sleep(3)
 
@@ -101,11 +124,11 @@ def _do_fetch(brand_key):
 
             # Exchange code for tokens
             import requests as req
-            resp = req.post(TOKEN_URL, data={
+            resp = req.post(token_url, data={
                 'grant_type': 'authorization_code',
                 'code': code,
-                'redirect_uri': REDIRECT_URL_FINAL,
-                'client_id': CLIENT_ID,
+                'redirect_uri': cfg['redirect_final'],
+                'client_id': cfg['client_id'],
                 'client_secret': 'secret',
             })
 

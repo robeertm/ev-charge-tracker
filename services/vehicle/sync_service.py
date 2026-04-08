@@ -32,8 +32,9 @@ def _do_sync(app):
             'vin': AppConfig.get('vehicle_api_vin', ''),
         }
 
+        force = AppConfig.get('vehicle_sync_mode', 'cached') == 'force'
         connector = get_connector(brand, creds)
-        status = connector.get_status()
+        status = connector.get_status(force=force)
 
         sync = VehicleSync(
             soc_percent=status.soc_percent,

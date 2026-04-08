@@ -296,7 +296,10 @@
                                 <i class="bi bi-wifi"></i> Verbindung testen
                             </button>
                             <button type="submit" name="action" value="sync_vehicle_now" class="btn btn-outline-info">
-                                <i class="bi bi-arrow-repeat"></i> Jetzt synchronisieren
+                                <i class="bi bi-arrow-repeat"></i> Sync (Cached)
+                            </button>
+                            <button type="submit" name="action" value="sync_vehicle_force" class="btn btn-outline-warning">
+                                <i class="bi bi-broadcast"></i> Sync (Live)
                             </button>
                             <button type="submit" name="action" value="delete_vehicle_api" class="btn btn-outline-danger"
                                     onclick="return confirm('Fahrzeug-API Zugangsdaten wirklich löschen?')">
@@ -327,6 +330,12 @@
                                         {% endfor %}
                                     </select>
                                 </div>
+                            </div>
+                            <div class="col-auto">
+                                <select class="form-select form-select-sm" name="vehicle_sync_mode" style="width:auto">
+                                    <option value="cached" {% if vehicle_sync_mode != 'force' %}selected{% endif %}>Cached</option>
+                                    <option value="force" {% if vehicle_sync_mode == 'force' %}selected{% endif %}>Live (weckt Auto)</option>
+                                </select>
                             </div>
                             <div class="col-auto">
                                 <button type="submit" name="action" value="save_vehicle_sync" class="btn btn-sm btn-outline-primary">

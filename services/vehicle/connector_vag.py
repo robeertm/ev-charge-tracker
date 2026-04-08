@@ -86,7 +86,7 @@ class VAGConnector(VehicleConnector):
             self._cc = None
             return False
 
-    def get_status(self) -> VehicleStatus:
+    def get_status(self, force=False) -> VehicleStatus:
         vehicle = self._find_vehicle()
 
         soc = None

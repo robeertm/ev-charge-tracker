@@ -68,8 +68,8 @@ class VehicleConnector(ABC):
         """Quick connectivity/credential check."""
 
     @abstractmethod
-    def get_status(self) -> VehicleStatus:
-        """Fetch current vehicle state (SoC, odometer, charging, etc.)."""
+    def get_status(self, force=False) -> VehicleStatus:
+        """Fetch current vehicle state. force=True wakes the car for fresh data."""
 
     @staticmethod
     @abstractmethod

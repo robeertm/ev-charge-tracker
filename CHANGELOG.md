@@ -1,5 +1,13 @@
 # Changelog
 
+## v1.6.0 (2026-04-08)
+- **Cached vs Live refresh** — two buttons on dashboard: "Cached" reads server cache, "Live" wakes the car for fresh data
+- **Force refresh fallback** — if Live returns null values (odometer, range, 12V), last known values are preserved
+- **Settings sync modes** — "Sync (Cached)" and "Sync (Live)" buttons, auto-sync mode selector (Cached/Live)
+- **Input force refresh** — vehicle fetch button in "Neue Ladung" always wakes the car
+- **localStorage cache** — vehicle data persists across tab switches, no re-fetch needed
+- **Hyundai token support** — token fetch now works for both Kia and Hyundai with brand-specific OAuth URLs
+
 ## v1.5.5 (2026-04-07)
 - **Full vehicle live dashboard** — all available data from Kia/Hyundai displayed in 3-row widget
 - **New data points** — doors/trunk/hood status, tire pressure warnings, 30-day consumption, Schuko charge time, registration date, Google Maps location link

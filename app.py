@@ -350,6 +350,7 @@ def register_routes(app):
                 enabled = 'true' if 'vehicle_sync_enabled' in request.form else 'false'
                 AppConfig.set('vehicle_sync_enabled', enabled)
                 AppConfig.set('vehicle_sync_interval_hours', request.form.get('vehicle_sync_interval', '4'))
+                AppConfig.set('vehicle_sync_mode', request.form.get('vehicle_sync_mode', 'cached'))
                 if enabled == 'true':
                     from services.vehicle.sync_service import start_sync
                     if start_sync(app):
@@ -361,7 +362,8 @@ def register_routes(app):
                     stop_sync()
                     flash('Automatische Synchronisierung deaktiviert.', 'warning')
 
-            elif action == 'sync_vehicle_now':
+            elif action in ('sync_vehicle_now', 'sync_vehicle_force'):
+                force = action == 'sync_vehicle_force'
                 brand = AppConfig.get('vehicle_api_brand', '')
                 if brand:
                     try:
@@ -369,7 +371,7 @@ def register_routes(app):
                         import json as _json
                         creds = _get_vehicle_credentials()
                         connector = get_connector(brand, creds)
-                        status = connector.get_status()
+                        status = connector.get_status(force=force)
                         sync = VehicleSync(
                             soc_percent=status.soc_percent,
                             odometer_km=status.odometer_km,
@@ -385,7 +387,8 @@ def register_routes(app):
                             parts.append(f'SoC: {status.soc_percent}%')
                         if status.odometer_km is not None:
                             parts.append(f'Tacho: {status.odometer_km:,} km')
-                        flash(f'Fahrzeugdaten abgerufen! {", ".join(parts)}', 'success')
+                        mode = 'Live' if force else 'Cached'
+                        flash(f'Fahrzeugdaten abgerufen ({mode})! {", ".join(parts)}', 'success')
                     except Exception as e:
                         flash(f'Sync-Fehler: {e}', 'danger')
                 else:
@@ -417,6 +420,7 @@ def register_routes(app):
                                vehicle_api_vin=AppConfig.get('vehicle_api_vin', ''),
                                vehicle_sync_enabled=AppConfig.get('vehicle_sync_enabled', 'false'),
                                vehicle_sync_interval=AppConfig.get('vehicle_sync_interval_hours', '4'),
+                               vehicle_sync_mode=AppConfig.get('vehicle_sync_mode', 'cached'),
                                last_vehicle_sync=last_sync,
                                battery_kwh=AppConfig.get('battery_kwh', str(Config.BATTERY_CAPACITY_KWH)),
                                max_ac_kw=AppConfig.get('max_ac_kw', ''),
@@ -572,12 +576,14 @@ def register_routes(app):
         if not brand:
             return jsonify({'error': 'not_configured'}), 400
 
+        force = request.args.get('force', '0') == '1'
+
         try:
             from services.vehicle import get_connector
             import json as _json
             creds = _get_vehicle_credentials()
             connector = get_connector(brand, creds)
-            s = connector.get_status()
+            s = connector.get_status(force=force)
             sync = VehicleSync(
                 soc_percent=s.soc_percent,
                 odometer_km=s.odometer_km,

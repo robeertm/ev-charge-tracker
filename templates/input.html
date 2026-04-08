@@ -207,7 +207,7 @@ document.getElementById('btnFetchVehicle').addEventListener('click', async () =>
     btn.innerHTML = '<span class="spinner-border spinner-border-sm"></span>';
     btn.disabled = true;
     try {
-        const resp = await fetch('/api/vehicle/status');
+        const resp = await fetch('/api/vehicle/status?force=1');
         const data = await resp.json();
         if (data.error) {
             if (data.error === 'not_configured') {
