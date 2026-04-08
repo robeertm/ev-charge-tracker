@@ -355,15 +355,16 @@ def register_routes(app):
                 AppConfig.set('vehicle_sync_enabled', enabled)
                 AppConfig.set('vehicle_sync_interval_hours', request.form.get('vehicle_sync_interval', '4'))
                 AppConfig.set('vehicle_sync_mode', request.form.get('vehicle_sync_mode', 'cached'))
+                from services.vehicle.sync_service import stop_sync, start_sync
+                stop_sync()  # Always stop first to pick up new settings
+                import time as _time
+                _time.sleep(0.5)  # Wait for thread to finish
                 if enabled == 'true':
-                    from services.vehicle.sync_service import start_sync
                     if start_sync(app):
                         flash('Automatische Synchronisierung gestartet!', 'success')
                     else:
-                        flash('Sync-Einstellungen gespeichert.', 'success')
+                        flash('Sync konnte nicht gestartet werden.', 'warning')
                 else:
-                    from services.vehicle.sync_service import stop_sync
-                    stop_sync()
                     flash('Automatische Synchronisierung deaktiviert.', 'warning')
 
             elif action in ('sync_vehicle_now', 'sync_vehicle_force'):
