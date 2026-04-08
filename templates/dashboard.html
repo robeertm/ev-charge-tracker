@@ -143,6 +143,11 @@
         document.getElementById('vFastChargeTime').textContent = d.est_fast_charge_min != null ? d.est_fast_charge_min + ' min' : '—';
         if (d.battery_soh != null) {
             document.getElementById('vSoH').textContent = d.battery_soh + ' %';
+        } else if (d.total_consumed_kwh != null) {
+            const battKwh = {{ battery_kwh }};
+            // total_consumed is in Wh; user formula: (val/10) / 1000 / capacity * 100
+            const soh = (d.total_consumed_kwh / 10 / 1000 / battKwh * 100).toFixed(1);
+            document.getElementById('vSoH').textContent = soh + ' %';
         }
         document.getElementById('vRegen').textContent = d.total_regenerated_kwh != null ? (d.total_regenerated_kwh / 1000).toFixed(0) + ' kWh' : '—';
         if (d.doors) {
