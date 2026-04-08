@@ -23,7 +23,7 @@ class Charge(db.Model):
     co2_g_per_kwh = db.Column(db.Integer)
     co2_kg = db.Column(db.Float)
     notes = db.Column(db.Text)
-    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    created_at = db.Column(db.DateTime, default=datetime.now)
 
     def calculate_fields(self, battery_kwh=None):
         """Auto-calculate derived fields."""
@@ -88,7 +88,7 @@ class VehicleSync(db.Model):
     __tablename__ = 'vehicle_syncs'
 
     id = db.Column(db.Integer, primary_key=True)
-    timestamp = db.Column(db.DateTime, nullable=False, default=datetime.utcnow)
+    timestamp = db.Column(db.DateTime, nullable=False, default=datetime.now)
     soc_percent = db.Column(db.Integer)
     odometer_km = db.Column(db.Integer)
     is_charging = db.Column(db.Boolean)
