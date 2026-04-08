@@ -1,16 +1,19 @@
-"""Client-side Kia/Hyundai OAuth token flow.
-
-Instead of Selenium on the server, this generates URLs for the user
-to complete the OAuth flow in their own browser. Works on headless servers.
+"""Fetch Kia/Hyundai refresh token via Selenium with mobile user-agent.
 
 Based on: https://github.com/Hyundai-Kia-Connect/hyundai_kia_connect_api/wiki/Kia-Europe-Login-Flow
+Key insight: Kia requires a MOBILE user-agent string, otherwise login is blocked.
 """
 import logging
 import re
-
-import requests as req
+import threading
 
 logger = logging.getLogger(__name__)
+
+MOBILE_USER_AGENT = (
+    "Mozilla/5.0 (Linux; Android 4.1.1; Galaxy Nexus Build/JRO03C) "
+    "AppleWebKit/535.19 (KHTML, like Gecko) Chrome/18.0.1025.166 "
+    "Mobile Safari/535.19_CCS_APP_AOS"
+)
 
 BRAND_CONFIG = {
     'kia': {
@@ -20,6 +23,7 @@ BRAND_CONFIG = {
         'login_redirect': 'https://www.kia.com/api/bin/oneid/login',
         'login_state': 'aHR0cHM6Ly93d3cua2lhLmNvbS9kZS8=_default',
         'redirect_final': 'https://prd.eu-ccapi.kia.com:8080/api/v1/user/oauth2/redirect',
+        'success_selector': "a[class='logout user']",
     },
     'hyundai': {
         'client_id': '6d477c38-3ca4-4cf3-9557-2a1929a94654',
@@ -28,15 +32,30 @@ BRAND_CONFIG = {
         'login_redirect': 'https://www.hyundai.com/api/bin/oneid/login',
         'login_state': 'aHR0cHM6Ly93d3cuaHl1bmRhaS5jb20vZGUv_default',
         'redirect_final': 'https://prd.eu-ccapi.hyundai.com:8080/api/v1/user/oauth2/redirect',
+        'success_selector': "a[class='logout user'], .logged-in, [data-logged-in]",
     },
 }
 
+_fetch_state = {
+    'running': False,
+    'status': '',
+    'token': None,
+    'error': None,
+}
 
-def get_urls(brand_key):
-    """Return the login and authorize URLs for the given brand."""
+
+def get_state():
+    return dict(_fetch_state)
+
+
+def _do_fetch(brand_key):
+    global _fetch_state
+    _fetch_state = {'running': True, 'status': 'Starte...', 'token': None, 'error': None}
+
     cfg = BRAND_CONFIG.get(brand_key)
     if not cfg:
-        return None
+        _fetch_state.update(running=False, error=f'Unbekannte Marke: {brand_key}')
+        return
 
     login_url = (
         f"{cfg['base_url']}authorize?ui_locales=de&scope=openid%20profile%20email%20phone"
@@ -44,50 +63,101 @@ def get_urls(brand_key):
         f"&redirect_uri={cfg['login_redirect']}"
         f"&state={cfg['login_state']}"
     )
-    authorize_url = (
+    redirect_url = (
         f"{cfg['base_url']}authorize?response_type=code&client_id={cfg['client_id']}"
         f"&redirect_uri={cfg['redirect_final']}&lang=de&state=ccsp"
     )
-    return {
-        'login_url': login_url,
-        'authorize_url': authorize_url,
-    }
-
-
-def exchange_code(brand_key, redirect_url_or_code):
-    """Extract auth code from redirect URL and exchange for refresh token."""
-    cfg = BRAND_CONFIG.get(brand_key)
-    if not cfg:
-        return {'error': 'Unbekannte Marke'}
-
-    # Accept either a full URL or just the code
-    code = redirect_url_or_code.strip()
-    match = re.search(r'code=([^&]+)', code)
-    if match:
-        code = match.group(1)
-
-    if not code:
-        return {'error': 'Kein Auth-Code gefunden'}
-
     token_url = f"{cfg['base_url']}token"
+
     try:
-        resp = req.post(token_url, data={
-            'grant_type': 'authorization_code',
-            'code': code,
-            'redirect_uri': cfg['redirect_final'],
-            'client_id': cfg['client_id'],
-            'client_secret': 'secret',
-        }, timeout=30)
+        # Auto-install selenium if missing
+        try:
+            from selenium import webdriver
+        except ImportError:
+            _fetch_state['status'] = 'Selenium wird installiert...'
+            import subprocess, sys
+            subprocess.run([sys.executable, '-m', 'pip', 'install', 'selenium', 'webdriver-manager'],
+                           capture_output=True, timeout=120)
+            from selenium import webdriver
 
-        if resp.status_code == 200:
-            tokens = resp.json()
-            refresh_token = tokens.get('refresh_token')
-            if refresh_token:
-                return {'token': refresh_token}
-            return {'error': 'Kein refresh_token in Antwort'}
+        from selenium.webdriver.chrome.service import Service
+        from selenium.webdriver.common.by import By
+        from selenium.webdriver.support.ui import WebDriverWait
+        from selenium.webdriver.support import expected_conditions as EC
 
-        return {'error': f'Token-Austausch fehlgeschlagen (HTTP {resp.status_code})'}
+        try:
+            from webdriver_manager.chrome import ChromeDriverManager
+            _fetch_state['status'] = 'ChromeDriver wird vorbereitet...'
+            service = Service(ChromeDriverManager().install())
+        except ImportError:
+            service = None
+
+        options = webdriver.ChromeOptions()
+        options.add_argument(f'user-agent={MOBILE_USER_AGENT}')
+        options.add_argument('--window-size=420,750')
+
+        _fetch_state['status'] = 'Browser wird gestartet...'
+        driver = webdriver.Chrome(service=service, options=options) if service else webdriver.Chrome(options=options)
+
+        try:
+            _fetch_state['status'] = 'Bitte im Browser einloggen (reCAPTCHA lösen)...'
+            driver.get(login_url)
+
+            # Wait for successful login (max 5 min)
+            wait = WebDriverWait(driver, 300)
+            wait.until(EC.presence_of_element_located((By.CSS_SELECTOR, cfg['success_selector'])))
+
+            _fetch_state['status'] = 'Login erkannt! Token wird abgerufen...'
+
+            # Navigate to CCSP authorize to get the auth code
+            driver.get(redirect_url)
+            import time
+            time.sleep(3)
+
+            current_url = driver.current_url
+            match = re.search(r'code=([^&]+)', current_url)
+            if not match:
+                _fetch_state.update(running=False, error='Kein Auth-Code in Redirect gefunden.')
+                return
+
+            code = match.group(1)
+
+            # Exchange code for tokens
+            import requests as req
+            resp = req.post(token_url, data={
+                'grant_type': 'authorization_code',
+                'code': code,
+                'redirect_uri': cfg['redirect_final'],
+                'client_id': cfg['client_id'],
+                'client_secret': 'secret',
+            })
+
+            if resp.status_code == 200:
+                tokens = resp.json()
+                refresh_token = tokens.get('refresh_token')
+                if refresh_token:
+                    _fetch_state.update(running=False, status='Token erfolgreich!', token=refresh_token)
+                    return
+
+            _fetch_state.update(running=False, error=f'Token-Austausch fehlgeschlagen ({resp.status_code})')
+
+        finally:
+            try:
+                driver.quit()
+            except Exception:
+                pass
 
     except Exception as e:
-        logger.error(f"Token exchange failed: {e}")
-        return {'error': str(e)}
+        _fetch_state.update(running=False, error=str(e))
+
+
+def start_fetch(brand_key):
+    if _fetch_state['running']:
+        return False
+    t = threading.Thread(target=_do_fetch, args=(brand_key,), daemon=True)
+    t.start()
+    return True
+
+
+def cancel_fetch():
+    _fetch_state['running'] = False
