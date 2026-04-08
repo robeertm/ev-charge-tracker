@@ -1,5 +1,9 @@
 <!DOCTYPE html>
 <html lang="de" data-bs-theme="light">
+<script>
+// Apply saved theme immediately to prevent flash
+(function(){var t=localStorage.getItem('ev_theme');if(t)document.documentElement.setAttribute('data-bs-theme',t)})();
+</script>
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
@@ -46,6 +50,9 @@
                         </a>
                     </li>
                 </ul>
+                <button class="btn btn-sm btn-outline-light me-2 py-0 px-2" id="btnTheme" title="Tag/Nacht-Modus">
+                    <i class="bi bi-moon-stars" id="themeIcon"></i>
+                </button>
                 <span class="navbar-text small text-light opacity-75">
                     {{ car_model }} &middot; v{{ app_version }}
                 </span>
@@ -73,6 +80,26 @@
     </footer>
 
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
+    <script>
+    (function(){
+        const html = document.documentElement;
+        const icon = document.getElementById('themeIcon');
+        function applyTheme(t) {
+            html.setAttribute('data-bs-theme', t);
+            icon.className = t === 'dark' ? 'bi bi-sun' : 'bi bi-moon-stars';
+        }
+        applyTheme(localStorage.getItem('ev_theme') || 'light');
+        document.getElementById('btnTheme').addEventListener('click', function() {
+            const next = html.getAttribute('data-bs-theme') === 'dark' ? 'light' : 'dark';
+            localStorage.setItem('ev_theme', next);
+            applyTheme(next);
+        });
+        // Sync across tabs
+        window.addEventListener('storage', function(e) {
+            if (e.key === 'ev_theme' && e.newValue) applyTheme(e.newValue);
+        });
+    })();
+    </script>
     {% block scripts %}{% endblock %}
 </body>
 </html>

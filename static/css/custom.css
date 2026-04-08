@@ -10,6 +10,26 @@ body {
     background-color: #f8f9fa;
 }
 
+[data-bs-theme="dark"] body {
+    background-color: #1a1d21;
+}
+
+[data-bs-theme="dark"] .bg-navy {
+    background-color: #0d1b2a !important;
+}
+
+[data-bs-theme="dark"] .kpi-label {
+    color: #adb5bd;
+}
+
+[data-bs-theme="dark"] .card {
+    border-color: #2c3034;
+}
+
+[data-bs-theme="dark"] .card-header.bg-white {
+    background-color: var(--bs-card-bg) !important;
+}
+
 .bg-navy {
     background-color: var(--navy) !important;
 }
