@@ -81,6 +81,7 @@ def register_routes(app):
         return {
             'app_version': Config.APP_VERSION,
             'car_model': AppConfig.get('car_model', Config.CAR_MODEL),
+            'current_year': date.today().year,
         }
 
     # ── DASHBOARD ──────────────────────────────────────────────
