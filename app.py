@@ -135,7 +135,8 @@ def register_routes(app):
 
                 db.session.add(charge)
                 db.session.commit()
-                flash(f'Ladevorgang vom {charge.date.strftime("%d.%m.%Y")} gespeichert! ({charge.kwh_loaded} kWh, €{charge.total_cost:.2f})', 'success')
+                cost_str = f'€{charge.total_cost:.2f}' if charge.total_cost is not None else '€—'
+                flash(f'Ladevorgang vom {charge.date.strftime("%d.%m.%Y")} gespeichert! ({charge.kwh_loaded or 0} kWh, {cost_str})', 'success')
                 return redirect(url_for('input_charge'))
 
             except Exception as e:
@@ -628,6 +629,13 @@ def register_routes(app):
             return jsonify({'error': 'not_configured'}), 400
 
         force = request.args.get('force', '0') == '1'
+
+        # Validate token format for Kia/Hyundai
+        if brand in ('kia', 'hyundai'):
+            import re as _re
+            token = AppConfig.get('vehicle_api_password', '')
+            if not _re.match(r'^[A-Z0-9]{48}$', token):
+                return jsonify({'error': 'Ungültiger Token. Bitte unter Einstellungen → Token holen.'}), 400
 
         # Rate limiter: max 200 calls/day (Kia EU), track usage
         today_str = date.today().isoformat()
