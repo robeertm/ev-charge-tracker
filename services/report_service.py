@@ -213,25 +213,28 @@ class EVReport(FPDF):
         self.line(self.l_margin, self.get_y(), self.w - self.r_margin, self.get_y())
         self.ln(3)
 
-    def kpi_row(self, items):
-        """items = list of (label, value, unit)"""
-        self.set_font('Helvetica', '', 7)
-        self.set_text_color(120, 120, 120)
-        col_w = (self.w - self.l_margin - self.r_margin) / len(items)
-        y = self.get_y()
-        for label, value, unit in items:
-            x = self.get_x()
+    def kpi_table(self, rows_data):
+        """Render KPI overview as a clean table.
+        rows_data = list of lists of (label, value, unit) tuples.
+        Each inner list becomes one row pair (header + value)."""
+        total_w = self.w - self.l_margin - self.r_margin
+        for items in rows_data:
+            n = len(items)
+            col_w = total_w / n
+            # Label row
             self.set_font('Helvetica', '', 7)
             self.set_text_color(120, 120, 120)
-            self.cell(col_w, 4, self._clean(label), align='C')
-            self.set_x(x)
-            self.set_y(y + 4)
-            self.set_font('Helvetica', 'B', 11)
+            self.set_fill_color(245, 245, 245)
+            for label, _, _ in items:
+                self.cell(col_w, 5, self._clean(label), border='TLR', align='C', fill=True)
+            self.ln()
+            # Value row
+            self.set_font('Helvetica', 'B', 9)
             self.set_text_color(33, 33, 33)
-            self.cell(col_w, 6, self._clean(f'{value} {unit}'), align='C')
-            self.set_y(y)
-            self.set_x(x + col_w)
-        self.ln(13)
+            for _, value, unit in items:
+                txt = f'{value} {unit}'.strip()
+                self.cell(col_w, 6, self._clean(txt), border='BLR', align='C')
+            self.ln(8)
 
     def add_table(self, headers, rows, col_widths=None):
         if not col_widths:
@@ -285,32 +288,34 @@ def generate_report():
     # === Page 1: Overview KPIs ===
     pdf.section_title('Gesamtübersicht')
 
-    pdf.kpi_row([
-        ('Ladekosten', f"€{stats['total_cost']:,.0f}", ''),
-        ('Geladen', f"{stats['total_kwh']:,.0f}", 'kWh'),
-        ('Ladevorgänge', str(stats['total_charges']), ''),
-        ('CO₂', f"{stats['total_co2_kg']:,.1f}", 'kg'),
-    ])
-    pdf.kpi_row([
-        ('Ø Preis', f"€{stats['avg_eur_per_kwh']:.2f}", '/kWh'),
-        ('CO₂-Ersparnis', f"{stats['co2_savings_pct']:.0f}", '%'),
-        ('THG-Quote', f"€{stats['total_thg_eur']:,.0f}", ''),
-        ('Netto-Kosten', f"€{stats['net_cost']:,.0f}", ''),
-    ])
-
+    kpi_rows = [
+        [
+            ('Ladekosten', f"EUR {stats['total_cost']:,.0f}", ''),
+            ('Geladen', f"{stats['total_kwh']:,.0f}", 'kWh'),
+            ('Ladevorgaenge', str(stats['total_charges']), ''),
+            ('CO2', f"{stats['total_co2_kg']:,.1f}", 'kg'),
+        ],
+        [
+            ('O Preis', f"EUR {stats['avg_eur_per_kwh']:.2f}", '/kWh'),
+            ('CO2-Ersparnis', f"{stats['co2_savings_pct']:.0f}", '%'),
+            ('THG-Quote', f"EUR {stats['total_thg_eur']:,.0f}", ''),
+            ('Netto-Kosten', f"EUR {stats['net_cost']:,.0f}", ''),
+        ],
+    ]
     if stats.get('total_km', 0) > 0:
-        pdf.kpi_row([
+        kpi_rows.append([
             ('Tachostand', f"{stats['total_km']:,.0f}", 'km'),
             ('Verbrauch', f"{stats['consumption_with_recup']:.1f}", 'kWh/100km'),
-            ('Kosten/100km', f"€{stats['cost_per_100km']:.2f}", ''),
+            ('Kosten/100km', f"EUR {stats['cost_per_100km']:.2f}", ''),
             ('Rekuperation', f"{stats['total_recuperation']:,.0f}", 'kWh'),
         ])
-        pdf.kpi_row([
+        kpi_rows.append([
             ('Ladezyklen', str(stats['charge_cycles']), ''),
             ('Rekup-Zyklen', str(stats['recup_cycles']), ''),
             ('km durch Rekup.', f"{stats['recup_extra_km']:,}", 'km'),
-            ('Netto/100km', f"€{stats['net_cost_per_100km']:.2f}", ''),
+            ('Netto/100km', f"EUR {stats['net_cost_per_100km']:.2f}", ''),
         ])
+    pdf.kpi_table(kpi_rows)
 
     first = stats.get('first_charge')
     last = stats.get('last_charge')

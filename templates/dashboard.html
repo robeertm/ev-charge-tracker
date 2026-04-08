@@ -17,7 +17,7 @@
 
 <!-- Fahrzeug Live Status -->
 {% if vehicle_configured %}
-<div class="card mb-3 border-info" id="vehicleLiveCard">
+<div class="card mb-3 border-info" id="vehicleLiveCard" data-battery-kwh="{{ battery_kwh }}">
     <div class="card-body p-2">
         <div class="d-flex align-items-center justify-content-between mb-2">
             <span class="fw-bold small"><i class="bi bi-car-front"></i> <span id="vName">{{ car_model }}</span></span>
@@ -75,8 +75,8 @@
                 <div class="fw-bold" id="vFastChargeTime">—</div>
             </div>
             <div class="col-4 col-md-2">
-                <div class="small text-muted">Verbraucht</div>
-                <div class="fw-bold" id="vConsumed">—</div>
+                <div class="small text-muted">SoH</div>
+                <div class="fw-bold" id="vSoH">—</div>
             </div>
             <div class="col-4 col-md-2">
                 <div class="small text-muted">Rekuperiert</div>
@@ -141,7 +141,12 @@
         document.getElementById('vLimitDC').textContent = d.charge_limit_dc != null ? d.charge_limit_dc + '%' : '—';
         document.getElementById('vChargeTime').textContent = d.est_charge_min != null ? d.est_charge_min + ' min' : '—';
         document.getElementById('vFastChargeTime').textContent = d.est_fast_charge_min != null ? d.est_fast_charge_min + ' min' : '—';
-        document.getElementById('vConsumed').textContent = d.total_consumed_kwh != null ? (d.total_consumed_kwh / 10).toFixed(0) + ' kWh' : '—';
+        if (d.total_consumed_kwh != null) {
+            const consumedKwh = d.total_consumed_kwh / 10;
+            const battKwh = parseFloat(document.getElementById('vehicleLiveCard').dataset.batteryKwh) || 64;
+            const soh = (consumedKwh / 1000 / battKwh * 100).toFixed(1);
+            document.getElementById('vSoH').textContent = soh + ' %';
+        }
         document.getElementById('vRegen').textContent = d.total_regenerated_kwh != null ? (d.total_regenerated_kwh / 10).toFixed(0) + ' kWh' : '—';
         if (d.doors) {
             const dr = d.doors;
@@ -178,11 +183,13 @@
         document.getElementById('vUpdated').innerHTML = '<span class="text-muted">' + updParts.join(' · ') + '</span>';
     }
 
-    // Restore from cache on page load
+    // Restore from cache on page load, then auto-fetch fresh cached data
     try {
         const cached = JSON.parse(localStorage.getItem(CACHE_KEY));
         if (cached) renderVehicle(cached);
     } catch(e) {}
+    // Always auto-fetch cached (non-force) data on page load to stay current
+    loadVehicle(false);
 
     async function loadVehicle(force) {
         btn.disabled = true; btnForce.disabled = true;

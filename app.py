@@ -95,7 +95,8 @@ def register_routes(app):
         return render_template('dashboard.html',
                                stats=stats, chart_data=chart_data,
                                acdc=acdc, yearly=yearly,
-                               vehicle_configured=vehicle_configured)
+                               vehicle_configured=vehicle_configured,
+                               battery_kwh=_get_battery_kwh())
 
     # ── EINGABE ────────────────────────────────────────────────
     @app.route('/input', methods=['GET', 'POST'])
