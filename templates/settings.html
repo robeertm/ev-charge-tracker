@@ -232,7 +232,7 @@
                     {% endif %}
 
                     <!-- Credentials (nur sichtbar wenn Marke gewählt) -->
-                    <div id="vehicleCredentials" style="display:none">
+                    <div id="vehicleCredentials" {% if not vehicle_api_brand %}style="display:none"{% endif %}>
                         <div class="row g-3 mb-3">
                             <div class="col-sm-6">
                                 <label for="vehicle_api_username" class="form-label">E-Mail / Benutzername</label>
@@ -309,8 +309,8 @@
 
                     </div>
                 </form>
-                <!-- Auto-Sync (separate form, outside credentials form) -->
-                <div id="vehicleSyncSection" style="display:none">
+                <!-- Auto-Sync (separate form, OUTSIDE credentials form) -->
+                <div id="vehicleSyncSection" {% if not vehicle_api_brand %}style="display:none"{% endif %}>
                     <hr>
                     <form method="POST" class="mb-3">
                         <div class="row g-2 align-items-center">

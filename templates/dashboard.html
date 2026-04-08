@@ -172,8 +172,10 @@
         if (d.location_lat && d.location_lon) {
             document.getElementById('vLocation').innerHTML = '<a href="https://www.google.com/maps?q=' + d.location_lat + ',' + d.location_lon + '" target="_blank" class="text-decoration-none"><i class="bi bi-geo-alt"></i> Karte</a>';
         }
-        const upd = d.last_updated ? 'Fahrzeug: ' + new Date(d.last_updated).toLocaleString('de') : '';
-        document.getElementById('vUpdated').innerHTML = '<span class="text-muted">' + upd + '</span>';
+        let updParts = [];
+        if (d.last_updated) updParts.push('Fahrzeug: ' + new Date(d.last_updated).toLocaleString('de'));
+        if (d.api_calls_today) updParts.push('API: ' + d.api_calls_today + '/200');
+        document.getElementById('vUpdated').innerHTML = '<span class="text-muted">' + updParts.join(' · ') + '</span>';
     }
 
     // Restore from cache on page load

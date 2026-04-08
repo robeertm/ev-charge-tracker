@@ -144,11 +144,15 @@ def register_routes(app):
 
         # Pre-fill date with today
         last_charge = Charge.query.order_by(Charge.date.desc()).first()
+        vehicle_configured = bool(AppConfig.get('vehicle_api_brand', ''))
         return render_template('input.html',
                                today=date.today().isoformat(),
                                last_charge=last_charge,
                                pv_co2=_get_pv_co2(),
-                               pv_price=AppConfig.get('pv_price_eur_per_kwh', '0.00'))
+                               pv_price=AppConfig.get('pv_price_eur_per_kwh', '0.00'),
+                               max_ac_kw=AppConfig.get('max_ac_kw', '11'),
+                               battery_kwh=_get_battery_kwh(),
+                               vehicle_configured=vehicle_configured)
 
     # ── HISTORY ────────────────────────────────────────────────
     @app.route('/history')
@@ -459,6 +463,41 @@ def register_routes(app):
         except Exception as e:
             return jsonify({'error': str(e)}), 500
 
+    @app.route('/api/co2/range')
+    def api_get_co2_range():
+        """Fetch average CO2 intensity for a time range (start_hour to end_hour on a date)."""
+        try:
+            date_str = request.args.get('date')
+            start_hour = request.args.get('start_hour', type=int)
+            end_hour = request.args.get('end_hour', type=int)
+            if not date_str or start_hour is None or end_hour is None:
+                return jsonify({'error': 'date, start_hour, end_hour required'}), 400
+
+            api_key = AppConfig.get('entsoe_api_key', Config.ENTSOE_API_KEY)
+            if not api_key:
+                return jsonify({'error': 'No ENTSO-E API key configured'}), 400
+
+            from services.entsoe_service import get_co2_intensity
+            target = datetime.strptime(date_str, '%Y-%m-%d')
+
+            # Collect hourly CO2 values for the range
+            values = []
+            for h in range(start_hour, min(end_hour + 1, 24)):
+                co2 = get_co2_intensity(api_key, target, hour=h)
+                if co2:
+                    values.append(co2)
+
+            if values:
+                avg = round(sum(values) / len(values))
+                return jsonify({
+                    'co2_g_per_kwh': avg,
+                    'hours_covered': len(values),
+                    'hours_total': end_hour - start_hour + 1,
+                })
+            return jsonify({'error': 'No data available'}), 404
+        except Exception as e:
+            return jsonify({'error': str(e)}), 500
+
     @app.route('/api/charge/<int:charge_id>/odometer', methods=['POST'])
     def api_update_odometer(charge_id):
         charge = Charge.query.get_or_404(charge_id)
@@ -578,6 +617,17 @@ def register_routes(app):
 
         force = request.args.get('force', '0') == '1'
 
+        # Rate limiter: max 200 calls/day (Kia EU), track usage
+        today_str = date.today().isoformat()
+        counter_date = AppConfig.get('vehicle_api_counter_date', '')
+        if counter_date != today_str:
+            AppConfig.set('vehicle_api_counter_date', today_str)
+            AppConfig.set('vehicle_api_counter', '0')
+        api_count = int(AppConfig.get('vehicle_api_counter', '0'))
+        if api_count >= 190:  # leave 10 buffer for other apps
+            return jsonify({'error': f'Tageslimit erreicht ({api_count}/200). Reset um Mitternacht.'}), 429
+        AppConfig.set('vehicle_api_counter', str(api_count + 1))
+
         try:
             from services.vehicle import get_connector
             import json as _json
@@ -632,6 +682,7 @@ def register_routes(app):
                 'est_portable_charge_min': s.est_portable_charge_min,
                 'registration_date': s.registration_date,
                 'timestamp': sync.timestamp.strftime('%H:%M'),
+                'api_calls_today': api_count + 1,
             })
         except Exception as e:
             return jsonify({'error': str(e)}), 500

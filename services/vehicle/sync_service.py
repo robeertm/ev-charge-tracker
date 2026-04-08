@@ -10,7 +10,7 @@ logger = logging.getLogger(__name__)
 _sync_thread = None
 _sync_running = False
 
-MIN_INTERVAL_HOURS = 0.5  # 30 minutes minimum to protect 12V battery
+MIN_INTERVAL_HOURS = 1  # 1 hour minimum (Kia EU: 200 calls/day, protect 12V)
 DEFAULT_INTERVAL_HOURS = 4
 
 
@@ -23,6 +23,19 @@ def _do_sync(app):
         brand = AppConfig.get('vehicle_api_brand', '')
         if not brand:
             return None
+
+        # Rate limit check (200/day for Kia EU)
+        from datetime import date
+        today_str = date.today().isoformat()
+        counter_date = AppConfig.get('vehicle_api_counter_date', '')
+        if counter_date != today_str:
+            AppConfig.set('vehicle_api_counter_date', today_str)
+            AppConfig.set('vehicle_api_counter', '0')
+        api_count = int(AppConfig.get('vehicle_api_counter', '0'))
+        if api_count >= 190:
+            logger.warning(f"Vehicle sync skipped: daily API limit reached ({api_count}/200)")
+            return None
+        AppConfig.set('vehicle_api_counter', str(api_count + 1))
 
         creds = {
             'username': AppConfig.get('vehicle_api_username', ''),

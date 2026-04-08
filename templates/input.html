@@ -9,7 +9,47 @@
                 <h5 class="mb-0"><i class="bi bi-plus-circle"></i> Neue Ladung erfassen</h5>
             </div>
             <div class="card-body">
+
+                <!-- Stromart (immer sichtbar, muss zuerst gewählt werden) -->
+                <div class="mb-3">
+                    <label class="form-label fw-bold">
+                        <i class="bi bi-lightning-charge"></i> Stromart
+                    </label>
+                    <div class="btn-group w-100" role="group">
+                        <input type="radio" class="btn-check" name="charge_type_select" id="typeAC" value="AC" checked>
+                        <label class="btn btn-outline-success btn-lg" for="typeAC">
+                            <i class="bi bi-plug"></i> AC
+                        </label>
+                        <input type="radio" class="btn-check" name="charge_type_select" id="typeDC" value="DC">
+                        <label class="btn btn-outline-warning btn-lg" for="typeDC">
+                            <i class="bi bi-lightning"></i> DC
+                        </label>
+                        <input type="radio" class="btn-check" name="charge_type_select" id="typePV" value="PV">
+                        <label class="btn btn-outline-info btn-lg" for="typePV">
+                            <i class="bi bi-sun"></i> PV
+                        </label>
+                    </div>
+                </div>
+
+                {% if vehicle_configured %}
+                <!-- Start/Stop Buttons -->
+                <div class="d-flex gap-2 mb-3">
+                    <button type="button" class="btn btn-success btn-lg flex-fill" id="btnStart">
+                        <i class="bi bi-play-circle"></i> Ladung starten
+                    </button>
+                    <button type="button" class="btn btn-danger btn-lg flex-fill" id="btnStop" disabled>
+                        <i class="bi bi-stop-circle"></i> Ladung stoppen
+                    </button>
+                </div>
+                <div class="small text-center mb-3" id="chargeTimer" style="display:none">
+                    <i class="bi bi-clock"></i> Ladezeit: <span id="timerDisplay" class="fw-bold">00:00</span>
+                </div>
+                {% endif %}
+
+                <!-- Formular (alle Felder änderbar) -->
                 <form method="POST" id="chargeForm">
+                    <input type="hidden" name="charge_type" id="chargeTypeHidden" value="AC">
+
                     <!-- Datum & Uhrzeit -->
                     <div class="row g-3 mb-3">
                         <div class="col-7">
@@ -21,7 +61,7 @@
                         </div>
                         <div class="col-5">
                             <label for="charge_hour" class="form-label fw-bold">
-                                <i class="bi bi-clock"></i> Uhrzeit
+                                <i class="bi bi-clock"></i> Startzeit
                             </label>
                             <select class="form-select form-select-lg" id="charge_hour" name="charge_hour">
                                 <option value="">–</option>
@@ -38,36 +78,23 @@
                             <i class="bi bi-speedometer"></i> km-Stand
                             <small class="text-muted fw-normal">optional</small>
                         </label>
-                        <div class="input-group">
-                            <input type="number" class="form-control form-control-lg" id="odometer"
-                                   name="odometer" min="0" max="999999"
-                                   placeholder="{{ last_charge.odometer if last_charge and last_charge.odometer else '' }}"
-                                   inputmode="numeric">
-                            <button type="button" class="btn btn-outline-info" id="btnFetchVehicle"
-                                    title="SoC & km vom Fahrzeug abrufen">
-                                <i class="bi bi-car-front"></i>
-                            </button>
-                        </div>
+                        <input type="number" class="form-control form-control-lg" id="odometer"
+                               name="odometer" min="0" max="999999"
+                               placeholder="{{ last_charge.odometer if last_charge and last_charge.odometer else '' }}"
+                               inputmode="numeric">
                     </div>
 
-                    <!-- Stromart -->
-                    <div class="mb-3">
-                        <label class="form-label fw-bold">
-                            <i class="bi bi-lightning-charge"></i> Stromart
-                        </label>
-                        <div class="btn-group w-100" role="group">
-                            <input type="radio" class="btn-check" name="charge_type" id="typeAC" value="AC" checked>
-                            <label class="btn btn-outline-success btn-lg" for="typeAC">
-                                <i class="bi bi-plug"></i> AC
-                            </label>
-                            <input type="radio" class="btn-check" name="charge_type" id="typeDC" value="DC">
-                            <label class="btn btn-outline-warning btn-lg" for="typeDC">
-                                <i class="bi bi-lightning"></i> DC
-                            </label>
-                            <input type="radio" class="btn-check" name="charge_type" id="typePV" value="PV">
-                            <label class="btn btn-outline-info btn-lg" for="typePV">
-                                <i class="bi bi-sun"></i> PV
-                            </label>
+                    <!-- SoC -->
+                    <div class="row g-3 mb-3">
+                        <div class="col-6">
+                            <label for="soc_from" class="form-label fw-bold">SoC Start %</label>
+                            <input type="number" class="form-control form-control-lg" id="soc_from" name="soc_from"
+                                   min="0" max="100" placeholder="20" inputmode="numeric">
+                        </div>
+                        <div class="col-6">
+                            <label for="soc_to" class="form-label fw-bold">SoC Ende %</label>
+                            <input type="number" class="form-control form-control-lg" id="soc_to" name="soc_to"
+                                   min="0" max="100" placeholder="80" inputmode="numeric">
                         </div>
                     </div>
 
@@ -80,9 +107,11 @@
                                    placeholder="0.30" inputmode="decimal">
                         </div>
                         <div class="col-6">
-                            <label for="kwh_loaded" class="form-label fw-bold">kWh geladen</label>
+                            <label for="kwh_loaded" class="form-label fw-bold">
+                                kWh geladen <small class="text-muted fw-normal" id="kwhHint"></small>
+                            </label>
                             <input type="number" class="form-control form-control-lg" id="kwh_loaded"
-                                   name="kwh_loaded" step="0.001" min="0" max="100"
+                                   name="kwh_loaded" step="0.001" min="0" max="200"
                                    placeholder="45.000" required inputmode="decimal">
                         </div>
                     </div>
@@ -91,20 +120,6 @@
                     <div class="mb-3">
                         <label class="form-label text-muted">Gesamtpreis (berechnet)</label>
                         <div class="form-control form-control-lg bg-light" id="calcPrice">—</div>
-                    </div>
-
-                    <!-- SoC -->
-                    <div class="row g-3 mb-3">
-                        <div class="col-6">
-                            <label for="soc_from" class="form-label fw-bold">SoC von %</label>
-                            <input type="number" class="form-control" id="soc_from" name="soc_from"
-                                   min="0" max="100" placeholder="20" inputmode="numeric">
-                        </div>
-                        <div class="col-6">
-                            <label for="soc_to" class="form-label fw-bold">SoC bis %</label>
-                            <input type="number" class="form-control" id="soc_to" name="soc_to"
-                                   min="0" max="100" placeholder="80" inputmode="numeric">
-                        </div>
                     </div>
 
                     <!-- Ladeverluste -->
@@ -159,6 +174,25 @@
 
 {% block scripts %}
 <script>
+const MAX_AC_KW = {{ max_ac_kw or 11 }};
+const BATTERY_KWH = {{ battery_kwh }};
+const pvCo2 = {{ pv_co2 }};
+const pvPrice = {{ pv_price }};
+let chargeStartTime = null;
+let timerInterval = null;
+
+// Sync charge_type radio to hidden input
+document.querySelectorAll('input[name="charge_type_select"]').forEach(radio => {
+    radio.addEventListener('change', function() {
+        document.getElementById('chargeTypeHidden').value = this.value;
+        if (this.value === 'PV') {
+            document.getElementById('co2_g_per_kwh').value = pvCo2;
+            document.getElementById('eur_per_kwh').value = pvPrice;
+            updateCalcPrice();
+        }
+    });
+});
+
 // Live price calculation
 function updateCalcPrice() {
     const eur = parseFloat(document.getElementById('eur_per_kwh').value);
@@ -174,6 +208,23 @@ function updateCalcPrice() {
 }
 document.getElementById('eur_per_kwh').addEventListener('input', updateCalcPrice);
 document.getElementById('kwh_loaded').addEventListener('input', updateCalcPrice);
+
+// Calculate kWh from SoC difference or from time + power
+function calcKwh() {
+    const socFrom = parseInt(document.getElementById('soc_from').value);
+    const socTo = parseInt(document.getElementById('soc_to').value);
+    const type = document.getElementById('chargeTypeHidden').value;
+
+    if (!isNaN(socFrom) && !isNaN(socTo) && socTo > socFrom) {
+        // From SoC: kWh = (socTo - socFrom) / 100 * battery_kwh
+        const kwh = (socTo - socFrom) / 100 * BATTERY_KWH;
+        document.getElementById('kwh_loaded').value = kwh.toFixed(3);
+        document.getElementById('kwhHint').textContent = '(aus SoC)';
+        updateCalcPrice();
+    }
+}
+document.getElementById('soc_from').addEventListener('input', calcKwh);
+document.getElementById('soc_to').addEventListener('input', calcKwh);
 
 // Fetch CO2 from ENTSO-E
 document.getElementById('btnFetchCo2').addEventListener('click', async () => {
@@ -201,53 +252,255 @@ document.getElementById('btnFetchCo2').addEventListener('click', async () => {
     }
 });
 
-// Fetch vehicle status (SoC + odometer)
-document.getElementById('btnFetchVehicle').addEventListener('click', async () => {
-    const btn = document.getElementById('btnFetchVehicle');
+{% if vehicle_configured %}
+// === Start/Stop charge tracking ===
+const btnStart = document.getElementById('btnStart');
+const btnStop = document.getElementById('btnStop');
+const timerEl = document.getElementById('chargeTimer');
+const timerDisplay = document.getElementById('timerDisplay');
+const CHARGE_KEY = 'ev_charge_session';
+
+// Restore session if active
+(function restoreSession() {
+    try {
+        const saved = JSON.parse(localStorage.getItem(CHARGE_KEY));
+        if (saved && saved.startTime) {
+            chargeStartTime = new Date(saved.startTime);
+            document.getElementById('date').value = saved.date || '';
+            document.getElementById('charge_hour').value = saved.hour || '';
+            document.getElementById('soc_from').value = saved.socFrom || '';
+            document.getElementById('odometer').value = saved.odometer || '';
+            if (saved.chargeType) {
+                document.getElementById('type' + saved.chargeType).checked = true;
+                document.getElementById('chargeTypeHidden').value = saved.chargeType;
+            }
+            btnStart.disabled = true;
+            btnStart.innerHTML = '<i class="bi bi-check-circle"></i> Gestartet';
+            btnStart.classList.replace('btn-success', 'btn-secondary');
+            if (saved.stopped) {
+                btnStop.disabled = true;
+                btnStop.innerHTML = '<i class="bi bi-check-circle"></i> Gestoppt';
+                btnStop.classList.replace('btn-danger', 'btn-secondary');
+            } else {
+                btnStop.disabled = false;
+                timerEl.style.display = '';
+                startTimer();
+                startAutoPolling();
+            }
+        }
+    } catch(e) {}
+})();
+
+function startTimer() {
+    timerInterval = setInterval(() => {
+        if (!chargeStartTime) return;
+        const elapsed = Math.floor((Date.now() - chargeStartTime.getTime()) / 1000);
+        const h = Math.floor(elapsed / 3600);
+        const m = Math.floor((elapsed % 3600) / 60);
+        timerDisplay.textContent = (h > 0 ? h + 'h ' : '') + String(m).padStart(2, '0') + 'min';
+
+        // Live kWh estimate from time + AC power
+        const type = document.getElementById('chargeTypeHidden').value;
+        if (type === 'AC') {
+            const hours = elapsed / 3600;
+            const estKwh = (hours * MAX_AC_KW).toFixed(3);
+            const kwhField = document.getElementById('kwh_loaded');
+            // Only auto-fill if not manually changed
+            if (!kwhField.dataset.manual) {
+                kwhField.value = estKwh;
+                document.getElementById('kwhHint').textContent = '(~' + estKwh + ' kWh bei ' + MAX_AC_KW + ' kW)';
+                updateCalcPrice();
+            }
+        }
+    }, 1000);
+}
+
+// Mark kWh field as manually edited
+document.getElementById('kwh_loaded').addEventListener('input', function() {
+    this.dataset.manual = '1';
+});
+
+async function fetchVehicle(btn) {
+    const origHtml = btn.innerHTML;
     btn.innerHTML = '<span class="spinner-border spinner-border-sm"></span>';
     btn.disabled = true;
     try {
-        const resp = await fetch('/api/vehicle/status?force=1');
-        const data = await resp.json();
-        if (data.error) {
-            if (data.error === 'not_configured') {
-                alert('Fahrzeug-API nicht konfiguriert. Bitte unter Einstellungen einrichten.');
-            } else {
-                alert('Fehler: ' + data.error);
-            }
-        } else {
-            if (data.soc !== null && data.soc !== undefined) {
-                document.getElementById('soc_from').value = data.soc;
-            }
-            if (data.odometer !== null && data.odometer !== undefined) {
-                document.getElementById('odometer').value = data.odometer;
-            }
-            let info = [];
-            if (data.soc !== null) info.push('SoC: ' + data.soc + '%');
-            if (data.odometer !== null) info.push('Tacho: ' + data.odometer.toLocaleString('de') + ' km');
-            if (data.is_charging) info.push('Lädt gerade!');
-            if (data.cached) info.push('(Cache ' + data.timestamp + ')');
-            btn.title = info.join(' · ');
-        }
-    } catch (e) {
-        alert('Verbindungsfehler: ' + e.message);
-    } finally {
-        btn.innerHTML = '<i class="bi bi-car-front"></i>';
+        const r = await fetch('/api/vehicle/status?force=1');
+        const d = await r.json();
+        btn.innerHTML = origHtml;
         btn.disabled = false;
+        if (d.error) throw new Error(d.error);
+        // Merge with previous dashboard data so null values get filled
+        const dashCache = JSON.parse(localStorage.getItem('ev_vehicle_data') || '{}');
+        for (const key in dashCache) {
+            if (d[key] === null || d[key] === undefined) d[key] = dashCache[key];
+        }
+        // Update dashboard localStorage so it shows fresh data when switching back
+        localStorage.setItem('ev_vehicle_data', JSON.stringify(d));
+        return d;
+    } catch(e) {
+        btn.innerHTML = origHtml;
+        btn.disabled = false;
+        throw e;
+    }
+}
+
+btnStart.addEventListener('click', async () => {
+    try {
+        const data = await fetchVehicle(btnStart);
+        const now = new Date();
+        chargeStartTime = now;
+
+        // Fill start values
+        document.getElementById('date').value = now.toISOString().slice(0, 10);
+        document.getElementById('charge_hour').value = now.getHours();
+        if (data.soc != null) document.getElementById('soc_from').value = data.soc;
+        if (data.odometer != null) document.getElementById('odometer').value = data.odometer;
+
+        const chargeType = document.getElementById('chargeTypeHidden').value;
+
+        // Save session
+        localStorage.setItem(CHARGE_KEY, JSON.stringify({
+            startTime: now.toISOString(),
+            date: document.getElementById('date').value,
+            hour: now.getHours().toString(),
+            socFrom: data.soc,
+            odometer: data.odometer,
+            chargeType: chargeType,
+        }));
+
+        btnStart.disabled = true;
+        btnStart.innerHTML = '<i class="bi bi-check-circle"></i> Gestartet';
+        btnStart.classList.replace('btn-success', 'btn-secondary');
+        btnStop.disabled = false;
+        timerEl.style.display = '';
+        document.getElementById('kwh_loaded').dataset.manual = '';
+        startTimer();
+        startAutoPolling();
+    } catch(e) {
+        alert('Fehler: ' + e.message);
     }
 });
 
-// PV auto-fill CO2 and price
-const pvCo2 = {{ pv_co2 }};
-const pvPrice = {{ pv_price }};
-document.querySelectorAll('input[name="charge_type"]').forEach(radio => {
-    radio.addEventListener('change', function() {
-        if (this.value === 'PV') {
-            document.getElementById('co2_g_per_kwh').value = pvCo2;
-            document.getElementById('eur_per_kwh').value = pvPrice;
-            updateCalcPrice();
+// === Auto-Polling: check every 5 min if charging stopped or limit reached ===
+let pollInterval = null;
+const POLL_MS = 10 * 60 * 1000; // 10 minutes (Kia EU limit: 200/day)
+
+function startAutoPolling() {
+    if (pollInterval) clearInterval(pollInterval);
+    pollInterval = setInterval(autoCheck, POLL_MS);
+}
+
+async function autoCheck() {
+    try {
+        // Use cached check (no force) to avoid draining 12V
+        const r = await fetch('/api/vehicle/status');
+        const d = await r.json();
+        if (d.error) return;
+
+        // Merge with dashboard cache
+        const dashCache = JSON.parse(localStorage.getItem('ev_vehicle_data') || '{}');
+        for (const key in dashCache) {
+            if (d[key] === null || d[key] === undefined) d[key] = dashCache[key];
         }
-    });
+        localStorage.setItem('ev_vehicle_data', JSON.stringify(d));
+
+        // Update SoC live display
+        if (d.soc != null) {
+            document.getElementById('kwhHint').textContent = '(aktuell: ' + d.soc + '%)';
+        }
+
+        // Auto-stop conditions
+        const chargeType = document.getElementById('chargeTypeHidden').value;
+        const limitAC = d.charge_limit_ac || 100;
+        const limitDC = d.charge_limit_dc || 100;
+        const limit = (chargeType === 'DC') ? limitDC : limitAC;
+
+        const shouldStop = (d.soc != null && d.soc >= limit) ||
+                           (d.is_charging === false && d.soc != null &&
+                            parseInt(document.getElementById('soc_from').value) < d.soc);
+
+        if (shouldStop) {
+            await doStop(d);
+        }
+    } catch(e) { console.error('Auto-poll error:', e); }
+}
+
+async function doStop(data) {
+    // If no data passed, do a force fetch
+    if (!data) {
+        try {
+            data = await fetchVehicle(btnStop);
+        } catch(e) {
+            alert('Fehler: ' + e.message);
+            return;
+        }
+    }
+
+    // Fill end values
+    if (data.soc != null) document.getElementById('soc_to').value = data.soc;
+
+    // Calculate kWh from SoC if available
+    const socFrom = parseInt(document.getElementById('soc_from').value);
+    const socTo = parseInt(document.getElementById('soc_to').value);
+    if (!isNaN(socFrom) && !isNaN(socTo) && socTo > socFrom) {
+        const kwh = (socTo - socFrom) / 100 * BATTERY_KWH;
+        document.getElementById('kwh_loaded').value = kwh.toFixed(3);
+        document.getElementById('kwhHint').textContent = '(aus SoC)';
+    } else if (chargeStartTime) {
+        const type = document.getElementById('chargeTypeHidden').value;
+        if (type === 'AC') {
+            const hours = (Date.now() - chargeStartTime.getTime()) / 3600000;
+            document.getElementById('kwh_loaded').value = (hours * MAX_AC_KW).toFixed(3);
+            document.getElementById('kwhHint').textContent = '(aus Zeit × ' + MAX_AC_KW + ' kW)';
+        }
+    }
+    updateCalcPrice();
+
+    // Fetch CO2 for charge time range
+    if (chargeStartTime) {
+        const startH = chargeStartTime.getHours();
+        const endH = new Date().getHours();
+        const dateStr = document.getElementById('date').value;
+        try {
+            const co2r = await fetch('/api/co2/range?date=' + dateStr + '&start_hour=' + startH + '&end_hour=' + endH);
+            const co2d = await co2r.json();
+            if (co2d.co2_g_per_kwh) {
+                document.getElementById('co2_g_per_kwh').value = co2d.co2_g_per_kwh;
+                document.getElementById('co2_g_per_kwh').title = co2d.hours_covered + '/' + co2d.hours_total + ' Stunden abgedeckt';
+            }
+        } catch(e) { console.error('CO2 range fetch error:', e); }
+    }
+
+    // Stop timer & polling
+    if (timerInterval) clearInterval(timerInterval);
+    if (pollInterval) clearInterval(pollInterval);
+    const session = JSON.parse(localStorage.getItem(CHARGE_KEY) || '{}');
+    session.endTime = new Date().toISOString();
+    session.stopped = true;
+    localStorage.setItem(CHARGE_KEY, JSON.stringify(session));
+    chargeStartTime = null;
+
+    btnStop.disabled = true;
+    btnStop.innerHTML = '<i class="bi bi-check-circle"></i> Gestoppt';
+    btnStop.classList.replace('btn-danger', 'btn-secondary');
+    timerDisplay.insertAdjacentHTML('afterend', ' <span class="badge bg-info">Bereit zum Speichern</span>');
+}
+
+btnStop.addEventListener('click', async () => {
+    // Manual stop: do force fetch
+    try {
+        const data = await fetchVehicle(btnStop);
+        await doStop(data);
+    } catch(e) {
+        alert('Fehler: ' + e.message);
+    }
 });
+
+// Clean up session after form submit
+document.getElementById('chargeForm').addEventListener('submit', () => {
+    localStorage.removeItem(CHARGE_KEY);
+});
+{% endif %}
 </script>
 {% endblock %}

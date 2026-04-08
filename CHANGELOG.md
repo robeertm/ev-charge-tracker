@@ -1,5 +1,21 @@
 # Changelog
 
+## v1.7.0 (2026-04-08)
+
+### New Features
+- **Start/Stop charge tracking** — buttons on input page trigger force-refresh from vehicle, auto-fill date/time/SoC/odometer
+- **Live charge timer** — shows elapsed time, estimates kWh from time × AC power
+- **Auto-stop** — polls every 10 min during charging, auto-stops when SoC reaches charge limit or car stops charging
+- **CO2 from time range** — calculates weighted average CO2 from ENTSO-E for the charge period (start to end hour)
+- **API rate limiter** — tracks daily Kia API calls (190/200 limit), counter shown on dashboard, auto-reset at midnight
+- **Session persistence** — charge session survives tab switches and page reloads via localStorage
+
+### Improvements
+- Charge poll interval: 10 min (was 5 min) to respect Kia EU 200 calls/day limit
+- Auto-sync minimum interval: 1 hour (was 30 min)
+- Sync service respects daily API limit
+- Settings: vehicleCredentials and syncSection render server-side when brand configured
+
 ## v1.6.0 (2026-04-08)
 - **Cached vs Live refresh** — two buttons on dashboard: "Cached" reads server cache, "Live" wakes the car for fresh data
 - **Force refresh fallback** — if Live returns null values (odometer, range, 12V), last known values are preserved
