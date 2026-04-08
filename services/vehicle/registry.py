@@ -19,12 +19,18 @@ def get_available_brands() -> list:
 
 
 # Auto-import connectors (they register themselves if their deps are installed)
-try:
-    from . import connector_hyundai_kia  # noqa: F401
-except ImportError:
-    pass
-
-try:
-    from . import connector_vag  # noqa: F401
-except ImportError:
-    pass
+_CONNECTOR_MODULES = [
+    'connector_hyundai_kia',
+    'connector_vag',
+    'connector_tesla',
+    'connector_renault',
+    'connector_polestar',
+    'connector_mg',
+    'connector_smart',
+    'connector_porsche',
+]
+for _mod in _CONNECTOR_MODULES:
+    try:
+        __import__(f'services.vehicle.{_mod}')
+    except ImportError:
+        pass

@@ -587,6 +587,12 @@ def register_routes(app):
             'vw': ['carconnectivity', 'carconnectivity-connector-volkswagen'],
             'skoda': ['carconnectivity', 'carconnectivity-connector-skoda'],
             'seatcupra': ['carconnectivity', 'carconnectivity-connector-seatcupra'],
+            'tesla': ['teslapy'],
+            'renault': ['renault-api', 'aiohttp'],
+            'polestar': ['pypolestar'],
+            'mg': ['saic-ismart-client-ng'],
+            'smart': ['pySmartHashtag'],
+            'porsche': ['pyporscheconnectapi'],
         }
 
         data = request.get_json() or {}
@@ -603,9 +609,16 @@ def register_routes(app):
             if result.returncode == 0:
                 # Force reload of connector modules so they re-check for installed packages
                 import importlib
+                CONNECTOR_MAP = {
+                    'hyundai-kia': 'connector_hyundai_kia',
+                    'vw': 'connector_vag', 'skoda': 'connector_vag', 'seatcupra': 'connector_vag',
+                    'tesla': 'connector_tesla', 'renault': 'connector_renault',
+                    'polestar': 'connector_polestar', 'mg': 'connector_mg',
+                    'smart': 'connector_smart', 'porsche': 'connector_porsche',
+                }
+                connector_mod = CONNECTOR_MAP.get(pkg_key, '')
                 modules_to_reload = [
-                    'services.vehicle.connector_hyundai_kia' if pkg_key == 'hyundai-kia'
-                    else 'services.vehicle.connector_vag',
+                    f'services.vehicle.{connector_mod}',
                     'services.vehicle.registry',
                     'services.vehicle',
                 ]

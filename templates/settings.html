@@ -216,6 +216,12 @@
                     {% if 'vw' not in installed_brand_keys %}{% set _ = missing_packages.append(('vw', 'Volkswagen')) %}{% endif %}
                     {% if 'skoda' not in installed_brand_keys %}{% set _ = missing_packages.append(('skoda', 'Skoda')) %}{% endif %}
                     {% if 'seat' not in installed_brand_keys %}{% set _ = missing_packages.append(('seatcupra', 'Seat / Cupra')) %}{% endif %}
+                    {% if 'tesla' not in installed_brand_keys %}{% set _ = missing_packages.append(('tesla', 'Tesla')) %}{% endif %}
+                    {% if 'renault' not in installed_brand_keys %}{% set _ = missing_packages.append(('renault', 'Renault / Dacia')) %}{% endif %}
+                    {% if 'polestar' not in installed_brand_keys %}{% set _ = missing_packages.append(('polestar', 'Polestar')) %}{% endif %}
+                    {% if 'mg' not in installed_brand_keys %}{% set _ = missing_packages.append(('mg', 'MG (SAIC)')) %}{% endif %}
+                    {% if 'smart' not in installed_brand_keys %}{% set _ = missing_packages.append(('smart', 'Smart #1/#3')) %}{% endif %}
+                    {% if 'porsche' not in installed_brand_keys %}{% set _ = missing_packages.append(('porsche', 'Porsche')) %}{% endif %}
                     {% if missing_packages %}
                     <div class="mb-3">
                         <p class="small text-muted mb-2">Weitere Marken verfügbar — Paket installieren:</p>
@@ -354,16 +360,20 @@
                     const hasBrand = brand !== '';
                     const isKiaHyundai = ['kia', 'hyundai'].includes(brand);
                     const isVAG = ['vw', 'skoda', 'seat', 'cupra', 'audi'].includes(brand);
+                    const isTesla = brand === 'tesla';
+                    const needsToken = isKiaHyundai || isTesla;
+                    const hasVin = isVAG || isKiaHyundai || ['polestar', 'mg', 'porsche'].includes(brand);
+                    const hasRegion = isKiaHyundai || brand === 'mg' || brand === 'renault' || brand === 'dacia';
 
                     // Show/hide credentials section (sync is inside it)
                     document.getElementById('vehicleCredentials').style.display = hasBrand ? '' : 'none';
 
                     // Brand-specific fields
                     document.querySelectorAll('.vehicle-field-pin').forEach(el => el.style.display = isKiaHyundai ? '' : 'none');
-                    document.querySelectorAll('.vehicle-field-region').forEach(el => el.style.display = isKiaHyundai ? '' : 'none');
-                    document.querySelectorAll('.vehicle-field-vin').forEach(el => el.style.display = (isVAG || isKiaHyundai) ? '' : 'none');
+                    document.querySelectorAll('.vehicle-field-region').forEach(el => el.style.display = hasRegion ? '' : 'none');
+                    document.querySelectorAll('.vehicle-field-vin').forEach(el => el.style.display = hasVin ? '' : 'none');
                     document.querySelectorAll('.vehicle-field-token-hint').forEach(el => el.style.display = isKiaHyundai ? '' : 'none');
-                    document.getElementById('labelPassword').textContent = isKiaHyundai ? 'Refresh-Token' : 'Passwort';
+                    document.getElementById('labelPassword').textContent = needsToken ? 'Refresh-Token' : 'Passwort';
                     document.getElementById('tokenHintSection').style.display = isKiaHyundai ? '' : 'none';
                 }
                 updateVehicleFields();
