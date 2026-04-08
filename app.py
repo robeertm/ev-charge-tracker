@@ -310,6 +310,17 @@ def register_routes(app):
                 AppConfig.set('vehicle_api_pin', request.form.get('vehicle_api_pin', ''))
                 AppConfig.set('vehicle_api_region', request.form.get('vehicle_api_region', 'EU'))
                 AppConfig.set('vehicle_api_vin', request.form.get('vehicle_api_vin', ''))
+                # Also save sync settings (same form)
+                enabled = 'true' if 'vehicle_sync_enabled' in request.form else 'false'
+                AppConfig.set('vehicle_sync_enabled', enabled)
+                AppConfig.set('vehicle_sync_interval_hours', request.form.get('vehicle_sync_interval', '4'))
+                AppConfig.set('vehicle_sync_mode', request.form.get('vehicle_sync_mode', 'cached'))
+                from services.vehicle.sync_service import stop_sync, start_sync
+                stop_sync()
+                import time as _time
+                _time.sleep(0.5)
+                if enabled == 'true':
+                    start_sync(app)
                 flash('Fahrzeug-API Zugangsdaten gespeichert!', 'success')
 
             elif action == 'test_vehicle_api':
