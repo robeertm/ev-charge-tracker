@@ -37,6 +37,9 @@ CREDENTIAL_FIELDS = [
 ]
 
 
+_managers = {}  # Cache VehicleManager instances across requests
+
+
 class _HyundaiKiaBase(VehicleConnector):
     """Shared logic for Kia and Hyundai (token-based auth)."""
 
@@ -44,25 +47,36 @@ class _HyundaiKiaBase(VehicleConnector):
 
     def __init__(self, credentials: dict):
         super().__init__(credentials)
-        self._manager = None
         self._vehicle = None
 
+    @property
+    def _cache_key(self):
+        return f"{self.BRAND_ID}:{self.credentials.get('username', '')}"
+
     def _get_manager(self) -> 'VehicleManager':
-        if self._manager is None:
+        key = self._cache_key
+        if key not in _managers:
             region = REGIONS.get(self.credentials.get('region', 'EU'), 1)
-            self._manager = VehicleManager(
+            _managers[key] = VehicleManager(
                 region=region,
                 brand=self.BRAND_ID,
                 username=self.credentials['username'],
                 password=self.credentials['password'],  # This is the refresh_token
                 pin=self.credentials.get('pin', ''),
             )
-        return self._manager
+        return _managers[key]
 
     def _ensure_auth(self):
         """Refresh the access token using the stored refresh_token."""
         mgr = self._get_manager()
-        return mgr.check_and_refresh_token()
+        try:
+            return mgr.check_and_refresh_token()
+        except Exception as e:
+            # If token refresh fails, clear cache and retry once
+            logger.warning(f"Token refresh failed, retrying: {e}")
+            _managers.pop(self._cache_key, None)
+            mgr = self._get_manager()
+            return mgr.check_and_refresh_token()
 
     def _get_vehicle(self) -> 'Vehicle':
         if self._vehicle is None:
@@ -81,7 +95,7 @@ class _HyundaiKiaBase(VehicleConnector):
             return True
         except Exception as e:
             logger.error(f"Auth failed: {e}")
-            self._manager = None
+            _managers.pop(self._cache_key, None)
             self._vehicle = None
             return False
 
