@@ -95,8 +95,7 @@ def register_routes(app):
         return render_template('dashboard.html',
                                stats=stats, chart_data=chart_data,
                                acdc=acdc, yearly=yearly,
-                               vehicle_configured=vehicle_configured,
-                               battery_kwh=_get_battery_kwh())
+                               vehicle_configured=vehicle_configured)
 
     # ── EINGABE ────────────────────────────────────────────────
     @app.route('/input', methods=['GET', 'POST'])
@@ -692,6 +691,7 @@ def register_routes(app):
                 'is_locked': s.is_locked,
                 'range_km': s.estimated_range_km,
                 'battery_12v': s.battery_12v_percent,
+                'battery_soh': s.battery_soh_percent,
                 'charge_limit_ac': s.charge_limit_ac,
                 'charge_limit_dc': s.charge_limit_dc,
                 'est_charge_min': s.est_charge_duration_min,

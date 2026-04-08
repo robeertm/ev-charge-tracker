@@ -17,7 +17,7 @@
 
 <!-- Fahrzeug Live Status -->
 {% if vehicle_configured %}
-<div class="card mb-3 border-info" id="vehicleLiveCard" data-battery-kwh="{{ battery_kwh }}">
+<div class="card mb-3 border-info" id="vehicleLiveCard">
     <div class="card-body p-2">
         <div class="d-flex align-items-center justify-content-between mb-2">
             <span class="fw-bold small"><i class="bi bi-car-front"></i> <span id="vName">{{ car_model }}</span></span>
@@ -141,11 +141,8 @@
         document.getElementById('vLimitDC').textContent = d.charge_limit_dc != null ? d.charge_limit_dc + '%' : '—';
         document.getElementById('vChargeTime').textContent = d.est_charge_min != null ? d.est_charge_min + ' min' : '—';
         document.getElementById('vFastChargeTime').textContent = d.est_fast_charge_min != null ? d.est_fast_charge_min + ' min' : '—';
-        if (d.total_consumed_kwh != null) {
-            const consumedKwh = d.total_consumed_kwh / 1000;
-            const battKwh = parseFloat(document.getElementById('vehicleLiveCard').dataset.batteryKwh) || 64;
-            const soh = (consumedKwh / 1000 / battKwh * 100).toFixed(1);
-            document.getElementById('vSoH').textContent = soh + ' %';
+        if (d.battery_soh != null) {
+            document.getElementById('vSoH').textContent = d.battery_soh + ' %';
         }
         document.getElementById('vRegen').textContent = d.total_regenerated_kwh != null ? (d.total_regenerated_kwh / 1000).toFixed(0) + ' kWh' : '—';
         if (d.doors) {
