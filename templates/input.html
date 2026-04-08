@@ -1,19 +1,19 @@
 {% extends "base.html" %}
-{% block title %}Neue Ladung — EV Charge Tracker{% endblock %}
+{% block title %}{{ t('input.title') }} — EV Charge Tracker{% endblock %}
 
 {% block content %}
 <div class="row justify-content-center">
     <div class="col-lg-6 col-md-8">
         <div class="card shadow-sm">
             <div class="card-header bg-success text-white">
-                <h5 class="mb-0"><i class="bi bi-plus-circle"></i> Neue Ladung erfassen</h5>
+                <h5 class="mb-0"><i class="bi bi-plus-circle"></i> {{ t('input.title') }}</h5>
             </div>
             <div class="card-body">
 
                 <!-- Stromart (immer sichtbar, muss zuerst gewählt werden) -->
                 <div class="mb-3">
                     <label class="form-label fw-bold">
-                        <i class="bi bi-lightning-charge"></i> Stromart
+                        <i class="bi bi-lightning-charge"></i> {{ t('input.charge_type') }}
                     </label>
                     <div class="btn-group w-100" role="group">
                         <input type="radio" class="btn-check" name="charge_type_select" id="typeAC" value="AC" checked>
@@ -35,14 +35,14 @@
                 <!-- Start/Stop Buttons -->
                 <div class="d-flex gap-2 mb-3">
                     <button type="button" class="btn btn-success btn-lg flex-fill" id="btnStart">
-                        <i class="bi bi-play-circle"></i> Ladung starten
+                        <i class="bi bi-play-circle"></i> {{ t('input.start') }}
                     </button>
                     <button type="button" class="btn btn-danger btn-lg flex-fill" id="btnStop" disabled>
-                        <i class="bi bi-stop-circle"></i> Ladung stoppen
+                        <i class="bi bi-stop-circle"></i> {{ t('input.stop') }}
                     </button>
                 </div>
                 <div class="small text-center mb-3" id="chargeTimer" style="display:none">
-                    <i class="bi bi-clock"></i> Ladezeit: <span id="timerDisplay" class="fw-bold">00:00</span>
+                    <i class="bi bi-clock"></i> {{ t('input.timer') }} <span id="timerDisplay" class="fw-bold">00:00</span>
                 </div>
                 {% endif %}
 
@@ -54,14 +54,14 @@
                     <div class="row g-3 mb-3">
                         <div class="col-7">
                             <label for="date" class="form-label fw-bold">
-                                <i class="bi bi-calendar3"></i> Datum
+                                <i class="bi bi-calendar3"></i> {{ t('input.date') }}
                             </label>
                             <input type="date" class="form-control form-control-lg" id="date" name="date"
                                    value="{{ today }}" required>
                         </div>
                         <div class="col-5">
                             <label for="charge_hour" class="form-label fw-bold">
-                                <i class="bi bi-clock"></i> Startzeit
+                                <i class="bi bi-clock"></i> {{ t('input.start_time') }}
                             </label>
                             <select class="form-select form-select-lg" id="charge_hour" name="charge_hour">
                                 <option value="">–</option>
@@ -75,8 +75,8 @@
                     <!-- km-Stand -->
                     <div class="mb-3">
                         <label for="odometer" class="form-label fw-bold">
-                            <i class="bi bi-speedometer"></i> km-Stand
-                            <small class="text-muted fw-normal">optional</small>
+                            <i class="bi bi-speedometer"></i> {{ t('input.odometer') }}
+                            <small class="text-muted fw-normal">{{ t('input.optional') }}</small>
                         </label>
                         <input type="number" class="form-control form-control-lg" id="odometer"
                                name="odometer" min="0" max="999999"
@@ -87,12 +87,12 @@
                     <!-- SoC -->
                     <div class="row g-3 mb-3">
                         <div class="col-6">
-                            <label for="soc_from" class="form-label fw-bold">SoC Start %</label>
+                            <label for="soc_from" class="form-label fw-bold">{{ t('input.soc_from') }}</label>
                             <input type="number" class="form-control form-control-lg" id="soc_from" name="soc_from"
                                    min="0" max="100" placeholder="20" inputmode="numeric">
                         </div>
                         <div class="col-6">
-                            <label for="soc_to" class="form-label fw-bold">SoC Ende %</label>
+                            <label for="soc_to" class="form-label fw-bold">{{ t('input.soc_to') }}</label>
                             <input type="number" class="form-control form-control-lg" id="soc_to" name="soc_to"
                                    min="0" max="100" placeholder="80" inputmode="numeric">
                         </div>
@@ -101,14 +101,14 @@
                     <!-- Preis & kWh -->
                     <div class="row g-3 mb-3">
                         <div class="col-6">
-                            <label for="eur_per_kwh" class="form-label fw-bold">€/kWh</label>
+                            <label for="eur_per_kwh" class="form-label fw-bold">{{ t('input.eur_kwh') }}</label>
                             <input type="number" class="form-control form-control-lg" id="eur_per_kwh"
                                    name="eur_per_kwh" step="0.01" min="0" max="2"
                                    placeholder="0.30" inputmode="decimal">
                         </div>
                         <div class="col-6">
                             <label for="kwh_loaded" class="form-label fw-bold">
-                                kWh geladen <small class="text-muted fw-normal" id="kwhHint"></small>
+                                {{ t('input.kwh_loaded') }} <small class="text-muted fw-normal" id="kwhHint"></small>
                             </label>
                             <input type="number" class="form-control form-control-lg" id="kwh_loaded"
                                    name="kwh_loaded" step="0.001" min="0" max="200"
@@ -118,14 +118,14 @@
 
                     <!-- Berechneter Preis -->
                     <div class="mb-3">
-                        <label class="form-label text-muted">Gesamtpreis (berechnet)</label>
+                        <label class="form-label text-muted">{{ t('input.total_price') }}</label>
                         <div class="form-control form-control-lg bg-light" id="calcPrice">—</div>
                     </div>
 
                     <!-- Ladeverluste -->
                     <div class="mb-3">
-                        <label for="loss_kwh" class="form-label">Ladeverluste (kWh)
-                            <small class="text-muted">optional</small>
+                        <label for="loss_kwh" class="form-label">{{ t('input.loss_kwh') }}
+                            <small class="text-muted">{{ t('input.optional') }}</small>
                         </label>
                         <input type="number" class="form-control" id="loss_kwh" name="loss_kwh"
                                step="0.001" min="0" placeholder="5.200" inputmode="decimal">
@@ -134,13 +134,13 @@
                     <!-- CO2 -->
                     <div class="mb-3">
                         <label for="co2_g_per_kwh" class="form-label">
-                            CO₂ (g/kWh) <small class="text-muted">leer lassen = automatisch via ENTSO-E</small>
+                            {{ t('input.co2_gkwh') }} <small class="text-muted">{{ t('input.co2_auto') }}</small>
                         </label>
                         <div class="input-group">
                             <input type="number" class="form-control" id="co2_g_per_kwh" name="co2_g_per_kwh"
                                    min="0" max="1500" placeholder="automatisch" inputmode="numeric">
                             <button type="button" class="btn btn-outline-secondary" id="btnFetchCo2"
-                                    title="CO₂ von ENTSO-E holen">
+                                    title="{{ t('input.co2_fetch') }}">
                                 <i class="bi bi-cloud-download"></i>
                             </button>
                         </div>
@@ -148,19 +148,19 @@
 
                     <!-- Notizen -->
                     <div class="mb-3">
-                        <label for="notes" class="form-label">Notizen <small class="text-muted">optional</small></label>
+                        <label for="notes" class="form-label">{{ t('input.notes') }} <small class="text-muted">{{ t('input.optional') }}</small></label>
                         <input type="text" class="form-control" id="notes" name="notes"
-                               placeholder="z.B. Ladestation, Ort...">
+                               placeholder="{{ t('input.notes_placeholder') }}">
                     </div>
 
                     <button type="submit" class="btn btn-success btn-lg w-100">
-                        <i class="bi bi-check-circle"></i> Speichern
+                        <i class="bi bi-check-circle"></i> {{ t('input.save') }}
                     </button>
                 </form>
 
                 {% if last_charge %}
                 <div class="mt-3 p-2 bg-light rounded small">
-                    <strong>Letzte Ladung:</strong>
+                    <strong>{{ t('input.last_charge') }}</strong>
                     {{ last_charge.date.strftime('%d.%m.%Y') }} —
                     {{ last_charge.kwh_loaded }} kWh ({{ last_charge.charge_type }}) —
                     €{{ "%.2f"|format(last_charge.total_cost or 0) }}
@@ -180,6 +180,20 @@ const pvCo2 = {{ pv_co2 }};
 const pvPrice = {{ pv_price }};
 let chargeStartTime = null;
 let timerInterval = null;
+
+const T = {
+    enter_date_first: {{ t('input.enter_date_first')|tojson }},
+    error_prefix: {{ t('input.error_prefix')|tojson }},
+    no_data: {{ t('input.no_data')|tojson }},
+    started: {{ t('input.started')|tojson }},
+    stopped: {{ t('input.stopped')|tojson }},
+    ready_to_save: {{ t('input.ready_to_save')|tojson }},
+    from_soc: {{ t('input.from_soc')|tojson }},
+    current: {{ t('input.current')|tojson }},
+    from_time: {{ t('input.from_time')|tojson }},
+    hours_covered: {{ t('input.hours_covered')|tojson }},
+    confirm_delete: {{ t('input.confirm_delete')|tojson }},
+};
 
 // Sync charge_type radio to hidden input
 document.querySelectorAll('input[name="charge_type_select"]').forEach(radio => {
@@ -219,7 +233,7 @@ function calcKwh() {
         // From SoC: kWh = (socTo - socFrom) / 100 * battery_kwh
         const kwh = (socTo - socFrom) / 100 * BATTERY_KWH;
         document.getElementById('kwh_loaded').value = kwh.toFixed(3);
-        document.getElementById('kwhHint').textContent = '(aus SoC)';
+        document.getElementById('kwhHint').textContent = '(' + T.from_soc + ')';
         updateCalcPrice();
     }
 }
@@ -229,7 +243,7 @@ document.getElementById('soc_to').addEventListener('input', calcKwh);
 // Fetch CO2 from ENTSO-E
 document.getElementById('btnFetchCo2').addEventListener('click', async () => {
     const dateVal = document.getElementById('date').value;
-    if (!dateVal) { alert('Bitte zuerst ein Datum eingeben.'); return; }
+    if (!dateVal) { alert(T.enter_date_first); return; }
     const hourVal = document.getElementById('charge_hour').value;
     const btn = document.getElementById('btnFetchCo2');
     btn.innerHTML = '<span class="spinner-border spinner-border-sm"></span>';
@@ -242,10 +256,10 @@ document.getElementById('btnFetchCo2').addEventListener('click', async () => {
         if (data.co2_g_per_kwh) {
             document.getElementById('co2_g_per_kwh').value = data.co2_g_per_kwh;
         } else {
-            alert(data.error || 'Keine Daten verfügbar.');
+            alert(data.error || T.no_data);
         }
     } catch (e) {
-        alert('Fehler: ' + e.message);
+        alert(T.error_prefix + e.message);
     } finally {
         btn.innerHTML = '<i class="bi bi-cloud-download"></i>';
         btn.disabled = false;
@@ -275,11 +289,11 @@ const CHARGE_KEY = 'ev_charge_session';
                 document.getElementById('chargeTypeHidden').value = saved.chargeType;
             }
             btnStart.disabled = true;
-            btnStart.innerHTML = '<i class="bi bi-check-circle"></i> Gestartet';
+            btnStart.innerHTML = '<i class="bi bi-check-circle"></i> ' + T.started;
             btnStart.classList.replace('btn-success', 'btn-secondary');
             if (saved.stopped) {
                 btnStop.disabled = true;
-                btnStop.innerHTML = '<i class="bi bi-check-circle"></i> Gestoppt';
+                btnStop.innerHTML = '<i class="bi bi-check-circle"></i> ' + T.stopped;
                 btnStop.classList.replace('btn-danger', 'btn-secondary');
             } else {
                 btnStop.disabled = false;
@@ -370,7 +384,7 @@ btnStart.addEventListener('click', async () => {
         }));
 
         btnStart.disabled = true;
-        btnStart.innerHTML = '<i class="bi bi-check-circle"></i> Gestartet';
+        btnStart.innerHTML = '<i class="bi bi-check-circle"></i> ' + T.started;
         btnStart.classList.replace('btn-success', 'btn-secondary');
         btnStop.disabled = false;
         timerEl.style.display = '';
@@ -378,7 +392,7 @@ btnStart.addEventListener('click', async () => {
         startTimer();
         startAutoPolling();
     } catch(e) {
-        alert('Fehler: ' + e.message);
+        alert(T.error_prefix + e.message);
     }
 });
 
@@ -407,7 +421,7 @@ async function autoCheck() {
 
         // Update SoC live display
         if (d.soc != null) {
-            document.getElementById('kwhHint').textContent = '(aktuell: ' + d.soc + '%)';
+            document.getElementById('kwhHint').textContent = '(' + T.current + d.soc + '%)';
         }
 
         // Auto-stop conditions
@@ -432,7 +446,7 @@ async function doStop(data) {
         try {
             data = await fetchVehicle(btnStop);
         } catch(e) {
-            alert('Fehler: ' + e.message);
+            alert(T.error_prefix + e.message);
             return;
         }
     }
@@ -446,13 +460,13 @@ async function doStop(data) {
     if (!isNaN(socFrom) && !isNaN(socTo) && socTo > socFrom) {
         const kwh = (socTo - socFrom) / 100 * BATTERY_KWH;
         document.getElementById('kwh_loaded').value = kwh.toFixed(3);
-        document.getElementById('kwhHint').textContent = '(aus SoC)';
+        document.getElementById('kwhHint').textContent = '(' + T.from_soc + ')';
     } else if (chargeStartTime) {
         const type = document.getElementById('chargeTypeHidden').value;
         if (type === 'AC') {
             const hours = (Date.now() - chargeStartTime.getTime()) / 3600000;
             document.getElementById('kwh_loaded').value = (hours * MAX_AC_KW).toFixed(3);
-            document.getElementById('kwhHint').textContent = '(aus Zeit × ' + MAX_AC_KW + ' kW)';
+            document.getElementById('kwhHint').textContent = '(' + T.from_time + ' × ' + MAX_AC_KW + ' kW)';
         }
     }
     updateCalcPrice();
@@ -467,7 +481,7 @@ async function doStop(data) {
             const co2d = await co2r.json();
             if (co2d.co2_g_per_kwh) {
                 document.getElementById('co2_g_per_kwh').value = co2d.co2_g_per_kwh;
-                document.getElementById('co2_g_per_kwh').title = co2d.hours_covered + '/' + co2d.hours_total + ' Stunden abgedeckt';
+                document.getElementById('co2_g_per_kwh').title = co2d.hours_covered + '/' + co2d.hours_total + ' ' + T.hours_covered;
             }
         } catch(e) { console.error('CO2 range fetch error:', e); }
     }
@@ -482,9 +496,9 @@ async function doStop(data) {
     chargeStartTime = null;
 
     btnStop.disabled = true;
-    btnStop.innerHTML = '<i class="bi bi-check-circle"></i> Gestoppt';
+    btnStop.innerHTML = '<i class="bi bi-check-circle"></i> ' + T.stopped;
     btnStop.classList.replace('btn-danger', 'btn-secondary');
-    timerDisplay.insertAdjacentHTML('afterend', ' <span class="badge bg-info">Bereit zum Speichern</span>');
+    timerDisplay.insertAdjacentHTML('afterend', ' <span class="badge bg-info">' + T.ready_to_save + '</span>');
 }
 
 btnStop.addEventListener('click', async () => {
@@ -493,7 +507,7 @@ btnStop.addEventListener('click', async () => {
         const data = await fetchVehicle(btnStop);
         await doStop(data);
     } catch(e) {
-        alert('Fehler: ' + e.message);
+        alert(T.error_prefix + e.message);
     }
 });
 

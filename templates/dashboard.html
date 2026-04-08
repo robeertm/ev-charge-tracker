@@ -8,9 +8,9 @@
 {% if not stats %}
 <div class="text-center py-5">
     <i class="bi bi-database-x display-1 text-muted"></i>
-    <h3 class="mt-3 text-muted">Noch keine Daten vorhanden</h3>
-    <p class="text-muted">Importiere deine Google Sheet Daten oder erfasse den ersten Ladevorgang.</p>
-    <a href="/input" class="btn btn-primary btn-lg mt-2"><i class="bi bi-plus-circle"></i> Erste Ladung erfassen</a>
+    <h3 class="mt-3 text-muted">{{ t('dash.no_data') }}</h3>
+    <p class="text-muted">{{ t('dash.no_data_hint') }}</p>
+    <a href="/input" class="btn btn-primary btn-lg mt-2"><i class="bi bi-plus-circle"></i> {{ t('dash.first_charge') }}</a>
     <a href="/settings" class="btn btn-outline-secondary btn-lg mt-2"><i class="bi bi-gear"></i> Einstellungen</a>
 </div>
 {% else %}
@@ -22,90 +22,90 @@
         <div class="d-flex align-items-center justify-content-between mb-2">
             <span class="fw-bold small"><i class="bi bi-car-front"></i> <span id="vName">{{ car_model }}</span></span>
             <span>
-                <button class="btn btn-outline-info btn-sm py-0 px-2" id="btnRefreshVehicle" style="font-size:0.75rem" title="Letzter Stand vom Server">
-                    <i class="bi bi-arrow-repeat"></i> Cached
+                <button class="btn btn-outline-info btn-sm py-0 px-2" id="btnRefreshVehicle" style="font-size:0.75rem" title="{{ t('dash.cached_title') }}">
+                    <i class="bi bi-arrow-repeat"></i> {{ t('dash.cached') }}
                 </button>
-                <button class="btn btn-outline-warning btn-sm py-0 px-2" id="btnForceVehicle" style="font-size:0.75rem" title="Auto aufwecken — frische Daten (verbraucht 12V)">
-                    <i class="bi bi-broadcast"></i> Live
+                <button class="btn btn-outline-warning btn-sm py-0 px-2" id="btnForceVehicle" style="font-size:0.75rem" title="{{ t('dash.live_title') }}">
+                    <i class="bi bi-broadcast"></i> {{ t('dash.live') }}
                 </button>
             </span>
         </div>
         <div class="row g-2 text-center" id="vehicleData" style="display:none">
             <div class="col-4 col-md-2">
-                <div class="small text-muted">Batterie</div>
+                <div class="small text-muted">{{ t('dash.battery') }}</div>
                 <div class="fw-bold" id="vSoc">—</div>
                 <div class="progress" style="height:6px"><div class="progress-bar bg-success" id="vSocBar" style="width:0%"></div></div>
             </div>
             <div class="col-4 col-md-2">
-                <div class="small text-muted">Reichweite</div>
+                <div class="small text-muted">{{ t('dash.range') }}</div>
                 <div class="fw-bold" id="vRange">—</div>
             </div>
             <div class="col-4 col-md-2">
-                <div class="small text-muted">Tacho</div>
+                <div class="small text-muted">{{ t('dash.odometer') }}</div>
                 <div class="fw-bold" id="vOdo">—</div>
             </div>
             <div class="col-4 col-md-2">
-                <div class="small text-muted">Status</div>
+                <div class="small text-muted">{{ t('dash.status') }}</div>
                 <div class="fw-bold" id="vStatus">—</div>
             </div>
             <div class="col-4 col-md-2">
-                <div class="small text-muted">12V</div>
+                <div class="small text-muted">{{ t('dash.v12') }}</div>
                 <div class="fw-bold" id="v12v">—</div>
             </div>
             <div class="col-4 col-md-2">
-                <div class="small text-muted">Klima</div>
+                <div class="small text-muted">{{ t('dash.climate') }}</div>
                 <div class="fw-bold" id="vClimate">—</div>
             </div>
         </div>
         <div class="row g-2 text-center mt-1" id="vehicleData2" style="display:none">
             <div class="col-4 col-md-2">
-                <div class="small text-muted">Ladelimit AC</div>
+                <div class="small text-muted">{{ t('dash.charge_limit_ac') }}</div>
                 <div class="fw-bold" id="vLimitAC">—</div>
             </div>
             <div class="col-4 col-md-2">
-                <div class="small text-muted">Ladelimit DC</div>
+                <div class="small text-muted">{{ t('dash.charge_limit_dc') }}</div>
                 <div class="fw-bold" id="vLimitDC">—</div>
             </div>
             <div class="col-4 col-md-2">
-                <div class="small text-muted">Ladezeit AC</div>
+                <div class="small text-muted">{{ t('dash.charge_time_ac') }}</div>
                 <div class="fw-bold" id="vChargeTime">—</div>
             </div>
             <div class="col-4 col-md-2">
-                <div class="small text-muted">Ladezeit DC</div>
+                <div class="small text-muted">{{ t('dash.charge_time_dc') }}</div>
                 <div class="fw-bold" id="vFastChargeTime">—</div>
             </div>
             <div class="col-4 col-md-2">
-                <div class="small text-muted">SoH</div>
+                <div class="small text-muted">{{ t('dash.soh') }}</div>
                 <div class="fw-bold" id="vSoH">—</div>
             </div>
             <div class="col-4 col-md-2">
-                <div class="small text-muted">Rekuperiert</div>
+                <div class="small text-muted">{{ t('dash.regenerated') }}</div>
                 <div class="fw-bold" id="vRegen">—</div>
             </div>
         </div>
         <div class="row g-2 text-center mt-1" id="vehicleData3" style="display:none">
             <div class="col-4 col-md-2">
-                <div class="small text-muted">Türen</div>
+                <div class="small text-muted">{{ t('dash.doors') }}</div>
                 <div class="fw-bold" id="vDoors">—</div>
             </div>
             <div class="col-4 col-md-2">
-                <div class="small text-muted">Reifen</div>
+                <div class="small text-muted">{{ t('dash.tires') }}</div>
                 <div class="fw-bold" id="vTires">—</div>
             </div>
             <div class="col-4 col-md-2">
-                <div class="small text-muted">Ø 30 Tage</div>
+                <div class="small text-muted">{{ t('dash.avg_30d') }}</div>
                 <div class="fw-bold" id="vConsumption30d">—</div>
             </div>
             <div class="col-4 col-md-2">
-                <div class="small text-muted">Schuko-Ladezeit</div>
+                <div class="small text-muted">{{ t('dash.portable_charge') }}</div>
                 <div class="fw-bold" id="vPortableCharge">—</div>
             </div>
             <div class="col-4 col-md-2">
-                <div class="small text-muted">Zulassung</div>
+                <div class="small text-muted">{{ t('dash.registration') }}</div>
                 <div class="fw-bold" id="vRegDate">—</div>
             </div>
             <div class="col-4 col-md-2">
-                <div class="small text-muted">Standort</div>
+                <div class="small text-muted">{{ t('dash.location') }}</div>
                 <div class="fw-bold" id="vLocation">—</div>
             </div>
         </div>
@@ -114,6 +114,21 @@
 </div>
 <script>
 (function() {
+    const T = {
+        charging: '{{ t("dash.charging") }}',
+        plugged_in: '{{ t("dash.plugged_in") }}',
+        locked: '{{ t("dash.locked") }}',
+        open: '{{ t("dash.open") }}',
+        climate_off: '{{ t("dash.climate_off") }}',
+        vehicle_prefix: '{{ t("dash.vehicle_prefix") }}',
+        api_prefix: '{{ t("dash.api_prefix") }}',
+        trunk: '{{ t("dash.trunk") }}',
+        hood: '{{ t("dash.hood") }}',
+        all_closed: '{{ t("dash.all_closed") }}',
+        tire_warning: '{{ t("dash.tire_warning") }}',
+        tire_ok: '{{ t("dash.tire_ok") }}',
+        map: '{{ t("dash.map") }}',
+    };
     const btn = document.getElementById('btnRefreshVehicle');
     const btnForce = document.getElementById('btnForceVehicle');
     const CACHE_KEY = 'ev_vehicle_data';
@@ -131,12 +146,12 @@
         }
         if (d.range_km != null) document.getElementById('vRange').textContent = d.range_km + ' km';
         if (d.odometer != null) document.getElementById('vOdo').textContent = d.odometer.toLocaleString('de') + ' km';
-        let status = d.is_charging ? '<span class="text-success">Lädt</span>' :
-                     d.is_plugged_in ? '<span class="text-info">Eingesteckt</span>' :
-                     d.is_locked ? '<span class="text-secondary">Verriegelt</span>' : '<span class="text-warning">Offen</span>';
+        let status = d.is_charging ? '<span class="text-success">' + T.charging + '</span>' :
+                     d.is_plugged_in ? '<span class="text-info">' + T.plugged_in + '</span>' :
+                     d.is_locked ? '<span class="text-secondary">' + T.locked + '</span>' : '<span class="text-warning">' + T.open + '</span>';
         document.getElementById('vStatus').innerHTML = status;
         if (d.battery_12v != null) document.getElementById('v12v').textContent = d.battery_12v + '%';
-        document.getElementById('vClimate').innerHTML = d.climate_on ? '<span class="text-success">' + (d.climate_temp || '') + '°C</span>' : 'Aus';
+        document.getElementById('vClimate').innerHTML = d.climate_on ? '<span class="text-success">' + (d.climate_temp || '') + '°C</span>' : T.climate_off;
         document.getElementById('vLimitAC').textContent = d.charge_limit_ac != null ? d.charge_limit_ac + '%' : '—';
         document.getElementById('vLimitDC').textContent = d.charge_limit_dc != null ? d.charge_limit_dc + '%' : '—';
         document.getElementById('vChargeTime').textContent = d.est_charge_min != null ? d.est_charge_min + ' min' : '—';
@@ -157,10 +172,10 @@
                 let open = [];
                 if (dr.fl) open.push('VL'); if (dr.fr) open.push('VR');
                 if (dr.bl) open.push('HL'); if (dr.br) open.push('HR');
-                if (dr.trunk) open.push('Kofferr.'); if (dr.hood) open.push('Motorh.');
+                if (dr.trunk) open.push(T.trunk); if (dr.hood) open.push(T.hood);
                 document.getElementById('vDoors').innerHTML = '<span class="text-danger"><i class="bi bi-exclamation-triangle"></i> ' + open.join(', ') + '</span>';
             } else {
-                document.getElementById('vDoors').innerHTML = '<span class="text-success"><i class="bi bi-check-circle"></i> Alle zu</span>';
+                document.getElementById('vDoors').innerHTML = '<span class="text-success"><i class="bi bi-check-circle"></i> ' + T.all_closed + '</span>';
             }
         }
         if (d.tires) {
@@ -168,20 +183,20 @@
                 let warn = [];
                 if (d.tires.fl) warn.push('VL'); if (d.tires.fr) warn.push('VR');
                 if (d.tires.rl) warn.push('HL'); if (d.tires.rr) warn.push('HR');
-                document.getElementById('vTires').innerHTML = '<span class="text-danger"><i class="bi bi-exclamation-triangle"></i> ' + (warn.length ? warn.join(', ') : 'Warnung') + '</span>';
+                document.getElementById('vTires').innerHTML = '<span class="text-danger"><i class="bi bi-exclamation-triangle"></i> ' + (warn.length ? warn.join(', ') : T.tire_warning) + '</span>';
             } else {
-                document.getElementById('vTires').innerHTML = '<span class="text-success"><i class="bi bi-check-circle"></i> OK</span>';
+                document.getElementById('vTires').innerHTML = '<span class="text-success"><i class="bi bi-check-circle"></i> ' + T.tire_ok + '</span>';
             }
         }
         if (d.consumption_30d) document.getElementById('vConsumption30d').textContent = (d.consumption_30d / 10).toFixed(1) + ' kWh/100km';  // Wh/km → kWh/100km = /10
         document.getElementById('vPortableCharge').textContent = d.est_portable_charge_min != null ? Math.round(d.est_portable_charge_min / 60) + 'h ' + (d.est_portable_charge_min % 60) + 'min' : '—';
         if (d.registration_date) document.getElementById('vRegDate').textContent = new Date(d.registration_date).toLocaleDateString('de');
         if (d.location_lat && d.location_lon) {
-            document.getElementById('vLocation').innerHTML = '<a href="https://www.google.com/maps?q=' + d.location_lat + ',' + d.location_lon + '" target="_blank" class="text-decoration-none"><i class="bi bi-geo-alt"></i> Karte</a>';
+            document.getElementById('vLocation').innerHTML = '<a href="https://www.google.com/maps?q=' + d.location_lat + ',' + d.location_lon + '" target="_blank" class="text-decoration-none"><i class="bi bi-geo-alt"></i> ' + T.map + '</a>';
         }
         let updParts = [];
-        if (d.last_updated) updParts.push('Fahrzeug: ' + new Date(d.last_updated).toLocaleString('de'));
-        if (d.api_calls_today) updParts.push('API: ' + d.api_calls_today + '/200');
+        if (d.last_updated) updParts.push(T.vehicle_prefix + ' ' + new Date(d.last_updated).toLocaleString('de'));
+        if (d.api_calls_today) updParts.push(T.api_prefix + ' ' + d.api_calls_today + '/200');
         document.getElementById('vUpdated').innerHTML = '<span class="text-muted">' + updParts.join(' · ') + '</span>';
     }
 
@@ -224,10 +239,10 @@
     <div class="col-6 col-lg-3">
         <div class="card kpi-card border-primary">
             <div class="card-body text-center p-2">
-                <div class="kpi-label">Ladekosten</div>
+                <div class="kpi-label">{{ t('dash.total_cost') }}</div>
                 <div class="kpi-value text-primary">€{{ "{:,.0f}".format(stats.total_cost).replace(",", ".") }}</div>
                 {% if stats.total_thg_eur > 0 %}
-                <div class="kpi-label mt-1" style="text-transform:none; letter-spacing:0">Netto: €{{ "{:,.0f}".format(stats.net_cost).replace(",", ".") }} (THG −€{{ "{:,.0f}".format(stats.total_thg_eur).replace(",", ".") }})</div>
+                <div class="kpi-label mt-1" style="text-transform:none; letter-spacing:0">{{ t('dash.net') }}: €{{ "{:,.0f}".format(stats.net_cost).replace(",", ".") }} ({{ t('dash.thg') }} −€{{ "{:,.0f}".format(stats.total_thg_eur).replace(",", ".") }})</div>
                 {% endif %}
             </div>
         </div>
@@ -235,7 +250,7 @@
     <div class="col-6 col-lg-3">
         <div class="card kpi-card border-info">
             <div class="card-body text-center p-2">
-                <div class="kpi-label">Geladen</div>
+                <div class="kpi-label">{{ t('dash.total_kwh') }}</div>
                 <div class="kpi-value text-info">{{ "{:,.0f}".format(stats.total_kwh).replace(",", ".") }} kWh</div>
                 <div class="kpi-label mt-1" style="text-transform:none; letter-spacing:0">{{ stats.total_charges }}× · Ø €{{ "%.2f"|format(stats.avg_eur_per_kwh) }}/kWh</div>
             </div>
@@ -244,18 +259,18 @@
     <div class="col-6 col-lg-3">
         <div class="card kpi-card border-danger">
             <div class="card-body text-center p-2">
-                <div class="kpi-label">CO₂</div>
+                <div class="kpi-label">{{ t('dash.co2') }}</div>
                 <div class="kpi-value text-danger">{{ "{:,.0f}".format(stats.total_co2_kg).replace(",", ".") }} kg</div>
-                <div class="kpi-label mt-1" style="text-transform:none; letter-spacing:0">{{ stats.co2_savings_pct }}% weniger als Verbrenner</div>
+                <div class="kpi-label mt-1" style="text-transform:none; letter-spacing:0">{{ stats.co2_savings_pct }}% {{ t('dash.less_than_ice') }}</div>
             </div>
         </div>
     </div>
     <div class="col-6 col-lg-3">
         <div class="card kpi-card border-secondary">
             <div class="card-body text-center p-2">
-                <div class="kpi-label">Ladezyklen</div>
+                <div class="kpi-label">{{ t('dash.charge_cycles') }}</div>
                 <div class="kpi-value text-secondary">{{ stats.charge_cycles + stats.recup_cycles }}</div>
-                <div class="kpi-label mt-1" style="text-transform:none; letter-spacing:0">{{ stats.charge_cycles }} Laden + {{ stats.recup_cycles }} Rekup.</div>
+                <div class="kpi-label mt-1" style="text-transform:none; letter-spacing:0">{{ stats.charge_cycles }} {{ t('dash.charging_label') }} + {{ stats.recup_cycles }} {{ t('dash.recup_label') }}</div>
             </div>
         </div>
     </div>
@@ -267,36 +282,36 @@
     <div class="col-6 col-lg-3">
         <div class="card kpi-card border-primary">
             <div class="card-body text-center p-2">
-                <div class="kpi-label">Tachostand</div>
+                <div class="kpi-label">{{ t('dash.odometer_label') }}</div>
                 <div class="kpi-value text-primary">{{ "{:,.0f}".format(stats.total_km).replace(",", ".") }} km</div>
-                <div class="kpi-label mt-1" style="text-transform:none; letter-spacing:0">{{ "%.2f"|format(stats.cost_per_100km) }} €/100km{% if stats.total_thg_eur > 0 %} (netto {{ "%.2f"|format(stats.net_cost_per_100km) }}){% endif %}</div>
+                <div class="kpi-label mt-1" style="text-transform:none; letter-spacing:0">{{ "%.2f"|format(stats.cost_per_100km) }} €/100km{% if stats.total_thg_eur > 0 %} ({{ t('dash.net') | lower }} {{ "%.2f"|format(stats.net_cost_per_100km) }}){% endif %}</div>
             </div>
         </div>
     </div>
     <div class="col-6 col-lg-3">
         <div class="card kpi-card border-warning">
             <div class="card-body text-center p-2">
-                <div class="kpi-label">Verbrauch</div>
+                <div class="kpi-label">{{ t('dash.consumption') }}</div>
                 <div class="kpi-value text-warning">{{ "%.1f"|format(stats.consumption_with_recup) }}<small> kWh/100km</small></div>
-                <div class="kpi-label mt-1" style="text-transform:none; letter-spacing:0">Ohne Rekup.: {{ "%.1f"|format(stats.consumption_without_recup) }} kWh/100km</div>
+                <div class="kpi-label mt-1" style="text-transform:none; letter-spacing:0">{{ t('dash.without_recup') }} {{ "%.1f"|format(stats.consumption_without_recup) }} kWh/100km</div>
             </div>
         </div>
     </div>
     <div class="col-6 col-lg-3">
         <div class="card kpi-card border-success">
             <div class="card-body text-center p-2">
-                <div class="kpi-label">Rekuperation</div>
+                <div class="kpi-label">{{ t('dash.recuperation') }}</div>
                 <div class="kpi-value text-success">{{ "{:,.0f}".format(stats.total_recuperation).replace(",", ".") }} kWh</div>
-                <div class="kpi-label mt-1" style="text-transform:none; letter-spacing:0">{{ stats.recup_cycles }} Zyklen · {{ "%.3f"|format(stats.total_recuperation / stats.total_km) }} kWh/km</div>
+                <div class="kpi-label mt-1" style="text-transform:none; letter-spacing:0">{{ stats.recup_cycles }} {{ t('dash.cycles') }} · {{ "%.3f"|format(stats.total_recuperation / stats.total_km) }} kWh/km</div>
             </div>
         </div>
     </div>
     <div class="col-6 col-lg-3">
         <div class="card kpi-card border-secondary">
             <div class="card-body text-center p-2">
-                <div class="kpi-label">km durch Rekuperation</div>
+                <div class="kpi-label">{{ t('dash.km_by_recup') }}</div>
                 <div class="kpi-value text-secondary">{{ "{:,.0f}".format(stats.recup_extra_km).replace(",", ".") }} km</div>
-                <div class="kpi-label mt-1" style="text-transform:none; letter-spacing:0">{{ "%.1f"|format(stats.recup_extra_km / stats.total_km * 100) }}% der Gesamtstrecke</div>
+                <div class="kpi-label mt-1" style="text-transform:none; letter-spacing:0">{{ "%.1f"|format(stats.recup_extra_km / stats.total_km * 100) }}% {{ t('dash.of_total') }}</div>
             </div>
         </div>
     </div>
@@ -308,7 +323,7 @@
     <div class="col-12">
         <div class="card">
             <div class="card-header bg-white fw-bold">
-                <i class="bi bi-graph-up"></i> Monatliche Ladekosten
+                <i class="bi bi-graph-up"></i> {{ t('dash.monthly_cost') }}
             </div>
             <div class="card-body">
                 <div style="position:relative; height:250px;"><canvas id="chartMonthlyCost"></canvas></div>
@@ -322,18 +337,18 @@
     <div class="col-lg-5">
         <div class="card h-100">
             <div class="card-header bg-white fw-bold">
-                <i class="bi bi-lightning-charge"></i> AC / DC / PV
+                <i class="bi bi-lightning-charge"></i> {{ t('dash.acdc_pv') }}
             </div>
             <div class="card-body">
                 {% if acdc %}
                 <table class="table table-sm mb-0">
                     <thead><tr><th></th><th class="text-success">AC</th><th class="text-warning">DC</th>{% if acdc.get('PV') %}<th class="text-info">PV</th>{% endif %}</tr></thead>
                     <tbody>
-                        <tr><td>Anzahl</td><td>{{ acdc.get('AC', {}).get('count', 0) }}</td><td>{{ acdc.get('DC', {}).get('count', 0) }}</td>{% if acdc.get('PV') %}<td>{{ acdc.PV.count }}</td>{% endif %}</tr>
-                        <tr><td>Ø €/kWh</td><td>{{ "%.2f"|format(acdc.get('AC', {}).get('avg_eur_per_kwh', 0)) }}</td><td>{{ "%.2f"|format(acdc.get('DC', {}).get('avg_eur_per_kwh', 0)) }}</td>{% if acdc.get('PV') %}<td>{{ "%.2f"|format(acdc.PV.avg_eur_per_kwh) }}</td>{% endif %}</tr>
-                        <tr><td>Gesamt kWh</td><td>{{ "{:,.0f}".format(acdc.get('AC', {}).get('total_kwh', 0)) }}</td><td>{{ "{:,.0f}".format(acdc.get('DC', {}).get('total_kwh', 0)) }}</td>{% if acdc.get('PV') %}<td>{{ "{:,.0f}".format(acdc.PV.total_kwh) }}</td>{% endif %}</tr>
-                        <tr><td>Gesamt €</td><td>{{ "{:,.0f}".format(acdc.get('AC', {}).get('total_cost', 0)) }}</td><td>{{ "{:,.0f}".format(acdc.get('DC', {}).get('total_cost', 0)) }}</td>{% if acdc.get('PV') %}<td>{{ "{:,.0f}".format(acdc.PV.total_cost) }}</td>{% endif %}</tr>
-                        <tr><td>Ø Verlust %</td><td>{{ acdc.get('AC', {}).get('avg_loss_pct', '-') }}</td><td>{{ acdc.get('DC', {}).get('avg_loss_pct', '-') }}</td>{% if acdc.get('PV') %}<td>{{ acdc.PV.avg_loss_pct }}</td>{% endif %}</tr>
+                        <tr><td>{{ t('dash.count') }}</td><td>{{ acdc.get('AC', {}).get('count', 0) }}</td><td>{{ acdc.get('DC', {}).get('count', 0) }}</td>{% if acdc.get('PV') %}<td>{{ acdc.PV.count }}</td>{% endif %}</tr>
+                        <tr><td>{{ t('dash.avg_eur_kwh') }}</td><td>{{ "%.2f"|format(acdc.get('AC', {}).get('avg_eur_per_kwh', 0)) }}</td><td>{{ "%.2f"|format(acdc.get('DC', {}).get('avg_eur_per_kwh', 0)) }}</td>{% if acdc.get('PV') %}<td>{{ "%.2f"|format(acdc.PV.avg_eur_per_kwh) }}</td>{% endif %}</tr>
+                        <tr><td>{{ t('dash.total_kwh_label') }}</td><td>{{ "{:,.0f}".format(acdc.get('AC', {}).get('total_kwh', 0)) }}</td><td>{{ "{:,.0f}".format(acdc.get('DC', {}).get('total_kwh', 0)) }}</td>{% if acdc.get('PV') %}<td>{{ "{:,.0f}".format(acdc.PV.total_kwh) }}</td>{% endif %}</tr>
+                        <tr><td>{{ t('dash.total_eur') }}</td><td>{{ "{:,.0f}".format(acdc.get('AC', {}).get('total_cost', 0)) }}</td><td>{{ "{:,.0f}".format(acdc.get('DC', {}).get('total_cost', 0)) }}</td>{% if acdc.get('PV') %}<td>{{ "{:,.0f}".format(acdc.PV.total_cost) }}</td>{% endif %}</tr>
+                        <tr><td>{{ t('dash.avg_loss') }}</td><td>{{ acdc.get('AC', {}).get('avg_loss_pct', '-') }}</td><td>{{ acdc.get('DC', {}).get('avg_loss_pct', '-') }}</td>{% if acdc.get('PV') %}<td>{{ acdc.PV.avg_loss_pct }}</td>{% endif %}</tr>
                     </tbody>
                 </table>
                 {% endif %}
@@ -343,11 +358,11 @@
     <div class="col-lg-7">
         <div class="card h-100">
             <div class="card-header bg-white fw-bold">
-                <i class="bi bi-calendar3"></i> Jährlich
+                <i class="bi bi-calendar3"></i> {{ t('dash.yearly') }}
             </div>
             <div class="card-body">
                 <table class="table table-sm mb-0">
-                    <thead><tr><th>Jahr</th><th>kWh</th><th>Kosten</th><th>THG</th><th>Netto</th></tr></thead>
+                    <thead><tr><th>{{ t('dash.year') }}</th><th>{{ t('dash.kwh') }}</th><th>{{ t('dash.cost') }}</th><th>{{ t('dash.thg') }}</th><th>{{ t('dash.net') }}</th></tr></thead>
                     <tbody>
                     {% for y in yearly %}
                         <tr>
@@ -370,7 +385,7 @@
     <div class="col-lg-6">
         <div class="card h-100">
             <div class="card-header bg-white fw-bold">
-                <i class="bi bi-graph-up-arrow"></i> Kumulierte Kosten
+                <i class="bi bi-graph-up-arrow"></i> {{ t('dash.cumulative_cost') }}
             </div>
             <div class="card-body">
                 <div style="position:relative; height:280px;"><canvas id="chartCumulative"></canvas></div>
@@ -380,7 +395,7 @@
     <div class="col-lg-6">
         <div class="card h-100">
             <div class="card-header bg-white fw-bold">
-                <i class="bi bi-lightning"></i> Monatliche kWh
+                <i class="bi bi-lightning"></i> {{ t('dash.monthly_kwh') }}
             </div>
             <div class="card-body">
                 <div style="position:relative; height:280px;"><canvas id="chartMonthlyKwh"></canvas></div>
@@ -394,7 +409,7 @@
     <div class="col-lg-6">
         <div class="card h-100">
             <div class="card-header bg-white fw-bold">
-                <i class="bi bi-cloud-haze2"></i> Monatliche CO₂-Emissionen
+                <i class="bi bi-cloud-haze2"></i> {{ t('dash.monthly_co2') }}
             </div>
             <div class="card-body">
                 <div style="position:relative; height:280px;"><canvas id="chartMonthlyCo2"></canvas></div>
@@ -404,7 +419,7 @@
     <div class="col-lg-6">
         <div class="card h-100">
             <div class="card-header bg-white fw-bold">
-                <i class="bi bi-graph-up-arrow"></i> CO₂-Ersparnis vs. Verbrenner
+                <i class="bi bi-graph-up-arrow"></i> {{ t('dash.co2_vs_ice') }}
             </div>
             <div class="card-body">
                 <div style="position:relative; height:280px;"><canvas id="chartCumulativeCo2"></canvas></div>
@@ -419,6 +434,17 @@
 {% block scripts %}
 {% if stats %}
 <script>
+const T = {
+    chart_cost_eur: '{{ t("dash.chart_cost_eur") }}',
+    chart_kwh_loaded: '{{ t("dash.chart_kwh_loaded") }}',
+    chart_co2_kg: '{{ t("dash.chart_co2_kg") }}',
+    chart_savings: '{{ t("dash.chart_savings") }}',
+    chart_battery_prod: '{{ t("dash.chart_battery_prod") }}',
+    chart_co2_savings: '{{ t("dash.chart_co2_savings") }}',
+    chart_battery_co2: '{{ t("dash.chart_battery_co2") }}',
+    chart_breakeven: '{{ t("dash.chart_breakeven") }}',
+    cumulative_cost: '{{ t("dash.cumulative_cost") }}',
+};
 const chartColors = {
     primary: 'rgba(33, 150, 243, 0.8)',
     primaryLight: 'rgba(33, 150, 243, 0.2)',
@@ -449,7 +475,7 @@ new Chart(document.getElementById('chartMonthlyCost'), {
     data: {
         labels: labels,
         datasets: [{
-            label: 'Kosten (€)',
+            label: T.chart_cost_eur,
             data: monthlyCostData,
             backgroundColor: chartColors.primary,
             borderRadius: isMobile ? 2 : 4,
@@ -479,7 +505,7 @@ new Chart(document.getElementById('chartCumulative'), {
     data: {
         labels: {{ chart_data.cumulative_labels | tojson }},
         datasets: [{
-            label: 'Kumulierte Kosten (€)',
+            label: T.cumulative_cost + ' (€)',
             data: {{ chart_data.cumulative_cost | tojson }},
             borderColor: chartColors.danger,
             backgroundColor: 'rgba(244, 67, 54, 0.1)',
@@ -505,7 +531,7 @@ new Chart(document.getElementById('chartMonthlyKwh'), {
     data: {
         labels: labels,
         datasets: [{
-            label: 'kWh geladen',
+            label: T.chart_kwh_loaded,
             data: monthlyKwhData,
             backgroundColor: chartColors.success,
             borderRadius: isMobile ? 2 : 4,
@@ -537,7 +563,7 @@ new Chart(document.getElementById('chartMonthlyCo2'), {
     data: {
         labels: labels,
         datasets: [{
-            label: 'CO₂ (kg)',
+            label: T.chart_co2_kg,
             data: monthlyCo2Data,
             backgroundColor: chartColors.warning,
             borderRadius: isMobile ? 2 : 4,
@@ -569,7 +595,7 @@ new Chart(document.getElementById('chartCumulativeCo2'), {
     data: {
         labels: savingsLabels,
         datasets: [{
-            label: isMobile ? 'Ersparnis' : 'CO₂-Ersparnis kumuliert (kg)',
+            label: isMobile ? T.chart_savings : T.chart_co2_savings,
             data: {{ chart_data.cumulative_co2_savings | tojson }},
             borderColor: chartColors.success,
             backgroundColor: 'rgba(76, 175, 80, 0.1)',
@@ -577,7 +603,7 @@ new Chart(document.getElementById('chartCumulativeCo2'), {
             tension: 0.3,
             ...mobilePoint,
         }, {
-            label: isMobile ? 'Akkuprod.' : 'Akkuproduktion CO₂ (kg)',
+            label: isMobile ? T.chart_battery_prod : T.chart_battery_co2,
             data: savingsLabels.map(() => batteryProductionCo2),
             borderColor: chartColors.danger,
             borderDash: [8, 4],
@@ -595,9 +621,9 @@ new Chart(document.getElementById('chartCumulativeCo2'), {
                         if (context[0].datasetIndex === 0) {
                             const savings = context[0].raw;
                             if (savings >= batteryProductionCo2) {
-                                return 'Break-Even erreicht!';
+                                return T.chart_breakeven;
                             } else {
-                                return 'Noch ' + (batteryProductionCo2 - savings).toLocaleString('de-DE', {maximumFractionDigits: 0}) + ' kg';
+                                return (batteryProductionCo2 - savings).toLocaleString('de-DE', {maximumFractionDigits: 0}) + ' kg';
                             }
                         }
                     }

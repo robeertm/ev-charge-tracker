@@ -7,6 +7,7 @@ from flask import Flask, render_template, request, redirect, url_for, flash, jso
 
 from models.database import db, Charge, AppConfig, ThgQuota, VehicleSync
 from config import Config
+from services.i18n import t
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -31,6 +32,10 @@ def create_app(config_class=Config):
             db.session.commit()
 
     register_routes(app)
+
+    # Initialize i18n
+    from services.i18n import init_app as init_i18n
+    init_i18n(app)
 
     # Auto-start vehicle sync if configured
     try:
@@ -124,7 +129,7 @@ def register_routes(app):
                     if charge.charge_type == 'PV':
                         charge.co2_g_per_kwh = _get_pv_co2()
                         charge.calculate_fields(_get_battery_kwh())
-                        flash(f'PV CO₂-Wert: {charge.co2_g_per_kwh} g/kWh', 'info')
+                        flash(t('flash.pv_co2_set', value=charge.co2_g_per_kwh), 'info')
                     else:
                         api_key = AppConfig.get('entsoe_api_key', Config.ENTSOE_API_KEY)
                         if api_key:
@@ -134,17 +139,17 @@ def register_routes(app):
                                 charge.co2_g_per_kwh = co2
                                 charge.calculate_fields(_get_battery_kwh())
                                 hour_label = f" ({charge.charge_hour}:00 Uhr)" if charge.charge_hour is not None else ""
-                                flash(f'CO₂-Intensität automatisch von ENTSO-E geholt: {co2} g/kWh{hour_label}', 'info')
+                                flash(t('flash.co2_fetched', value=co2, hour=hour_label), 'info')
 
                 db.session.add(charge)
                 db.session.commit()
                 cost_str = f'€{charge.total_cost:.2f}' if charge.total_cost is not None else '€—'
-                flash(f'Ladevorgang vom {charge.date.strftime("%d.%m.%Y")} gespeichert! ({charge.kwh_loaded or 0} kWh, {cost_str})', 'success')
+                flash(t('flash.charge_saved', date=charge.date.strftime("%d.%m.%Y"), kwh=charge.kwh_loaded or 0, cost=cost_str), 'success')
                 return redirect(url_for('input_charge'))
 
             except Exception as e:
                 logger.error(f"Error saving charge: {e}")
-                flash(f'Fehler beim Speichern: {e}', 'danger')
+                flash(t('flash.save_error', error=e), 'danger')
 
         # Pre-fill date with today
         last_charge = Charge.query.order_by(Charge.date.desc()).first()
@@ -204,10 +209,10 @@ def register_routes(app):
                 charge.notes = request.form.get('notes', '').strip() or None
                 charge.calculate_fields(_get_battery_kwh())
                 db.session.commit()
-                flash('Eintrag aktualisiert!', 'success')
+                flash(t('flash.entry_updated'), 'success')
                 return redirect(url_for('history'))
             except Exception as e:
-                flash(f'Fehler: {e}', 'danger')
+                flash(t('flash.error', error=e), 'danger')
 
         return render_template('edit.html', charge=charge)
 
@@ -216,7 +221,7 @@ def register_routes(app):
         charge = Charge.query.get_or_404(charge_id)
         db.session.delete(charge)
         db.session.commit()
-        flash('Eintrag gelöscht.', 'warning')
+        flash(t('flash.entry_deleted'), 'warning')
         return redirect(url_for('history'))
 
     # ── SETTINGS ───────────────────────────────────────────────
@@ -228,18 +233,25 @@ def register_routes(app):
             if action == 'save_entsoe':
                 key = request.form.get('entsoe_key', '').strip()
                 AppConfig.set('entsoe_api_key', key)
-                flash('ENTSO-E API Key gespeichert!', 'success')
+                flash(t('flash.entsoe_saved'), 'success')
 
             elif action == 'test_entsoe':
                 key = AppConfig.get('entsoe_api_key', '')
                 if key:
                     from services.entsoe_service import test_api_key
                     if test_api_key(key):
-                        flash('ENTSO-E API Key ist gültig! ✓', 'success')
+                        flash(t('flash.entsoe_valid'), 'success')
                     else:
-                        flash('ENTSO-E API Key ungültig oder API nicht erreichbar.', 'danger')
+                        flash(t('flash.entsoe_invalid'), 'danger')
                 else:
-                    flash('Kein API Key hinterlegt.', 'warning')
+                    flash(t('flash.entsoe_missing_key'), 'warning')
+
+            elif action == 'save_language':
+                lang = request.form.get('app_language', 'de')
+                AppConfig.set('app_language', lang)
+                from services.i18n import set_language
+                set_language(lang)
+                return redirect(url_for('settings'))
 
             elif action == 'save_car':
                 AppConfig.set('car_model', request.form.get('car_model', '').strip())
@@ -248,7 +260,7 @@ def register_routes(app):
                 AppConfig.set('battery_co2_per_kwh', request.form.get('battery_co2_per_kwh', ''))
                 AppConfig.set('fossil_co2_per_km', request.form.get('fossil_co2_per_km', ''))
                 AppConfig.set('recuperation_kwh_per_km', request.form.get('recuperation_kwh_per_km', ''))
-                flash('Fahrzeugdaten gespeichert!', 'success')
+                flash(t('flash.vehicle_saved'), 'success')
 
             elif action == 'save_pv':
                 AppConfig.set('pv_kwp', request.form.get('pv_kwp', ''))
@@ -256,7 +268,7 @@ def register_routes(app):
                 AppConfig.set('pv_lifetime', request.form.get('pv_lifetime', ''))
                 AppConfig.set('pv_production_co2', request.form.get('pv_production_co2', ''))
                 AppConfig.set('pv_price_eur_per_kwh', request.form.get('pv_price_eur_per_kwh', ''))
-                flash('PV-Anlage gespeichert!', 'success')
+                flash(t('flash.pv_saved'), 'success')
 
             elif action == 'add_thg':
                 try:
@@ -267,16 +279,16 @@ def register_routes(app):
                     )
                     db.session.add(thg)
                     db.session.commit()
-                    flash(f'THG-Quote {thg.year_from}/{thg.year_to} hinzugefügt!', 'success')
+                    flash(t('flash.thg_added', period=f'{thg.year_from}/{thg.year_to}'), 'success')
                 except Exception as e:
-                    flash(f'Fehler: {e}', 'danger')
+                    flash(t('flash.error', error=e), 'danger')
 
             elif action == 'delete_thg':
                 thg = ThgQuota.query.get(request.form.get('thg_id'))
                 if thg:
                     db.session.delete(thg)
                     db.session.commit()
-                    flash('THG-Quote gelöscht.', 'warning')
+                    flash(t('flash.thg_deleted'), 'warning')
 
             elif action == 'import_csv':
                 file = request.files.get('csv_file')
@@ -287,25 +299,25 @@ def register_routes(app):
                         replace = 'replace_data' in request.form
                         stream = io.StringIO(file.stream.read().decode('utf-8'))
                         result = import_csv_data(stream, replace=replace)
-                        msg = f"{result['imported']} Ladevorgänge importiert, {result['skipped']} Zeilen übersprungen."
+                        msg = t('flash.import_success', count=result['imported'])
                         if result['errors']:
-                            msg += f" {len(result['errors'])} Fehler."
+                            msg += ' ' + t('flash.import_errors', count=len(result['errors']))
                         flash(msg, 'success')
                         # Auto-start CO2 backfill
                         from services.co2_backfill import start_backfill
                         if start_backfill(app):
-                            flash('CO₂-Daten werden im Hintergrund von ENTSO-E geladen...', 'info')
+                            flash(t('flash.co2_backfill_started'), 'info')
                     except Exception as e:
-                        flash(f'Import-Fehler: {e}', 'danger')
+                        flash(t('flash.import_error', error=e), 'danger')
                 else:
-                    flash('Keine Datei ausgewählt.', 'warning')
+                    flash(t('flash.no_file'), 'warning')
 
             elif action == 'backfill_co2':
                 from services.co2_backfill import start_backfill
                 if start_backfill(app):
-                    flash('CO₂-Daten werden im Hintergrund geladen...', 'info')
+                    flash(t('flash.co2_loading'), 'info')
                 else:
-                    flash('Backfill läuft bereits oder keine fehlenden Werte.', 'warning')
+                    flash(t('flash.backfill_running'), 'warning')
 
             elif action == 'save_vehicle_api':
                 AppConfig.set('vehicle_api_brand', request.form.get('vehicle_api_brand', ''))
@@ -325,7 +337,7 @@ def register_routes(app):
                 _time.sleep(0.5)
                 if enabled == 'true':
                     start_sync(app)
-                flash('Fahrzeug-API Zugangsdaten gespeichert!', 'success')
+                flash(t('flash.api_creds_saved'), 'success')
 
             elif action == 'test_vehicle_api':
                 brand = AppConfig.get('vehicle_api_brand', '')
@@ -343,15 +355,15 @@ def register_routes(app):
                             if status.odometer_km is not None:
                                 parts.append(f'Tacho: {status.odometer_km:,} km')
                             if status.estimated_range_km is not None:
-                                parts.append(f'Reichweite: {status.estimated_range_km} km')
-                            info = ', '.join(parts) if parts else 'Verbunden'
-                            flash(f'Fahrzeug-API verbunden! {info}', 'success')
+                                parts.append(f'Range: {status.estimated_range_km} km')
+                            info = ', '.join(parts) if parts else ''
+                            flash(t('flash.api_connected', info=info), 'success')
                         else:
-                            flash('Verbindung fehlgeschlagen. Zugangsdaten prüfen.', 'danger')
+                            flash(t('flash.api_connect_failed'), 'danger')
                     except Exception as e:
-                        flash(f'Fehler: {e}', 'danger')
+                        flash(t('flash.error', error=e), 'danger')
                 else:
-                    flash('Keine Fahrzeugmarke ausgewählt.', 'warning')
+                    flash(t('flash.api_no_brand'), 'warning')
 
             elif action == 'delete_vehicle_api':
                 for key in ('vehicle_api_brand', 'vehicle_api_username', 'vehicle_api_password',
@@ -363,7 +375,7 @@ def register_routes(app):
                 db.session.commit()
                 from services.vehicle.sync_service import stop_sync
                 stop_sync()
-                flash('Fahrzeug-API Zugangsdaten gelöscht.', 'warning')
+                flash(t('flash.api_creds_deleted'), 'warning')
 
             elif action == 'save_vehicle_sync':
                 enabled = 'true' if 'vehicle_sync_enabled' in request.form else 'false'
@@ -376,11 +388,11 @@ def register_routes(app):
                 _time.sleep(0.5)  # Wait for thread to finish
                 if enabled == 'true':
                     if start_sync(app):
-                        flash('Automatische Synchronisierung gestartet!', 'success')
+                        flash(t('flash.sync_started'), 'success')
                     else:
-                        flash('Sync konnte nicht gestartet werden.', 'warning')
+                        flash(t('flash.sync_failed'), 'warning')
                 else:
-                    flash('Automatische Synchronisierung deaktiviert.', 'warning')
+                    flash(t('flash.sync_disabled'), 'warning')
 
             elif action in ('sync_vehicle_now', 'sync_vehicle_force'):
                 force = action == 'sync_vehicle_force'
@@ -408,11 +420,11 @@ def register_routes(app):
                         if status.odometer_km is not None:
                             parts.append(f'Tacho: {status.odometer_km:,} km')
                         mode = 'Live' if force else 'Cached'
-                        flash(f'Fahrzeugdaten abgerufen ({mode})! {", ".join(parts)}', 'success')
+                        flash(t('flash.sync_success', mode=mode, parts=', '.join(parts)), 'success')
                     except Exception as e:
-                        flash(f'Sync-Fehler: {e}', 'danger')
+                        flash(t('flash.sync_error', error=e), 'danger')
                 else:
-                    flash('Keine Fahrzeugmarke konfiguriert.', 'warning')
+                    flash(t('flash.no_brand_configured'), 'warning')
 
             return redirect(url_for('settings'))
 
@@ -464,7 +476,7 @@ def register_routes(app):
         from flask import send_file
         pdf_bytes = generate_report()
         if not pdf_bytes:
-            flash('Keine Daten für Report vorhanden.', 'warning')
+            flash(t('flash.no_report_data'), 'warning')
             return redirect(url_for('dashboard'))
         car = AppConfig.get('car_model', 'EV')
         filename = f'EV_Report_{car}_{date.today().strftime("%Y%m%d")}.pdf'

@@ -1,23 +1,23 @@
 {% extends "base.html" %}
-{% block title %}Bearbeiten — EV Charge Tracker{% endblock %}
+{% block title %}{{ t('edit.title') }} — EV Charge Tracker{% endblock %}
 
 {% block content %}
 <div class="row justify-content-center">
     <div class="col-lg-6 col-md-8">
         <div class="card shadow-sm">
             <div class="card-header bg-primary text-white">
-                <h5 class="mb-0"><i class="bi bi-pencil"></i> Eintrag bearbeiten</h5>
+                <h5 class="mb-0"><i class="bi bi-pencil"></i> {{ t('edit.header') }}</h5>
             </div>
             <div class="card-body">
                 <form method="POST">
                     <div class="row g-3 mb-3">
                         <div class="col-7">
-                            <label for="date" class="form-label fw-bold">Datum</label>
+                            <label for="date" class="form-label fw-bold">{{ t('edit.date') }}</label>
                             <input type="date" class="form-control" id="date" name="date"
                                    value="{{ charge.date.isoformat() }}" required>
                         </div>
                         <div class="col-5">
-                            <label for="charge_hour" class="form-label fw-bold">Uhrzeit</label>
+                            <label for="charge_hour" class="form-label fw-bold">{{ t('edit.hour') }}</label>
                             <select class="form-select" id="charge_hour" name="charge_hour">
                                 <option value="">–</option>
                                 {% for h in range(24) %}
@@ -28,13 +28,13 @@
                     </div>
 
                     <div class="mb-3">
-                        <label class="form-label fw-bold">km-Stand</label>
+                        <label class="form-label fw-bold">{{ t('edit.odometer') }}</label>
                         <input type="number" class="form-control" name="odometer"
                                value="{{ charge.odometer if charge.odometer is not none else '' }}" min="0">
                     </div>
 
                     <div class="mb-3">
-                        <label class="form-label fw-bold">Stromart</label>
+                        <label class="form-label fw-bold">{{ t('edit.charge_type') }}</label>
                         <div class="btn-group w-100">
                             <input type="radio" class="btn-check" name="charge_type" id="typeAC" value="AC"
                                    {% if charge.charge_type == 'AC' %}checked{% endif %}>
@@ -50,12 +50,12 @@
 
                     <div class="row g-3 mb-3">
                         <div class="col-6">
-                            <label class="form-label">€/kWh</label>
+                            <label class="form-label">{{ t('edit.eur_kwh') }}</label>
                             <input type="number" class="form-control" name="eur_per_kwh"
                                    value="{{ charge.eur_per_kwh }}" step="0.01">
                         </div>
                         <div class="col-6">
-                            <label class="form-label">kWh geladen</label>
+                            <label class="form-label">{{ t('edit.kwh_loaded') }}</label>
                             <input type="number" class="form-control" name="kwh_loaded"
                                    value="{{ charge.kwh_loaded }}" step="0.001" required>
                         </div>
@@ -63,12 +63,12 @@
 
                     <div class="row g-3 mb-3">
                         <div class="col-6">
-                            <label class="form-label">SoC von %</label>
+                            <label class="form-label">{{ t('edit.soc_from') }}</label>
                             <input type="number" class="form-control" name="soc_from"
                                    value="{{ charge.soc_from if charge.soc_from is not none else '' }}">
                         </div>
                         <div class="col-6">
-                            <label class="form-label">SoC bis %</label>
+                            <label class="form-label">{{ t('edit.soc_to') }}</label>
                             <input type="number" class="form-control" name="soc_to"
                                    value="{{ charge.soc_to if charge.soc_to is not none else '' }}">
                         </div>
@@ -76,28 +76,28 @@
 
                     <div class="row g-3 mb-3">
                         <div class="col-6">
-                            <label class="form-label">Ladeverluste kWh</label>
+                            <label class="form-label">{{ t('edit.loss_kwh') }}</label>
                             <input type="number" class="form-control" name="loss_kwh"
                                    value="{{ charge.loss_kwh if charge.loss_kwh is not none else '' }}" step="0.001">
                         </div>
                         <div class="col-6">
-                            <label class="form-label">CO₂ g/kWh</label>
+                            <label class="form-label">{{ t('edit.co2_gkwh') }}</label>
                             <input type="number" class="form-control" name="co2_g_per_kwh"
                                    value="{{ charge.co2_g_per_kwh if charge.co2_g_per_kwh is not none else '' }}">
                         </div>
                     </div>
 
                     <div class="mb-3">
-                        <label class="form-label">Notizen</label>
+                        <label class="form-label">{{ t('edit.notes') }}</label>
                         <input type="text" class="form-control" name="notes"
                                value="{{ charge.notes or '' }}">
                     </div>
 
                     <div class="d-flex gap-2">
                         <button type="submit" class="btn btn-primary flex-grow-1">
-                            <i class="bi bi-check"></i> Speichern
+                            <i class="bi bi-check"></i> {{ t('edit.save') }}
                         </button>
-                        <a href="/history" class="btn btn-outline-secondary">Abbrechen</a>
+                        <a href="/history" class="btn btn-outline-secondary">{{ t('edit.cancel') }}</a>
                     </div>
                 </form>
             </div>

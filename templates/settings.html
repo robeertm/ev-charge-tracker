@@ -1,58 +1,77 @@
 {% extends "base.html" %}
-{% block title %}Einstellungen — EV Charge Tracker{% endblock %}
+{% block title %}{{ t('set.title') }} — EV Charge Tracker{% endblock %}
 
 {% block content %}
 <div class="row justify-content-center">
     <div class="col-lg-8">
-        <h4 class="mb-3"><i class="bi bi-gear"></i> Einstellungen</h4>
+        <h4 class="mb-3"><i class="bi bi-gear"></i> {{ t('set.title') }}</h4>
+
+        <!-- Sprache / Language -->
+        <div class="card mb-4">
+            <div class="card-header bg-white fw-bold">
+                <i class="bi bi-translate"></i> {{ t('set.language') }}
+            </div>
+            <div class="card-body">
+                <form method="POST">
+                    <div class="d-flex align-items-center gap-3">
+                        <select class="form-select form-select-sm" name="app_language" style="max-width:200px" onchange="this.form.submit()">
+                            {% for code, name in supported_languages %}
+                            <option value="{{ code }}" {% if code == current_lang() %}selected{% endif %}>{{ name }}</option>
+                            {% endfor %}
+                        </select>
+                        <input type="hidden" name="action" value="save_language">
+                    </div>
+                </form>
+            </div>
+        </div>
 
         <!-- Fahrzeug -->
         <div class="card mb-4">
             <div class="card-header bg-white fw-bold">
-                <i class="bi bi-car-front"></i> Fahrzeug
+                <i class="bi bi-car-front"></i> {{ t('set.vehicle') }}
             </div>
             <div class="card-body">
                 <form method="POST">
                     <div class="row g-3 mb-3">
                         <div class="col-12">
-                            <label for="car_model" class="form-label">Modellbezeichnung</label>
+                            <label for="car_model" class="form-label">{{ t('set.car_model') }}</label>
                             <input type="text" class="form-control" id="car_model" name="car_model"
-                                   value="{{ car_model_val }}" placeholder="z.B. Kia Niro EV 64kWh MY21">
+                                   value="{{ car_model_val }}" placeholder="{{ t('set.car_model_placeholder') }}">
                         </div>
                         <div class="col-sm-6">
-                            <label for="battery_kwh" class="form-label">Akkukapazität (kWh)</label>
+                            <label for="battery_kwh" class="form-label">{{ t('set.battery_kwh') }}</label>
                             <input type="number" class="form-control" id="battery_kwh" name="battery_kwh"
                                    value="{{ battery_kwh }}" step="0.1" min="0">
                         </div>
                         <div class="col-sm-6">
-                            <label for="max_ac_kw" class="form-label">Max. AC-Ladeleistung (kW)</label>
+                            <label for="max_ac_kw" class="form-label">{{ t('set.max_ac_kw') }}</label>
                             <input type="number" class="form-control" id="max_ac_kw" name="max_ac_kw"
                                    value="{{ max_ac_kw }}" step="0.1" min="0">
                         </div>
                         <div class="col-sm-6">
-                            <label for="battery_co2_per_kwh" class="form-label">CO₂ Akkuproduktion (kg/kWh)</label>
+                            <label for="battery_co2_per_kwh" class="form-label">{{ t('set.co2_production') }}</label>
                             <input type="number" class="form-control" id="battery_co2_per_kwh" name="battery_co2_per_kwh"
                                    value="{{ battery_co2_per_kwh }}" step="1" min="0"
                                    placeholder="100">
-                            <div class="form-text">Typisch MY2021: ~100 kg CO₂/kWh</div>
+                            <div class="form-text">{{ t('set.co2_production_hint') }}</div>
                         </div>
                         <div class="col-sm-6">
-                            <label for="fossil_co2_per_km" class="form-label">Verbrenner CO₂ WTW (g/km)</label>
+                            <label for="fossil_co2_per_km" class="form-label">{{ t('set.co2_wtw') }}</label>
                             <input type="number" class="form-control" id="fossil_co2_per_km" name="fossil_co2_per_km"
                                    value="{{ fossil_co2_per_km }}" step="1" min="0"
                                    placeholder="164">
-                            <div class="form-text">Well-to-Wheel inkl. Förderung, Raffinerie, Transport. Ø DE: ~164 g/km</div>
+                            <div class="form-text">{{ t('set.co2_wtw_hint') }}</div>
                         </div>
                         <div class="col-sm-6">
-                            <label for="recuperation_kwh_per_km" class="form-label">Rekuperation (kWh/km)</label>
+                            <label for="recuperation_kwh_per_km" class="form-label">{{ t('set.recup_rate') }}</label>
                             <input type="number" class="form-control" id="recuperation_kwh_per_km" name="recuperation_kwh_per_km"
                                    value="{{ recuperation_kwh_per_km }}" step="0.001" min="0"
                                    placeholder="0.086">
-                            <div class="form-text">Kia Niro EV: ~0,086 kWh/km</div>
+                            <div class="form-text">{{ t('set.recup_hint') }}</div>
                         </div>
                     </div>
                     <button type="submit" name="action" value="save_car" class="btn btn-primary">
-                        <i class="bi bi-save"></i> Speichern
+                        <i class="bi bi-save"></i> {{ t('set.save') }}
                     </button>
                 </form>
             </div>
@@ -61,14 +80,14 @@
         <!-- THG-Quote -->
         <div class="card mb-4">
             <div class="card-header bg-white fw-bold">
-                <i class="bi bi-cash-coin"></i> THG-Quote
+                <i class="bi bi-cash-coin"></i> {{ t('set.thg_title') }}
             </div>
             <div class="card-body">
-                <p class="text-muted small mb-3">Jährliche Auszahlung für eingesparte CO₂-Emissionen.</p>
+                <p class="text-muted small mb-3">{{ t('set.thg_desc') }}</p>
                 {% if thg_quotas %}
                 <table class="table table-sm mb-3">
                     <thead>
-                        <tr><th>Zeitraum</th><th class="text-end">Auszahlung</th><th></th></tr>
+                        <tr><th>{{ t('set.thg_period') }}</th><th class="text-end">{{ t('set.thg_payout') }}</th><th></th></tr>
                     </thead>
                     <tbody>
                         {% for thg in thg_quotas %}
@@ -79,7 +98,7 @@
                                 <form method="POST" class="d-inline">
                                     <input type="hidden" name="thg_id" value="{{ thg.id }}">
                                     <button type="submit" name="action" value="delete_thg"
-                                            class="btn btn-sm btn-outline-danger" title="Löschen">
+                                            class="btn btn-sm btn-outline-danger" title="{{ t('set.thg_delete') }}">
                                         <i class="bi bi-trash"></i>
                                     </button>
                                 </form>
@@ -87,7 +106,7 @@
                         </tr>
                         {% endfor %}
                         <tr class="fw-bold">
-                            <td>Gesamt</td>
+                            <td>{{ t('set.thg_total') }}</td>
                             <td class="text-end">{{ "%.2f"|format(thg_quotas|sum(attribute='amount_eur')) }} €</td>
                             <td></td>
                         </tr>
@@ -97,23 +116,23 @@
                 <form method="POST">
                     <div class="row g-2 align-items-end">
                         <div class="col-4 col-sm-3">
-                            <label class="form-label small">Jahr von</label>
+                            <label class="form-label small">{{ t('set.thg_year_from') }}</label>
                             <input type="number" class="form-control" name="thg_year_from"
                                    placeholder="2024" min="2020" max="2040" required>
                         </div>
                         <div class="col-4 col-sm-3">
-                            <label class="form-label small">Jahr bis</label>
+                            <label class="form-label small">{{ t('set.thg_year_to') }}</label>
                             <input type="number" class="form-control" name="thg_year_to"
                                    placeholder="2025" min="2020" max="2040" required>
                         </div>
                         <div class="col-4 col-sm-3">
-                            <label class="form-label small">Betrag €</label>
+                            <label class="form-label small">{{ t('set.thg_amount') }}</label>
                             <input type="text" class="form-control" name="thg_amount"
                                    placeholder="75,00" required>
                         </div>
                         <div class="col-12 col-sm-3">
                             <button type="submit" name="action" value="add_thg" class="btn btn-primary w-100">
-                                <i class="bi bi-plus-lg"></i> Hinzufügen
+                                <i class="bi bi-plus-lg"></i> {{ t('set.thg_add') }}
                             </button>
                         </div>
                     </div>
@@ -124,46 +143,46 @@
         <!-- PV-Anlage -->
         <div class="card mb-4">
             <div class="card-header bg-white fw-bold">
-                <i class="bi bi-sun"></i> PV-Anlage
+                <i class="bi bi-sun"></i> {{ t('set.pv_title') }}
             </div>
             <div class="card-body">
                 <form method="POST">
                     <div class="row g-3 mb-3">
                         <div class="col-sm-6">
-                            <label for="pv_kwp" class="form-label">Anlagengröße (kWp)</label>
+                            <label for="pv_kwp" class="form-label">{{ t('set.pv_kwp') }}</label>
                             <input type="number" class="form-control" id="pv_kwp" name="pv_kwp"
                                    value="{{ pv_kwp }}" step="0.1" min="0" placeholder="10">
                         </div>
                         <div class="col-sm-6">
-                            <label for="pv_yield_per_kwp" class="form-label">Jahresertrag (kWh/kWp)</label>
+                            <label for="pv_yield_per_kwp" class="form-label">{{ t('set.pv_yield') }}</label>
                             <input type="number" class="form-control" id="pv_yield_per_kwp" name="pv_yield_per_kwp"
                                    value="{{ pv_yield_per_kwp }}" step="1" min="0" placeholder="950">
-                            <div class="form-text">DE Durchschnitt: ~950</div>
+                            <div class="form-text">{{ t('set.pv_yield_hint') }}</div>
                         </div>
                         <div class="col-sm-6">
-                            <label for="pv_lifetime" class="form-label">Lebensdauer (Jahre)</label>
+                            <label for="pv_lifetime" class="form-label">{{ t('set.pv_lifetime') }}</label>
                             <input type="number" class="form-control" id="pv_lifetime" name="pv_lifetime"
                                    value="{{ pv_lifetime }}" step="1" min="1" placeholder="25">
                         </div>
                         <div class="col-sm-6">
-                            <label for="pv_production_co2" class="form-label">Herstellungs-CO₂ (kg/kWp)</label>
+                            <label for="pv_production_co2" class="form-label">{{ t('set.pv_co2_prod') }}</label>
                             <input type="number" class="form-control" id="pv_production_co2" name="pv_production_co2"
                                    value="{{ pv_production_co2 }}" step="1" min="0" placeholder="1000">
-                            <div class="form-text">Inkl. Produktion, Transport, Installation</div>
+                            <div class="form-text">{{ t('set.pv_co2_hint') }}</div>
                         </div>
                         <div class="col-sm-6">
-                            <label for="pv_price_eur_per_kwh" class="form-label">PV-Strompreis (€/kWh)</label>
+                            <label for="pv_price_eur_per_kwh" class="form-label">{{ t('set.pv_price') }}</label>
                             <input type="number" class="form-control" id="pv_price_eur_per_kwh" name="pv_price_eur_per_kwh"
                                    value="{{ pv_price_eur_per_kwh }}" step="0.01" min="0" placeholder="0.00">
-                            <div class="form-text">Eigenverbrauchskosten (oft €0)</div>
+                            <div class="form-text">{{ t('set.pv_price_hint') }}</div>
                         </div>
                         <div class="col-sm-6">
-                            <label class="form-label">Berechnetes CO₂</label>
+                            <label class="form-label">{{ t('set.pv_co2_calc') }}</label>
                             <div class="form-control bg-light fw-bold" id="pvCo2Result">—</div>
                         </div>
                     </div>
                     <button type="submit" name="action" value="save_pv" class="btn btn-primary">
-                        <i class="bi bi-save"></i> Speichern
+                        <i class="bi bi-save"></i> {{ t('set.save') }}
                     </button>
                 </form>
                 <script>
@@ -175,10 +194,10 @@
                     const el = document.getElementById('pvCo2Result');
                     if (kwp > 0 && yield_ > 0 && lifetime > 0 && prodCo2 > 0) {
                         const co2 = Math.round(prodCo2 / (yield_ * lifetime));
-                        el.textContent = co2 + ' g CO₂/kWh';
+                        el.textContent = co2 + ' g CO\u2082/kWh';
                         el.classList.add('text-success');
                     } else {
-                        el.textContent = '—';
+                        el.textContent = '\u2014';
                         el.classList.remove('text-success');
                     }
                 }
@@ -192,16 +211,16 @@
         <!-- Fahrzeug-API -->
         <div class="card mb-4">
             <div class="card-header bg-white fw-bold">
-                <i class="bi bi-ev-station"></i> Fahrzeug-API
+                <i class="bi bi-ev-station"></i> {{ t('set.api_title') }}
             </div>
             <div class="card-body">
-                <p class="text-muted small mb-3">Verbinde dein Fahrzeug um SoC, Tachostand und Ladestatus automatisch abzurufen.</p>
+                <p class="text-muted small mb-3">{{ t('set.api_desc') }}</p>
                 <form method="POST">
                     <!-- Markenauswahl -->
                     <div class="mb-3">
-                        <label for="vehicle_api_brand" class="form-label">Marke</label>
+                        <label for="vehicle_api_brand" class="form-label">{{ t('set.api_brand') }}</label>
                         <select class="form-select" id="vehicle_api_brand" name="vehicle_api_brand" onchange="updateVehicleFields()">
-                            <option value="">— Bitte wählen —</option>
+                            <option value="">{{ t('set.api_choose') }}</option>
                             {% for brand in vehicle_brands %}
                             <option value="{{ brand.key }}" {% if brand.key == vehicle_api_brand %}selected{% endif %}>
                                 {{ brand.name }}
@@ -224,7 +243,7 @@
                     {% if 'porsche' not in installed_brand_keys %}{% set _ = missing_packages.append(('porsche', 'Porsche')) %}{% endif %}
                     {% if missing_packages %}
                     <div class="mb-3">
-                        <p class="small text-muted mb-2">Weitere Marken verfügbar — Paket installieren:</p>
+                        <p class="small text-muted mb-2">{{ t('set.api_install_hint') }}</p>
                         <div class="d-flex flex-wrap gap-2 mb-2">
                             {% for pkg_key, pkg_label in missing_packages %}
                             <button type="button" class="btn btn-outline-primary btn-sm"
@@ -241,25 +260,25 @@
                     <div id="vehicleCredentials" {% if not vehicle_api_brand %}style="display:none"{% endif %}>
                         <div class="row g-3 mb-3">
                             <div class="col-sm-6">
-                                <label for="vehicle_api_username" class="form-label">E-Mail / Benutzername</label>
+                                <label for="vehicle_api_username" class="form-label">{{ t('set.api_email') }}</label>
                                 <input type="text" class="form-control" id="vehicle_api_username" name="vehicle_api_username"
                                        value="{{ vehicle_api_username }}">
                             </div>
                             <div class="col-sm-6">
-                                <label for="vehicle_api_password" class="form-label" id="labelPassword">Passwort</label>
+                                <label for="vehicle_api_password" class="form-label" id="labelPassword">{{ t('set.api_password') }}</label>
                                 <input type="password" class="form-control" id="vehicle_api_password" name="vehicle_api_password"
                                        value="{{ vehicle_api_password }}">
                                 <div class="form-text vehicle-field-token-hint" style="display:none">
-                                    <i class="bi bi-info-circle"></i> Kein Passwort — wird automatisch per <strong>Token holen</strong> ausgefüllt.
+                                    <i class="bi bi-info-circle"></i> {{ t('set.api_token_manual') }}
                                 </div>
                             </div>
                             <div class="col-sm-6 vehicle-field-pin" style="display:none">
-                                <label for="vehicle_api_pin" class="form-label">PIN (4-stellig aus Kia Connect App)</label>
+                                <label for="vehicle_api_pin" class="form-label">{{ t('set.api_pin') }}</label>
                                 <input type="password" class="form-control" id="vehicle_api_pin" name="vehicle_api_pin"
                                        value="{{ vehicle_api_pin }}">
                             </div>
                             <div class="col-sm-6 vehicle-field-region" style="display:none">
-                                <label for="vehicle_api_region" class="form-label">Region</label>
+                                <label for="vehicle_api_region" class="form-label">{{ t('set.api_region') }}</label>
                                 <select class="form-select" id="vehicle_api_region" name="vehicle_api_region">
                                     <option value="EU" {% if vehicle_api_region == 'EU' %}selected{% endif %}>Europa</option>
                                     <option value="US" {% if vehicle_api_region == 'US' %}selected{% endif %}>USA</option>
@@ -268,48 +287,48 @@
                                 </select>
                             </div>
                             <div class="col-sm-6 vehicle-field-vin" style="display:none">
-                                <label for="vehicle_api_vin" class="form-label">FIN / VIN (optional)</label>
+                                <label for="vehicle_api_vin" class="form-label">{{ t('set.api_vin') }}</label>
                                 <input type="text" class="form-control" id="vehicle_api_vin" name="vehicle_api_vin"
-                                       value="{{ vehicle_api_vin }}" placeholder="Bei mehreren Fahrzeugen">
+                                       value="{{ vehicle_api_vin }}" placeholder="{{ t('set.api_vin_hint') }}">
                             </div>
                         </div>
 
                         <!-- Token-Fetch (Kia/Hyundai) -->
                         <div id="tokenHintSection" class="mb-3" style="display:none">
                             <div class="alert alert-info py-2 mb-0 small">
-                                <strong><i class="bi bi-shield-lock"></i> Refresh-Token benötigt</strong><br>
-                                Kia/Hyundai erlaubt keinen Passwort-Login. Klicke den Button — ein Chrome-Fenster öffnet sich (mobiler Modus). Dort einloggen und reCAPTCHA lösen. Der Token wird automatisch gespeichert.
+                                <strong><i class="bi bi-shield-lock"></i> {{ t('set.api_token_required') }}</strong><br>
+                                {{ t('set.api_token_desc') }}
                                 <div class="mt-2 d-flex gap-2 align-items-center flex-wrap">
                                     <button type="button" class="btn btn-warning btn-sm" id="btnFetchToken">
-                                        <i class="bi bi-key"></i> Token holen
+                                        <i class="bi bi-key"></i> {{ t('set.api_fetch_token') }}
                                     </button>
                                     <button type="button" class="btn btn-outline-secondary btn-sm" id="btnCancelToken" style="display:none">
-                                        <i class="bi bi-x-lg"></i> Abbrechen
+                                        <i class="bi bi-x-lg"></i> {{ t('set.api_cancel') }}
                                     </button>
                                     <span class="small" id="tokenFetchStatus"></span>
                                 </div>
                                 <div class="mt-2 text-muted" style="font-size:0.75rem">
-                                    Oder Token manuell eintragen (z.B. aus <a href="https://github.com/Hyundai-Kia-Connect/hyundai_kia_connect_api/wiki/Kia-Europe-Login-Flow" target="_blank">externem Script</a>). Token ist ca. 1 Jahr gültig.
+                                    {{ t('set.api_token_manual') }}
                                 </div>
                             </div>
                         </div>
 
                         <div class="d-flex gap-2 flex-wrap">
                             <button type="submit" name="action" value="save_vehicle_api" class="btn btn-primary">
-                                <i class="bi bi-save"></i> Speichern
+                                <i class="bi bi-save"></i> {{ t('set.save') }}
                             </button>
                             <button type="submit" name="action" value="test_vehicle_api" class="btn btn-outline-secondary">
-                                <i class="bi bi-wifi"></i> Verbindung testen
+                                <i class="bi bi-wifi"></i> {{ t('set.api_test') }}
                             </button>
                             <button type="submit" name="action" value="sync_vehicle_now" class="btn btn-outline-info">
-                                <i class="bi bi-arrow-repeat"></i> Sync (Cached)
+                                <i class="bi bi-arrow-repeat"></i> {{ t('set.api_sync_cached') }}
                             </button>
                             <button type="submit" name="action" value="sync_vehicle_force" class="btn btn-outline-warning">
-                                <i class="bi bi-broadcast"></i> Sync (Live)
+                                <i class="bi bi-broadcast"></i> {{ t('set.api_sync_live') }}
                             </button>
                             <button type="submit" name="action" value="delete_vehicle_api" class="btn btn-outline-danger"
-                                    onclick="return confirm('Fahrzeug-API Zugangsdaten wirklich löschen?')">
-                                <i class="bi bi-trash"></i> Löschen
+                                    onclick="return confirm(T.api_delete_confirm)">
+                                <i class="bi bi-trash"></i> {{ t('set.thg_delete') }}
                             </button>
                         </div>
 
@@ -321,12 +340,12 @@
                                     <div class="form-check form-switch">
                                         <input class="form-check-input" type="checkbox" id="vehicle_sync_enabled"
                                                name="vehicle_sync_enabled" {% if vehicle_sync_enabled == 'true' %}checked{% endif %}>
-                                        <label class="form-check-label" for="vehicle_sync_enabled">Auto-Sync</label>
+                                        <label class="form-check-label" for="vehicle_sync_enabled">{{ t('set.api_autosync') }}</label>
                                     </div>
                                 </div>
                                 <div class="col-auto">
                                     <div class="input-group input-group-sm" style="width:160px">
-                                        <span class="input-group-text">alle</span>
+                                        <span class="input-group-text">{{ t('set.api_every') }}</span>
                                         <select class="form-select form-select-sm" name="vehicle_sync_interval">
                                             {% for val, label in [('1','1h'),('2','2h'),('4','4h'),('8','8h'),('12','12h')] %}
                                             <option value="{{ val }}" {% if vehicle_sync_interval == val %}selected{% endif %}>{{ label }}</option>
@@ -336,8 +355,8 @@
                                 </div>
                                 <div class="col-auto">
                                     <select class="form-select form-select-sm" name="vehicle_sync_mode" style="width:auto">
-                                        <option value="cached" {% if vehicle_sync_mode != 'force' %}selected{% endif %}>Cached</option>
-                                        <option value="force" {% if vehicle_sync_mode == 'force' %}selected{% endif %}>Live (weckt Auto)</option>
+                                        <option value="cached" {% if vehicle_sync_mode != 'force' %}selected{% endif %}>{{ t('set.api_mode_cached') }}</option>
+                                        <option value="force" {% if vehicle_sync_mode == 'force' %}selected{% endif %}>{{ t('set.api_mode_live') }}</option>
                                     </select>
                                 </div>
                                 <div class="col-auto" id="syncStatusBadge"></div>
@@ -347,14 +366,34 @@
                 </form>
                 {% if last_vehicle_sync %}
                 <div class="small text-muted mt-2">
-                    <strong>Letzte Synchronisierung:</strong> {{ last_vehicle_sync.timestamp.strftime('%d.%m.%Y %H:%M') }}
+                    <strong>{{ t('set.api_last_sync') }}</strong> {{ last_vehicle_sync.timestamp.strftime('%d.%m.%Y %H:%M') }}
                     {% if last_vehicle_sync.soc_percent is not none %} · SoC: {{ last_vehicle_sync.soc_percent }}%{% endif %}
                     {% if last_vehicle_sync.odometer_km is not none %} · Tacho: {{ "{:,}".format(last_vehicle_sync.odometer_km).replace(",", ".") }} km{% endif %}
-                    {% if last_vehicle_sync.is_charging %} · <span class="badge bg-success">Lädt</span>{% endif %}
+                    {% if last_vehicle_sync.is_charging %} · <span class="badge bg-success">{{ t('dash.charging') }}</span>{% endif %}
                 </div>
                 {% endif %}
 
                 <script>
+                const T = {
+                    api_refresh_token: {{ t('set.api_refresh_token')|tojson }},
+                    api_password: {{ t('set.api_password')|tojson }},
+                    api_starting: {{ t('set.api_starting')|tojson }},
+                    api_fetch_token: {{ t('set.api_fetch_token')|tojson }},
+                    api_token_saved: {{ t('set.api_token_saved')|tojson }},
+                    api_installing: {{ t('set.api_installing')|tojson }},
+                    api_installed: {{ t('set.api_installed')|tojson }},
+                    api_retry: {{ t('set.api_retry')|tojson }},
+                    api_sync_active: {{ t('set.api_sync_active')|tojson }},
+                    api_sync_inactive: {{ t('set.api_sync_inactive')|tojson }},
+                    api_delete_confirm: {{ t('set.api_delete_confirm')|tojson }},
+                    app_checking: {{ t('set.app_checking')|tojson }},
+                    app_new_version: {{ t('set.app_new_version')|tojson }},
+                    app_download: {{ t('set.app_download')|tojson }},
+                    app_up_to_date: {{ t('set.app_up_to_date')|tojson }},
+                    app_not_found: {{ t('set.app_not_found')|tojson }},
+                    app_error: {{ t('set.app_error')|tojson }},
+                };
+
                 function updateVehicleFields() {
                     const brand = document.getElementById('vehicle_api_brand').value;
                     const hasBrand = brand !== '';
@@ -373,7 +412,7 @@
                     document.querySelectorAll('.vehicle-field-region').forEach(el => el.style.display = hasRegion ? '' : 'none');
                     document.querySelectorAll('.vehicle-field-vin').forEach(el => el.style.display = hasVin ? '' : 'none');
                     document.querySelectorAll('.vehicle-field-token-hint').forEach(el => el.style.display = isKiaHyundai ? '' : 'none');
-                    document.getElementById('labelPassword').textContent = needsToken ? 'Refresh-Token' : 'Passwort';
+                    document.getElementById('labelPassword').textContent = needsToken ? T.api_refresh_token : T.api_password;
                     document.getElementById('tokenHintSection').style.display = isKiaHyundai ? '' : 'none';
                 }
                 updateVehicleFields();
@@ -390,14 +429,14 @@
                     function stopPolling() {
                         if (pollInterval) { clearInterval(pollInterval); pollInterval = null; }
                         btnFetch.disabled = false;
-                        btnFetch.innerHTML = '<i class="bi bi-key"></i> Token holen';
+                        btnFetch.innerHTML = '<i class="bi bi-key"></i> ' + T.api_fetch_token;
                         btnCancel.style.display = 'none';
                     }
 
                     function pollStatus() {
                         fetch('/api/vehicle/token/status').then(r => r.json()).then(d => {
                             if (d.token) {
-                                statusEl.innerHTML = '<span class="text-success fw-bold"><i class="bi bi-check-circle"></i> Token gespeichert!</span>';
+                                statusEl.innerHTML = '<span class="text-success fw-bold"><i class="bi bi-check-circle"></i> ' + T.api_token_saved + '</span>';
                                 stopPolling();
                                 setTimeout(() => location.reload(), 1500);
                             } else if (d.error) {
@@ -411,7 +450,7 @@
 
                     btnFetch.addEventListener('click', async () => {
                         btnFetch.disabled = true;
-                        btnFetch.innerHTML = '<span class="spinner-border spinner-border-sm"></span> Starte...';
+                        btnFetch.innerHTML = '<span class="spinner-border spinner-border-sm"></span> ' + T.api_starting;
                         btnCancel.style.display = '';
                         statusEl.textContent = '';
                         try {
@@ -435,7 +474,7 @@
 
                     btnCancel.addEventListener('click', async () => {
                         await fetch('/api/vehicle/token/cancel', {method: 'POST'});
-                        statusEl.textContent = 'Abgebrochen.';
+                        statusEl.textContent = '';
                         stopPolling();
                     });
                 })();
@@ -449,8 +488,8 @@
                             const r = await fetch('/api/vehicle/sync/status');
                             const d = await r.json();
                             badge.innerHTML = d.running
-                                ? '<span class="badge bg-success">Sync aktiv</span>'
-                                : '<span class="badge bg-secondary">Sync inaktiv</span>';
+                                ? '<span class="badge bg-success">' + T.api_sync_active + '</span>'
+                                : '<span class="badge bg-secondary">' + T.api_sync_inactive + '</span>';
                         } catch(e) {}
                     }
                     checkSync();
@@ -461,7 +500,7 @@
                 async function installPkg(pkg, btn) {
                     const statusEl = document.getElementById('installStatus');
                     btn.disabled = true;
-                    btn.innerHTML = '<span class="spinner-border spinner-border-sm"></span> Installiere...';
+                    btn.innerHTML = '<span class="spinner-border spinner-border-sm"></span> ' + T.api_installing;
                     statusEl.textContent = '';
                     try {
                         const r = await fetch('/api/vehicle/install', {
@@ -473,7 +512,7 @@
                         if (d.success) {
                             btn.classList.remove('btn-outline-primary');
                             btn.classList.add('btn-success');
-                            btn.innerHTML = '<i class="bi bi-check-lg"></i> Installiert';
+                            btn.innerHTML = '<i class="bi bi-check-lg"></i> ' + T.api_installed;
                             setTimeout(() => location.reload(), 1500);
                         } else {
                             btn.classList.remove('btn-outline-primary');
@@ -484,7 +523,7 @@
                             setTimeout(() => {
                                 btn.classList.remove('btn-outline-danger');
                                 btn.classList.add('btn-outline-primary');
-                                btn.innerHTML = '<i class="bi bi-download"></i> Erneut';
+                                btn.innerHTML = '<i class="bi bi-download"></i> ' + T.api_retry;
                             }, 3000);
                         }
                     } catch (e) {
@@ -499,25 +538,25 @@
         <!-- ENTSO-E API -->
         <div class="card mb-4">
             <div class="card-header bg-white fw-bold">
-                <i class="bi bi-cloud"></i> ENTSO-E API (CO₂-Daten)
+                <i class="bi bi-cloud"></i> {{ t('set.entsoe_title') }}
             </div>
             <div class="card-body">
                 <form method="POST">
                     <div class="mb-3">
-                        <label for="entsoe_key" class="form-label">API Key</label>
+                        <label for="entsoe_key" class="form-label">{{ t('set.entsoe_key') }}</label>
                         <input type="password" class="form-control" id="entsoe_key" name="entsoe_key"
-                               value="{{ entsoe_key }}" placeholder="Dein ENTSO-E Security Token">
+                               value="{{ entsoe_key }}" placeholder="{{ t('set.entsoe_placeholder') }}">
                         <div class="form-text">
                             Token von <a href="https://transparency.entsoe.eu/" target="_blank">transparency.entsoe.eu</a> →
-                            Registrieren → E-Mail mit Token.
+                            {{ t('set.entsoe_register') }}
                         </div>
                     </div>
                     <div class="d-flex gap-2">
                         <button type="submit" name="action" value="save_entsoe" class="btn btn-primary">
-                            <i class="bi bi-save"></i> Speichern
+                            <i class="bi bi-save"></i> {{ t('set.save') }}
                         </button>
                         <button type="submit" name="action" value="test_entsoe" class="btn btn-outline-secondary">
-                            <i class="bi bi-wifi"></i> Verbindung testen
+                            <i class="bi bi-wifi"></i> {{ t('set.entsoe_test') }}
                         </button>
                     </div>
                 </form>
@@ -526,10 +565,10 @@
                 <div class="d-flex align-items-center gap-2" id="backfillSection">
                     <form method="POST" class="d-inline">
                         <button type="submit" name="action" value="backfill_co2" class="btn btn-outline-info btn-sm" id="btnBackfill">
-                            <i class="bi bi-cloud-download"></i> CO₂ nachladen
+                            <i class="bi bi-cloud-download"></i> {{ t('set.entsoe_backfill') }}
                         </button>
                     </form>
-                    <span class="text-muted small" id="backfillStatus">{{ co2_missing }} Einträge ohne CO₂-Daten</span>
+                    <span class="text-muted small" id="backfillStatus">{{ co2_missing }} {{ t('set.entsoe_missing') }}</span>
                 </div>
                 <script>
                 (function() {
@@ -541,11 +580,11 @@
                             if (d.running) {
                                 el.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span>' + d.missing + ' verbleibend...';
                             } else if (d.missing === 0) {
-                                el.textContent = 'Alle CO₂-Daten vorhanden!';
+                                el.textContent = {{ t('set.entsoe_complete')|tojson }};
                                 el.classList.add('text-success');
                                 clearInterval(interval);
                             } else {
-                                el.textContent = d.missing + ' Einträge ohne CO₂-Daten';
+                                el.textContent = d.missing + ' ' + {{ t('set.entsoe_missing')|tojson }};
                             }
                         } catch(e) {}
                     }, 5000);
@@ -558,19 +597,19 @@
         <!-- Database Info -->
         <div class="card mb-4">
             <div class="card-header bg-white fw-bold">
-                <i class="bi bi-database"></i> Datenbank
+                <i class="bi bi-database"></i> {{ t('set.db_title') }}
             </div>
             <div class="card-body">
-                <p><strong>Einträge:</strong> {{ total_charges }} Ladevorgänge</p>
+                <p><strong>{{ t('set.db_entries') }}</strong> {{ total_charges }} {{ t('set.db_charges') }}</p>
                 <div class="d-flex gap-2 flex-wrap mb-3">
                     <a href="/api/export/csv" class="btn btn-outline-success">
-                        <i class="bi bi-download"></i> CSV Export
+                        <i class="bi bi-download"></i> {{ t('set.db_export') }}
                     </a>
                 </div>
                 <hr>
-                <h6><i class="bi bi-upload"></i> Google Sheet Import</h6>
+                <h6><i class="bi bi-upload"></i> {{ t('set.db_import_title') }}</h6>
                 <p class="text-muted small">
-                    Google Sheet als CSV exportieren (Datei → Herunterladen → .csv) und hier hochladen.
+                    {{ t('set.db_import_desc') }}
                 </p>
                 <form method="POST" enctype="multipart/form-data">
                     <div class="mb-2">
@@ -579,11 +618,11 @@
                     <div class="form-check mb-2">
                         <input class="form-check-input" type="checkbox" name="replace_data" id="replaceData">
                         <label class="form-check-label small text-danger" for="replaceData">
-                            Bestehende Daten vorher löschen
+                            {{ t('set.db_delete_first') }}
                         </label>
                     </div>
                     <button type="submit" name="action" value="import_csv" class="btn btn-outline-primary btn-sm">
-                        <i class="bi bi-upload"></i> CSV importieren
+                        <i class="bi bi-upload"></i> {{ t('set.db_import') }}
                     </button>
                 </form>
             </div>
@@ -592,18 +631,18 @@
         <!-- App Info -->
         <div class="card mb-4">
             <div class="card-header bg-white fw-bold">
-                <i class="bi bi-info-circle"></i> App-Info
+                <i class="bi bi-info-circle"></i> {{ t('set.app_title') }}
             </div>
             <div class="card-body">
                 <table class="table table-sm mb-0">
-                    <tr><td>Version</td><td>{{ app_version }}</td></tr>
-                    <tr><td>Fahrzeug</td><td>{{ car_model }}</td></tr>
-                    <tr><td>GitHub</td><td><a href="https://github.com/robeertm/ev-charge-tracker" target="_blank">robertmanuwald/ev-charge-tracker</a></td></tr>
+                    <tr><td>{{ t('set.app_version') }}</td><td>{{ app_version }}</td></tr>
+                    <tr><td>{{ t('set.app_vehicle') }}</td><td>{{ car_model }}</td></tr>
+                    <tr><td>{{ t('set.app_github') }}</td><td><a href="https://github.com/robeertm/ev-charge-tracker" target="_blank">robertmanuwald/ev-charge-tracker</a></td></tr>
                 </table>
 
                 <hr>
                 <button class="btn btn-outline-primary" id="btnCheckUpdate">
-                    <i class="bi bi-arrow-repeat"></i> Nach Updates suchen
+                    <i class="bi bi-arrow-repeat"></i> {{ t('set.app_check_update') }}
                 </button>
                 <div id="updateResult" class="mt-2"></div>
             </div>
@@ -618,26 +657,26 @@ document.getElementById('btnCheckUpdate').addEventListener('click', async () => 
     const btn = document.getElementById('btnCheckUpdate');
     const result = document.getElementById('updateResult');
     btn.disabled = true;
-    btn.innerHTML = '<span class="spinner-border spinner-border-sm"></span> Prüfe...';
+    btn.innerHTML = '<span class="spinner-border spinner-border-sm"></span> ' + T.app_checking;
     try {
         const resp = await fetch('https://api.github.com/repos/robeertm/ev-charge-tracker/releases/latest');
         if (resp.ok) {
             const data = await resp.json();
             const current = '{{ app_version }}';
             if (data.tag_name && data.tag_name.replace('v', '') !== current) {
-                result.innerHTML = `<div class="alert alert-info">Neue Version verfügbar: <strong>${data.tag_name}</strong>
-                    <a href="${data.html_url}" target="_blank" class="btn btn-sm btn-primary ms-2">Download</a></div>`;
+                result.innerHTML = `<div class="alert alert-info">${T.app_new_version} <strong>${data.tag_name}</strong>
+                    <a href="${data.html_url}" target="_blank" class="btn btn-sm btn-primary ms-2">${T.app_download}</a></div>`;
             } else {
-                result.innerHTML = '<div class="alert alert-success">Du hast die aktuelle Version!</div>';
+                result.innerHTML = '<div class="alert alert-success">' + T.app_up_to_date + '</div>';
             }
         } else {
-            result.innerHTML = '<div class="alert alert-warning">Repository nicht gefunden. Noch nicht auf GitHub veröffentlicht.</div>';
+            result.innerHTML = '<div class="alert alert-warning">' + T.app_not_found + '</div>';
         }
     } catch (e) {
-        result.innerHTML = '<div class="alert alert-danger">Fehler: ' + e.message + '</div>';
+        result.innerHTML = '<div class="alert alert-danger">' + T.app_error + e.message + '</div>';
     }
     btn.disabled = false;
-    btn.innerHTML = '<i class="bi bi-arrow-repeat"></i> Nach Updates suchen';
+    btn.innerHTML = '<i class="bi bi-arrow-repeat"></i> ' + {{ t('set.app_check_update')|tojson }};
 });
 </script>
 {% endblock %}

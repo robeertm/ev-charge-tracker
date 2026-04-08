@@ -1,12 +1,12 @@
 {% extends "base.html" %}
-{% block title %}Verlauf — EV Charge Tracker{% endblock %}
+{% block title %}{{ t('hist.title') }} — EV Charge Tracker{% endblock %}
 
 {% block content %}
 <div class="d-flex justify-content-between align-items-center mb-3">
-    <h4 class="mb-0"><i class="bi bi-clock-history"></i> Ladeverlauf</h4>
+    <h4 class="mb-0"><i class="bi bi-clock-history"></i> {{ t('hist.title') }}</h4>
     <div class="d-flex gap-2">
         <a href="/api/export/csv" class="btn btn-sm btn-outline-secondary">
-            <i class="bi bi-download"></i> CSV Export
+            <i class="bi bi-download"></i> {{ t('hist.csv_export') }}
         </a>
     </div>
 </div>
@@ -17,7 +17,7 @@
         <form method="GET" class="row g-2 align-items-center">
             <div class="col-auto">
                 <select name="type" class="form-select form-select-sm">
-                    <option value="" {% if not charge_type %}selected{% endif %}>Alle Typen</option>
+                    <option value="" {% if not charge_type %}selected{% endif %}>{{ t('hist.all_types') }}</option>
                     <option value="AC" {% if charge_type == 'AC' %}selected{% endif %}>AC</option>
                     <option value="DC" {% if charge_type == 'DC' %}selected{% endif %}>DC</option>
                     <option value="PV" {% if charge_type == 'PV' %}selected{% endif %}>PV</option>
@@ -25,18 +25,18 @@
             </div>
             <div class="col-auto">
                 <select name="year" class="form-select form-select-sm">
-                    <option value="" {% if not year %}selected{% endif %}>Alle Jahre</option>
+                    <option value="" {% if not year %}selected{% endif %}>{{ t('hist.all_years') }}</option>
                     {% for y in years %}
                     <option value="{{ y }}" {% if year == y %}selected{% endif %}>{{ y }}</option>
                     {% endfor %}
                 </select>
             </div>
             <div class="col-auto">
-                <button type="submit" class="btn btn-sm btn-primary"><i class="bi bi-funnel"></i> Filtern</button>
+                <button type="submit" class="btn btn-sm btn-primary"><i class="bi bi-funnel"></i> {{ t('hist.filter') }}</button>
             </div>
             {% if charge_type or year %}
             <div class="col-auto">
-                <a href="/history" class="btn btn-sm btn-outline-secondary"><i class="bi bi-x"></i> Reset</a>
+                <a href="/history" class="btn btn-sm btn-outline-secondary"><i class="bi bi-x"></i> {{ t('hist.reset') }}</a>
             </div>
             {% endif %}
         </form>
@@ -48,14 +48,14 @@
     <table class="table table-sm table-hover align-middle">
         <thead class="table-dark">
             <tr>
-                <th>Datum</th>
-                <th>Typ</th>
-                <th class="text-end">kWh</th>
-                <th class="text-end">€/kWh</th>
-                <th class="text-end">Kosten</th>
-                <th class="text-end d-none d-md-table-cell">km</th>
-                <th class="text-end d-none d-md-table-cell">SoC</th>
-                <th class="text-end d-none d-lg-table-cell">Verluste</th>
+                <th>{{ t('hist.date') }}</th>
+                <th>{{ t('hist.type') }}</th>
+                <th class="text-end">{{ t('hist.kwh') }}</th>
+                <th class="text-end">{{ t('hist.eur_kwh') }}</th>
+                <th class="text-end">{{ t('hist.cost') }}</th>
+                <th class="text-end d-none d-md-table-cell">{{ t('hist.km') }}</th>
+                <th class="text-end d-none d-md-table-cell">{{ t('hist.soc') }}</th>
+                <th class="text-end d-none d-lg-table-cell">{{ t('hist.loss') }}</th>
                 <th class="text-end d-none d-lg-table-cell">CO₂</th>
                 <th></th>
             </tr>
@@ -70,7 +70,7 @@
                 <td class="text-end">{{ "%.2f"|format(c.eur_per_kwh or 0) }}</td>
                 <td class="text-end fw-bold">€{{ "%.2f"|format(c.total_cost or 0) }}</td>
                 <td class="text-end d-none d-md-table-cell">
-                    <span class="editable-km" data-id="{{ c.id }}" role="button" title="Klicken zum Bearbeiten"
+                    <span class="editable-km" data-id="{{ c.id }}" role="button" title="{{ t('hist.click_edit_km') }}"
                           style="cursor:pointer; border-bottom:1px dashed #aaa;">
                         {% if c.odometer %}{{ "{:,}".format(c.odometer).replace(",", ".") }}{% else %}—{% endif %}
                     </span>
@@ -86,12 +86,12 @@
                 </td>
                 <td>
                     <div class="btn-group btn-group-sm">
-                        <a href="/edit/{{ c.id }}" class="btn btn-outline-primary" title="Bearbeiten">
+                        <a href="/edit/{{ c.id }}" class="btn btn-outline-primary" title="{{ t('hist.edit') }}">
                             <i class="bi bi-pencil"></i>
                         </a>
                         <form method="POST" action="/delete/{{ c.id }}" class="d-inline"
-                              onsubmit="return confirm('Eintrag wirklich löschen?')">
-                            <button type="submit" class="btn btn-outline-danger" title="Löschen">
+                              onsubmit="return confirm(T.confirm_delete)">
+                            <button type="submit" class="btn btn-outline-danger" title="{{ t('hist.delete') }}">
                                 <i class="bi bi-trash"></i>
                             </button>
                         </form>
@@ -131,12 +131,17 @@
 {% endif %}
 
 <div class="text-muted text-center small">
-    {{ charges.total }} Einträge gesamt
+    {{ charges.total }} {{ t('hist.total_entries') }}
 </div>
 {% endblock %}
 
 {% block scripts %}
 <script>
+const T = {
+    confirm_delete: "{{ t('hist.confirm_delete') }}",
+    error_prefix: "{{ t('hist.error_prefix') }}"
+};
+
 document.querySelectorAll('.editable-km').forEach(span => {
     span.addEventListener('click', function() {
         const id = this.dataset.id;
@@ -163,7 +168,7 @@ document.querySelectorAll('.editable-km').forEach(span => {
                 });
                 location.reload();
             } catch(e) {
-                alert('Fehler: ' + e.message);
+                alert(T.error_prefix + e.message);
             }
         };
         input.addEventListener('blur', save);

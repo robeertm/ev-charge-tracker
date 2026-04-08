@@ -26,31 +26,31 @@
                 <ul class="navbar-nav me-auto">
                     <li class="nav-item">
                         <a class="nav-link {% if request.endpoint == 'dashboard' %}active{% endif %}" href="/">
-                            <i class="bi bi-speedometer2"></i> Dashboard
+                            <i class="bi bi-speedometer2"></i> {{ t('nav.dashboard') }}
                         </a>
                     </li>
                     <li class="nav-item">
                         <a class="nav-link {% if request.endpoint == 'input_charge' %}active{% endif %}" href="/input">
-                            <i class="bi bi-plus-circle"></i> Neue Ladung
+                            <i class="bi bi-plus-circle"></i> {{ t('nav.input') }}
                         </a>
                     </li>
                     <li class="nav-item">
                         <a class="nav-link {% if request.endpoint == 'history' %}active{% endif %}" href="/history">
-                            <i class="bi bi-clock-history"></i> Verlauf
+                            <i class="bi bi-clock-history"></i> {{ t('nav.history') }}
                         </a>
                     </li>
                     <li class="nav-item">
                         <a class="nav-link {% if request.endpoint == 'settings' %}active{% endif %}" href="/settings">
-                            <i class="bi bi-gear"></i> Einstellungen
+                            <i class="bi bi-gear"></i> {{ t('nav.settings') }}
                         </a>
                     </li>
                     <li class="nav-item">
-                        <a class="nav-link" href="/report" title="PDF Report herunterladen">
+                        <a class="nav-link" href="/report" title="{{ t('nav.report_title') }}">
                             <i class="bi bi-file-earmark-pdf"></i> Report
                         </a>
                     </li>
                 </ul>
-                <button class="btn btn-sm btn-outline-light me-2 py-0 px-2" id="btnTheme" title="Tag/Nacht-Modus">
+                <button class="btn btn-sm btn-outline-light me-2 py-0 px-2" id="btnTheme" title="{{ t('nav.theme_title') }}">
                     <i class="bi bi-moon-stars" id="themeIcon"></i>
                 </button>
                 <span class="navbar-text small text-light opacity-75">
