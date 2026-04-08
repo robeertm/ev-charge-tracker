@@ -268,20 +268,56 @@
                             </div>
                         </div>
 
-                        <!-- Token-Fetch (Kia/Hyundai) -->
+                        <!-- Token-Fetch Wizard (Kia/Hyundai) -->
                         <div id="tokenHintSection" class="mb-3" style="display:none">
                             <div class="alert alert-info py-2 mb-0 small">
                                 <strong><i class="bi bi-shield-lock"></i> Refresh-Token benötigt</strong><br>
-                                Kia/Hyundai erlaubt keinen Passwort-Login. Klicke den Button — ein Chrome-Fenster öffnet sich (mobiler Modus). Dort einloggen und reCAPTCHA lösen. Der Token wird automatisch gespeichert.
-                                <div class="mt-2 d-flex gap-2 align-items-center flex-wrap">
+                                Kia/Hyundai erlaubt keinen Passwort-Login. Token wird im eigenen Browser geholt (funktioniert auch bei headless Server).
+
+                                <!-- Step 0: Start -->
+                                <div id="tokenStep0" class="mt-2">
                                     <button type="button" class="btn btn-warning btn-sm" id="btnFetchToken">
-                                        <i class="bi bi-key"></i> Token holen
+                                        <i class="bi bi-key"></i> Token holen (Anleitung)
                                     </button>
-                                    <button type="button" class="btn btn-outline-secondary btn-sm" id="btnCancelToken" style="display:none">
-                                        <i class="bi bi-x-lg"></i> Abbrechen
-                                    </button>
-                                    <span class="small" id="tokenFetchStatus"></span>
                                 </div>
+
+                                <!-- Step 1: Login -->
+                                <div id="tokenStep1" class="mt-2" style="display:none">
+                                    <strong>Schritt 1:</strong> Diesen Link in einem neuen Tab/Fenster öffnen.<br>
+                                    <span class="text-muted" style="font-size:0.7rem">Wichtig: In Chrome <kbd>F12</kbd> drücken, dann oben links das Handy-Symbol (<i class="bi bi-phone"></i>) aktivieren (mobile Ansicht). Ohne mobile Ansicht blockiert Kia den Login.</span>
+                                    <div class="mt-1">
+                                        <a id="tokenLoginLink" href="#" target="_blank" class="btn btn-outline-primary btn-sm">
+                                            <i class="bi bi-box-arrow-up-right"></i> Login-Seite öffnen
+                                        </a>
+                                    </div>
+                                    <div class="mt-2">
+                                        Einloggen und reCAPTCHA lösen. Danach:
+                                        <button type="button" class="btn btn-primary btn-sm mt-1" id="btnTokenStep2">
+                                            <i class="bi bi-arrow-right"></i> Eingeloggt — weiter
+                                        </button>
+                                    </div>
+                                </div>
+
+                                <!-- Step 2: Authorize -->
+                                <div id="tokenStep2" class="mt-2" style="display:none">
+                                    <strong>Schritt 2:</strong> Jetzt diesen Link <strong>im gleichen Tab</strong> öffnen (wo du gerade eingeloggt bist).<br>
+                                    <div class="mt-1">
+                                        <a id="tokenAuthLink" href="#" target="_blank" class="btn btn-outline-primary btn-sm">
+                                            <i class="bi bi-box-arrow-up-right"></i> Authorize-Link öffnen
+                                        </a>
+                                    </div>
+                                    <div class="mt-2">
+                                        Du wirst weitergeleitet. <strong>Kopiere die komplette URL</strong> aus der Adressleiste (sie enthält <code>code=...</code>) und füge sie hier ein:
+                                        <div class="input-group input-group-sm mt-1">
+                                            <input type="text" class="form-control" id="tokenRedirectUrl" placeholder="https://prd.eu-ccapi...?code=ABC123...">
+                                            <button type="button" class="btn btn-success" id="btnTokenExchange">
+                                                <i class="bi bi-check-lg"></i> Token holen
+                                            </button>
+                                        </div>
+                                        <span class="small" id="tokenExchangeStatus"></span>
+                                    </div>
+                                </div>
+
                                 <div class="mt-2 text-muted" style="font-size:0.75rem">
                                     Oder Token manuell eintragen (z.B. aus <a href="https://github.com/Hyundai-Kia-Connect/hyundai_kia_connect_api/wiki/Kia-Europe-Login-Flow" target="_blank">externem Script</a>). Token ist ca. 1 Jahr gültig.
                                 </div>
@@ -369,64 +405,74 @@
                 updateVehicleFields();
 
 
-                // Token fetch (Kia/Hyundai)
+                // Token fetch wizard (Kia/Hyundai) — client-side OAuth flow
                 (function() {
                     const btnFetch = document.getElementById('btnFetchToken');
-                    const btnCancel = document.getElementById('btnCancelToken');
-                    const statusEl = document.getElementById('tokenFetchStatus');
                     if (!btnFetch) return;
-                    let pollInterval = null;
 
-                    function stopPolling() {
-                        if (pollInterval) { clearInterval(pollInterval); pollInterval = null; }
-                        btnFetch.disabled = false;
-                        btnFetch.innerHTML = '<i class="bi bi-key"></i> Token holen';
-                        btnCancel.style.display = 'none';
-                    }
-
-                    function pollStatus() {
-                        fetch('/api/vehicle/token/status').then(r => r.json()).then(d => {
-                            if (d.token) {
-                                statusEl.innerHTML = '<span class="text-success fw-bold"><i class="bi bi-check-circle"></i> Token gespeichert!</span>';
-                                stopPolling();
-                                setTimeout(() => location.reload(), 1500);
-                            } else if (d.error) {
-                                statusEl.innerHTML = '<span class="text-danger">' + d.error + '</span>';
-                                stopPolling();
-                            } else if (d.running) {
-                                statusEl.innerHTML = '<span class="text-primary"><span class="spinner-border spinner-border-sm me-1"></span>' + d.status + '</span>';
-                            }
-                        }).catch(() => {});
-                    }
+                    const step0 = document.getElementById('tokenStep0');
+                    const step1 = document.getElementById('tokenStep1');
+                    const step2 = document.getElementById('tokenStep2');
+                    const loginLink = document.getElementById('tokenLoginLink');
+                    const authLink = document.getElementById('tokenAuthLink');
+                    const btnStep2 = document.getElementById('btnTokenStep2');
+                    const btnExchange = document.getElementById('btnTokenExchange');
+                    const redirectInput = document.getElementById('tokenRedirectUrl');
+                    const statusEl = document.getElementById('tokenExchangeStatus');
 
                     btnFetch.addEventListener('click', async () => {
+                        const brand = document.getElementById('vehicle_api_brand').value;
                         btnFetch.disabled = true;
-                        btnFetch.innerHTML = '<span class="spinner-border spinner-border-sm"></span> Starte...';
-                        btnCancel.style.display = '';
-                        statusEl.textContent = '';
+                        btnFetch.innerHTML = '<span class="spinner-border spinner-border-sm"></span>';
                         try {
-                            const brand = document.getElementById('vehicle_api_brand').value;
-                            const r = await fetch('/api/vehicle/token/start', {
+                            const r = await fetch('/api/vehicle/token/urls', {
                                 method: 'POST', headers: {'Content-Type': 'application/json'},
                                 body: JSON.stringify({brand}),
                             });
                             const d = await r.json();
-                            if (d.success) {
-                                pollInterval = setInterval(pollStatus, 2000);
-                            } else {
-                                statusEl.innerHTML = '<span class="text-danger">' + d.error + '</span>';
-                                stopPolling();
-                            }
+                            if (d.error) { btnFetch.disabled = false; btnFetch.innerHTML = '<i class="bi bi-key"></i> Token holen'; alert(d.error); return; }
+                            loginLink.href = d.login_url;
+                            authLink.href = d.authorize_url;
+                            step0.style.display = 'none';
+                            step1.style.display = '';
                         } catch(e) {
-                            statusEl.innerHTML = '<span class="text-danger">' + e.message + '</span>';
-                            stopPolling();
+                            alert(e.message);
+                            btnFetch.disabled = false;
+                            btnFetch.innerHTML = '<i class="bi bi-key"></i> Token holen';
                         }
                     });
 
-                    btnCancel.addEventListener('click', async () => {
-                        await fetch('/api/vehicle/token/cancel', {method: 'POST'});
-                        statusEl.textContent = 'Abgebrochen.';
-                        stopPolling();
+                    btnStep2.addEventListener('click', () => {
+                        step1.style.display = 'none';
+                        step2.style.display = '';
+                    });
+
+                    btnExchange.addEventListener('click', async () => {
+                        const code = redirectInput.value.trim();
+                        if (!code) { statusEl.innerHTML = '<span class="text-danger">Bitte URL einfügen</span>'; return; }
+                        btnExchange.disabled = true;
+                        btnExchange.innerHTML = '<span class="spinner-border spinner-border-sm"></span>';
+                        statusEl.textContent = '';
+                        try {
+                            const brand = document.getElementById('vehicle_api_brand').value;
+                            const r = await fetch('/api/vehicle/token/exchange', {
+                                method: 'POST', headers: {'Content-Type': 'application/json'},
+                                body: JSON.stringify({brand, code}),
+                            });
+                            const d = await r.json();
+                            if (d.token) {
+                                statusEl.innerHTML = '<span class="text-success fw-bold"><i class="bi bi-check-circle"></i> Token gespeichert!</span>';
+                                setTimeout(() => location.reload(), 1500);
+                            } else {
+                                statusEl.innerHTML = '<span class="text-danger">' + (d.error || 'Unbekannter Fehler') + '</span>';
+                                btnExchange.disabled = false;
+                                btnExchange.innerHTML = '<i class="bi bi-check-lg"></i> Token holen';
+                            }
+                        } catch(e) {
+                            statusEl.innerHTML = '<span class="text-danger">' + e.message + '</span>';
+                            btnExchange.disabled = false;
+                            btnExchange.innerHTML = '<i class="bi bi-check-lg"></i> Token holen';
+                        }
                     });
                 })();
 

@@ -547,33 +547,33 @@ def register_routes(app):
             'missing': get_missing_count(app),
         })
 
-    @app.route('/api/vehicle/token/start', methods=['POST'])
-    def api_vehicle_token_start():
-        """Start browser-based token fetch with mobile user-agent."""
+    @app.route('/api/vehicle/token/urls', methods=['POST'])
+    def api_vehicle_token_urls():
+        """Return OAuth login + authorize URLs for client-side token flow."""
         data = request.get_json() or {}
         brand = data.get('brand') or AppConfig.get('vehicle_api_brand', '')
         if brand not in ('kia', 'hyundai'):
             return jsonify({'error': 'Nur für Kia/Hyundai verfügbar'}), 400
-        AppConfig.set('vehicle_api_brand', brand)
-        from services.vehicle.token_fetch import start_fetch
-        if start_fetch(brand):
-            return jsonify({'success': True})
-        return jsonify({'error': 'Läuft bereits'}), 409
+        from services.vehicle.token_fetch import get_urls
+        urls = get_urls(brand)
+        if not urls:
+            return jsonify({'error': 'Unbekannte Marke'}), 400
+        return jsonify(urls)
 
-    @app.route('/api/vehicle/token/status')
-    def api_vehicle_token_status():
-        """Poll token fetch status."""
-        from services.vehicle.token_fetch import get_state
-        state = get_state()
-        if state.get('token'):
-            AppConfig.set('vehicle_api_password', state['token'])
-        return jsonify(state)
-
-    @app.route('/api/vehicle/token/cancel', methods=['POST'])
-    def api_vehicle_token_cancel():
-        from services.vehicle.token_fetch import cancel_fetch
-        cancel_fetch()
-        return jsonify({'success': True})
+    @app.route('/api/vehicle/token/exchange', methods=['POST'])
+    def api_vehicle_token_exchange():
+        """Exchange auth code (or redirect URL) for refresh token."""
+        data = request.get_json() or {}
+        brand = data.get('brand') or AppConfig.get('vehicle_api_brand', '')
+        code_or_url = data.get('code', '')
+        if not code_or_url:
+            return jsonify({'error': 'Kein Code oder URL angegeben'}), 400
+        from services.vehicle.token_fetch import exchange_code
+        result = exchange_code(brand, code_or_url)
+        if result.get('token'):
+            AppConfig.set('vehicle_api_password', result['token'])
+            AppConfig.set('vehicle_api_brand', brand)
+        return jsonify(result)
 
     @app.route('/api/vehicle/install', methods=['POST'])
     def api_vehicle_install():
