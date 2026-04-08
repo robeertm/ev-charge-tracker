@@ -24,7 +24,7 @@ class Config:
     ENTSOE_API_KEY = os.environ.get('ENTSOE_API_KEY', '')
     ENTSOE_COUNTRY = 'DE'
 
-    APP_VERSION = '1.8.3'
+    APP_VERSION = '1.9.0'
     GITHUB_REPO = 'robeertm/ev-charge-tracker'
     APP_HOST = '0.0.0.0'
     APP_PORT = 7654
