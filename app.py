@@ -1,8 +1,9 @@
 """EV Charge Tracker - Main Flask Application."""
+import io
 import os
 import logging
 from datetime import datetime, date
-from flask import Flask, render_template, request, redirect, url_for, flash, jsonify
+from flask import Flask, render_template, request, redirect, url_for, flash, jsonify, send_file
 
 from models.database import db, Charge, AppConfig, ThgQuota, VehicleSync
 from config import Config
@@ -453,6 +454,24 @@ def register_routes(app):
                                total_charges=Charge.query.count(),
                                co2_missing=Charge.query.filter(Charge.co2_g_per_kwh.is_(None), Charge.charge_type != 'PV').count(),
                                app_version=Config.APP_VERSION)
+
+    # ── REPORT ─────────────────────────────────────────────────
+    @app.route('/report')
+    def report():
+        from services.report_service import generate_report
+        from flask import send_file
+        pdf_bytes = generate_report()
+        if not pdf_bytes:
+            flash('Keine Daten für Report vorhanden.', 'warning')
+            return redirect(url_for('dashboard'))
+        car = AppConfig.get('car_model', 'EV')
+        filename = f'EV_Report_{car}_{date.today().strftime("%Y%m%d")}.pdf'
+        return send_file(
+            io.BytesIO(pdf_bytes),
+            mimetype='application/pdf',
+            as_attachment=True,
+            download_name=filename,
+        )
 
     # ── API ENDPOINTS ──────────────────────────────────────────
     @app.route('/api/co2/<date_str>')

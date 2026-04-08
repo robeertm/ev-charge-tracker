@@ -5,6 +5,8 @@ entsoe-py==0.6.11
 pandas==2.2.3
 gunicorn==23.0.0
 requests==2.32.3
+matplotlib>=3.8.0
+fpdf2>=2.7.0
 
 # Optional: Vehicle API connectors (install only what you need)
 # hyundai-kia-connect-api>=3.0.0  # Kia UVO / Hyundai Bluelink

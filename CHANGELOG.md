@@ -1,5 +1,14 @@
 # Changelog
 
+## v1.8.0 (2026-04-08)
+
+### New Features
+- **PDF Report** — new "Report" button in navigation, generates multi-page PDF with:
+  - KPI overview (costs, kWh, CO2, savings, consumption, recuperation)
+  - 10 colorful charts (monthly costs/kWh/CO2 with averages, cumulative cost/kWh, CO2 break-even, price trend, charge count, AC/DC/PV pie charts, yearly comparison)
+  - Detailed tables (AC/DC/PV statistics, yearly overview, monthly breakdown)
+  - Auto-generated filename with car model and date
+
 ## v1.7.0 (2026-04-08)
 
 ### New Features
