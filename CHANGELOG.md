@@ -1,5 +1,14 @@
 # Changelog
 
+## v2.2.0 (2026-04-09)
+
+### New Features
+- **Real in-app updater** — the "Update verfügbar" button in Settings now actually rolls out the update on the user's machine instead of opening the GitHub release page in a browser. Click → confirm → the app downloads the new release zip, stages it, hands off to a detached `updater_helper.py` process, gracefully shuts itself down, the helper swaps files (preserving `venv/`, `data/`, `.git/`), runs `pip install -r requirements.txt` and re-launches the app via the platform start script. The settings page polls until the app comes back online and reloads the browser automatically.
+- **`POST /api/update/install`** and **`GET /api/update/check`** routes drive the new flow.
+
+### How it works
+The trick is the detour through a standalone `updater_helper.py` script: the running Flask process cannot safely overwrite its own `app.py` and templates while still serving requests, so the helper runs in a separate detached subprocess that waits on the parent PID, then performs the file swap. Pattern adapted from `shelly-energy-analyzer`.
+
 ## v2.1.1 (2026-04-09)
 
 ### Fixes

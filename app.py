@@ -823,6 +823,49 @@ def register_routes(app):
         from services.stats_service import get_summary_stats
         return jsonify(get_summary_stats())
 
+    # ── UPDATE ENDPOINTS ───────────────────────────────────────
+    @app.route('/api/update/check')
+    def api_update_check():
+        """Check GitHub for a strictly newer release."""
+        from updater import check_for_update
+        new_version, zip_url = check_for_update()
+        return jsonify({
+            'current': Config.APP_VERSION,
+            'latest': new_version,
+            'update_available': bool(new_version),
+            'zip_url': zip_url,
+            'release_url': f"https://github.com/{Config.GITHUB_REPO}/releases/tag/v{new_version}" if new_version else None,
+        })
+
+    @app.route('/api/update/install', methods=['POST'])
+    def api_update_install():
+        """Stage an update and trigger a graceful shutdown so the helper
+        can swap files and restart the app."""
+        from updater import check_for_update, apply_update
+        new_version, zip_url = check_for_update()
+        if not new_version or not zip_url:
+            return jsonify({'error': 'no_update_available'}), 400
+
+        ok = apply_update(zip_url, new_version)
+        if not ok:
+            return jsonify({'error': 'update_failed', 'version': new_version}), 500
+
+        # Schedule a delayed graceful shutdown so this response can flush.
+        # The helper is already detached and is waiting on our PID with a
+        # ~30s budget; 1.5s gives the JSON response time to reach the browser.
+        import threading
+        def _shutdown():
+            import time as _t
+            _t.sleep(1.5)
+            os._exit(0)
+        threading.Thread(target=_shutdown, daemon=True).start()
+
+        return jsonify({
+            'staged': True,
+            'version': new_version,
+            'message': 'Update wird installiert. Die App startet in wenigen Sekunden neu.',
+        })
+
     @app.route('/api/export/csv')
     def export_csv():
         """Export all charges as CSV."""

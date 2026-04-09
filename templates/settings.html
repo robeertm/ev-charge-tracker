@@ -392,6 +392,15 @@
                     app_up_to_date: {{ t('set.app_up_to_date')|tojson }},
                     app_not_found: {{ t('set.app_not_found')|tojson }},
                     app_error: {{ t('set.app_error')|tojson }},
+                    app_current: {{ t('set.app_current')|tojson }},
+                    app_install_now: {{ t('set.app_install_now')|tojson }},
+                    app_install_confirm: {{ t('set.app_install_confirm')|tojson }},
+                    app_installing: {{ t('set.app_installing')|tojson }},
+                    app_install_started: {{ t('set.app_install_started')|tojson }},
+                    app_install_wait: {{ t('set.app_install_wait')|tojson }},
+                    app_install_done: {{ t('set.app_install_done')|tojson }},
+                    app_install_timeout: {{ t('set.app_install_timeout')|tojson }},
+                    app_release_notes: {{ t('set.app_release_notes')|tojson }},
                 };
 
                 function updateVehicleFields() {
@@ -653,30 +662,111 @@
 
 {% block scripts %}
 <script>
-document.getElementById('btnCheckUpdate').addEventListener('click', async () => {
+(function() {
     const btn = document.getElementById('btnCheckUpdate');
     const result = document.getElementById('updateResult');
-    btn.disabled = true;
-    btn.innerHTML = '<span class="spinner-border spinner-border-sm"></span> ' + T.app_checking;
-    try {
-        const resp = await fetch('https://api.github.com/repos/robeertm/ev-charge-tracker/releases/latest');
-        if (resp.ok) {
-            const data = await resp.json();
-            const current = '{{ app_version }}';
-            if (data.tag_name && data.tag_name.replace('v', '') !== current) {
-                result.innerHTML = `<div class="alert alert-info">${T.app_new_version} <strong>${data.tag_name}</strong>
-                    <a href="${data.html_url}" target="_blank" class="btn btn-sm btn-primary ms-2">${T.app_download}</a></div>`;
-            } else {
-                result.innerHTML = '<div class="alert alert-success">' + T.app_up_to_date + '</div>';
-            }
-        } else {
-            result.innerHTML = '<div class="alert alert-warning">' + T.app_not_found + '</div>';
-        }
-    } catch (e) {
-        result.innerHTML = '<div class="alert alert-danger">' + T.app_error + e.message + '</div>';
+    const checkLabel = '<i class="bi bi-arrow-repeat"></i> ' + {{ t('set.app_check_update')|tojson }};
+
+    let pendingVersion = null;
+    let pendingZipUrl = null;
+
+    function setBusy(label) {
+        btn.disabled = true;
+        btn.innerHTML = '<span class="spinner-border spinner-border-sm"></span> ' + label;
     }
-    btn.disabled = false;
-    btn.innerHTML = '<i class="bi bi-arrow-repeat"></i> ' + {{ t('set.app_check_update')|tojson }};
-});
+    function setIdle() {
+        btn.disabled = false;
+        btn.innerHTML = checkLabel;
+    }
+
+    async function doCheck() {
+        setBusy(T.app_checking);
+        result.innerHTML = '';
+        try {
+            const r = await fetch('/api/update/check');
+            const data = await r.json();
+            if (data.update_available) {
+                pendingVersion = data.latest;
+                pendingZipUrl = data.zip_url;
+                result.innerHTML =
+                    '<div class="alert alert-info">' +
+                    T.app_new_version + ' <strong>v' + data.latest + '</strong> ' +
+                    '(' + T.app_current + ': v' + data.current + ')' +
+                    '<div class="mt-2">' +
+                    '<button class="btn btn-sm btn-primary me-2" id="btnInstallUpdate"><i class="bi bi-download"></i> ' + T.app_install_now + '</button>' +
+                    '<a href="' + data.release_url + '" target="_blank" class="btn btn-sm btn-outline-secondary"><i class="bi bi-github"></i> ' + T.app_release_notes + '</a>' +
+                    '</div>' +
+                    '</div>';
+                document.getElementById('btnInstallUpdate').addEventListener('click', doInstall);
+            } else if (data.latest === null) {
+                result.innerHTML = '<div class="alert alert-success">' + T.app_up_to_date + '</div>';
+            } else {
+                result.innerHTML = '<div class="alert alert-warning">' + T.app_not_found + '</div>';
+            }
+        } catch (e) {
+            result.innerHTML = '<div class="alert alert-danger">' + T.app_error + e.message + '</div>';
+        }
+        setIdle();
+    }
+
+    async function doInstall() {
+        if (!confirm(T.app_install_confirm)) return;
+        const installBtn = document.getElementById('btnInstallUpdate');
+        if (installBtn) {
+            installBtn.disabled = true;
+            installBtn.innerHTML = '<span class="spinner-border spinner-border-sm"></span> ' + T.app_installing;
+        }
+        try {
+            const r = await fetch('/api/update/install', { method: 'POST' });
+            const data = await r.json();
+            if (data.staged) {
+                result.innerHTML =
+                    '<div class="alert alert-success">' +
+                    '<i class="bi bi-check-circle"></i> ' + T.app_install_started + '<br>' +
+                    '<small>' + T.app_install_wait + '</small>' +
+                    '<div class="progress mt-2" style="height:6px"><div class="progress-bar progress-bar-striped progress-bar-animated" style="width:100%"></div></div>' +
+                    '</div>';
+                // Poll for the app coming back online
+                setTimeout(pollUntilBack, 5000);
+            } else {
+                result.innerHTML = '<div class="alert alert-danger">' + T.app_error + (data.error || 'unknown') + '</div>';
+            }
+        } catch (e) {
+            // Connection drop is expected when the server restarts
+            result.innerHTML =
+                '<div class="alert alert-info">' +
+                '<i class="bi bi-arrow-clockwise"></i> ' + T.app_install_started + '<br>' +
+                '<small>' + T.app_install_wait + '</small>' +
+                '</div>';
+            setTimeout(pollUntilBack, 5000);
+        }
+    }
+
+    async function pollUntilBack() {
+        let tries = 0;
+        const maxTries = 60;  // ~3 minutes at 3s intervals
+        while (tries < maxTries) {
+            try {
+                const r = await fetch('/api/update/check', { cache: 'no-store' });
+                if (r.ok) {
+                    const data = await r.json();
+                    if (data.current && data.current !== '{{ app_version }}') {
+                        result.innerHTML =
+                            '<div class="alert alert-success">' +
+                            '<i class="bi bi-check-circle"></i> ' + T.app_install_done + ' v' + data.current +
+                            '</div>';
+                        setTimeout(() => location.reload(), 1500);
+                        return;
+                    }
+                }
+            } catch (e) { /* still down — keep polling */ }
+            await new Promise(res => setTimeout(res, 3000));
+            tries++;
+        }
+        result.innerHTML += '<div class="alert alert-warning mt-2">' + T.app_install_timeout + '</div>';
+    }
+
+    btn.addEventListener('click', doCheck);
+})();
 </script>
 {% endblock %}
