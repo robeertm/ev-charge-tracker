@@ -1,5 +1,13 @@
 # Changelog
 
+## v2.3.1 (2026-04-09)
+
+### Updater fixes
+- **Helper restarts the app reliably** — `updater_helper.py` now spawns `venv/bin/python app.py` directly instead of going through `start.command` → `start.sh`. This bypasses the redundant pip install loop and the `set -e` shell pitfalls, dropping restart latency from ~15 s to ~3 s.
+- **Port-release race fix** — wait 2 s after the parent Flask process dies before binding the port again, so we can't hit `EADDRINUSE`.
+- **Restart log** — every restart attempt is logged to `updates/restart.log` with timestamps and stdout/stderr of the spawned process. Previously failures were silent because output went to `/dev/null`.
+- **`_spawn_helper` prefers the staging helper** — `updater.py` now launches `staging/.../updater_helper.py` (the new release) instead of the in-place helper, so future updater bugfixes take effect on the very first update that ships them.
+
 ## v2.3.0 (2026-04-09)
 
 ### New Features

@@ -83,14 +83,74 @@ def _clear_quarantine(target: Path) -> None:
 
 
 def _restart_app(app_dir: Path) -> None:
-    """Re-launch the app via the platform start script."""
+    """Re-launch the app. Prefers ``venv/bin/python app.py`` so we don't go
+    through start.sh's full pip-install + browser-open dance (the helper
+    already ran pip). Logs everything to ``updates/restart.log`` so failures
+    are visible."""
+    # Give the kernel a moment to release the listening port. Without this
+    # the new process can race the dying parent and fail with EADDRINUSE.
+    try:
+        time.sleep(2.0)
+    except Exception:
+        pass
+
+    log_path = app_dir / 'updates' / 'restart.log'
+    log_path.parent.mkdir(parents=True, exist_ok=True)
+    try:
+        log_fh = open(log_path, 'a', buffering=1)
+    except Exception:
+        log_fh = None
+    if log_fh:
+        log_fh.write(f"\n[restart] {time.strftime('%Y-%m-%d %H:%M:%S')} attempting restart\n")
+
+    py = _venv_python(app_dir)
+    app_py = app_dir / 'app.py'
+
+    # Preferred path: directly invoke venv python with app.py.
+    # This bypasses start.sh entirely and avoids running pip install twice.
+    if py and app_py.exists():
+        if log_fh:
+            log_fh.write(f"[restart] using venv python: {py} {app_py}\n")
+        cmd = [str(py), str(app_py)]
+        try:
+            if os.name == 'nt':
+                subprocess.Popen(
+                    cmd,
+                    cwd=str(app_dir),
+                    stdin=subprocess.DEVNULL,
+                    stdout=log_fh or subprocess.DEVNULL,
+                    stderr=log_fh or subprocess.DEVNULL,
+                    creationflags=subprocess.DETACHED_PROCESS | subprocess.CREATE_NEW_PROCESS_GROUP,
+                    close_fds=False,
+                )
+            else:
+                subprocess.Popen(
+                    cmd,
+                    cwd=str(app_dir),
+                    stdin=subprocess.DEVNULL,
+                    stdout=log_fh or subprocess.DEVNULL,
+                    stderr=log_fh or subprocess.DEVNULL,
+                    start_new_session=True,
+                    close_fds=True,
+                )
+            if log_fh:
+                log_fh.write("[restart] venv python spawned successfully\n")
+            try:
+                time.sleep(0.8)
+            except Exception:
+                pass
+            return
+        except Exception as e:
+            if log_fh:
+                log_fh.write(f"[restart] venv python spawn failed: {e}\n")
+
+    # Fallback: spawn the platform start script
     if os.name == 'nt':
         start = app_dir / 'start.bat'
         if start.exists():
             subprocess.Popen(['cmd', '/c', 'start', '', str(start)], cwd=str(app_dir))
         return
 
-    # macOS / Linux: prefer start.command, fall back to start.sh
     candidates = ['start.command', 'start.sh']
     start = None
     for name in candidates:
@@ -99,9 +159,8 @@ def _restart_app(app_dir: Path) -> None:
             start = cand
             break
     if start is None:
-        # Last resort: launch python app.py directly
-        py = _venv_python(app_dir) or Path(sys.executable)
-        _spawn_detached([str(py), str(app_dir / 'app.py')], cwd=app_dir)
+        if log_fh:
+            log_fh.write("[restart] no start script found\n")
         return
 
     _ensure_executable(start)
@@ -109,9 +168,28 @@ def _restart_app(app_dir: Path) -> None:
     _ensure_executable(app_dir / 'start.sh')
     _clear_quarantine(app_dir)
 
-    _spawn_detached(['/usr/bin/nohup', '/bin/bash', str(start)], cwd=app_dir)
+    if log_fh:
+        log_fh.write(f"[restart] fallback: bash {start}\n")
     try:
-        time.sleep(0.5)
+        if os.name == 'nt':
+            subprocess.Popen([str(start)], cwd=str(app_dir),
+                             stdin=subprocess.DEVNULL,
+                             stdout=log_fh or subprocess.DEVNULL,
+                             stderr=log_fh or subprocess.DEVNULL,
+                             creationflags=subprocess.DETACHED_PROCESS | subprocess.CREATE_NEW_PROCESS_GROUP,
+                             close_fds=False)
+        else:
+            subprocess.Popen(['/bin/bash', str(start)], cwd=str(app_dir),
+                             stdin=subprocess.DEVNULL,
+                             stdout=log_fh or subprocess.DEVNULL,
+                             stderr=log_fh or subprocess.DEVNULL,
+                             start_new_session=True, close_fds=True)
+    except Exception as e:
+        if log_fh:
+            log_fh.write(f"[restart] fallback spawn failed: {e}\n")
+
+    try:
+        time.sleep(0.8)
     except Exception:
         pass
 

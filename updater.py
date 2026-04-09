@@ -114,10 +114,18 @@ def _extract_and_unwrap(zip_path: Path, staging: Path) -> Path:
 
 
 def _spawn_helper(staging_root: Path) -> None:
-    """Launch updater_helper.py fully detached from this process."""
+    """Launch updater_helper.py fully detached from this process.
+
+    Prefers the helper script from the **staging** directory (the new
+    release) if it exists, so improvements to the helper take effect on
+    the very first update that ships them — without needing a second
+    update cycle to install them.
+    """
     app_dir = _app_dir()
+    staging_helper = staging_root / 'updater_helper.py'
+    helper_path = staging_helper if staging_helper.exists() else app_dir / 'updater_helper.py'
     helper = [
-        sys.executable, str(app_dir / 'updater_helper.py'),
+        sys.executable, str(helper_path),
         '--app-dir', str(app_dir),
         '--staging-dir', str(staging_root),
         '--wait-pid', str(os.getpid()),
