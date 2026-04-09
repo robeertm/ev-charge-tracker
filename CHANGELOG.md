@@ -1,5 +1,12 @@
 # Changelog
 
+## v2.3.2 (2026-04-09)
+
+### Updater fixes (the actual restart problem)
+- **`nohup`-wrap the new Python process**, not just the bash launcher. macOS Terminal.app sends SIGHUP to *every* process in its session when the window closes, even processes that called `setsid`. The v2.3.1 fix bypassed `start.sh` correctly but the bare `python app.py` was still vulnerable. v2.3.2 wraps it in `/usr/bin/nohup` which sets `SIG_IGN` for SIGHUP — survives terminal close.
+- **Health check after spawn** — the helper now waits 4 seconds, verifies the spawned process is still alive (`p.poll() is None`), and probes port 7654 with a TCP socket. Failure is logged with the exit code instead of being silent.
+- **More verbose logging** — every step in `_restart_app` is timestamped so future failures are debuggable from `updates/restart.log` alone.
+
 ## v2.3.1 (2026-04-09)
 
 ### Updater fixes

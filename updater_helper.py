@@ -83,12 +83,19 @@ def _clear_quarantine(target: Path) -> None:
 
 
 def _restart_app(app_dir: Path) -> None:
-    """Re-launch the app. Prefers ``venv/bin/python app.py`` so we don't go
-    through start.sh's full pip-install + browser-open dance (the helper
-    already ran pip). Logs everything to ``updates/restart.log`` so failures
-    are visible."""
-    # Give the kernel a moment to release the listening port. Without this
-    # the new process can race the dying parent and fail with EADDRINUSE.
+    """Re-launch the app as a fully-detached background daemon.
+
+    The challenge on macOS: Terminal.app sends SIGHUP to *every* process in
+    its session when the window closes — even processes that called setsid.
+    To survive that, the new Python process must be wrapped in ``nohup``
+    (which sets SIG_IGN for SIGHUP) AND placed in its own session.
+
+    We bypass start.sh entirely because the redundant pip install + browser
+    open + ``set -e`` shell pitfalls add ~10 s of latency and several ways
+    to fail silently. The helper already ran pip install with the new
+    requirements.txt, so the venv is ready.
+    """
+    # Give the kernel a moment to release the listening port.
     try:
         time.sleep(2.0)
     except Exception:
@@ -100,21 +107,31 @@ def _restart_app(app_dir: Path) -> None:
         log_fh = open(log_path, 'a', buffering=1)
     except Exception:
         log_fh = None
-    if log_fh:
-        log_fh.write(f"\n[restart] {time.strftime('%Y-%m-%d %H:%M:%S')} attempting restart\n")
+
+    def _log(msg):
+        if log_fh:
+            log_fh.write(f"[restart {time.strftime('%H:%M:%S')}] {msg}\n")
+
+    _log(f"=== restart attempt for {app_dir} ===")
 
     py = _venv_python(app_dir)
     app_py = app_dir / 'app.py'
+    _log(f"venv python: {py}")
+    _log(f"app.py exists: {app_py.exists()}")
 
-    # Preferred path: directly invoke venv python with app.py.
-    # This bypasses start.sh entirely and avoids running pip install twice.
     if py and app_py.exists():
-        if log_fh:
-            log_fh.write(f"[restart] using venv python: {py} {app_py}\n")
-        cmd = [str(py), str(app_py)]
+        # Preferred path: nohup wrap so SIGHUP from Terminal close is ignored,
+        # plus start_new_session so we leave the parent's process group entirely.
+        nohup = '/usr/bin/nohup' if os.path.exists('/usr/bin/nohup') else 'nohup'
+        if os.name == 'nt':
+            cmd = [str(py), str(app_py)]
+        else:
+            cmd = [nohup, str(py), str(app_py)]
+        _log(f"spawning: {' '.join(cmd)}")
+
         try:
             if os.name == 'nt':
-                subprocess.Popen(
+                p = subprocess.Popen(
                     cmd,
                     cwd=str(app_dir),
                     stdin=subprocess.DEVNULL,
@@ -124,7 +141,7 @@ def _restart_app(app_dir: Path) -> None:
                     close_fds=False,
                 )
             else:
-                subprocess.Popen(
+                p = subprocess.Popen(
                     cmd,
                     cwd=str(app_dir),
                     stdin=subprocess.DEVNULL,
@@ -133,18 +150,23 @@ def _restart_app(app_dir: Path) -> None:
                     start_new_session=True,
                     close_fds=True,
                 )
-            if log_fh:
-                log_fh.write("[restart] venv python spawned successfully\n")
-            try:
-                time.sleep(0.8)
-            except Exception:
-                pass
-            return
+            _log(f"spawned PID {p.pid}, waiting 4s for startup…")
+            # Wait a bit, then verify the process is still alive AND something
+            # is listening on the port.
+            time.sleep(4.0)
+            alive = (p.poll() is None)
+            _log(f"PID {p.pid} alive after 4s: {alive}")
+            if alive:
+                _check_port_listening(7654, log_fh)
+                _log("restart successful")
+                return
+            else:
+                _log(f"PID {p.pid} died with exit code {p.returncode}")
         except Exception as e:
-            if log_fh:
-                log_fh.write(f"[restart] venv python spawn failed: {e}\n")
+            _log(f"spawn exception: {e}")
 
-    # Fallback: spawn the platform start script
+    # Fallback: spawn start script
+    _log("falling back to start script")
     if os.name == 'nt':
         start = app_dir / 'start.bat'
         if start.exists():
@@ -159,8 +181,7 @@ def _restart_app(app_dir: Path) -> None:
             start = cand
             break
     if start is None:
-        if log_fh:
-            log_fh.write("[restart] no start script found\n")
+        _log("no start script found")
         return
 
     _ensure_executable(start)
@@ -168,28 +189,29 @@ def _restart_app(app_dir: Path) -> None:
     _ensure_executable(app_dir / 'start.sh')
     _clear_quarantine(app_dir)
 
-    if log_fh:
-        log_fh.write(f"[restart] fallback: bash {start}\n")
+    _log(f"fallback spawn: nohup bash {start}")
     try:
-        if os.name == 'nt':
-            subprocess.Popen([str(start)], cwd=str(app_dir),
-                             stdin=subprocess.DEVNULL,
-                             stdout=log_fh or subprocess.DEVNULL,
-                             stderr=log_fh or subprocess.DEVNULL,
-                             creationflags=subprocess.DETACHED_PROCESS | subprocess.CREATE_NEW_PROCESS_GROUP,
-                             close_fds=False)
-        else:
-            subprocess.Popen(['/bin/bash', str(start)], cwd=str(app_dir),
-                             stdin=subprocess.DEVNULL,
-                             stdout=log_fh or subprocess.DEVNULL,
-                             stderr=log_fh or subprocess.DEVNULL,
-                             start_new_session=True, close_fds=True)
+        nohup = '/usr/bin/nohup' if os.path.exists('/usr/bin/nohup') else 'nohup'
+        subprocess.Popen([nohup, '/bin/bash', str(start)], cwd=str(app_dir),
+                         stdin=subprocess.DEVNULL,
+                         stdout=log_fh or subprocess.DEVNULL,
+                         stderr=log_fh or subprocess.DEVNULL,
+                         start_new_session=True, close_fds=True)
+        time.sleep(2.0)
     except Exception as e:
-        if log_fh:
-            log_fh.write(f"[restart] fallback spawn failed: {e}\n")
+        _log(f"fallback spawn failed: {e}")
 
+
+def _check_port_listening(port, log_fh):
+    """Best-effort check that something has bound the port."""
     try:
-        time.sleep(0.8)
+        import socket
+        s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        s.settimeout(1.0)
+        result = s.connect_ex(('127.0.0.1', port))
+        s.close()
+        if log_fh:
+            log_fh.write(f"[restart {time.strftime('%H:%M:%S')}] port {port} listening: {result == 0}\n")
     except Exception:
         pass
 
