@@ -425,5 +425,12 @@
   "set.feat_consumption_30d": "30-day consumption",
   "set.feat_doors_locks": "Doors / locks",
   "set.feat_climate": "Climate / cabin temp",
-  "set.feat_tires": "Tire pressure warnings"
+  "set.feat_tires": "Tire pressure warnings",
+  "set.app_restart": "Restart app",
+  "set.app_restart_now": "Restart now",
+  "set.app_restart_confirm": "Restart the app now? The connection will be briefly interrupted.",
+  "set.app_restarting": "App is restarting…",
+  "set.app_restart_wait": "Please wait — the page will reload automatically once the app is back.",
+  "set.app_restart_back": "App is back, reloading…",
+  "set.app_restart_timeout": "Timeout. Please reload the browser manually."
 }

@@ -1,5 +1,12 @@
 # Changelog
 
+## v2.4.1 (2026-04-09)
+
+### Restart button
+- **New "App neustarten" button** in Settings → App-Info, plus an inline "Jetzt neustarten" button that appears after saving HTTPS settings or generating a new certificate. No more manual `start.command` after switching HTTPS mode.
+- **Restart-only mode** for `updater_helper.py`: `--staging-dir` is now optional. Without it the helper skips the file swap and the pip install, just waits for the parent PID and spawns a fresh `venv/bin/python app.py` with the same nohup-wrap, env-strip, and health check as the update flow.
+- **`POST /api/restart`** triggers the same delayed-shutdown pattern as `/api/update/install`, and the Settings page polls until the app is back online and reloads the browser.
+
 ## v2.4.0 (2026-04-09)
 
 ### HTTPS / TLS support

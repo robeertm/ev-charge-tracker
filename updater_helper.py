@@ -291,55 +291,60 @@ def _is_excluded(name: str) -> bool:
 def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument('--app-dir', required=True)
-    ap.add_argument('--staging-dir', required=True)
+    ap.add_argument('--staging-dir', default='',
+                    help='Staging dir for an update. Omit for restart-only mode.')
     ap.add_argument('--wait-pid', type=int, default=0)
     ap.add_argument('--update-deps', type=int, default=1)
     ap.add_argument('--restart', type=int, default=1)
     args = ap.parse_args()
 
     app_dir = Path(args.app_dir).resolve()
-    staging = Path(args.staging_dir).resolve()
+    staging = Path(args.staging_dir).resolve() if args.staging_dir else None
 
     print(f"[updater] app_dir={app_dir}", file=sys.stderr)
-    print(f"[updater] staging={staging}", file=sys.stderr)
+    if staging:
+        print(f"[updater] staging={staging}", file=sys.stderr)
+    else:
+        print("[updater] restart-only mode (no staging dir)", file=sys.stderr)
     print(f"[updater] waiting for pid {args.wait_pid}", file=sys.stderr)
     _wait_for_pid(int(args.wait_pid or 0))
 
-    if not staging.exists():
-        print(f"[updater] staging dir missing: {staging}", file=sys.stderr)
-        return 1
+    # File swap is skipped entirely in restart-only mode
+    if staging is not None:
+        if not staging.exists():
+            print(f"[updater] staging dir missing: {staging}", file=sys.stderr)
+            return 1
 
-    # Copy staging → app_dir, preserving excluded paths
-    print("[updater] swapping files…", file=sys.stderr)
-    for item in staging.iterdir():
-        name = item.name
-        if _is_excluded(name):
-            continue
-        dst = app_dir / name
-        try:
-            if item.is_dir():
-                _copy_tree(item, dst)
-            else:
-                _copy_file(item, dst)
-        except Exception as e:
-            print(f"[updater] failed to copy {name}: {e}", file=sys.stderr)
-
-    # Update Python dependencies
-    if int(args.update_deps or 0) == 1:
-        req = app_dir / 'requirements.txt'
-        py = _venv_python(app_dir)
-        if py and req.exists():
-            print("[updater] running pip install -r requirements.txt…", file=sys.stderr)
+        print("[updater] swapping files…", file=sys.stderr)
+        for item in staging.iterdir():
+            name = item.name
+            if _is_excluded(name):
+                continue
+            dst = app_dir / name
             try:
-                subprocess.run(
-                    [str(py), '-m', 'pip', 'install', '-r', str(req)],
-                    check=False,
-                )
+                if item.is_dir():
+                    _copy_tree(item, dst)
+                else:
+                    _copy_file(item, dst)
             except Exception as e:
-                print(f"[updater] pip install failed: {e}", file=sys.stderr)
+                print(f"[updater] failed to copy {name}: {e}", file=sys.stderr)
 
-    # Clean up staging now that the install is complete
-    _safe_rmtree(staging)
+        # Update Python dependencies
+        if int(args.update_deps or 0) == 1:
+            req = app_dir / 'requirements.txt'
+            py = _venv_python(app_dir)
+            if py and req.exists():
+                print("[updater] running pip install -r requirements.txt…", file=sys.stderr)
+                try:
+                    subprocess.run(
+                        [str(py), '-m', 'pip', 'install', '-r', str(req)],
+                        check=False,
+                    )
+                except Exception as e:
+                    print(f"[updater] pip install failed: {e}", file=sys.stderr)
+
+        # Clean up staging now that the install is complete
+        _safe_rmtree(staging)
 
     # Restart
     if int(args.restart or 0) == 1:

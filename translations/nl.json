@@ -425,5 +425,12 @@
   "set.feat_consumption_30d": "30-dagen verbruik",
   "set.feat_doors_locks": "Deuren / sloten",
   "set.feat_climate": "Klimaat / interieurtemp",
-  "set.feat_tires": "Bandenspanningswaarschuwingen"
+  "set.feat_tires": "Bandenspanningswaarschuwingen",
+  "set.app_restart": "App herstarten",
+  "set.app_restart_now": "Nu herstarten",
+  "set.app_restart_confirm": "App nu herstarten? De verbinding wordt kort onderbroken.",
+  "set.app_restarting": "App wordt herstart…",
+  "set.app_restart_wait": "Even geduld — de pagina laadt automatisch zodra de app weer bereikbaar is.",
+  "set.app_restart_back": "App is terug, herladen…",
+  "set.app_restart_timeout": "Time-out. Herlaad de browser handmatig."
 }

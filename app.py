@@ -1,6 +1,7 @@
 """EV Charge Tracker - Main Flask Application."""
 import io
 import os
+import sys
 import logging
 from datetime import datetime, date
 from flask import Flask, render_template, request, redirect, url_for, flash, jsonify, send_file
@@ -947,6 +948,53 @@ def register_routes(app):
             'zip_url': zip_url,
             'release_url': f"https://github.com/{Config.GITHUB_REPO}/releases/tag/v{new_version}" if new_version else None,
         })
+
+    @app.route('/api/restart', methods=['POST'])
+    def api_restart():
+        """Spawn updater_helper in restart-only mode and exit gracefully.
+
+        Used to apply settings that require a fresh process — most importantly
+        switching the HTTPS mode after generating a new certificate.
+        """
+        try:
+            from pathlib import Path
+            import subprocess as _sp
+            app_dir = Path(__file__).resolve().parent
+            helper = [
+                sys.executable, str(app_dir / 'updater_helper.py'),
+                '--app-dir', str(app_dir),
+                '--wait-pid', str(os.getpid()),
+                '--update-deps', '0',
+                '--restart', '1',
+            ]
+            log_path = app_dir / 'updates' / 'restart.log'
+            log_path.parent.mkdir(parents=True, exist_ok=True)
+            log_fh = open(log_path, 'a', buffering=1)
+            log_fh.write(f"\n[restart-button] launching helper at {datetime.now()}\n")
+
+            if os.name == 'nt':
+                creationflags = (
+                    getattr(_sp, 'DETACHED_PROCESS', 0)
+                    | getattr(_sp, 'CREATE_NEW_PROCESS_GROUP', 0)
+                )
+                _sp.Popen(helper, cwd=str(app_dir),
+                          stdin=_sp.DEVNULL, stdout=log_fh, stderr=log_fh,
+                          creationflags=creationflags, close_fds=False)
+            else:
+                _sp.Popen(helper, cwd=str(app_dir),
+                          stdin=_sp.DEVNULL, stdout=log_fh, stderr=log_fh,
+                          start_new_session=True, close_fds=True)
+        except Exception as e:
+            return jsonify({'error': str(e)}), 500
+
+        # Schedule a delayed graceful shutdown so the JSON response can flush
+        import threading
+        def _shutdown():
+            import time as _t
+            _t.sleep(1.5)
+            os._exit(0)
+        threading.Thread(target=_shutdown, daemon=True).start()
+        return jsonify({'ok': True})
 
     @app.route('/api/update/install', methods=['POST'])
     def api_update_install():

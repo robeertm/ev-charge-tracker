@@ -425,5 +425,12 @@
   "set.feat_consumption_30d": "Verbrauch 30 Tage",
   "set.feat_doors_locks": "Türen / Verriegelung",
   "set.feat_climate": "Klima / Innentemperatur",
-  "set.feat_tires": "Reifendruck-Warnungen"
+  "set.feat_tires": "Reifendruck-Warnungen",
+  "set.app_restart": "App neustarten",
+  "set.app_restart_now": "Jetzt neustarten",
+  "set.app_restart_confirm": "App jetzt neustarten? Die Verbindung wird kurz unterbrochen.",
+  "set.app_restarting": "App wird neu gestartet…",
+  "set.app_restart_wait": "Bitte warten - die Seite lädt automatisch neu sobald die App wieder erreichbar ist.",
+  "set.app_restart_back": "App ist wieder erreichbar, lade neu…",
+  "set.app_restart_timeout": "Zeitüberschreitung. Bitte Browser manuell neu laden."
 }

@@ -425,5 +425,12 @@
   "set.feat_consumption_30d": "Consumo 30 días",
   "set.feat_doors_locks": "Puertas / cerradura",
   "set.feat_climate": "Clima / temp habitáculo",
-  "set.feat_tires": "Avisos presión neumáticos"
+  "set.feat_tires": "Avisos presión neumáticos",
+  "set.app_restart": "Reiniciar app",
+  "set.app_restart_now": "Reiniciar ahora",
+  "set.app_restart_confirm": "¿Reiniciar la app ahora? La conexión se interrumpirá brevemente.",
+  "set.app_restarting": "La app se está reiniciando…",
+  "set.app_restart_wait": "Por favor espera — la página se recargará automáticamente cuando la app esté disponible.",
+  "set.app_restart_back": "La app está de vuelta, recargando…",
+  "set.app_restart_timeout": "Tiempo de espera agotado. Recarga el navegador manualmente."
 }

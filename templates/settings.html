@@ -818,10 +818,16 @@
                 </table>
 
                 <hr>
-                <button class="btn btn-outline-primary" id="btnCheckUpdate">
-                    <i class="bi bi-arrow-repeat"></i> {{ t('set.app_check_update') }}
-                </button>
+                <div class="d-flex gap-2 flex-wrap">
+                    <button class="btn btn-outline-primary" id="btnCheckUpdate">
+                        <i class="bi bi-arrow-repeat"></i> {{ t('set.app_check_update') }}
+                    </button>
+                    <button class="btn btn-outline-warning" id="btnRestartApp">
+                        <i class="bi bi-power"></i> {{ t('set.app_restart') }}
+                    </button>
+                </div>
                 <div id="updateResult" class="mt-2"></div>
+                <div id="restartResult" class="mt-2"></div>
             </div>
         </div>
     </div>
@@ -935,6 +941,59 @@
     }
 
     btn.addEventListener('click', doCheck);
+})();
+
+// ── Restart button ─────────────────────────────────────────────
+(function() {
+    const T_RST = {
+        confirm:    {{ t('set.app_restart_confirm')|tojson }},
+        restarting: {{ t('set.app_restarting')|tojson }},
+        wait:       {{ t('set.app_restart_wait')|tojson }},
+        back:       {{ t('set.app_restart_back')|tojson }},
+        timeout:    {{ t('set.app_restart_timeout')|tojson }},
+    };
+    const btn = document.getElementById('btnRestartApp');
+    const result = document.getElementById('restartResult');
+    if (!btn) return;
+
+    async function pollUntilBack() {
+        const wantedScheme = location.protocol;  // remember http: or https:
+        let tries = 0;
+        const maxTries = 60;
+        while (tries < maxTries) {
+            try {
+                // /api/update/check is a tiny harmless GET — perfect heartbeat
+                const r = await fetch('/api/update/check', { cache: 'no-store' });
+                if (r.ok) {
+                    result.innerHTML = '<div class="alert alert-success py-2 mb-0"><i class="bi bi-check-circle"></i> ' + T_RST.back + '</div>';
+                    setTimeout(() => location.reload(), 1200);
+                    return;
+                }
+            } catch (e) { /* still down */ }
+            await new Promise(res => setTimeout(res, 2000));
+            tries++;
+        }
+        result.innerHTML += '<div class="alert alert-warning mt-2 py-2 mb-0">' + T_RST.timeout + '</div>';
+    }
+
+    // Expose for the SSL save flow to reuse
+    window.__restartAndPoll = async function() {
+        result.innerHTML =
+            '<div class="alert alert-info py-2 mb-0">' +
+            '<i class="bi bi-arrow-clockwise"></i> ' + T_RST.restarting + '<br>' +
+            '<small>' + T_RST.wait + '</small>' +
+            '<div class="progress mt-2" style="height:6px"><div class="progress-bar progress-bar-striped progress-bar-animated" style="width:100%"></div></div>' +
+            '</div>';
+        try {
+            await fetch('/api/restart', { method: 'POST' });
+        } catch (e) { /* server is dying — connection drop is expected */ }
+        setTimeout(pollUntilBack, 4000);
+    };
+
+    btn.addEventListener('click', async () => {
+        if (!confirm(T_RST.confirm)) return;
+        await window.__restartAndPoll();
+    });
 })();
 </script>
 
@@ -1187,6 +1246,21 @@
             });
         });
 
+        function showRestartPrompt(parent) {
+            // Inline "Restart now" button after a save that requires it
+            const wrap = document.createElement('div');
+            wrap.className = 'mt-2';
+            const btn = document.createElement('button');
+            btn.type = 'button';
+            btn.className = 'btn btn-sm btn-warning';
+            btn.innerHTML = '<i class="bi bi-power"></i> ' + {{ t('set.app_restart_now')|tojson }};
+            btn.addEventListener('click', () => {
+                if (window.__restartAndPoll) window.__restartAndPoll();
+            });
+            wrap.appendChild(btn);
+            parent.appendChild(wrap);
+        }
+
         document.getElementById('btnSslSave').addEventListener('click', async () => {
             const mode = document.querySelector('input[name="sslMode"]:checked').value;
             setStatus(T_SSL.saving);
@@ -1201,8 +1275,12 @@
                     }),
                 });
                 const data = await r.json();
-                if (data.ok) setStatus(T_SSL.saved, 'success');
-                else setStatus(T_SSL.error + ' ' + (data.error || ''), 'danger');
+                if (data.ok) {
+                    setStatus(T_SSL.saved, 'success');
+                    if (data.restart_required) showRestartPrompt(status);
+                } else {
+                    setStatus(T_SSL.error + ' ' + (data.error || ''), 'danger');
+                }
             } catch (e) { setStatus(T_SSL.error + ' ' + e.message, 'danger'); }
         });
 
@@ -1214,6 +1292,7 @@
                 if (data.ok) {
                     setStatus(T_SSL.generated, 'success');
                     showCertInfo(data.cert_info);
+                    if (data.restart_required) showRestartPrompt(status);
                 } else {
                     setStatus(T_SSL.error + ' ' + (data.error || ''), 'danger');
                 }
