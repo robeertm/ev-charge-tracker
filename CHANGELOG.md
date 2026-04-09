@@ -1,5 +1,15 @@
 # Changelog
 
+## v2.3.4 (2026-04-09)
+
+### Favorites picker — visible feedback + diagnostics
+- **Crosshair cursor + blue outline** on the map when in pick mode (home/work/favorite). Previously the user had no visual confirmation that the map was waiting for a click.
+- **Console logging** of every step in the favorites flow (pickMode transitions, map clicks, POST results) so issues can be debugged from browser DevTools.
+- **`e.preventDefault()` + `e.stopPropagation()`** on `btnAddFav` click — defensive against any parent form swallowing the event.
+- **Auto-focus the name field** when "Bitte Name eingeben" warning fires.
+- **Status message includes coordinates and name** after a favorite is saved, so the user sees concrete confirmation.
+- **Refactored map click handler** into a named `handleMapClick` function with explicit early returns per branch — easier to reason about and reduces the chance of state bleed between branches.
+
 ## v2.3.3 (2026-04-09)
 
 ### The actual updater fix (root cause)

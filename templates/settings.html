@@ -899,33 +899,65 @@
     refreshHomeMarker();
     refreshWorkMarker();
 
-    // Click-to-set mode
+    // Click-to-set mode with prominent visual feedback
     let pickMode = null;  // 'home' | 'work' | 'favorite' | null
     let pendingFavName = null;
-    document.getElementById('btnSetHome').addEventListener('click', () => {
-        pickMode = 'home'; setStatus(T_LOC.click_home);
-    });
-    document.getElementById('btnSetWork').addEventListener('click', () => {
-        pickMode = 'work'; setStatus(T_LOC.click_work);
-    });
-    map.on('click', async e => {
-        if (!pickMode) return;
+    const mapEl = document.getElementById('locMap');
+
+    function setPickMode(mode, statusMsg) {
+        pickMode = mode;
+        if (mode) {
+            mapEl.style.cursor = 'crosshair';
+            mapEl.style.outline = '3px solid #0d6efd';
+            mapEl.style.outlineOffset = '-3px';
+        } else {
+            mapEl.style.cursor = '';
+            mapEl.style.outline = '';
+            mapEl.style.outlineOffset = '';
+        }
+        if (statusMsg) setStatus(statusMsg);
+        console.log('[loc] pickMode →', mode);
+    }
+
+    document.getElementById('btnSetHome').addEventListener('click', () => setPickMode('home', T_LOC.click_home));
+    document.getElementById('btnSetWork').addEventListener('click', () => setPickMode('work', T_LOC.click_work));
+
+    async function handleMapClick(e) {
+        console.log('[loc] map clicked, pickMode=', pickMode, 'pendingFavName=', pendingFavName);
+        if (!pickMode) {
+            console.log('[loc] click ignored — not in pick mode');
+            return;
+        }
         const lat = e.latlng.lat.toFixed(6);
         const lon = e.latlng.lng.toFixed(6);
+
         if (pickMode === 'home') {
             document.getElementById('homeLat').value = lat;
             document.getElementById('homeLon').value = lon;
             refreshHomeMarker();
             setStatus(T_LOC.picked + ' ' + lat + ', ' + lon);
-        } else if (pickMode === 'work') {
+            setPickMode(null);
+            return;
+        }
+
+        if (pickMode === 'work') {
             document.getElementById('workLat').value = lat;
             document.getElementById('workLon').value = lon;
             refreshWorkMarker();
             setStatus(T_LOC.picked + ' ' + lat + ', ' + lon);
-        } else if (pickMode === 'favorite' && pendingFavName) {
-            // Capture the name now — we'll clear pickMode below
+            setPickMode(null);
+            return;
+        }
+
+        if (pickMode === 'favorite') {
             const name = pendingFavName;
-            pickMode = null; pendingFavName = null;
+            console.log('[loc] saving favorite:', name, lat, lon);
+            setPickMode(null);
+            pendingFavName = null;
+            if (!name) {
+                setStatus(T_LOC.fav_need_name);
+                return;
+            }
             setStatus(T_LOC.saving);
             try {
                 const r = await fetch('/api/locations/favorites', {
@@ -933,21 +965,22 @@
                     headers: {'Content-Type': 'application/json'},
                     body: JSON.stringify({ name: name, lat: parseFloat(lat), lon: parseFloat(lon) }),
                 });
+                console.log('[loc] POST favorites →', r.status);
                 if (r.ok) {
                     document.getElementById('favName').value = '';
-                    setStatus(T_LOC.fav_added);
+                    setStatus(T_LOC.fav_added + ' (' + name + ' @ ' + lat + ', ' + lon + ')');
                     loadFavs();
                 } else {
                     const data = await r.json().catch(() => ({}));
-                    setStatus(T_LOC.error + ' ' + (data.error || r.status));
+                    setStatus(T_LOC.error + ' HTTP ' + r.status + ' ' + (data.error || ''));
                 }
             } catch (err) {
+                console.error('[loc] favorite POST failed', err);
                 setStatus(T_LOC.error + ' ' + err.message);
             }
-            return;
         }
-        pickMode = null;
-    });
+    }
+    map.on('click', handleMapClick);
 
     async function saveLocation(kind) {
         const lat = parseFloat(document.getElementById(kind + 'Lat').value);
@@ -1002,12 +1035,20 @@
     }
     function startAddFavorite() {
         const name = document.getElementById('favName').value.trim();
-        if (!name) { setStatus(T_LOC.fav_need_name); return; }
+        console.log('[loc] startAddFavorite, name=', JSON.stringify(name));
+        if (!name) {
+            setStatus(T_LOC.fav_need_name);
+            document.getElementById('favName').focus();
+            return;
+        }
         pendingFavName = name;
-        pickMode = 'favorite';
-        setStatus(T_LOC.fav_click);
+        setPickMode('favorite', T_LOC.fav_click);
     }
-    document.getElementById('btnAddFav').addEventListener('click', startAddFavorite);
+    document.getElementById('btnAddFav').addEventListener('click', e => {
+        e.preventDefault();
+        e.stopPropagation();
+        startAddFavorite();
+    });
     document.getElementById('favName').addEventListener('keydown', e => {
         if (e.key === 'Enter') { e.preventDefault(); startAddFavorite(); }
     });
