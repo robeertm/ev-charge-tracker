@@ -153,6 +153,7 @@ class ParkingEvent(db.Model):
 
     id = db.Column(db.Integer, primary_key=True)
     arrived_at = db.Column(db.DateTime, nullable=False, index=True)
+    last_seen_at = db.Column(db.DateTime)  # Most recent sync confirming this position
     departed_at = db.Column(db.DateTime, index=True)  # NULL = currently parked
     lat = db.Column(db.Float, nullable=False)
     lon = db.Column(db.Float, nullable=False)

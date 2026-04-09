@@ -1,5 +1,41 @@
 # Changelog
 
+## v2.4.2 (2026-04-09)
+
+### Fahrtenbuch — actually working with sparse Kia polling
+
+This release fixes a stack of subtle bugs that prevented parking events from being created on a real-world database with the Kia/Hyundai cached-mode sync.
+
+#### Root cause fix
+- **Parking hook now runs on EVERY save**, not only when `differs_from(last)` returns True. Previously, a force-refresh that delivered the *same* GPS coordinates as the existing latest row (because the car hadn't moved) would skip the hook entirely — so no parking event was ever created. Fixed in `_save_vehicle_sync` ([app.py](app.py)).
+
+#### Backfill
+- New `backfill_parking_events()` in `services/trips_service.py` replays every existing `VehicleSync` row chronologically through the parking hook. This catches up databases populated before v2.3.0 (no hook) or after weeks of cached polling where the hook only fired occasionally.
+- **Auto-runs on startup** if the parking_events table is empty AND there is at least one VehicleSync row with GPS data.
+- **`POST /api/trips/backfill`** for manual triggering. New "Aus Historie nachbauen" button on the `/trips` page.
+
+#### Smart sync mode
+- New `'smart'` option in Settings → Vehicle API alongside `cached` and `force`.
+- Smart mode runs cached by default but **upgrades to a force-refresh when the latest GPS-bearing sync is older than 6 h** (configurable via `smart_force_max_hours`) and the car is not currently charging. This catches movement without burning the 12V battery on every cycle.
+- Tracks `last_force_refresh_at` so the smart-mode decision logic has something to compare against.
+
+#### Tighter trip durations
+- New `last_seen_at` column on `parking_events` is updated on every sync that confirms the same position. The trip-duration calculation now uses `last_seen_at` of the previous event as the lower bound instead of `arrived_at`, which would have overstated the trip duration by the entire parking spell.
+- Auto-migrated on startup.
+
+#### Trips page auto-fresh
+- Opening `/trips` automatically triggers a force vehicle sync if all of these are true: a brand is configured, auto-sync is enabled, the brand supports GPS (per the feature matrix), the latest GPS sync is >30 min old, and the daily API counter is below 180/200. Skipped silently otherwise. Means the map is current the moment you open the page.
+
+#### Manual sync button
+- **"Jetzt synchronisieren"** button on `/trips` triggers an immediate force refresh and reports back whether GPS came through or not.
+
+#### Settings UX
+- **Warning banner** when sync mode is `cached` and brand is Kia/Hyundai: "GPS für Fahrtenbuch erfordert Smart oder Live, oder manueller Sync (Live)".
+- Last-sync line in Vehicle API card now shows a 📍 icon when the most recent row has GPS data.
+
+### Translations
+- 13 new translation keys × 6 languages.
+
 ## v2.4.1 (2026-04-09)
 
 ### Restart button

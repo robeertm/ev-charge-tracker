@@ -432,5 +432,18 @@
   "set.app_restarting": "L'app redémarre…",
   "set.app_restart_wait": "Patientez — la page se rechargera automatiquement dès que l'app sera de retour.",
   "set.app_restart_back": "L'app est de retour, rechargement…",
-  "set.app_restart_timeout": "Délai dépassé. Rechargez le navigateur manuellement."
+  "set.app_restart_timeout": "Délai dépassé. Rechargez le navigateur manuellement.",
+  "set.api_mode_smart": "Smart (cache + auto-live)",
+  "set.api_cached_gps_warning": "En mode cache, Kia/Hyundai ne renvoie généralement pas de GPS. Pour le carnet de bord, utilisez \"Smart\" ou \"Live\", ou cliquez sur \"Sync (Live)\".",
+  "trips.sync_now": "Synchroniser maintenant",
+  "trips.backfill": "Reconstruire à partir de l'historique",
+  "trips.backfill_title": "Rejouer toutes les syncs véhicule via la détection de stationnement",
+  "trips.tb_syncing": "Synchronisation…",
+  "trips.tb_synced_with_gps": "Sync OK avec GPS — rechargement…",
+  "trips.tb_synced_no_gps": "Sync OK, mais Kia n'a pas renvoyé de GPS. La voiture est peut-être en sommeil profond.",
+  "trips.tb_sync_failed": "Échec de la sync :",
+  "trips.tb_backfilling": "Reconstruction du carnet de bord…",
+  "trips.tb_backfilled": "Carnet de bord créé :",
+  "trips.tb_backfill_failed": "Backfill échoué :",
+  "trips.tb_backfill_confirm": "Supprimer les événements de stationnement existants et reconstruire à partir de la sync ?"
 }

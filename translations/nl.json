@@ -432,5 +432,18 @@
   "set.app_restarting": "App wordt herstart…",
   "set.app_restart_wait": "Even geduld — de pagina laadt automatisch zodra de app weer bereikbaar is.",
   "set.app_restart_back": "App is terug, herladen…",
-  "set.app_restart_timeout": "Time-out. Herlaad de browser handmatig."
+  "set.app_restart_timeout": "Time-out. Herlaad de browser handmatig.",
+  "set.api_mode_smart": "Slim (cache + auto-live)",
+  "set.api_cached_gps_warning": "In cache-modus levert Kia/Hyundai meestal geen GPS. Gebruik voor de ritregistratie \"Smart\" of \"Live\", of druk handmatig op \"Sync (Live)\".",
+  "trips.sync_now": "Nu synchroniseren",
+  "trips.backfill": "Uit geschiedenis opnieuw opbouwen",
+  "trips.backfill_title": "Alle voertuigsyncs opnieuw door de parkeerdetectie sturen",
+  "trips.tb_syncing": "Synchroniseren…",
+  "trips.tb_synced_with_gps": "Sync OK met GPS — opnieuw laden…",
+  "trips.tb_synced_no_gps": "Sync OK, maar Kia gaf geen GPS terug. Auto mogelijk in diepe slaap.",
+  "trips.tb_sync_failed": "Sync mislukt:",
+  "trips.tb_backfilling": "Ritregistratie opnieuw opbouwen…",
+  "trips.tb_backfilled": "Ritregistratie aangemaakt:",
+  "trips.tb_backfill_failed": "Backfill mislukt:",
+  "trips.tb_backfill_confirm": "Bestaande parkeerevenementen verwijderen en opnieuw opbouwen uit synchronisatiehistorie?"
 }

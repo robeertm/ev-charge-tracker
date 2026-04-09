@@ -432,5 +432,18 @@
   "set.app_restarting": "L'app si sta riavviando…",
   "set.app_restart_wait": "Attendere — la pagina si ricaricherà automaticamente quando l'app sarà di nuovo disponibile.",
   "set.app_restart_back": "L'app è tornata, ricaricamento…",
-  "set.app_restart_timeout": "Timeout. Ricarica il browser manualmente."
+  "set.app_restart_timeout": "Timeout. Ricarica il browser manualmente.",
+  "set.api_mode_smart": "Smart (cache + auto-live)",
+  "set.api_cached_gps_warning": "In modalità cache Kia/Hyundai di solito non restituisce GPS. Per il libro di bordo usa \"Smart\" o \"Live\", o premi \"Sync (Live)\".",
+  "trips.sync_now": "Sincronizza ora",
+  "trips.backfill": "Ricostruisci dalla cronologia",
+  "trips.backfill_title": "Riprodurre tutte le sincronizzazioni veicolo tramite il rilevamento parcheggio",
+  "trips.tb_syncing": "Sincronizzazione…",
+  "trips.tb_synced_with_gps": "Sync OK con GPS — ricaricamento…",
+  "trips.tb_synced_no_gps": "Sync OK, ma Kia non ha restituito GPS. Auto forse in sonno profondo.",
+  "trips.tb_sync_failed": "Sync fallita:",
+  "trips.tb_backfilling": "Ricostruzione del libro di bordo…",
+  "trips.tb_backfilled": "Libro di bordo creato:",
+  "trips.tb_backfill_failed": "Backfill fallito:",
+  "trips.tb_backfill_confirm": "Eliminare gli eventi di parcheggio esistenti e ricostruire dalla cronologia sync?"
 }

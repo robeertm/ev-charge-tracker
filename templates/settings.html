@@ -412,12 +412,16 @@
                                     </div>
                                 </div>
                                 <div class="col-auto">
-                                    <select class="form-select form-select-sm" name="vehicle_sync_mode" style="width:auto">
-                                        <option value="cached" {% if vehicle_sync_mode != 'force' %}selected{% endif %}>{{ t('set.api_mode_cached') }}</option>
+                                    <select class="form-select form-select-sm" name="vehicle_sync_mode" style="width:auto" id="vehicleSyncModeSel">
+                                        <option value="cached" {% if vehicle_sync_mode == 'cached' %}selected{% endif %}>{{ t('set.api_mode_cached') }}</option>
+                                        <option value="smart" {% if vehicle_sync_mode == 'smart' %}selected{% endif %}>{{ t('set.api_mode_smart') }}</option>
                                         <option value="force" {% if vehicle_sync_mode == 'force' %}selected{% endif %}>{{ t('set.api_mode_live') }}</option>
                                     </select>
                                 </div>
                                 <div class="col-auto" id="syncStatusBadge"></div>
+                            </div>
+                            <div class="alert alert-warning py-1 px-2 small mt-2 mb-0" id="cachedGpsWarning" style="display:none">
+                                <i class="bi bi-info-circle"></i> {{ t('set.api_cached_gps_warning') }}
                             </div>
                         </div>
                     </div>
@@ -427,9 +431,26 @@
                     <strong>{{ t('set.api_last_sync') }}</strong> {{ last_vehicle_sync.timestamp.strftime('%d.%m.%Y %H:%M') }}
                     {% if last_vehicle_sync.soc_percent is not none %} · SoC: {{ last_vehicle_sync.soc_percent }}%{% endif %}
                     {% if last_vehicle_sync.odometer_km is not none %} · Tacho: {{ "{:,}".format(last_vehicle_sync.odometer_km).replace(",", ".") }} km{% endif %}
+                    {% if last_vehicle_sync.location_lat %} · <i class="bi bi-geo-alt-fill text-success" title="GPS"></i>{% endif %}
                     {% if last_vehicle_sync.is_charging %} · <span class="badge bg-success">{{ t('dash.charging') }}</span>{% endif %}
                 </div>
                 {% endif %}
+                <script>
+                // Show cached-GPS warning when relevant
+                (function() {
+                    function updateGpsWarning() {
+                        const sel = document.getElementById('vehicleSyncModeSel');
+                        const brand = document.getElementById('vehicle_api_brand').value;
+                        const w = document.getElementById('cachedGpsWarning');
+                        const isCached = sel && sel.value === 'cached';
+                        const wantsGps = ['kia', 'hyundai'].includes(brand);
+                        w.style.display = (isCached && wantsGps) ? '' : 'none';
+                    }
+                    document.getElementById('vehicleSyncModeSel').addEventListener('change', updateGpsWarning);
+                    document.getElementById('vehicle_api_brand').addEventListener('change', updateGpsWarning);
+                    updateGpsWarning();
+                })();
+                </script>
 
                 <script>
                 const T = {

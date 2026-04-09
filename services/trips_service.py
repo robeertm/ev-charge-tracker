@@ -114,11 +114,15 @@ def update_parking_from_sync(sync) -> Optional[ParkingEvent]:
 
     if distance <= SAME_PLACE_M:
         # Car still at the same spot. Update arrival data with the latest
-        # snapshot in case earlier values were missing.
+        # snapshot in case earlier values were missing, and bump last_seen_at
+        # so the trip-duration math has a tighter lower bound.
         if open_evt.odometer_arrived is None and sync.odometer_km:
             open_evt.odometer_arrived = sync.odometer_km
         if open_evt.soc_arrived is None and sync.soc_percent:
             open_evt.soc_arrived = sync.soc_percent
+        # Only advance last_seen_at forward, never backward (matters during backfill)
+        if open_evt.last_seen_at is None or sync.timestamp > open_evt.last_seen_at:
+            open_evt.last_seen_at = sync.timestamp
         db.session.commit()
         return open_evt
 
@@ -139,6 +143,7 @@ def _open_event(sync, lat: float, lon: float) -> ParkingEvent:
     label, fav_name = _classify_location(lat, lon)
     evt = ParkingEvent(
         arrived_at=sync.timestamp,
+        last_seen_at=sync.timestamp,
         lat=lat,
         lon=lon,
         label=label,
@@ -184,12 +189,16 @@ def get_trips(limit: Optional[int] = None,
         km = None
         if prev.odometer_arrived is not None and curr.odometer_arrived is not None:
             km = max(curr.odometer_arrived - prev.odometer_arrived, 0)
-        # Duration = time between leaving the prev spot and arriving at the next.
-        # With sparse polling this is approximate; for very short trips it can be 0.
+        # Trip duration: tightest bound is from prev.last_seen_at (the most
+        # recent sync that confirmed the car was at the previous location)
+        # to curr.arrived_at (the first sync at the new location). With
+        # sparse polling this still overstates the actual driving time, but
+        # it's the closest we can get without GPS during the trip itself.
         duration_min = None
-        if prev.departed_at and curr.arrived_at:
-            delta = (curr.arrived_at - prev.departed_at).total_seconds() / 60
-            duration_min = max(int(round(delta)), 0) or None
+        anchor = prev.last_seen_at or prev.arrived_at
+        if anchor and curr.arrived_at:
+            delta = (curr.arrived_at - anchor).total_seconds() / 60
+            duration_min = int(round(delta)) if delta > 0 else None
         soc_used = None
         if prev.soc_arrived is not None and curr.soc_arrived is not None:
             soc_used = max(prev.soc_arrived - curr.soc_arrived, 0)
@@ -250,3 +259,41 @@ def reclassify_all_events():
         evt.favorite_name = fav_name
     db.session.commit()
     return len(events)
+
+
+def backfill_parking_events(wipe_existing: bool = False) -> dict:
+    """Replay every VehicleSync row chronologically through the parking hook.
+
+    Used to retroactively build the driving log from a database that was
+    populated before the parking hook existed (or after a long sync history
+    where the hook only fired occasionally).
+
+    Returns a summary dict ``{'syncs_processed': N, 'events_after': M}``.
+    """
+    from models.database import VehicleSync
+
+    if wipe_existing:
+        ParkingEvent.query.delete()
+        db.session.commit()
+
+    syncs = (VehicleSync.query
+             .filter(VehicleSync.location_lat.isnot(None),
+                     VehicleSync.location_lon.isnot(None))
+             .order_by(VehicleSync.timestamp.asc())
+             .all())
+    for s in syncs:
+        update_parking_from_sync(s)
+
+    return {
+        'syncs_processed': len(syncs),
+        'events_after': ParkingEvent.query.count(),
+    }
+
+
+def is_brand_supports_location(brand: str) -> bool:
+    """Cheap helper to ask the feature matrix without a circular import."""
+    try:
+        from services.vehicle.feature_matrix import get_features
+        return get_features(brand).get('location') in ('yes', 'partial')
+    except Exception:
+        return False

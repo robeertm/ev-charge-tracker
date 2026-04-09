@@ -432,5 +432,18 @@
   "set.app_restarting": "App is restarting…",
   "set.app_restart_wait": "Please wait — the page will reload automatically once the app is back.",
   "set.app_restart_back": "App is back, reloading…",
-  "set.app_restart_timeout": "Timeout. Please reload the browser manually."
+  "set.app_restart_timeout": "Timeout. Please reload the browser manually.",
+  "set.api_mode_smart": "Smart (cached + auto-live)",
+  "set.api_cached_gps_warning": "In cached mode Kia/Hyundai usually returns no GPS position. For the driving log use \"Smart\" or \"Live\", or hit \"Sync (Live)\" manually.",
+  "trips.sync_now": "Sync now",
+  "trips.backfill": "Rebuild from history",
+  "trips.backfill_title": "Replay all vehicle syncs through the parking detection",
+  "trips.tb_syncing": "Syncing…",
+  "trips.tb_synced_with_gps": "Sync OK with GPS — reloading…",
+  "trips.tb_synced_no_gps": "Sync OK, but Kia did not return GPS. Car might be deep asleep.",
+  "trips.tb_sync_failed": "Sync failed:",
+  "trips.tb_backfilling": "Rebuilding driving log from history…",
+  "trips.tb_backfilled": "Driving log created:",
+  "trips.tb_backfill_failed": "Backfill failed:",
+  "trips.tb_backfill_confirm": "Delete existing parking events and rebuild from sync history?"
 }

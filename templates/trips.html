@@ -47,14 +47,27 @@
     </div>
 </div>
 
-<!-- Map + Export -->
+<!-- Toolbar -->
+<div class="card mb-3">
+    <div class="card-body py-2">
+        <div class="d-flex flex-wrap gap-1">
+            <button type="button" class="btn btn-sm btn-primary" id="btnSyncNow">
+                <i class="bi bi-broadcast"></i> {{ t('trips.sync_now') }}
+            </button>
+            <button type="button" class="btn btn-sm btn-outline-secondary" id="btnBackfill" title="{{ t('trips.backfill_title') }}">
+                <i class="bi bi-arrow-counterclockwise"></i> {{ t('trips.backfill') }}
+            </button>
+            <a href="/api/trips/export.csv" class="btn btn-sm btn-outline-secondary"><i class="bi bi-filetype-csv"></i> CSV</a>
+            <a href="/api/trips/export.gpx" class="btn btn-sm btn-outline-secondary"><i class="bi bi-geo"></i> GPX</a>
+        </div>
+        <div id="toolbarStatus" class="small text-muted mt-1"></div>
+    </div>
+</div>
+
+<!-- Map -->
 <div class="card mb-3">
     <div class="card-header bg-white d-flex justify-content-between align-items-center">
         <span class="fw-bold"><i class="bi bi-map"></i> {{ t('trips.map_title') }}</span>
-        <span>
-            <a href="/api/trips/export.csv" class="btn btn-sm btn-outline-secondary"><i class="bi bi-filetype-csv"></i> CSV</a>
-            <a href="/api/trips/export.gpx" class="btn btn-sm btn-outline-secondary"><i class="bi bi-geo"></i> GPX</a>
-        </span>
     </div>
     <div class="card-body p-0">
         <div id="tripsMap" style="height:420px;"></div>
@@ -137,6 +150,75 @@
     });
     map.addLayer(cluster);
     if (bounds.length) map.fitBounds(bounds, { padding: [20, 20] });
+})();
+
+// ── Toolbar buttons: sync now + backfill ──────────────────────
+(function() {
+    const T_TB = {
+        syncing:        {{ t('trips.tb_syncing')|tojson }},
+        synced_with_gps:{{ t('trips.tb_synced_with_gps')|tojson }},
+        synced_no_gps:  {{ t('trips.tb_synced_no_gps')|tojson }},
+        sync_failed:    {{ t('trips.tb_sync_failed')|tojson }},
+        backfilling:    {{ t('trips.tb_backfilling')|tojson }},
+        backfilled:     {{ t('trips.tb_backfilled')|tojson }},
+        backfill_failed:{{ t('trips.tb_backfill_failed')|tojson }},
+        backfill_confirm:{{ t('trips.tb_backfill_confirm')|tojson }},
+    };
+    const status = document.getElementById('toolbarStatus');
+    function setStatus(msg) { status.textContent = msg; }
+
+    document.getElementById('btnSyncNow').addEventListener('click', async () => {
+        const btn = document.getElementById('btnSyncNow');
+        btn.disabled = true;
+        const orig = btn.innerHTML;
+        btn.innerHTML = '<span class="spinner-border spinner-border-sm"></span>';
+        setStatus(T_TB.syncing);
+        try {
+            const r = await fetch('/api/trips/sync_now', { method: 'POST' });
+            const data = await r.json();
+            if (data.ok) {
+                if (data.has_location) {
+                    setStatus(T_TB.synced_with_gps + ' (' + data.lat.toFixed(5) + ', ' + data.lon.toFixed(5) + ')');
+                    setTimeout(() => location.reload(), 1500);
+                } else {
+                    setStatus(T_TB.synced_no_gps);
+                }
+            } else {
+                setStatus(T_TB.sync_failed + ' ' + (data.error || ''));
+            }
+        } catch (e) {
+            setStatus(T_TB.sync_failed + ' ' + e.message);
+        }
+        btn.disabled = false;
+        btn.innerHTML = orig;
+    });
+
+    document.getElementById('btnBackfill').addEventListener('click', async () => {
+        if (!confirm(T_TB.backfill_confirm)) return;
+        const btn = document.getElementById('btnBackfill');
+        btn.disabled = true;
+        const orig = btn.innerHTML;
+        btn.innerHTML = '<span class="spinner-border spinner-border-sm"></span>';
+        setStatus(T_TB.backfilling);
+        try {
+            const r = await fetch('/api/trips/backfill', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({ wipe: true }),
+            });
+            const data = await r.json();
+            if (data.ok) {
+                setStatus(T_TB.backfilled + ' ' + data.syncs_processed + ' syncs → ' + data.events_after + ' events');
+                setTimeout(() => location.reload(), 1500);
+            } else {
+                setStatus(T_TB.backfill_failed + ' ' + (data.error || ''));
+            }
+        } catch (e) {
+            setStatus(T_TB.backfill_failed + ' ' + e.message);
+        }
+        btn.disabled = false;
+        btn.innerHTML = orig;
+    });
 })();
 </script>
 {% endblock %}

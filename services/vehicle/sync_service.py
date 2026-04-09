@@ -45,9 +45,64 @@ def _do_sync(app):
             'vin': AppConfig.get('vehicle_api_vin', ''),
         }
 
-        force = AppConfig.get('vehicle_sync_mode', 'cached') == 'force'
+        # ── Determine effective force flag based on mode ─────
+        # 'cached' = always cached (cheap, no GPS most of the time)
+        # 'force'  = always force (wakes the car, gets GPS, but burns 12V)
+        # 'smart'  = cached by default, but force if:
+        #            - last cached sync shows odometer changed (car was moved)
+        #              compared to the previous sync row, OR
+        #            - the latest VehicleSync row with GPS data is older than
+        #              the smart_force_max_hours threshold (default 6h),
+        #            …and the car is not currently charging.
+        mode = AppConfig.get('vehicle_sync_mode', 'cached')
+        force = (mode == 'force')
+
+        if mode == 'smart':
+            try:
+                from datetime import datetime, timedelta
+                from models.database import VehicleSync
+                # Find the last sync with GPS to know how stale our location is
+                last_with_gps = (VehicleSync.query
+                                 .filter(VehicleSync.location_lat.isnot(None))
+                                 .order_by(VehicleSync.timestamp.desc())
+                                 .first())
+                # Find the absolutely-last sync to check charging state
+                last_sync = (VehicleSync.query
+                             .order_by(VehicleSync.timestamp.desc())
+                             .first())
+                # Charging skip
+                is_charging = bool(last_sync.is_charging) if last_sync else False
+                # Threshold for force re-fetch (default 6 hours)
+                try:
+                    max_hours = float(AppConfig.get('smart_force_max_hours', '6'))
+                except (ValueError, TypeError):
+                    max_hours = 6.0
+                stale = True
+                if last_with_gps:
+                    age_hours = (datetime.now() - last_with_gps.timestamp).total_seconds() / 3600
+                    stale = (age_hours >= max_hours)
+                if not is_charging and stale:
+                    force = True
+                    logger.info(
+                        f"Smart sync: forcing live refresh (gps stale, "
+                        f"max_hours={max_hours}, charging={is_charging})"
+                    )
+
+                # Also: do a quick cached pre-fetch to detect movement?
+                # No — that would double the API call cost. We rely on the
+                # next cycle catching new positions instead.
+            except Exception as e:
+                logger.warning(f"Smart-mode decision failed, using cached: {e}")
+                force = False
+
         connector = get_connector(brand, creds)
         status = connector.get_status(force=force)
+
+        # Track the timestamp of the last successful force-refresh, so the
+        # smart-mode decision logic above has something to compare against.
+        if force:
+            from datetime import datetime as _dt
+            AppConfig.set('last_force_refresh_at', _dt.now().isoformat())
 
         from app import _save_vehicle_sync, _get_battery_kwh
         sync = _save_vehicle_sync(status, _get_battery_kwh(),

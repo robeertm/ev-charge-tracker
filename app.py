@@ -57,6 +57,14 @@ def create_app(config_class=Config):
         if 'location_name' not in columns:
             db.session.execute(text('ALTER TABLE charges ADD COLUMN location_name VARCHAR(200)'))
 
+        # Migrate: add last_seen_at to parking_events
+        try:
+            parking_columns = [c['name'] for c in inspector.get_columns('parking_events')]
+            if 'last_seen_at' not in parking_columns:
+                db.session.execute(text('ALTER TABLE parking_events ADD COLUMN last_seen_at DATETIME'))
+        except Exception:
+            pass  # table might not exist yet on a fresh install — create_all() will handle it
+
         db.session.commit()
 
     register_routes(app)
@@ -64,6 +72,20 @@ def create_app(config_class=Config):
     # Initialize i18n
     from services.i18n import init_app as init_i18n
     init_i18n(app)
+
+    # Auto-backfill parking events from existing vehicle sync history if
+    # the parking log is empty (e.g. fresh upgrade from a pre-fahrtenbuch
+    # version, or a database where the hook didn't fire on most syncs).
+    with app.app_context():
+        try:
+            from models.database import ParkingEvent, VehicleSync
+            if ParkingEvent.query.count() == 0:
+                if VehicleSync.query.filter(VehicleSync.location_lat.isnot(None)).count() > 0:
+                    from services.trips_service import backfill_parking_events
+                    summary = backfill_parking_events()
+                    logger.info(f"Auto-backfilled parking events: {summary}")
+        except Exception as e:
+            logger.warning(f"Auto-backfill failed: {e}")
 
     # Auto-start vehicle sync if configured
     try:
@@ -159,20 +181,32 @@ def _save_vehicle_sync(status, battery_kwh, raw_json=''):
     """Persist a VehicleSync row only if any tracked value differs from the
     most recent row. Returns the saved (or last existing) sync row.
 
-    Also updates the parking-event log so the driving log stays in sync.
+    The parking-event hook is **always** invoked on the latest snapshot
+    (whether freshly persisted or the existing one). This catches two
+    important edge cases:
+      1. A previous-session sync had GPS data but the parking hook wasn't
+         installed yet (older versions of the app).
+      2. A force-refresh delivers identical GPS coords to the existing row
+         (car hasn't moved), which would otherwise skip the hook entirely.
     """
     new_sync = _build_vehicle_sync(status, battery_kwh, raw_json=raw_json)
     last = VehicleSync.query.order_by(VehicleSync.timestamp.desc()).first()
+
     if new_sync.differs_from(last):
         db.session.add(new_sync)
         db.session.commit()
-        try:
-            from services.trips_service import update_parking_from_sync
-            update_parking_from_sync(new_sync)
-        except Exception as e:
-            logger.warning(f"Failed to update parking event: {e}")
-        return new_sync
-    return last
+        result = new_sync
+    else:
+        result = last
+
+    # Always run parking detection on the latest snapshot.
+    try:
+        from services.trips_service import update_parking_from_sync
+        update_parking_from_sync(result)
+    except Exception as e:
+        logger.warning(f"Failed to update parking event: {e}")
+
+    return result
 
 
 def register_routes(app):
@@ -1028,7 +1062,47 @@ def register_routes(app):
     # ── TRIPS / FAHRTENBUCH ────────────────────────────────────
     @app.route('/trips')
     def trips_page():
-        from services.trips_service import get_trips, get_parking_events, get_trip_summary, _load_locations
+        from services.trips_service import (
+            get_trips, get_parking_events, get_trip_summary, _load_locations,
+            is_brand_supports_location,
+        )
+
+        # Auto-fresh: if a vehicle brand is configured, the brand supports GPS,
+        # and the last sync (with GPS) is stale (>30 min), do a force refresh
+        # so the user sees current data when they open the page.
+        # Skipped if rate limit is near or auto-sync is disabled.
+        try:
+            brand = AppConfig.get('vehicle_api_brand', '')
+            auto_sync_enabled = AppConfig.get('vehicle_sync_enabled', 'false') == 'true'
+            if brand and auto_sync_enabled and is_brand_supports_location(brand):
+                from datetime import datetime as _dt, timedelta as _td
+                last_with_gps = (VehicleSync.query
+                                 .filter(VehicleSync.location_lat.isnot(None))
+                                 .order_by(VehicleSync.timestamp.desc())
+                                 .first())
+                stale = True
+                if last_with_gps:
+                    stale = (_dt.now() - last_with_gps.timestamp) > _td(minutes=30)
+                # Rate limit guard (200/day)
+                today_str = date.today().isoformat()
+                counter_date = AppConfig.get('vehicle_api_counter_date', '')
+                if counter_date != today_str:
+                    AppConfig.set('vehicle_api_counter_date', today_str)
+                    AppConfig.set('vehicle_api_counter', '0')
+                api_count = int(AppConfig.get('vehicle_api_counter', '0'))
+                if stale and api_count < 180:
+                    AppConfig.set('vehicle_api_counter', str(api_count + 1))
+                    from services.vehicle import get_connector
+                    import json as _json
+                    creds = _get_vehicle_credentials()
+                    connector = get_connector(brand, creds)
+                    status = connector.get_status(force=True)
+                    _save_vehicle_sync(status, _get_battery_kwh(),
+                                       raw_json=_json.dumps(status.raw_data))
+                    logger.info("trips_page: triggered auto-fresh live sync")
+        except Exception as e:
+            logger.warning(f"trips_page auto-fresh failed: {e}")
+
         trips = get_trips(limit=200)
         events = get_parking_events(limit=200)
         summary = get_trip_summary()
@@ -1093,6 +1167,59 @@ def register_routes(app):
         out.append('</gpx>')
         return Response('\n'.join(out), mimetype='application/gpx+xml',
                         headers={'Content-Disposition': 'attachment;filename=fahrtenbuch.gpx'})
+
+    @app.route('/api/trips/backfill', methods=['POST'])
+    def api_trips_backfill():
+        """Replay all vehicle syncs through the parking-event hook.
+
+        Body: {wipe: bool} — if true, deletes existing events first.
+        """
+        from services.trips_service import backfill_parking_events
+        data = request.get_json(silent=True) or {}
+        wipe = bool(data.get('wipe', False))
+        try:
+            summary = backfill_parking_events(wipe_existing=wipe)
+            return jsonify({'ok': True, **summary})
+        except Exception as e:
+            return jsonify({'error': str(e)}), 500
+
+    @app.route('/api/trips/sync_now', methods=['POST'])
+    def api_trips_sync_now():
+        """Trigger a force vehicle sync from the trips page."""
+        brand = AppConfig.get('vehicle_api_brand', '')
+        if not brand:
+            return jsonify({'error': 'no_brand'}), 400
+
+        # Rate limiter check (Kia EU 200/day)
+        today_str = date.today().isoformat()
+        counter_date = AppConfig.get('vehicle_api_counter_date', '')
+        if counter_date != today_str:
+            AppConfig.set('vehicle_api_counter_date', today_str)
+            AppConfig.set('vehicle_api_counter', '0')
+        api_count = int(AppConfig.get('vehicle_api_counter', '0'))
+        if api_count >= 190:
+            return jsonify({'error': f'rate_limit ({api_count}/200)'}), 429
+        AppConfig.set('vehicle_api_counter', str(api_count + 1))
+
+        try:
+            from services.vehicle import get_connector
+            import json as _json
+            creds = _get_vehicle_credentials()
+            connector = get_connector(brand, creds)
+            status = connector.get_status(force=True)
+            sync = _save_vehicle_sync(status, _get_battery_kwh(),
+                                      raw_json=_json.dumps(status.raw_data))
+            return jsonify({
+                'ok': True,
+                'has_location': sync.location_lat is not None,
+                'lat': sync.location_lat,
+                'lon': sync.location_lon,
+                'soc': sync.soc_percent,
+                'odometer': sync.odometer_km,
+                'timestamp': sync.timestamp.isoformat() if sync.timestamp else None,
+            })
+        except Exception as e:
+            return jsonify({'error': str(e)}), 500
 
     @app.route('/api/locations/save', methods=['POST'])
     def api_locations_save():

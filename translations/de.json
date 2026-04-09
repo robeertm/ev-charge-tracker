@@ -432,5 +432,18 @@
   "set.app_restarting": "App wird neu gestartet…",
   "set.app_restart_wait": "Bitte warten - die Seite lädt automatisch neu sobald die App wieder erreichbar ist.",
   "set.app_restart_back": "App ist wieder erreichbar, lade neu…",
-  "set.app_restart_timeout": "Zeitüberschreitung. Bitte Browser manuell neu laden."
+  "set.app_restart_timeout": "Zeitüberschreitung. Bitte Browser manuell neu laden.",
+  "set.api_mode_smart": "Smart (Cached + Auto-Live)",
+  "set.api_cached_gps_warning": "Im Cached-Modus liefert Kia/Hyundai meistens keine GPS-Position. Für das Fahrtenbuch nutze \"Smart\" oder \"Live\", oder drücke manuell \"Sync (Live)\".",
+  "trips.sync_now": "Jetzt synchronisieren",
+  "trips.backfill": "Aus Historie nachbauen",
+  "trips.backfill_title": "Alle Fahrzeug-Syncs nochmal durch die Park-Erkennung schicken",
+  "trips.tb_syncing": "Synchronisiere…",
+  "trips.tb_synced_with_gps": "Sync OK mit GPS — lade Seite neu…",
+  "trips.tb_synced_no_gps": "Sync OK, aber Kia lieferte keine GPS-Position. Auto evtl. tief schlafend.",
+  "trips.tb_sync_failed": "Sync fehlgeschlagen:",
+  "trips.tb_backfilling": "Baue Fahrtenbuch aus Historie neu auf…",
+  "trips.tb_backfilled": "Fahrtenbuch erstellt:",
+  "trips.tb_backfill_failed": "Backfill fehlgeschlagen:",
+  "trips.tb_backfill_confirm": "Vorhandene Parkereignisse löschen und aus Sync-Historie neu aufbauen?"
 }
