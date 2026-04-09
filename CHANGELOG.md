@@ -1,5 +1,10 @@
 # Changelog
 
+## v2.1.1 (2026-04-09)
+
+### Fixes
+- **Updater** — version comparison now uses semver tuples instead of plain string inequality. A user on a later dev version no longer sees an "update available" pointing at an older release, and `2.10.0` correctly sorts above `2.9.0`.
+
 ## v2.1.0 (2026-04-09)
 
 ### New Features
