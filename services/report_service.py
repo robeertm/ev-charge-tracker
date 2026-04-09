@@ -2,7 +2,7 @@
 import io
 import os
 import tempfile
-from datetime import date
+from datetime import date, datetime
 
 import matplotlib
 matplotlib.use('Agg')
@@ -13,7 +13,7 @@ from fpdf import FPDF
 from models.database import db, Charge, AppConfig, ThgQuota
 from services.stats_service import (
     get_summary_stats, get_monthly_stats, get_yearly_stats,
-    get_ac_dc_stats, get_chart_data,
+    get_ac_dc_stats, get_chart_data, get_vehicle_history,
 )
 
 # Colors
@@ -183,6 +183,47 @@ def _generate_charts(stats, monthly, chart_data, acdc, tmp_dir):
     return charts
 
 
+def _generate_vehicle_history_charts(vh, tmp_dir):
+    """Generate charts for vehicle history time series. Returns dict of paths."""
+    if not vh or vh['summary']['count'] < 2:
+        return {}
+
+    series = vh['series']
+    timestamps = [datetime.fromisoformat(t) for t in series['timestamps']]
+
+    def _filtered(values):
+        ts_out, val_out = [], []
+        for t, v in zip(timestamps, values):
+            if v is not None:
+                ts_out.append(t)
+                val_out.append(v)
+        return ts_out, val_out
+
+    def _line_chart(name, values, ylabel, title, color):
+        ts_v, val_v = _filtered(values)
+        if not val_v:
+            return None
+        fig, ax = plt.subplots(figsize=(8, 2.4))
+        ax.plot(ts_v, val_v, color=color, linewidth=1.5)
+        ax.fill_between(ts_v, val_v, alpha=0.15, color=color)
+        ax.set_ylabel(ylabel)
+        ax.set_title(title, fontweight='bold')
+        ax.xaxis.set_major_locator(mdates.AutoDateLocator())
+        ax.xaxis.set_major_formatter(mdates.DateFormatter('%d.%m.%y'))
+        plt.xticks(rotation=45, ha='right', fontsize=7)
+        return _save_chart(fig, tmp_dir, name)
+
+    out = {}
+    out['vh_soc']    = _line_chart('vh_soc',    series['soc'],             '%',           'SoC Verlauf',            C_SUCCESS)
+    out['vh_range']  = _line_chart('vh_range',  series['range_km'],        'km',          'Reichweite',             C_PRIMARY)
+    out['vh_odo']    = _line_chart('vh_odo',    series['odometer_km'],     'km',          'Tachostand',             C_DARK)
+    out['vh_12v']    = _line_chart('vh_12v',    series['battery_12v'],     '%',           '12V Batterie',           C_WARNING)
+    out['vh_soh']    = _line_chart('vh_soh',    series['soh'],             '%',           'SoH (State of Health)',  C_DANGER)
+    out['vh_regen']  = _line_chart('vh_regen',  series['regen_kwh'],       'kWh',         'Rekuperation gesamt',    C_INFO)
+    out['vh_cons']   = _line_chart('vh_cons',   series['consumption_30d'], 'kWh/100km',  'O 30 Tage Verbrauch',    C_PV)
+    return {k: v for k, v in out.items() if v}
+
+
 class EVReport(FPDF):
     @staticmethod
     def _clean(text):
@@ -276,9 +317,11 @@ def generate_report():
     yearly = get_yearly_stats()
     acdc = get_ac_dc_stats()
     chart_data = get_chart_data()
+    vehicle_history = get_vehicle_history()
 
     tmp_dir = tempfile.mkdtemp()
     charts = _generate_charts(stats, monthly, chart_data, acdc, tmp_dir)
+    vh_charts = _generate_vehicle_history_charts(vehicle_history, tmp_dir)
 
     pdf = EVReport()
     pdf.alias_nb_pages()
@@ -359,6 +402,34 @@ def generate_report():
     if 'yearly_comparison' in charts:
         pdf.section_title('Jahresvergleich')
         pdf.add_chart(charts.get('yearly_comparison', ''))
+
+    # === Vehicle history (if data available) ===
+    if vh_charts and vehicle_history:
+        pdf.add_page()
+        pdf.section_title('Fahrzeug-Historie')
+        sm = vehicle_history['summary']
+        last = sm['last']
+        info_parts = [f"Datenpunkte: {sm['count']}"]
+        if sm.get('km_driven'):
+            info_parts.append(f"Gefahren: {sm['km_driven']:,} km")
+        if sm.get('soh_delta') is not None:
+            info_parts.append(f"SoH Delta: {sm['soh_delta']:+.1f} %")
+        if sm.get('regen_delta') is not None:
+            info_parts.append(f"Rekup. Delta: {sm['regen_delta']:+.0f} kWh")
+        pdf.set_font('Helvetica', 'I', 8)
+        pdf.set_text_color(120, 120, 120)
+        pdf.cell(0, 5, pdf._clean(' - '.join(info_parts)), align='C', new_x='LMARGIN', new_y='NEXT')
+        pdf.ln(2)
+
+        for key in ('vh_soc', 'vh_range', 'vh_odo', 'vh_12v', 'vh_soh', 'vh_regen', 'vh_cons'):
+            if key in vh_charts:
+                pdf.add_chart(vh_charts[key], w=170)
+
+        if last.get('lat') and last.get('lon'):
+            pdf.set_font('Helvetica', '', 8)
+            pdf.set_text_color(33, 33, 33)
+            pdf.cell(0, 5, pdf._clean(f"Letzter Standort: {last['lat']:.5f}, {last['lon']:.5f}"),
+                     align='C', new_x='LMARGIN', new_y='NEXT')
 
     # === Tables ===
     pdf.add_page()

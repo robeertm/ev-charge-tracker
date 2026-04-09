@@ -17,7 +17,7 @@ DEFAULT_INTERVAL_HOURS = 4
 def _do_sync(app):
     """Fetch vehicle status and store as VehicleSync row."""
     with app.app_context():
-        from models.database import db, AppConfig, VehicleSync
+        from models.database import AppConfig
         from services.vehicle import get_connector
 
         brand = AppConfig.get('vehicle_api_brand', '')
@@ -49,16 +49,9 @@ def _do_sync(app):
         connector = get_connector(brand, creds)
         status = connector.get_status(force=force)
 
-        sync = VehicleSync(
-            soc_percent=status.soc_percent,
-            odometer_km=status.odometer_km,
-            is_charging=status.is_charging,
-            charge_power_kw=status.charge_power_kw,
-            estimated_range_km=status.estimated_range_km,
-            raw_json=json.dumps(status.raw_data),
-        )
-        db.session.add(sync)
-        db.session.commit()
+        from app import _save_vehicle_sync, _get_battery_kwh
+        sync = _save_vehicle_sync(status, _get_battery_kwh(),
+                                  raw_json=json.dumps(status.raw_data))
 
         logger.info(
             f"Vehicle sync: SoC={status.soc_percent}%, "

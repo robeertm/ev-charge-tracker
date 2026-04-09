@@ -31,6 +31,21 @@ def create_app(config_class=Config):
             db.session.execute(text('ALTER TABLE charges ADD COLUMN odometer INTEGER'))
             db.session.commit()
 
+        # Migrate: add extended history columns to vehicle_syncs
+        sync_columns = [c['name'] for c in inspector.get_columns('vehicle_syncs')]
+        _new_sync_cols = [
+            ('battery_12v_percent', 'INTEGER'),
+            ('battery_soh_percent', 'REAL'),
+            ('total_regenerated_kwh', 'REAL'),
+            ('consumption_30d_kwh_per_100km', 'REAL'),
+            ('location_lat', 'REAL'),
+            ('location_lon', 'REAL'),
+        ]
+        for col_name, col_type in _new_sync_cols:
+            if col_name not in sync_columns:
+                db.session.execute(text(f'ALTER TABLE vehicle_syncs ADD COLUMN {col_name} {col_type}'))
+        db.session.commit()
+
     register_routes(app)
 
     # Initialize i18n
@@ -79,6 +94,66 @@ def _get_battery_kwh():
         return Config.BATTERY_CAPACITY_KWH
 
 
+def _calc_soh_percent(status, battery_kwh):
+    """Compute SoH%. Prefer native value from API; otherwise derive from total
+    consumed energy via the agreed formula: (consumed/10) / 1000 / battery_kwh * 100."""
+    if status.battery_soh_percent is not None:
+        try:
+            return round(float(status.battery_soh_percent), 1)
+        except (ValueError, TypeError):
+            pass
+    if status.total_power_consumed_kwh is not None and battery_kwh:
+        try:
+            consumed = float(status.total_power_consumed_kwh) / 10.0
+            return round(consumed / 1000.0 / float(battery_kwh) * 100.0, 1)
+        except (ValueError, TypeError, ZeroDivisionError):
+            pass
+    return None
+
+
+def _build_vehicle_sync(status, battery_kwh, raw_json=''):
+    """Build a VehicleSync row from a connector VehicleStatus."""
+    regen_kwh = None
+    if status.total_power_regenerated_kwh is not None:
+        try:
+            regen_kwh = round(float(status.total_power_regenerated_kwh) / 10.0, 1)
+        except (ValueError, TypeError):
+            pass
+    cons_30d = None
+    if status.consumption_30d_wh_per_km is not None:
+        try:
+            # API returns Wh/km in 0.1 units → divide by 10 → kWh/100km
+            cons_30d = round(float(status.consumption_30d_wh_per_km) / 10.0, 1)
+        except (ValueError, TypeError):
+            pass
+    return VehicleSync(
+        soc_percent=status.soc_percent,
+        odometer_km=status.odometer_km,
+        is_charging=status.is_charging,
+        charge_power_kw=status.charge_power_kw,
+        estimated_range_km=status.estimated_range_km,
+        battery_12v_percent=status.battery_12v_percent,
+        battery_soh_percent=_calc_soh_percent(status, battery_kwh),
+        total_regenerated_kwh=regen_kwh,
+        consumption_30d_kwh_per_100km=cons_30d,
+        location_lat=status.location_lat,
+        location_lon=status.location_lon,
+        raw_json=raw_json,
+    )
+
+
+def _save_vehicle_sync(status, battery_kwh, raw_json=''):
+    """Persist a VehicleSync row only if any tracked value differs from the
+    most recent row. Returns the saved (or last existing) sync row."""
+    new_sync = _build_vehicle_sync(status, battery_kwh, raw_json=raw_json)
+    last = VehicleSync.query.order_by(VehicleSync.timestamp.desc()).first()
+    if new_sync.differs_from(last):
+        db.session.add(new_sync)
+        db.session.commit()
+        return new_sync
+    return last
+
+
 def register_routes(app):
 
     @app.context_processor
@@ -92,16 +167,21 @@ def register_routes(app):
     # ── DASHBOARD ──────────────────────────────────────────────
     @app.route('/')
     def dashboard():
-        from services.stats_service import get_summary_stats, get_chart_data, get_ac_dc_stats, get_yearly_stats
+        from services.stats_service import (
+            get_summary_stats, get_chart_data, get_ac_dc_stats,
+            get_yearly_stats, get_vehicle_history,
+        )
         stats = get_summary_stats()
         chart_data = get_chart_data()
         acdc = get_ac_dc_stats()
         yearly = get_yearly_stats()
         vehicle_configured = bool(AppConfig.get('vehicle_api_brand', ''))
+        vehicle_history = get_vehicle_history() if vehicle_configured else None
         return render_template('dashboard.html',
                                stats=stats, chart_data=chart_data,
                                acdc=acdc, yearly=yearly,
                                vehicle_configured=vehicle_configured,
+                               vehicle_history=vehicle_history,
                                battery_kwh=_get_battery_kwh())
 
     # ── EINGABE ────────────────────────────────────────────────
@@ -404,16 +484,8 @@ def register_routes(app):
                         creds = _get_vehicle_credentials()
                         connector = get_connector(brand, creds)
                         status = connector.get_status(force=force)
-                        sync = VehicleSync(
-                            soc_percent=status.soc_percent,
-                            odometer_km=status.odometer_km,
-                            is_charging=status.is_charging,
-                            charge_power_kw=status.charge_power_kw,
-                            estimated_range_km=status.estimated_range_km,
-                            raw_json=_json.dumps(status.raw_data),
-                        )
-                        db.session.add(sync)
-                        db.session.commit()
+                        _save_vehicle_sync(status, _get_battery_kwh(),
+                                           raw_json=_json.dumps(status.raw_data))
                         parts = []
                         if status.soc_percent is not None:
                             parts.append(f'SoC: {status.soc_percent}%')
@@ -700,16 +772,8 @@ def register_routes(app):
             creds = _get_vehicle_credentials()
             connector = get_connector(brand, creds)
             s = connector.get_status(force=force)
-            sync = VehicleSync(
-                soc_percent=s.soc_percent,
-                odometer_km=s.odometer_km,
-                is_charging=s.is_charging,
-                charge_power_kw=s.charge_power_kw,
-                estimated_range_km=s.estimated_range_km,
-                raw_json=_json.dumps(s.raw_data),
-            )
-            db.session.add(sync)
-            db.session.commit()
+            sync = _save_vehicle_sync(s, _get_battery_kwh(),
+                                      raw_json=_json.dumps(s.raw_data))
             return jsonify({
                 'soc': s.soc_percent,
                 'odometer': s.odometer_km,

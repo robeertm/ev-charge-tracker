@@ -44,6 +44,8 @@
   "dash.tire_warning": "Attenzione",
   "dash.tire_ok": "OK",
   "dash.map": "Mappa",
+  "dash.vehicle_history": "Cronologia veicolo",
+  "dash.records": "voci",
   "dash.total_cost": "Costi di ricarica",
   "dash.total_kwh": "Ricaricato",
   "dash.co2": "CO₂",

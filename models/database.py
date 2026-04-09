@@ -88,13 +88,47 @@ class VehicleSync(db.Model):
     __tablename__ = 'vehicle_syncs'
 
     id = db.Column(db.Integer, primary_key=True)
-    timestamp = db.Column(db.DateTime, nullable=False, default=datetime.now)
+    timestamp = db.Column(db.DateTime, nullable=False, default=datetime.now, index=True)
     soc_percent = db.Column(db.Integer)
     odometer_km = db.Column(db.Integer)
     is_charging = db.Column(db.Boolean)
     charge_power_kw = db.Column(db.Float)
     estimated_range_km = db.Column(db.Integer)
+    # Extended history columns
+    battery_12v_percent = db.Column(db.Integer)
+    battery_soh_percent = db.Column(db.Float)
+    total_regenerated_kwh = db.Column(db.Float)
+    consumption_30d_kwh_per_100km = db.Column(db.Float)
+    location_lat = db.Column(db.Float)
+    location_lon = db.Column(db.Float)
     raw_json = db.Column(db.Text)
+
+    # Fields used for change detection (any difference triggers a new row)
+    TRACKED_FIELDS = (
+        'soc_percent', 'odometer_km', 'estimated_range_km',
+        'battery_12v_percent', 'battery_soh_percent',
+        'total_regenerated_kwh', 'consumption_30d_kwh_per_100km',
+        'location_lat', 'location_lon',
+    )
+
+    def differs_from(self, other):
+        """Return True if any tracked field differs (None counts as different)."""
+        if other is None:
+            return True
+        for f in self.TRACKED_FIELDS:
+            a = getattr(self, f)
+            b = getattr(other, f)
+            if a is None and b is None:
+                continue
+            if a is None or b is None:
+                return True
+            # Floats: tolerate tiny noise
+            if isinstance(a, float) or isinstance(b, float):
+                if abs(float(a) - float(b)) > 1e-4:
+                    return True
+            elif a != b:
+                return True
+        return False
 
 
 class ThgQuota(db.Model):

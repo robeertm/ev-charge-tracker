@@ -1,7 +1,7 @@
 """Statistics and aggregation service."""
-from datetime import date
+from datetime import date, datetime, timedelta
 from sqlalchemy import func, extract
-from models.database import db, Charge, ThgQuota, AppConfig
+from models.database import db, Charge, ThgQuota, AppConfig, VehicleSync
 
 
 def get_summary_stats():
@@ -169,6 +169,78 @@ def get_ac_dc_stats():
                 'avg_loss_pct': round(sum(c.loss_pct or 0 for c in charges if c.loss_pct) / max(sum(1 for c in charges if c.loss_pct), 1), 1),
             }
     return stats
+
+
+def get_vehicle_history(days=None):
+    """Return time series of tracked vehicle metrics from VehicleSync rows.
+
+    days: optional, limit to last N days. None = all history.
+    """
+    q = VehicleSync.query.order_by(VehicleSync.timestamp.asc())
+    if days:
+        cutoff = datetime.now() - timedelta(days=days)
+        q = q.filter(VehicleSync.timestamp >= cutoff)
+    rows = q.all()
+    if not rows:
+        return None
+
+    series = {
+        'timestamps': [r.timestamp.isoformat() for r in rows],
+        'soc': [r.soc_percent for r in rows],
+        'range_km': [r.estimated_range_km for r in rows],
+        'odometer_km': [r.odometer_km for r in rows],
+        'battery_12v': [r.battery_12v_percent for r in rows],
+        'soh': [r.battery_soh_percent for r in rows],
+        'regen_kwh': [r.total_regenerated_kwh for r in rows],
+        'consumption_30d': [r.consumption_30d_kwh_per_100km for r in rows],
+        'lat': [r.location_lat for r in rows],
+        'lon': [r.location_lon for r in rows],
+    }
+
+    last = rows[-1]
+    summary = {
+        'count': len(rows),
+        'first_seen': rows[0].timestamp.isoformat(),
+        'last_seen': last.timestamp.isoformat(),
+        'last': {
+            'soc': last.soc_percent,
+            'range_km': last.estimated_range_km,
+            'odometer_km': last.odometer_km,
+            'battery_12v': last.battery_12v_percent,
+            'soh': last.battery_soh_percent,
+            'regen_kwh': last.total_regenerated_kwh,
+            'consumption_30d': last.consumption_30d_kwh_per_100km,
+            'lat': last.location_lat,
+            'lon': last.location_lon,
+        },
+    }
+
+    # Compute deltas from first → last where meaningful
+    def _first_non_null(values):
+        for v in values:
+            if v is not None:
+                return v
+        return None
+
+    def _last_non_null(values):
+        for v in reversed(values):
+            if v is not None:
+                return v
+        return None
+
+    odo_first = _first_non_null(series['odometer_km'])
+    odo_last = _last_non_null(series['odometer_km'])
+    summary['km_driven'] = (odo_last - odo_first) if (odo_first and odo_last) else 0
+
+    soh_first = _first_non_null(series['soh'])
+    soh_last = _last_non_null(series['soh'])
+    summary['soh_delta'] = round(soh_last - soh_first, 2) if (soh_first is not None and soh_last is not None) else None
+
+    regen_first = _first_non_null(series['regen_kwh'])
+    regen_last = _last_non_null(series['regen_kwh'])
+    summary['regen_delta'] = round(regen_last - regen_first, 1) if (regen_first is not None and regen_last is not None) else None
+
+    return {'series': series, 'summary': summary}
 
 
 def get_chart_data():

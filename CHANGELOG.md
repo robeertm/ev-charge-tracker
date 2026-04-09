@@ -1,5 +1,66 @@
 # Changelog
 
+## v2.1.0 (2026-04-09)
+
+### New Features
+- **Vehicle history tracking** — every vehicle sync now persists battery (SoC), range, odometer, 12V battery, calculated SoH, total recuperated kWh, 30-day kWh/100km consumption, and GPS location. New rows are only stored when at least one tracked value has changed (compact, audit-friendly history).
+- **Dashboard vehicle history widget** — 7 compact time-series mini-charts (SoC, range, odometer, 12V, SoH, recuperation, consumption) showing the evolution of all tracked metrics.
+- **Vehicle location map** — small Leaflet/OpenStreetMap card on the dashboard showing where the car was last seen, with marker and zoom.
+- **PDF report extended** — new "Fahrzeug-Historie" section with all 7 time-series charts, summary KPIs (km driven, SoH delta, recuperation delta) and the last known GPS position.
+
+### Database
+- New columns on `vehicle_syncs`: `battery_12v_percent`, `battery_soh_percent`, `total_regenerated_kwh`, `consumption_30d_kwh_per_100km`, `location_lat`, `location_lon` (auto-migrated on startup).
+
+## v2.0.0 (2026-04-09)
+
+### New Features
+- **Multi-language support** — Deutsch, English, Français, Español, Italiano, Nederlands. Switchable in Settings → Sprache. 286 strings per locale, JSON-based fallback to German.
+- **Marketing-ready README** — badges, screenshots section, problem/solution table, "why this app" pitch, GitHub topics for discoverability (electric-vehicle, ev-charging, kia, hyundai, tesla, …).
+
+### Improvements
+- Lightweight i18n service (`services/i18n.py`) with `t()` global, per-request language selection, format-string support.
+
+## v1.9.0 (2026-04-09)
+
+### New Features
+- **6 additional vehicle brands** via API connectors:
+  - **Tesla** (`teslapy`, OAuth refresh-token, miles → km auto-convert)
+  - **Renault** & **Dacia** (`renault-api`, async)
+  - **Polestar** (`pypolestar`, async)
+  - **MG / SAIC** (`saic-ismart-client-ng`)
+  - **Smart #1/#3** (`pySmartHashtag`)
+  - **Porsche** (`pyporscheconnectapi`)
+- Modular connector architecture preserved — Kia/Hyundai integration untouched, no token loss.
+- All packages installable from Settings → Vehicle API UI (no terminal needed).
+
+### Improvements
+- **Dark / Light mode** toggle in navbar, inline boot script avoids flash, synced across browser tabs via `localStorage` storage event.
+- **Local timestamps** — `datetime.utcnow` replaced with `datetime.now` everywhere; "Letzte Sync" no longer shows UTC.
+- **Repo cleanup** — `.DS_Store`, `.claude/`, `*.command` added to `.gitignore` and untracked.
+- **Dynamic copyright year** — footer no longer hardcoded to 2025.
+
+## v1.8.4 (2026-04-08)
+
+### Fixes
+- Reverted experimental client-side OAuth wizard — Selenium-based token fetch (v1.5.4) is back as the only reliable approach for headed environments.
+
+## v1.8.3 (2026-04-08)
+
+### Fixes
+- **SoH fallback** — when the EU API does not populate `BatteryManagement.SoH.Ratio` (most non-Kona vehicles), SoH is computed from `total_consumed_kwh / battery_kwh` and shown in the dashboard widget.
+
+## v1.8.2 (2026-04-08)
+
+### Fixes
+- **Kia API unit conversion** — `totalPwrCsp` and `regenPwr` empirically use 0.1 kWh units (not Wh as the upstream library docs claim). Recuperation now matches dashboard expectations (~7.072 kWh, not 21.011).
+
+## v1.8.1 (2026-04-08)
+
+### Fixes
+- **PDF "Gesamtübersicht" layout** — replaced overlapping manual y-positioning with a clean bordered KPI table.
+- **Dashboard auto-refresh** — vehicle widget now actually fetches fresh cached data on page load (was only restoring from localStorage cache).
+- **SoH on dashboard** — added new "SoH %" tile to the live vehicle widget.
+
 ## v1.8.0 (2026-04-08)
 
 ### New Features

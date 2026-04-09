@@ -2,6 +2,11 @@
 {% block title %}Dashboard — EV Charge Tracker{% endblock %}
 {% block head %}
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.6/dist/chart.umd.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/chartjs-adapter-date-fns@3.0.0/dist/chartjs-adapter-date-fns.bundle.min.js"></script>
+{% if vehicle_history and vehicle_history.summary.last.lat %}
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+{% endif %}
 {% endblock %}
 
 {% block content %}
@@ -230,6 +235,118 @@
     }
     btn.addEventListener('click', () => loadVehicle(false));
     btnForce.addEventListener('click', () => loadVehicle(true));
+})();
+</script>
+{% endif %}
+
+{% if vehicle_history and vehicle_history.summary.count > 1 %}
+<!-- Vehicle History (time series) -->
+<div class="card mb-3">
+    <div class="card-header bg-white fw-bold d-flex justify-content-between align-items-center">
+        <span><i class="bi bi-clock-history"></i> {{ t('dash.vehicle_history') }}</span>
+        <span class="text-muted small">{{ vehicle_history.summary.count }} {{ t('dash.records') }}</span>
+    </div>
+    <div class="card-body">
+        <div class="row g-3">
+            <div class="col-lg-4 col-md-6">
+                <div class="small text-muted">{{ t('dash.battery') }} (SoC %)</div>
+                <div style="position:relative; height:140px;"><canvas id="vhSoc"></canvas></div>
+            </div>
+            <div class="col-lg-4 col-md-6">
+                <div class="small text-muted">{{ t('dash.range') }} (km)</div>
+                <div style="position:relative; height:140px;"><canvas id="vhRange"></canvas></div>
+            </div>
+            <div class="col-lg-4 col-md-6">
+                <div class="small text-muted">{{ t('dash.odometer') }} (km)</div>
+                <div style="position:relative; height:140px;"><canvas id="vhOdo"></canvas></div>
+            </div>
+            <div class="col-lg-4 col-md-6">
+                <div class="small text-muted">{{ t('dash.v12') }} (%)</div>
+                <div style="position:relative; height:140px;"><canvas id="vh12v"></canvas></div>
+            </div>
+            <div class="col-lg-4 col-md-6">
+                <div class="small text-muted">{{ t('dash.soh') }} (%)</div>
+                <div style="position:relative; height:140px;"><canvas id="vhSoh"></canvas></div>
+            </div>
+            <div class="col-lg-4 col-md-6">
+                <div class="small text-muted">{{ t('dash.regenerated') }} (kWh)</div>
+                <div style="position:relative; height:140px;"><canvas id="vhRegen"></canvas></div>
+            </div>
+            <div class="col-lg-4 col-md-6">
+                <div class="small text-muted">{{ t('dash.avg_30d') }} (kWh/100km)</div>
+                <div style="position:relative; height:140px;"><canvas id="vhCons"></canvas></div>
+            </div>
+            {% if vehicle_history.summary.last.lat %}
+            <div class="col-lg-8 col-md-12">
+                <div class="small text-muted">{{ t('dash.location') }}</div>
+                <div id="vhMap" style="height:200px; border-radius:4px; z-index:0;"></div>
+            </div>
+            {% endif %}
+        </div>
+    </div>
+</div>
+<script>
+(function() {
+    const VH = {{ vehicle_history.series | tojson }};
+    const ts = VH.timestamps.map(s => new Date(s));
+
+    function pairs(values) {
+        const out = [];
+        for (let i = 0; i < ts.length; i++) {
+            if (values[i] !== null && values[i] !== undefined) {
+                out.push({ x: ts[i], y: values[i] });
+            }
+        }
+        return out;
+    }
+
+    const baseOpts = (color, fmt) => ({
+        type: 'line',
+        data: { datasets: [{
+            data: [],
+            borderColor: color,
+            backgroundColor: color.replace('1)', '0.15)'),
+            borderWidth: 1.5,
+            pointRadius: 0,
+            tension: 0.2,
+            fill: true,
+            spanGaps: true,
+        }] },
+        options: {
+            maintainAspectRatio: false,
+            responsive: true,
+            plugins: { legend: { display: false }, tooltip: { intersect: false, mode: 'index' } },
+            scales: {
+                x: { type: 'time', ticks: { font: { size: 9 }, maxTicksLimit: 5 }, grid: { display: false } },
+                y: { ticks: { font: { size: 9 }, callback: v => fmt ? fmt(v) : v } },
+            }
+        }
+    });
+
+    function makeChart(id, values, color, fmt) {
+        const cfg = baseOpts(color, fmt);
+        cfg.data.datasets[0].data = pairs(values);
+        new Chart(document.getElementById(id), cfg);
+    }
+
+    makeChart('vhSoc',   VH.soc,             'rgba(76, 175, 80, 1)',  v => v + '%');
+    makeChart('vhRange', VH.range_km,        'rgba(33, 150, 243, 1)', v => v + ' km');
+    makeChart('vhOdo',   VH.odometer_km,     'rgba(96, 125, 139, 1)', v => v.toLocaleString('de'));
+    makeChart('vh12v',   VH.battery_12v,     'rgba(255, 193, 7, 1)',  v => v + '%');
+    makeChart('vhSoh',   VH.soh,             'rgba(244, 67, 54, 1)',  v => v + '%');
+    makeChart('vhRegen', VH.regen_kwh,       'rgba(0, 188, 212, 1)',  v => v.toFixed(0));
+    makeChart('vhCons',  VH.consumption_30d, 'rgba(255, 152, 0, 1)',  v => v.toFixed(1));
+
+    {% if vehicle_history.summary.last.lat %}
+    const lat = {{ vehicle_history.summary.last.lat }};
+    const lon = {{ vehicle_history.summary.last.lon }};
+    const map = L.map('vhMap', { zoomControl: true, scrollWheelZoom: false }).setView([lat, lon], 14);
+    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+        attribution: '&copy; OpenStreetMap',
+        maxZoom: 19,
+    }).addTo(map);
+    L.marker([lat, lon]).addTo(map).bindPopup('{{ car_model }}').openPopup();
+    {% endif %}
 })();
 </script>
 {% endif %}
