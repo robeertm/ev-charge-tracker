@@ -140,6 +140,56 @@
             </div>
         </div>
 
+        <!-- Locations / Standorte -->
+        <div class="card mb-4" id="locationsCard">
+            <div class="card-header bg-white fw-bold">
+                <i class="bi bi-geo-alt"></i> {{ t('set.locations_title') }}
+            </div>
+            <div class="card-body">
+                <p class="small text-muted">{{ t('set.locations_hint') }}</p>
+                <div class="row g-2 mb-2">
+                    <div class="col-md-4">
+                        <label class="form-label small mb-1"><i class="bi bi-house-fill text-success"></i> {{ t('set.loc_home') }}</label>
+                        <input type="text" id="homeLabel" class="form-control form-control-sm mb-1" placeholder="Home" value="{{ home_label }}">
+                        <div class="input-group input-group-sm">
+                            <span class="input-group-text">{{ t('set.loc_lat') }}</span>
+                            <input type="number" step="0.000001" id="homeLat" class="form-control" value="{{ home_lat }}">
+                            <span class="input-group-text">{{ t('set.loc_lon') }}</span>
+                            <input type="number" step="0.000001" id="homeLon" class="form-control" value="{{ home_lon }}">
+                        </div>
+                        <div class="d-flex gap-1 mt-1">
+                            <button type="button" class="btn btn-sm btn-success flex-fill" id="btnSetHome"><i class="bi bi-bullseye"></i> {{ t('set.loc_set_from_map') }}</button>
+                            <button type="button" class="btn btn-sm btn-outline-success" id="btnSaveHome"><i class="bi bi-save"></i></button>
+                        </div>
+                    </div>
+                    <div class="col-md-4">
+                        <label class="form-label small mb-1"><i class="bi bi-briefcase-fill text-warning"></i> {{ t('set.loc_work') }}</label>
+                        <input type="text" id="workLabel" class="form-control form-control-sm mb-1" placeholder="Work" value="{{ work_label }}">
+                        <div class="input-group input-group-sm">
+                            <span class="input-group-text">{{ t('set.loc_lat') }}</span>
+                            <input type="number" step="0.000001" id="workLat" class="form-control" value="{{ work_lat }}">
+                            <span class="input-group-text">{{ t('set.loc_lon') }}</span>
+                            <input type="number" step="0.000001" id="workLon" class="form-control" value="{{ work_lon }}">
+                        </div>
+                        <div class="d-flex gap-1 mt-1">
+                            <button type="button" class="btn btn-sm btn-warning flex-fill" id="btnSetWork"><i class="bi bi-bullseye"></i> {{ t('set.loc_set_from_map') }}</button>
+                            <button type="button" class="btn btn-sm btn-outline-warning" id="btnSaveWork"><i class="bi bi-save"></i></button>
+                        </div>
+                    </div>
+                    <div class="col-md-4">
+                        <label class="form-label small mb-1"><i class="bi bi-star-fill text-info"></i> {{ t('set.loc_favorites') }}</label>
+                        <ul class="list-group list-group-flush small" id="favList" style="max-height:130px; overflow-y:auto"></ul>
+                        <div class="input-group input-group-sm mt-1">
+                            <input type="text" id="favName" class="form-control" placeholder="{{ t('set.loc_fav_name') }}">
+                            <button class="btn btn-info" id="btnAddFav"><i class="bi bi-plus"></i></button>
+                        </div>
+                    </div>
+                </div>
+                <div id="locMap" style="height:300px; border-radius:4px;"></div>
+                <div class="mt-2 small text-muted" id="locStatus">{{ t('set.loc_status_idle') }}</div>
+            </div>
+        </div>
+
         <!-- PV-Anlage -->
         <div class="card mb-4">
             <div class="card-header bg-white fw-bold">
@@ -401,6 +451,19 @@
                     app_install_done: {{ t('set.app_install_done')|tojson }},
                     app_install_timeout: {{ t('set.app_install_timeout')|tojson }},
                     app_release_notes: {{ t('set.app_release_notes')|tojson }},
+                };
+                const T_LOC = {
+                    click_home: {{ t('set.loc_click_home')|tojson }},
+                    click_work: {{ t('set.loc_click_work')|tojson }},
+                    picked: {{ t('set.loc_picked')|tojson }},
+                    no_coords: {{ t('set.loc_no_coords')|tojson }},
+                    saving: {{ t('set.loc_saving')|tojson }},
+                    saved: {{ t('set.loc_saved')|tojson }},
+                    reclassified: {{ t('set.loc_reclassified')|tojson }},
+                    error: {{ t('set.loc_error')|tojson }},
+                    fav_need_name: {{ t('set.loc_fav_need_name')|tojson }},
+                    fav_click: {{ t('set.loc_fav_click')|tojson }},
+                    fav_added: {{ t('set.loc_fav_added')|tojson }},
                 };
 
                 function updateVehicleFields() {
@@ -767,6 +830,169 @@
     }
 
     btn.addEventListener('click', doCheck);
+})();
+</script>
+
+<!-- Location picker (Leaflet) -->
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script>
+(function() {
+    if (!document.getElementById('locMap')) return;
+
+    const status = document.getElementById('locStatus');
+    function setStatus(msg) { status.textContent = msg; }
+
+    // Default center: home if set, else Berlin
+    const homeLatVal = parseFloat(document.getElementById('homeLat').value);
+    const homeLonVal = parseFloat(document.getElementById('homeLon').value);
+    const center = (!isNaN(homeLatVal) && !isNaN(homeLonVal)) ? [homeLatVal, homeLonVal] : [52.52, 13.405];
+
+    const map = L.map('locMap').setView(center, 13);
+    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+        attribution: '&copy; OpenStreetMap',
+        maxZoom: 19,
+    }).addTo(map);
+
+    let homeMarker = null, workMarker = null, favMarkers = [];
+
+    function placeMarker(kind, lat, lon, label) {
+        const colour = kind === 'home' ? 'green' : kind === 'work' ? 'orange' : 'cornflowerblue';
+        const icon = L.divIcon({
+            className: 'loc-marker',
+            html: '<div style="background:' + colour + ';width:18px;height:18px;border-radius:50%;border:3px solid white;box-shadow:0 0 5px rgba(0,0,0,0.5);"></div>',
+            iconSize: [18, 18],
+        });
+        const m = L.marker([lat, lon], { icon: icon, draggable: kind !== 'favorite' });
+        m.bindPopup(label || kind);
+        m.addTo(map);
+        return m;
+    }
+
+    function refreshHomeMarker() {
+        const lat = parseFloat(document.getElementById('homeLat').value);
+        const lon = parseFloat(document.getElementById('homeLon').value);
+        if (homeMarker) { map.removeLayer(homeMarker); homeMarker = null; }
+        if (!isNaN(lat) && !isNaN(lon)) {
+            homeMarker = placeMarker('home', lat, lon, document.getElementById('homeLabel').value || 'Home');
+            homeMarker.on('dragend', e => {
+                const ll = e.target.getLatLng();
+                document.getElementById('homeLat').value = ll.lat.toFixed(6);
+                document.getElementById('homeLon').value = ll.lng.toFixed(6);
+            });
+        }
+    }
+    function refreshWorkMarker() {
+        const lat = parseFloat(document.getElementById('workLat').value);
+        const lon = parseFloat(document.getElementById('workLon').value);
+        if (workMarker) { map.removeLayer(workMarker); workMarker = null; }
+        if (!isNaN(lat) && !isNaN(lon)) {
+            workMarker = placeMarker('work', lat, lon, document.getElementById('workLabel').value || 'Work');
+            workMarker.on('dragend', e => {
+                const ll = e.target.getLatLng();
+                document.getElementById('workLat').value = ll.lat.toFixed(6);
+                document.getElementById('workLon').value = ll.lng.toFixed(6);
+            });
+        }
+    }
+
+    refreshHomeMarker();
+    refreshWorkMarker();
+
+    // Click-to-set mode
+    let pickMode = null;  // 'home' | 'work' | null
+    document.getElementById('btnSetHome').addEventListener('click', () => {
+        pickMode = 'home'; setStatus(T_LOC.click_home);
+    });
+    document.getElementById('btnSetWork').addEventListener('click', () => {
+        pickMode = 'work'; setStatus(T_LOC.click_work);
+    });
+    map.on('click', e => {
+        if (!pickMode) return;
+        const lat = e.latlng.lat.toFixed(6);
+        const lon = e.latlng.lng.toFixed(6);
+        if (pickMode === 'home') {
+            document.getElementById('homeLat').value = lat;
+            document.getElementById('homeLon').value = lon;
+            refreshHomeMarker();
+        } else {
+            document.getElementById('workLat').value = lat;
+            document.getElementById('workLon').value = lon;
+            refreshWorkMarker();
+        }
+        setStatus(T_LOC.picked + ' ' + lat + ', ' + lon);
+        pickMode = null;
+    });
+
+    async function saveLocation(kind) {
+        const lat = parseFloat(document.getElementById(kind + 'Lat').value);
+        const lon = parseFloat(document.getElementById(kind + 'Lon').value);
+        const label = document.getElementById(kind + 'Label').value;
+        if (isNaN(lat) || isNaN(lon)) { setStatus(T_LOC.no_coords); return; }
+        setStatus(T_LOC.saving);
+        try {
+            const r = await fetch('/api/locations/save', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({ kind, lat, lon, label }),
+            });
+            const data = await r.json();
+            if (data.ok) {
+                setStatus(T_LOC.saved + ' (' + (data.reclassified || 0) + ' ' + T_LOC.reclassified + ')');
+            } else {
+                setStatus(T_LOC.error + ' ' + (data.error || ''));
+            }
+        } catch (e) { setStatus(T_LOC.error + ' ' + e.message); }
+    }
+    document.getElementById('btnSaveHome').addEventListener('click', () => saveLocation('home'));
+    document.getElementById('btnSaveWork').addEventListener('click', () => saveLocation('work'));
+
+    // Favorites
+    async function loadFavs() {
+        const r = await fetch('/api/locations/favorites');
+        const data = await r.json();
+        const list = document.getElementById('favList');
+        list.innerHTML = '';
+        favMarkers.forEach(m => map.removeLayer(m));
+        favMarkers = [];
+        (data.favorites || []).forEach((f, idx) => {
+            const li = document.createElement('li');
+            li.className = 'list-group-item d-flex justify-content-between align-items-center px-1 py-1';
+            li.innerHTML = '<span><i class="bi bi-star-fill text-info"></i> ' + f.name + '</span>';
+            const del = document.createElement('button');
+            del.className = 'btn btn-link btn-sm text-danger p-0';
+            del.innerHTML = '<i class="bi bi-trash"></i>';
+            del.addEventListener('click', async () => {
+                await fetch('/api/locations/favorites', {
+                    method: 'DELETE',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({ index: idx }),
+                });
+                loadFavs();
+            });
+            li.appendChild(del);
+            list.appendChild(li);
+            favMarkers.push(placeMarker('favorite', f.lat, f.lon, f.name));
+        });
+    }
+    document.getElementById('btnAddFav').addEventListener('click', async () => {
+        const name = document.getElementById('favName').value.trim();
+        if (!name) { setStatus(T_LOC.fav_need_name); return; }
+        setStatus(T_LOC.fav_click);
+        const handler = async (e) => {
+            map.off('click', handler);
+            await fetch('/api/locations/favorites', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({ name, lat: e.latlng.lat, lon: e.latlng.lng }),
+            });
+            document.getElementById('favName').value = '';
+            setStatus(T_LOC.fav_added);
+            loadFavs();
+        };
+        map.on('click', handler);
+    });
+    loadFavs();
 })();
 </script>
 {% endblock %}

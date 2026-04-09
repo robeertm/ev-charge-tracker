@@ -1,0 +1,154 @@
+{% extends "base.html" %}
+{% block title %}{{ t('maint.title') }} — EV Charge Tracker{% endblock %}
+
+{% block content %}
+<h4 class="mb-3"><i class="bi bi-tools"></i> {{ t('maint.title') }}</h4>
+
+{% if due_items %}
+<div class="card mb-3 border-warning">
+    <div class="card-header bg-warning bg-opacity-25 fw-bold">
+        <i class="bi bi-exclamation-triangle"></i> {{ t('maint.due_title') }}
+    </div>
+    <ul class="list-group list-group-flush">
+        {% for item in due_items %}
+        <li class="list-group-item d-flex justify-content-between align-items-center">
+            <span>
+                {% if item.severity == 'overdue' %}<i class="bi bi-x-circle-fill text-danger"></i>{% else %}<i class="bi bi-clock-fill text-warning"></i>{% endif %}
+                <strong>{{ item.title }}</strong>
+                <span class="text-muted small ms-2">{{ item.reasons | join(' · ') }}</span>
+            </span>
+            <span class="badge {% if item.severity == 'overdue' %}bg-danger{% else %}bg-warning text-dark{% endif %}">
+                {{ t('maint.severity_' + item.severity) }}
+            </span>
+        </li>
+        {% endfor %}
+    </ul>
+</div>
+{% endif %}
+
+<div class="row g-3">
+    <div class="col-lg-5">
+        <!-- Add form -->
+        <div class="card mb-3">
+            <div class="card-header bg-white fw-bold"><i class="bi bi-plus-circle"></i> {{ t('maint.add_title') }}</div>
+            <div class="card-body">
+                <form method="POST">
+                    <div class="row g-2">
+                        <div class="col-12">
+                            <label class="form-label small mb-1">{{ t('maint.field_type') }}</label>
+                            <select name="item_type" class="form-select form-select-sm" id="itemTypeSel">
+                                <option value="inspection">{{ t('maint.type_inspection') }}</option>
+                                <option value="tires_winter">{{ t('maint.type_tires_winter') }}</option>
+                                <option value="tires_summer">{{ t('maint.type_tires_summer') }}</option>
+                                <option value="brakes">{{ t('maint.type_brakes') }}</option>
+                                <option value="wiper">{{ t('maint.type_wiper') }}</option>
+                                <option value="battery_12v">{{ t('maint.type_battery_12v') }}</option>
+                                <option value="cabin_filter">{{ t('maint.type_cabin_filter') }}</option>
+                                <option value="tuv">{{ t('maint.type_tuv') }}</option>
+                                <option value="other">{{ t('maint.type_other') }}</option>
+                            </select>
+                        </div>
+                        <div class="col-12">
+                            <label class="form-label small mb-1">{{ t('maint.field_title') }}</label>
+                            <input type="text" name="title" class="form-control form-control-sm" placeholder="{{ t('maint.field_title_ph') }}">
+                        </div>
+                        <div class="col-6">
+                            <label class="form-label small mb-1">{{ t('maint.field_date') }}</label>
+                            <input type="date" name="date" class="form-control form-control-sm" value="{{ today }}" required>
+                        </div>
+                        <div class="col-6">
+                            <label class="form-label small mb-1">{{ t('maint.field_odo') }}</label>
+                            <input type="number" name="odometer_km" class="form-control form-control-sm" value="{{ current_odo or '' }}">
+                        </div>
+                        <div class="col-6">
+                            <label class="form-label small mb-1">{{ t('maint.field_cost') }}</label>
+                            <input type="number" step="0.01" name="cost_eur" class="form-control form-control-sm" placeholder="0.00">
+                        </div>
+                        <div class="col-12">
+                            <label class="form-label small mb-1">{{ t('maint.field_notes') }}</label>
+                            <textarea name="notes" rows="2" class="form-control form-control-sm"></textarea>
+                        </div>
+                        <div class="col-6">
+                            <label class="form-label small mb-1">{{ t('maint.field_next_km') }}</label>
+                            <input type="number" name="next_due_km" id="nextKmInput" class="form-control form-control-sm">
+                        </div>
+                        <div class="col-6">
+                            <label class="form-label small mb-1">{{ t('maint.field_next_date') }}</label>
+                            <input type="date" name="next_due_date" id="nextDateInput" class="form-control form-control-sm">
+                        </div>
+                    </div>
+                    <button type="submit" class="btn btn-primary btn-sm mt-3">
+                        <i class="bi bi-save"></i> {{ t('maint.save_btn') }}
+                    </button>
+                </form>
+            </div>
+        </div>
+    </div>
+
+    <div class="col-lg-7">
+        <div class="card">
+            <div class="card-header bg-white fw-bold d-flex justify-content-between">
+                <span><i class="bi bi-list-ul"></i> {{ t('maint.list_title') }}</span>
+                {% if summary.count %}
+                <span class="text-muted small">
+                    {{ summary.count }} {{ t('maint.entries') }} · {{ "%.2f"|format(summary.total_cost) }} €
+                </span>
+                {% endif %}
+            </div>
+            <div class="card-body p-0">
+                <div class="table-responsive">
+                    <table class="table table-sm table-hover mb-0">
+                        <thead>
+                            <tr>
+                                <th>{{ t('maint.field_date') }}</th>
+                                <th>{{ t('maint.field_type') }}</th>
+                                <th>{{ t('maint.field_title') }}</th>
+                                <th class="text-end">km</th>
+                                <th class="text-end">€</th>
+                                <th></th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                        {% for e in entries %}
+                            <tr>
+                                <td class="small">{{ e.date.strftime('%d.%m.%Y') }}</td>
+                                <td><span class="badge bg-secondary">{{ e.item_type }}</span></td>
+                                <td>{{ e.title or '—' }}</td>
+                                <td class="text-end">{% if e.odometer_km %}{{ '{:,.0f}'.format(e.odometer_km).replace(',', '.') }}{% endif %}</td>
+                                <td class="text-end">{% if e.cost_eur %}{{ "%.2f"|format(e.cost_eur) }}{% endif %}</td>
+                                <td>
+                                    <form method="POST" action="/maintenance/delete/{{ e.id }}" onsubmit="return confirm('{{ t('maint.delete_confirm') }}')">
+                                        <button class="btn btn-sm btn-link text-danger p-0"><i class="bi bi-trash"></i></button>
+                                    </form>
+                                </td>
+                            </tr>
+                        {% else %}
+                            <tr><td colspan="6" class="text-center text-muted py-4">{{ t('maint.empty') }}</td></tr>
+                        {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+// Pre-fill next_due fields based on type defaults
+const INTERVALS = {{ default_intervals | tojson }};
+const currentOdo = {{ current_odo or 'null' }};
+document.getElementById('itemTypeSel').addEventListener('change', function() {
+    const intv = INTERVALS[this.value] || {};
+    const kmIn = document.getElementById('nextKmInput');
+    const dateIn = document.getElementById('nextDateInput');
+    if (intv.km && currentOdo) {
+        kmIn.value = currentOdo + intv.km;
+    } else { kmIn.value = ''; }
+    if (intv.months) {
+        const d = new Date();
+        d.setMonth(d.getMonth() + intv.months);
+        dateIn.value = d.toISOString().slice(0, 10);
+    } else { dateIn.value = ''; }
+});
+</script>
+{% endblock %}

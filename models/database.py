@@ -23,6 +23,9 @@ class Charge(db.Model):
     co2_g_per_kwh = db.Column(db.Integer)
     co2_kg = db.Column(db.Float)
     notes = db.Column(db.Text)
+    location_lat = db.Column(db.Float)
+    location_lon = db.Column(db.Float)
+    location_name = db.Column(db.String(200))
     created_at = db.Column(db.DateTime, default=datetime.now)
 
     def calculate_fields(self, battery_kwh=None):
@@ -59,6 +62,9 @@ class Charge(db.Model):
             'co2_g_per_kwh': self.co2_g_per_kwh,
             'co2_kg': self.co2_kg,
             'notes': self.notes,
+            'location_lat': self.location_lat,
+            'location_lon': self.location_lon,
+            'location_name': self.location_name,
         }
 
 
@@ -138,3 +144,62 @@ class ThgQuota(db.Model):
     year_from = db.Column(db.Integer, nullable=False)
     year_to = db.Column(db.Integer, nullable=False)
     amount_eur = db.Column(db.Float, nullable=False)
+
+
+class ParkingEvent(db.Model):
+    """A single parking spell. Created when the vehicle stops at a new
+    location, closed when it moves >100m away."""
+    __tablename__ = 'parking_events'
+
+    id = db.Column(db.Integer, primary_key=True)
+    arrived_at = db.Column(db.DateTime, nullable=False, index=True)
+    departed_at = db.Column(db.DateTime, index=True)  # NULL = currently parked
+    lat = db.Column(db.Float, nullable=False)
+    lon = db.Column(db.Float, nullable=False)
+    label = db.Column(db.String(32))   # 'home' | 'work' | 'favorite' | 'other'
+    favorite_name = db.Column(db.String(120))  # name of matched favorite, if any
+    address = db.Column(db.Text)
+    odometer_arrived = db.Column(db.Integer)
+    odometer_departed = db.Column(db.Integer)
+    soc_arrived = db.Column(db.Integer)
+    soc_departed = db.Column(db.Integer)
+
+
+class MaintenanceEntry(db.Model):
+    """Maintenance log: inspections, tires, brakes, etc., with optional reminders."""
+    __tablename__ = 'maintenance_log'
+
+    id = db.Column(db.Integer, primary_key=True)
+    date = db.Column(db.Date, nullable=False, index=True)
+    item_type = db.Column(db.String(40), nullable=False)  # 'inspection','tires','brakes','wiper','battery_12v','other'
+    title = db.Column(db.String(120))
+    odometer_km = db.Column(db.Integer)
+    cost_eur = db.Column(db.Float)
+    notes = db.Column(db.Text)
+    next_due_km = db.Column(db.Integer)
+    next_due_date = db.Column(db.Date)
+    created_at = db.Column(db.DateTime, default=datetime.now)
+
+
+class GeocodeCache(db.Model):
+    """Reverse geocoding cache (Nominatim) — keyed by rounded lat/lon to avoid
+    re-querying for nearby coords."""
+    __tablename__ = 'geocode_cache'
+
+    id = db.Column(db.Integer, primary_key=True)
+    lat_key = db.Column(db.String(20), nullable=False, index=True)
+    lon_key = db.Column(db.String(20), nullable=False, index=True)
+    address = db.Column(db.Text)
+    fetched_at = db.Column(db.DateTime, default=datetime.now)
+
+
+class WeatherCache(db.Model):
+    """Daily mean temperature cache from Open-Meteo, keyed by date+coords."""
+    __tablename__ = 'weather_cache'
+
+    id = db.Column(db.Integer, primary_key=True)
+    date = db.Column(db.Date, nullable=False, index=True)
+    lat_key = db.Column(db.String(20), nullable=False)
+    lon_key = db.Column(db.String(20), nullable=False)
+    temp_mean_c = db.Column(db.Float)
+    fetched_at = db.Column(db.DateTime, default=datetime.now)

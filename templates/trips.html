@@ -1,0 +1,142 @@
+{% extends "base.html" %}
+{% block title %}{{ t('trips.title') }} — EV Charge Tracker{% endblock %}
+{% block head %}
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<link rel="stylesheet" href="https://unpkg.com/leaflet.markercluster@1.5.3/dist/MarkerCluster.css" />
+<link rel="stylesheet" href="https://unpkg.com/leaflet.markercluster@1.5.3/dist/MarkerCluster.Default.css" />
+<script src="https://unpkg.com/leaflet.markercluster@1.5.3/dist/leaflet.markercluster.js"></script>
+{% endblock %}
+
+{% block content %}
+<h4 class="mb-3"><i class="bi bi-signpost-split"></i> {{ t('trips.title') }}</h4>
+
+<!-- Summary -->
+<div class="row g-2 mb-3">
+    <div class="col-6 col-md-3">
+        <div class="card kpi-card border-primary">
+            <div class="card-body text-center p-2">
+                <div class="kpi-label">{{ t('trips.total_trips') }}</div>
+                <div class="kpi-value text-primary">{{ summary.count }}</div>
+            </div>
+        </div>
+    </div>
+    <div class="col-6 col-md-3">
+        <div class="card kpi-card border-info">
+            <div class="card-body text-center p-2">
+                <div class="kpi-label">{{ t('trips.total_km') }}</div>
+                <div class="kpi-value text-info">{{ "{:,.0f}".format(summary.total_km).replace(",", ".") }} km</div>
+            </div>
+        </div>
+    </div>
+    <div class="col-6 col-md-3">
+        <div class="card kpi-card border-secondary">
+            <div class="card-body text-center p-2">
+                <div class="kpi-label">{{ t('trips.total_hours') }}</div>
+                <div class="kpi-value text-secondary">{{ "%.1f"|format(summary.total_hours) }} h</div>
+            </div>
+        </div>
+    </div>
+    <div class="col-6 col-md-3">
+        <div class="card kpi-card border-success">
+            <div class="card-body text-center p-2">
+                <div class="kpi-label">{{ t('trips.home_work') }}</div>
+                <div class="kpi-value text-success">{{ "{:,.0f}".format(summary.home_work_km).replace(",", ".") }} km</div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Map + Export -->
+<div class="card mb-3">
+    <div class="card-header bg-white d-flex justify-content-between align-items-center">
+        <span class="fw-bold"><i class="bi bi-map"></i> {{ t('trips.map_title') }}</span>
+        <span>
+            <a href="/api/trips/export.csv" class="btn btn-sm btn-outline-secondary"><i class="bi bi-filetype-csv"></i> CSV</a>
+            <a href="/api/trips/export.gpx" class="btn btn-sm btn-outline-secondary"><i class="bi bi-geo"></i> GPX</a>
+        </span>
+    </div>
+    <div class="card-body p-0">
+        <div id="tripsMap" style="height:420px;"></div>
+    </div>
+</div>
+
+<!-- Trips list -->
+<div class="card mb-3">
+    <div class="card-header bg-white fw-bold"><i class="bi bi-list-ol"></i> {{ t('trips.list_title') }}</div>
+    <div class="card-body p-0">
+        <div class="table-responsive">
+            <table class="table table-sm table-hover mb-0">
+                <thead>
+                    <tr>
+                        <th>{{ t('trips.col_when') }}</th>
+                        <th>{{ t('trips.col_from') }}</th>
+                        <th>{{ t('trips.col_to') }}</th>
+                        <th class="text-end">km</th>
+                        <th class="text-end">{{ t('trips.col_duration') }}</th>
+                        <th class="text-end">Ø km/h</th>
+                        <th class="text-end">SoC</th>
+                    </tr>
+                </thead>
+                <tbody>
+                {% for tr in trips %}
+                    <tr>
+                        <td class="small">{% if tr.from.departed_at %}{{ tr.from.departed_at[:16] | replace('T', ' ') }}{% endif %}</td>
+                        <td>
+                            {% if tr.from.label == 'home' %}<i class="bi bi-house-fill text-success"></i>{% elif tr.from.label == 'work' %}<i class="bi bi-briefcase-fill text-warning"></i>{% elif tr.from.label == 'favorite' %}<i class="bi bi-star-fill text-info"></i>{% endif %}
+                            {{ tr.from.name or tr.from.address or '%.4f, %.4f'|format(tr.from.lat, tr.from.lon) }}
+                        </td>
+                        <td>
+                            {% if tr.to.label == 'home' %}<i class="bi bi-house-fill text-success"></i>{% elif tr.to.label == 'work' %}<i class="bi bi-briefcase-fill text-warning"></i>{% elif tr.to.label == 'favorite' %}<i class="bi bi-star-fill text-info"></i>{% endif %}
+                            {{ tr.to.name or tr.to.address or '%.4f, %.4f'|format(tr.to.lat, tr.to.lon) }}
+                        </td>
+                        <td class="text-end">{% if tr.km %}{{ tr.km }}{% endif %}</td>
+                        <td class="text-end">{% if tr.duration_min %}{{ tr.duration_min }} min{% endif %}</td>
+                        <td class="text-end">{% if tr.avg_speed_kmh %}{{ tr.avg_speed_kmh }}{% endif %}</td>
+                        <td class="text-end">{% if tr.soc_used %}−{{ tr.soc_used }}%{% endif %}</td>
+                    </tr>
+                {% else %}
+                    <tr><td colspan="7" class="text-center text-muted py-4">{{ t('trips.empty') }}</td></tr>
+                {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+</div>
+
+<script>
+(function() {
+    const events = {{ events | tojson }};
+    if (!events.length) return;
+
+    const map = L.map('tripsMap');
+    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+        attribution: '&copy; OpenStreetMap',
+        maxZoom: 19,
+    }).addTo(map);
+
+    const cluster = L.markerClusterGroup();
+    const bounds = [];
+
+    events.forEach(e => {
+        const colour = e.label === 'home' ? 'green'
+                     : e.label === 'work' ? 'orange'
+                     : e.label === 'favorite' ? 'blue' : 'gray';
+        const icon = L.divIcon({
+            className: 'trip-marker',
+            html: '<div style="background:' + colour + ';width:14px;height:14px;border-radius:50%;border:2px solid white;box-shadow:0 0 4px rgba(0,0,0,0.5);"></div>',
+            iconSize: [14, 14],
+        });
+        const marker = L.marker([e.lat, e.lon], { icon: icon });
+        const when = e.arrived_at ? new Date(e.arrived_at).toLocaleString('de') : '—';
+        const left = e.departed_at ? ' &rarr; ' + new Date(e.departed_at).toLocaleString('de') : ' (jetzt)';
+        const name = e.name || e.label || '';
+        marker.bindPopup('<strong>' + name + '</strong><br>' + when + left + (e.address ? '<br><small>' + e.address + '</small>' : ''));
+        cluster.addLayer(marker);
+        bounds.push([e.lat, e.lon]);
+    });
+    map.addLayer(cluster);
+    if (bounds.length) map.fitBounds(bounds, { padding: [20, 20] });
+})();
+</script>
+{% endblock %}

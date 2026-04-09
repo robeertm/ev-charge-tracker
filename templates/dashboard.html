@@ -351,6 +351,105 @@
 </script>
 {% endif %}
 
+<!-- Range / Highlights / Weather row -->
+<div class="row g-2 mb-3" id="extrasRow">
+    <div class="col-md-4">
+        <div class="card h-100 border-info">
+            <div class="card-header bg-white py-2 fw-bold small"><i class="bi bi-speedometer"></i> {{ t('dash.range_calc') }}</div>
+            <div class="card-body p-2 text-center" id="rangeBox">
+                <div class="text-muted small">{{ t('dash.range_loading') }}</div>
+            </div>
+        </div>
+    </div>
+    <div class="col-md-4">
+        <div class="card h-100 border-warning">
+            <div class="card-header bg-white py-2 fw-bold small"><i class="bi bi-trophy"></i> {{ t('dash.highlights') }}</div>
+            <div class="card-body p-2 small" id="highlightsBox">
+                <div class="text-muted">{{ t('dash.highlights_loading') }}</div>
+            </div>
+        </div>
+    </div>
+    <div class="col-md-4">
+        <div class="card h-100 border-secondary">
+            <div class="card-header bg-white py-2 fw-bold small"><i class="bi bi-thermometer-half"></i> {{ t('dash.weather_corr') }}</div>
+            <div class="card-body p-2">
+                <div style="position:relative; height:140px;"><canvas id="weatherChart"></canvas></div>
+                <div class="text-muted small text-center mt-1" id="weatherHint"></div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+(function() {
+    // Range calculator
+    fetch('/api/range').then(r => r.json()).then(d => {
+        const box = document.getElementById('rangeBox');
+        if (d.error) {
+            box.innerHTML = '<div class="text-muted small">{{ t("dash.range_no_data") }}</div>';
+            return;
+        }
+        const tempStr = d.temp_c != null ? (d.temp_c.toFixed(1) + '°C') : '—';
+        box.innerHTML =
+            '<div class="display-6 text-info mb-1">' + d.range_km + ' km</div>' +
+            '<div class="small text-muted">' +
+            'SoC ' + d.soc + '% &middot; ' + d.consumption + ' kWh/100km &middot; ' + tempStr +
+            '</div>';
+    }).catch(() => {});
+
+    // Highlights
+    fetch('/api/highlights').then(r => r.json()).then(d => {
+        const box = document.getElementById('highlightsBox');
+        const h = d.highlights || {};
+        const lines = [];
+        if (h.cheapest_charge)
+            lines.push('<i class="bi bi-tag text-success"></i> {{ t("dash.h_cheapest") }} <strong>' + h.cheapest_charge.eur_per_kwh.toFixed(3) + ' €/kWh</strong>');
+        if (h.most_expensive_charge)
+            lines.push('<i class="bi bi-tag text-danger"></i> {{ t("dash.h_expensive") }} <strong>' + h.most_expensive_charge.eur_per_kwh.toFixed(3) + ' €/kWh</strong>');
+        if (h.biggest_charge)
+            lines.push('<i class="bi bi-battery-charging text-info"></i> {{ t("dash.h_biggest") }} <strong>' + h.biggest_charge.kwh.toFixed(1) + ' kWh</strong>');
+        if (h.longest_trip)
+            lines.push('<i class="bi bi-signpost text-primary"></i> {{ t("dash.h_longest_trip") }} <strong>' + h.longest_trip.km + ' km</strong>');
+        if (h.fastest_trip)
+            lines.push('<i class="bi bi-speedometer2 text-warning"></i> {{ t("dash.h_fastest_trip") }} <strong>' + h.fastest_trip.avg_speed_kmh + ' km/h</strong>');
+        if (h.longest_park)
+            lines.push('<i class="bi bi-p-square text-secondary"></i> {{ t("dash.h_longest_park") }} <strong>' + h.longest_park.days + ' d</strong>');
+        box.innerHTML = lines.length ? lines.join('<br>') : '<div class="text-muted">{{ t("dash.h_empty") }}</div>';
+    }).catch(() => {});
+
+    // Weather correlation chart
+    fetch('/api/weather/correlation').then(r => r.json()).then(d => {
+        if (!d.months || !d.months.length) {
+            document.getElementById('weatherHint').textContent = '{{ t("dash.weather_no_data") }}';
+            return;
+        }
+        const labels = d.months.map(m => m.label);
+        const kwh = d.months.map(m => m.kwh);
+        const temp = d.months.map(m => m.temp_avg_c);
+        new Chart(document.getElementById('weatherChart'), {
+            data: {
+                labels: labels,
+                datasets: [
+                    { type: 'bar', label: 'kWh', data: kwh, backgroundColor: 'rgba(33, 150, 243, 0.6)', yAxisID: 'y1' },
+                    { type: 'line', label: '°C', data: temp, borderColor: 'rgba(244, 67, 54, 1)', borderWidth: 2, pointRadius: 2, yAxisID: 'y2' },
+                ]
+            },
+            options: {
+                maintainAspectRatio: false,
+                plugins: { legend: { display: true, position: 'bottom', labels: { font: { size: 9 }, boxWidth: 10 } } },
+                scales: {
+                    x: { ticks: { font: { size: 8 }, maxTicksLimit: 6 } },
+                    y1: { position: 'left', ticks: { font: { size: 8 } } },
+                    y2: { position: 'right', ticks: { font: { size: 8 }, callback: v => v + '°' }, grid: { drawOnChartArea: false } },
+                }
+            }
+        });
+    }).catch(() => {
+        document.getElementById('weatherHint').textContent = '{{ t("dash.weather_no_home") }}';
+    });
+})();
+</script>
+
 <!-- KPI Cards Row 1 -->
 <div class="row g-2 mb-3">
     <div class="col-6 col-lg-3">

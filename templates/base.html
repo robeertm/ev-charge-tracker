@@ -40,6 +40,16 @@
                         </a>
                     </li>
                     <li class="nav-item">
+                        <a class="nav-link {% if request.endpoint == 'trips_page' %}active{% endif %}" href="/trips">
+                            <i class="bi bi-signpost-split"></i> {{ t('nav.trips') }}
+                        </a>
+                    </li>
+                    <li class="nav-item">
+                        <a class="nav-link {% if request.endpoint == 'maintenance_page' %}active{% endif %}" href="/maintenance">
+                            <i class="bi bi-tools"></i> {{ t('nav.maintenance') }}
+                        </a>
+                    </li>
+                    <li class="nav-item">
                         <a class="nav-link {% if request.endpoint == 'settings' %}active{% endif %}" href="/settings">
                             <i class="bi bi-gear"></i> {{ t('nav.settings') }}
                         </a>
@@ -71,6 +81,15 @@
             {% endfor %}
         {% endif %}
         {% endwith %}
+
+        {% if thg_reminder_year %}
+        <div class="alert alert-warning alert-dismissible fade show" role="alert">
+            <i class="bi bi-cash-coin"></i> <strong>{{ t('thg_reminder.title') }}</strong>
+            {{ t('thg_reminder.body', year=thg_reminder_year) }}
+            <a href="/settings#thg" class="alert-link">{{ t('thg_reminder.action') }}</a>
+            <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+        </div>
+        {% endif %}
 
         {% block content %}{% endblock %}
     </main>

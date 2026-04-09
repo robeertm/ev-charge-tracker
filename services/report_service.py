@@ -10,11 +10,14 @@ import matplotlib.pyplot as plt
 import matplotlib.dates as mdates
 from fpdf import FPDF
 
-from models.database import db, Charge, AppConfig, ThgQuota
+from models.database import db, Charge, AppConfig, ThgQuota, MaintenanceEntry
 from services.stats_service import (
     get_summary_stats, get_monthly_stats, get_yearly_stats,
     get_ac_dc_stats, get_chart_data, get_vehicle_history,
 )
+from services.trips_service import get_trips, get_trip_summary
+from services.maintenance_service import list_entries as list_maintenance, get_summary as get_maint_summary
+from services.highlights_service import get_highlights
 
 # Colors
 C_PRIMARY = '#2196F3'
@@ -430,6 +433,90 @@ def generate_report():
             pdf.set_text_color(33, 33, 33)
             pdf.cell(0, 5, pdf._clean(f"Letzter Standort: {last['lat']:.5f}, {last['lon']:.5f}"),
                      align='C', new_x='LMARGIN', new_y='NEXT')
+
+    # === Highlights page ===
+    highlights = get_highlights()
+    if highlights:
+        pdf.add_page()
+        pdf.section_title('Highlights')
+        pdf.set_font('Helvetica', '', 9)
+        pdf.set_text_color(33, 33, 33)
+        rows = []
+        if 'cheapest_charge' in highlights:
+            c = highlights['cheapest_charge']
+            rows.append(('Guenstigste Ladung', f"EUR {c['eur_per_kwh']:.3f}/kWh ({c['kwh']:.1f} kWh, {c['type']}, {c['date']})"))
+        if 'most_expensive_charge' in highlights:
+            c = highlights['most_expensive_charge']
+            rows.append(('Teuerste Ladung', f"EUR {c['eur_per_kwh']:.3f}/kWh ({c['kwh']:.1f} kWh, {c['type']}, {c['date']})"))
+        if 'biggest_charge' in highlights:
+            c = highlights['biggest_charge']
+            rows.append(('Groesste Ladung', f"{c['kwh']:.1f} kWh ({c['type']}, {c['date']})"))
+        if 'longest_trip' in highlights:
+            t = highlights['longest_trip']
+            rows.append(('Laengste Fahrt', f"{t['km']} km - {t['duration_min']} min"))
+        if 'fastest_trip' in highlights:
+            t = highlights['fastest_trip']
+            rows.append(('Schnellste Fahrt', f"O {t['avg_speed_kmh']} km/h ({t['km']} km)"))
+        if 'longest_park' in highlights:
+            p = highlights['longest_park']
+            rows.append(('Laengste Standzeit', f"{p['days']} Tage ({p['label']})"))
+        for label, value in rows:
+            pdf.cell(60, 6, pdf._clean(label), border='B')
+            pdf.cell(0, 6, pdf._clean(value), border='B', new_x='LMARGIN', new_y='NEXT')
+        pdf.ln(3)
+
+    # === Trips / Fahrtenbuch ===
+    trips = get_trips(limit=200)
+    if trips:
+        trip_summary = get_trip_summary()
+        pdf.add_page()
+        pdf.section_title('Fahrtenbuch')
+        pdf.set_font('Helvetica', 'I', 8)
+        pdf.set_text_color(120, 120, 120)
+        pdf.cell(0, 5, pdf._clean(
+            f"{trip_summary['count']} Fahrten - {trip_summary['total_km']:,.0f} km - "
+            f"{trip_summary['total_hours']:.1f} h - Home<->Work: {trip_summary['home_work_km']:,.0f} km"
+        ), align='C', new_x='LMARGIN', new_y='NEXT')
+        pdf.ln(2)
+
+        headers = ['Datum', 'Von', 'Nach', 'km', 'min', 'Ø km/h']
+        cw = [22, 60, 60, 14, 14, 18]
+        rows = []
+        for tr in trips[:80]:
+            d = (tr['from'].get('departed_at') or '')[:10]
+            from_ = (tr['from'].get('name') or tr['from'].get('label') or
+                     f"{tr['from']['lat']:.3f},{tr['from']['lon']:.3f}")[:28]
+            to_ = (tr['to'].get('name') or tr['to'].get('label') or
+                   f"{tr['to']['lat']:.3f},{tr['to']['lon']:.3f}")[:28]
+            rows.append([d, from_, to_,
+                         str(tr['km']) if tr['km'] else '-',
+                         str(tr['duration_min']) if tr['duration_min'] else '-',
+                         str(tr['avg_speed_kmh']) if tr['avg_speed_kmh'] else '-'])
+        pdf.add_table(headers, rows, cw)
+
+    # === Maintenance log ===
+    maint = list_maintenance()
+    if maint:
+        m_summary = get_maint_summary()
+        pdf.add_page()
+        pdf.section_title('Wartungs-Logbuch')
+        pdf.set_font('Helvetica', 'I', 8)
+        pdf.set_text_color(120, 120, 120)
+        pdf.cell(0, 5, pdf._clean(f"{m_summary['count']} Eintraege - Gesamt EUR {m_summary['total_cost']:.2f}"),
+                 align='C', new_x='LMARGIN', new_y='NEXT')
+        pdf.ln(2)
+        headers = ['Datum', 'Typ', 'Bezeichnung', 'km', 'EUR']
+        cw = [22, 30, 88, 22, 22]
+        rows = []
+        for e in maint:
+            rows.append([
+                e.date.strftime('%d.%m.%Y'),
+                (e.item_type or '')[:14],
+                (e.title or '')[:42],
+                f"{e.odometer_km:,}".replace(',', '.') if e.odometer_km else '-',
+                f"{e.cost_eur:.2f}" if e.cost_eur else '-',
+            ])
+        pdf.add_table(headers, rows, cw)
 
     # === Tables ===
     pdf.add_page()

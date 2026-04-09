@@ -5,7 +5,10 @@ import logging
 from datetime import datetime, date
 from flask import Flask, render_template, request, redirect, url_for, flash, jsonify, send_file
 
-from models.database import db, Charge, AppConfig, ThgQuota, VehicleSync
+from models.database import (
+    db, Charge, AppConfig, ThgQuota, VehicleSync,
+    ParkingEvent, MaintenanceEntry,
+)
 from config import Config
 from services.i18n import t
 
@@ -44,6 +47,15 @@ def create_app(config_class=Config):
         for col_name, col_type in _new_sync_cols:
             if col_name not in sync_columns:
                 db.session.execute(text(f'ALTER TABLE vehicle_syncs ADD COLUMN {col_name} {col_type}'))
+
+        # Migrate: add location columns to charges (for Ladestationen-Memory)
+        if 'location_lat' not in columns:
+            db.session.execute(text('ALTER TABLE charges ADD COLUMN location_lat REAL'))
+        if 'location_lon' not in columns:
+            db.session.execute(text('ALTER TABLE charges ADD COLUMN location_lon REAL'))
+        if 'location_name' not in columns:
+            db.session.execute(text('ALTER TABLE charges ADD COLUMN location_name VARCHAR(200)'))
+
         db.session.commit()
 
     register_routes(app)
@@ -144,12 +156,20 @@ def _build_vehicle_sync(status, battery_kwh, raw_json=''):
 
 def _save_vehicle_sync(status, battery_kwh, raw_json=''):
     """Persist a VehicleSync row only if any tracked value differs from the
-    most recent row. Returns the saved (or last existing) sync row."""
+    most recent row. Returns the saved (or last existing) sync row.
+
+    Also updates the parking-event log so the driving log stays in sync.
+    """
     new_sync = _build_vehicle_sync(status, battery_kwh, raw_json=raw_json)
     last = VehicleSync.query.order_by(VehicleSync.timestamp.desc()).first()
     if new_sync.differs_from(last):
         db.session.add(new_sync)
         db.session.commit()
+        try:
+            from services.trips_service import update_parking_from_sync
+            update_parking_from_sync(new_sync)
+        except Exception as e:
+            logger.warning(f"Failed to update parking event: {e}")
         return new_sync
     return last
 
@@ -158,10 +178,22 @@ def register_routes(app):
 
     @app.context_processor
     def inject_globals():
+        # THG reminder: between Jan 1 and Mar 31, warn if previous year has no quota
+        thg_reminder = None
+        today = date.today()
+        if today.month <= 3:
+            prev_year = today.year - 1
+            existing = ThgQuota.query.filter(
+                ThgQuota.year_from <= prev_year,
+                ThgQuota.year_to >= prev_year,
+            ).first()
+            if not existing:
+                thg_reminder = prev_year
         return {
             'app_version': Config.APP_VERSION,
             'car_model': AppConfig.get('car_model', Config.CAR_MODEL),
-            'current_year': date.today().year,
+            'current_year': today.year,
+            'thg_reminder_year': thg_reminder,
         }
 
     # ── DASHBOARD ──────────────────────────────────────────────
@@ -201,6 +233,9 @@ def register_routes(app):
                     loss_kwh=_float(request.form.get('loss_kwh')),
                     co2_g_per_kwh=_int(request.form.get('co2_g_per_kwh')),
                     notes=request.form.get('notes', '').strip() or None,
+                    location_lat=_float(request.form.get('location_lat')),
+                    location_lon=_float(request.form.get('location_lon')),
+                    location_name=request.form.get('location_name', '').strip() or None,
                 )
                 charge.calculate_fields(_get_battery_kwh())
 
@@ -536,6 +571,12 @@ def register_routes(app):
                                pv_lifetime=AppConfig.get('pv_lifetime', '25'),
                                pv_production_co2=AppConfig.get('pv_production_co2', '1000'),
                                pv_price_eur_per_kwh=AppConfig.get('pv_price_eur_per_kwh', '0.00'),
+                               home_lat=AppConfig.get('home_lat', ''),
+                               home_lon=AppConfig.get('home_lon', ''),
+                               home_label=AppConfig.get('home_label', 'Home'),
+                               work_lat=AppConfig.get('work_lat', ''),
+                               work_lon=AppConfig.get('work_lon', ''),
+                               work_label=AppConfig.get('work_label', 'Work'),
                                thg_quotas=ThgQuota.query.order_by(ThgQuota.year_from).all(),
                                total_charges=Charge.query.count(),
                                co2_missing=Charge.query.filter(Charge.co2_g_per_kwh.is_(None), Charge.charge_type != 'PV').count(),
@@ -865,6 +906,262 @@ def register_routes(app):
             'version': new_version,
             'message': 'Update wird installiert. Die App startet in wenigen Sekunden neu.',
         })
+
+    # ── TRIPS / FAHRTENBUCH ────────────────────────────────────
+    @app.route('/trips')
+    def trips_page():
+        from services.trips_service import get_trips, get_parking_events, get_trip_summary, _load_locations
+        trips = get_trips(limit=200)
+        events = get_parking_events(limit=200)
+        summary = get_trip_summary()
+        locations = _load_locations()
+        return render_template('trips.html',
+                               trips=trips, events=[
+                                   {'id': e.id, 'arrived_at': e.arrived_at.isoformat(),
+                                    'departed_at': e.departed_at.isoformat() if e.departed_at else None,
+                                    'lat': e.lat, 'lon': e.lon, 'label': e.label,
+                                    'name': e.favorite_name, 'address': e.address,
+                                    'odo_in': e.odometer_arrived, 'odo_out': e.odometer_departed,
+                                    'soc_in': e.soc_arrived, 'soc_out': e.soc_departed}
+                                   for e in events
+                               ], summary=summary, locations=locations)
+
+    @app.route('/api/trips/export.csv')
+    def trips_export_csv():
+        from services.trips_service import get_trips
+        import csv, io as _io
+        trips = get_trips()
+        out = _io.StringIO()
+        writer = csv.writer(out, delimiter=';')
+        writer.writerow(['Datum', 'Von', 'Nach', 'km', 'Dauer (min)', 'Ø km/h', 'SoC %'])
+        for t in trips:
+            from_label = (t['from'].get('name')
+                          or t['from'].get('label')
+                          or f"{t['from']['lat']:.4f},{t['from']['lon']:.4f}")
+            to_label = (t['to'].get('name')
+                        or t['to'].get('label')
+                        or f"{t['to']['lat']:.4f},{t['to']['lon']:.4f}")
+            writer.writerow([
+                (t['from']['departed_at'] or '')[:10],
+                from_label, to_label,
+                t['km'] or '', t['duration_min'] or '',
+                t['avg_speed_kmh'] or '', t['soc_used'] or '',
+            ])
+        from flask import Response
+        return Response(out.getvalue(), mimetype='text/csv',
+                        headers={'Content-Disposition': 'attachment;filename=fahrtenbuch.csv'})
+
+    @app.route('/api/trips/export.gpx')
+    def trips_export_gpx():
+        from services.trips_service import get_parking_events
+        events = list(reversed(get_parking_events()))  # chronological
+        from flask import Response
+        from xml.sax.saxutils import escape
+        out = ['<?xml version="1.0" encoding="UTF-8"?>']
+        out.append('<gpx version="1.1" creator="EV Charge Tracker" xmlns="http://www.topografix.com/GPX/1/1">')
+        for e in events:
+            name = escape(e.favorite_name or e.label or 'Park')
+            time = e.arrived_at.strftime('%Y-%m-%dT%H:%M:%SZ')
+            out.append(f'  <wpt lat="{e.lat:.6f}" lon="{e.lon:.6f}">')
+            out.append(f'    <name>{name}</name>')
+            out.append(f'    <time>{time}</time>')
+            out.append('  </wpt>')
+        # Track connecting consecutive events
+        out.append('  <trk><name>Fahrtenbuch</name><trkseg>')
+        for e in events:
+            time = e.arrived_at.strftime('%Y-%m-%dT%H:%M:%SZ')
+            out.append(f'    <trkpt lat="{e.lat:.6f}" lon="{e.lon:.6f}"><time>{time}</time></trkpt>')
+        out.append('  </trkseg></trk>')
+        out.append('</gpx>')
+        return Response('\n'.join(out), mimetype='application/gpx+xml',
+                        headers={'Content-Disposition': 'attachment;filename=fahrtenbuch.gpx'})
+
+    @app.route('/api/locations/save', methods=['POST'])
+    def api_locations_save():
+        """Save home or work location from JSON {kind, lat, lon, label}."""
+        data = request.get_json() or {}
+        kind = data.get('kind')
+        if kind not in ('home', 'work'):
+            return jsonify({'error': 'invalid_kind'}), 400
+        try:
+            lat = float(data.get('lat'))
+            lon = float(data.get('lon'))
+        except (TypeError, ValueError):
+            return jsonify({'error': 'invalid_coords'}), 400
+        AppConfig.set(f'{kind}_lat', lat)
+        AppConfig.set(f'{kind}_lon', lon)
+        if data.get('label'):
+            AppConfig.set(f'{kind}_label', data['label'])
+
+        # Reclassify all events with the new locations
+        from services.trips_service import reclassify_all_events
+        n = reclassify_all_events()
+        return jsonify({'ok': True, 'reclassified': n})
+
+    @app.route('/api/locations/favorites', methods=['GET', 'POST', 'DELETE'])
+    def api_locations_favorites():
+        import json as _json
+        favs_raw = AppConfig.get('favorite_locations', '[]')
+        try:
+            favs = _json.loads(favs_raw)
+            if not isinstance(favs, list):
+                favs = []
+        except _json.JSONDecodeError:
+            favs = []
+
+        if request.method == 'GET':
+            return jsonify({'favorites': favs})
+
+        if request.method == 'POST':
+            data = request.get_json() or {}
+            try:
+                fav = {'name': str(data.get('name', 'Favorit'))[:60],
+                       'lat': float(data['lat']), 'lon': float(data['lon'])}
+            except (TypeError, ValueError, KeyError):
+                return jsonify({'error': 'invalid'}), 400
+            favs.append(fav)
+            AppConfig.set('favorite_locations', _json.dumps(favs))
+            from services.trips_service import reclassify_all_events
+            reclassify_all_events()
+            return jsonify({'ok': True, 'favorites': favs})
+
+        if request.method == 'DELETE':
+            data = request.get_json() or {}
+            idx = data.get('index')
+            try:
+                favs.pop(int(idx))
+            except (TypeError, ValueError, IndexError):
+                return jsonify({'error': 'invalid_index'}), 400
+            AppConfig.set('favorite_locations', _json.dumps(favs))
+            from services.trips_service import reclassify_all_events
+            reclassify_all_events()
+            return jsonify({'ok': True, 'favorites': favs})
+
+    @app.route('/api/locations/reverse')
+    def api_locations_reverse():
+        try:
+            lat = float(request.args.get('lat'))
+            lon = float(request.args.get('lon'))
+        except (TypeError, ValueError):
+            return jsonify({'error': 'invalid_coords'}), 400
+        from services.geocode_service import reverse
+        addr = reverse(lat, lon, language=AppConfig.get('app_language', 'de'))
+        return jsonify({'address': addr})
+
+    # ── MAINTENANCE / WARTUNG ──────────────────────────────────
+    @app.route('/maintenance', methods=['GET', 'POST'])
+    def maintenance_page():
+        from services.maintenance_service import (
+            list_entries, get_due_items, get_summary, add_entry, DEFAULT_INTERVALS,
+        )
+
+        if request.method == 'POST':
+            try:
+                date_str = request.form.get('date')
+                add_entry(
+                    date_=datetime.strptime(date_str, '%Y-%m-%d').date() if date_str else date.today(),
+                    item_type=request.form.get('item_type', 'other'),
+                    title=request.form.get('title', '').strip() or None,
+                    odometer_km=_int(request.form.get('odometer_km')),
+                    cost_eur=_float(request.form.get('cost_eur')),
+                    notes=request.form.get('notes', '').strip() or None,
+                    next_due_km=_int(request.form.get('next_due_km')),
+                    next_due_date=(datetime.strptime(request.form.get('next_due_date'), '%Y-%m-%d').date()
+                                    if request.form.get('next_due_date') else None),
+                )
+                flash(t('flash.maintenance_saved'), 'success')
+            except Exception as e:
+                flash(t('flash.error', error=e), 'danger')
+            return redirect(url_for('maintenance_page'))
+
+        # Determine current odometer (latest charge or vehicle sync)
+        current_odo = None
+        last_charge = Charge.query.filter(Charge.odometer.isnot(None)).order_by(Charge.date.desc()).first()
+        if last_charge:
+            current_odo = last_charge.odometer
+        last_sync = VehicleSync.query.filter(VehicleSync.odometer_km.isnot(None)).order_by(VehicleSync.timestamp.desc()).first()
+        if last_sync and (current_odo is None or (last_sync.odometer_km or 0) > current_odo):
+            current_odo = last_sync.odometer_km
+
+        return render_template('maintenance.html',
+                               entries=list_entries(),
+                               due_items=get_due_items(current_odo),
+                               summary=get_summary(),
+                               current_odo=current_odo,
+                               today=date.today().isoformat(),
+                               default_intervals=DEFAULT_INTERVALS)
+
+    @app.route('/maintenance/delete/<int:entry_id>', methods=['POST'])
+    def maintenance_delete(entry_id):
+        from services.maintenance_service import delete_entry
+        if delete_entry(entry_id):
+            flash(t('flash.maintenance_deleted'), 'warning')
+        return redirect(url_for('maintenance_page'))
+
+    # ── HIGHLIGHTS / RANGE / WEATHER ───────────────────────────
+    @app.route('/api/highlights')
+    def api_highlights():
+        from services.highlights_service import get_highlights, get_charging_stations
+        return jsonify({
+            'highlights': get_highlights(),
+            'stations': get_charging_stations(limit=10),
+        })
+
+    @app.route('/api/range')
+    def api_range():
+        """Realistic range estimate based on SoC + recent consumption + temp."""
+        from services.highlights_service import calculate_range
+        from services.weather_service import _get_home_coords, fetch_temp_for_date
+        try:
+            soc = float(request.args.get('soc')) if request.args.get('soc') else None
+        except (TypeError, ValueError):
+            soc = None
+        if soc is None:
+            last = VehicleSync.query.order_by(VehicleSync.timestamp.desc()).first()
+            if last and last.soc_percent:
+                soc = last.soc_percent
+        if soc is None:
+            return jsonify({'error': 'no_soc'}), 400
+
+        battery = _get_battery_kwh()
+        # Recent consumption: prefer 30d API value, fallback to total avg
+        cons = None
+        last = VehicleSync.query.filter(VehicleSync.consumption_30d_kwh_per_100km.isnot(None)) \
+                                .order_by(VehicleSync.timestamp.desc()).first()
+        if last and last.consumption_30d_kwh_per_100km:
+            cons = float(last.consumption_30d_kwh_per_100km)
+        else:
+            from services.stats_service import get_summary_stats
+            stats = get_summary_stats() or {}
+            cons = stats.get('consumption_with_recup') or None
+        if not cons:
+            return jsonify({'error': 'no_consumption'}), 400
+
+        # Current temp from Open-Meteo at home coords
+        temp_c = None
+        home = _get_home_coords()
+        if home:
+            try:
+                temp_c = fetch_temp_for_date(date.today(), home[0], home[1])
+            except Exception:
+                pass
+
+        result = calculate_range(soc, battery, cons, temp_c=temp_c)
+        if not result:
+            return jsonify({'error': 'calc_failed'}), 400
+        result['soc'] = soc
+        result['battery_kwh'] = battery
+        result['consumption'] = round(cons, 1)
+        result['temp_c'] = round(temp_c, 1) if temp_c is not None else None
+        return jsonify(result)
+
+    @app.route('/api/weather/correlation')
+    def api_weather_correlation():
+        from services.weather_service import get_consumption_temperature_correlation
+        data = get_consumption_temperature_correlation(months=12)
+        if not data:
+            return jsonify({'error': 'no_data'}), 404
+        return jsonify({'months': data})
 
     @app.route('/api/export/csv')
     def export_csv():

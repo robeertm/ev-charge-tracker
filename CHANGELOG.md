@@ -1,5 +1,48 @@
 # Changelog
 
+## v2.3.0 (2026-04-09)
+
+### New Features
+
+#### Driving log / Fahrtenbuch
+- **Auto-detected parking events** — every vehicle sync hooks into a new `ParkingEvent` log. The car's location is checked against the last open event; >100 m means "moved", a new event is opened, the previous one is closed with arrival/departure odometer + SoC.
+- **Home / Work / Favorites picker** — click on a Leaflet/OpenStreetMap card in Settings to set your home and work coordinates (drag-to-fine-tune supported). Optional named favorites for parents, vacation home, etc. All parking events are auto-classified as `home`/`work`/`favorite`/`other` with a 200 m radius. Reclassification runs whenever you change a location.
+- **Trips page** at `/trips` — KPI cards (count, total km, drive time, commute km), Leaflet map with marker clustering colored by location label, full trips table with from/to/km/duration/avg-speed/SoC.
+- **CSV + GPX export** — `/api/trips/export.csv` for the tax advisor, `/api/trips/export.gpx` for Google Earth / Komoot / OsmAnd.
+- **PDF report** gets a new "Fahrtenbuch" section with the last 80 trips and a header showing home↔work km (relevant for German Pendlerpauschale).
+
+#### Maintenance log / Wartungs-Logbuch
+- **New `/maintenance` page** — track inspections, tires, brakes, wipers, 12V battery, cabin filter, MOT/TÜV with date, odometer, cost and free-text notes.
+- **Smart reminders** — every entry can have a `next_due_km` and/or `next_due_date`. The page surfaces a "due soon / overdue" banner; the form auto-fills sensible defaults (e.g. inspection = 12 months / 30 000 km).
+- **PDF report** gets a "Wartungs-Logbuch" section with the full history and total cost.
+
+#### Charging stations memory
+- **Lat/lon/name on `Charge`** — the input form now optionally captures the location of a charge.
+- **`/api/highlights` returns charging stations** grouped by rounded coordinates with cheapest €/kWh, total kWh, count and last-used date — for finding the cheapest stations within your usual routes.
+
+#### Range calculator
+- **Realistic range estimate** at `/api/range` — uses live SoC, the configured battery capacity, the 30-day average consumption from the API (or fallback to lifetime average), and the current outdoor temperature from Open-Meteo at your home location. Applies a temperature penalty (1.30× below 0°C, 1.18× < 10°C, 1.06× < 20°C, 1.10× > 30°C). Shown as a dashboard card.
+
+#### Weather correlation
+- **Open-Meteo integration** — `services/weather_service.py` fetches daily mean temperatures for your home location with DB caching (no API key, no rate-limit issues for normal usage).
+- **Dashboard chart** — bar (kWh/month) + line (avg outdoor °C) showing exactly why winter is more expensive.
+
+#### Highlights / fun facts
+- **Dashboard "Highlights" card** — cheapest charge, most expensive charge, biggest single charge, longest trip (km), fastest trip (avg km/h), longest park (days). Also rendered on a dedicated page in the PDF report.
+
+#### Reverse geocoding
+- **Nominatim integration** — `services/geocode_service.py` resolves coordinates to street addresses, with a permanent DB cache and a 1-second rate-limiter (Nominatim ToS). Used by parking events on demand.
+
+#### THG quota reminder
+- **Banner** between January 1 and March 31 if no THG quota is logged for the previous year — direct link to Settings.
+
+### Database
+- New tables: `parking_events`, `maintenance_log`, `geocode_cache`, `weather_cache` — auto-created on startup.
+- New columns on `charges`: `location_lat`, `location_lon`, `location_name` — auto-migrated.
+
+### i18n
+- **83 new translation keys** in all 6 languages (DE, EN, FR, ES, IT, NL) — every new page, banner, button and tooltip is fully localized.
+
 ## v2.2.0 (2026-04-09)
 
 ### New Features
