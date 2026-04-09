@@ -306,6 +306,14 @@
                     </div>
                     {% endif %}
 
+                    <!-- Brand feature support matrix -->
+                    <div id="brandFeatureCard" class="mb-3" {% if not vehicle_api_brand %}style="display:none"{% endif %}>
+                        <div class="border rounded p-2 bg-light">
+                            <div class="small fw-bold mb-1"><i class="bi bi-check2-square"></i> {{ t('set.feat_title') }}</div>
+                            <div id="brandFeatureGrid" class="row g-1 small"></div>
+                        </div>
+                    </div>
+
                     <!-- Credentials (nur sichtbar wenn Marke gewählt) -->
                     <div id="vehicleCredentials" {% if not vehicle_api_brand %}style="display:none"{% endif %}>
                         <div class="row g-3 mb-3">
@@ -465,6 +473,18 @@
                     fav_click: {{ t('set.loc_fav_click')|tojson }},
                     fav_added: {{ t('set.loc_fav_added')|tojson }},
                 };
+                const T_FEAT = {
+                    soc_range_odo:   {{ t('set.feat_soc_range_odo')|tojson }},
+                    live_status:     {{ t('set.feat_live_status')|tojson }},
+                    location:        {{ t('set.feat_location')|tojson }},
+                    battery_12v:     {{ t('set.feat_battery_12v')|tojson }},
+                    soh:             {{ t('set.feat_soh')|tojson }},
+                    regenerated:     {{ t('set.feat_regenerated')|tojson }},
+                    consumption_30d: {{ t('set.feat_consumption_30d')|tojson }},
+                    doors_locks:     {{ t('set.feat_doors_locks')|tojson }},
+                    climate:         {{ t('set.feat_climate')|tojson }},
+                    tires:           {{ t('set.feat_tires')|tojson }},
+                };
 
                 function updateVehicleFields() {
                     const brand = document.getElementById('vehicle_api_brand').value;
@@ -478,6 +498,7 @@
 
                     // Show/hide credentials section (sync is inside it)
                     document.getElementById('vehicleCredentials').style.display = hasBrand ? '' : 'none';
+                    document.getElementById('brandFeatureCard').style.display = hasBrand ? '' : 'none';
 
                     // Brand-specific fields
                     document.querySelectorAll('.vehicle-field-pin').forEach(el => el.style.display = isKiaHyundai ? '' : 'none');
@@ -486,6 +507,41 @@
                     document.querySelectorAll('.vehicle-field-token-hint').forEach(el => el.style.display = isKiaHyundai ? '' : 'none');
                     document.getElementById('labelPassword').textContent = needsToken ? T.api_refresh_token : T.api_password;
                     document.getElementById('tokenHintSection').style.display = isKiaHyundai ? '' : 'none';
+
+                    // Load feature matrix for this brand
+                    if (hasBrand) loadBrandFeatures(brand);
+                }
+
+                async function loadBrandFeatures(brand) {
+                    try {
+                        const r = await fetch('/api/vehicle/features/' + encodeURIComponent(brand));
+                        if (!r.ok) return;
+                        const data = await r.json();
+                        const grid = document.getElementById('brandFeatureGrid');
+                        grid.innerHTML = '';
+                        const labels = {
+                            soc_range_odo:   T_FEAT.soc_range_odo,
+                            live_status:     T_FEAT.live_status,
+                            location:        T_FEAT.location,
+                            battery_12v:     T_FEAT.battery_12v,
+                            soh:             T_FEAT.soh,
+                            regenerated:     T_FEAT.regenerated,
+                            consumption_30d: T_FEAT.consumption_30d,
+                            doors_locks:     T_FEAT.doors_locks,
+                            climate:         T_FEAT.climate,
+                            tires:           T_FEAT.tires,
+                        };
+                        data.keys.forEach(key => {
+                            const v = data.features[key] || 'no';
+                            const icon = v === 'yes' ? '<i class="bi bi-check-circle-fill text-success"></i>'
+                                       : v === 'partial' ? '<i class="bi bi-dash-circle-fill text-warning"></i>'
+                                       : '<i class="bi bi-x-circle-fill text-danger"></i>';
+                            const col = document.createElement('div');
+                            col.className = 'col-6 col-md-4';
+                            col.innerHTML = icon + ' ' + (labels[key] || key);
+                            grid.appendChild(col);
+                        });
+                    } catch (e) { console.warn('feature load failed', e); }
                 }
                 updateVehicleFields();
 
@@ -697,6 +753,55 @@
                         <i class="bi bi-upload"></i> {{ t('set.db_import') }}
                     </button>
                 </form>
+            </div>
+        </div>
+
+        <!-- HTTPS / Sicherheit -->
+        <div class="card mb-4" id="sslCard">
+            <div class="card-header bg-white fw-bold">
+                <i class="bi bi-shield-lock"></i> {{ t('set.ssl_title') }}
+            </div>
+            <div class="card-body">
+                <p class="small text-muted">{{ t('set.ssl_hint') }}</p>
+                <div class="btn-group btn-group-sm mb-2" role="group" id="sslModeGroup">
+                    <input type="radio" class="btn-check" name="sslMode" id="sslOff" value="off">
+                    <label class="btn btn-outline-secondary" for="sslOff"><i class="bi bi-x-circle"></i> {{ t('set.ssl_off') }}</label>
+                    <input type="radio" class="btn-check" name="sslMode" id="sslAuto" value="auto">
+                    <label class="btn btn-outline-success" for="sslAuto"><i class="bi bi-magic"></i> {{ t('set.ssl_auto') }}</label>
+                    <input type="radio" class="btn-check" name="sslMode" id="sslCustom" value="custom">
+                    <label class="btn btn-outline-primary" for="sslCustom"><i class="bi bi-file-earmark-lock"></i> {{ t('set.ssl_custom') }}</label>
+                </div>
+                <div id="sslCustomFields" class="row g-2 mb-2" style="display:none">
+                    <div class="col-md-6">
+                        <label class="form-label small mb-1">{{ t('set.ssl_cert_path') }}</label>
+                        <input type="text" id="sslCertPath" class="form-control form-control-sm" placeholder="/etc/letsencrypt/live/example.com/fullchain.pem">
+                    </div>
+                    <div class="col-md-6">
+                        <label class="form-label small mb-1">{{ t('set.ssl_key_path') }}</label>
+                        <input type="text" id="sslKeyPath" class="form-control form-control-sm" placeholder="/etc/letsencrypt/live/example.com/privkey.pem">
+                    </div>
+                </div>
+                <div class="d-flex gap-1 flex-wrap">
+                    <button type="button" class="btn btn-sm btn-primary" id="btnSslSave">
+                        <i class="bi bi-save"></i> {{ t('set.ssl_save') }}
+                    </button>
+                    <button type="button" class="btn btn-sm btn-outline-success" id="btnSslGenerate">
+                        <i class="bi bi-arrow-clockwise"></i> {{ t('set.ssl_regenerate') }}
+                    </button>
+                    <a href="/api/ssl/download/cert" class="btn btn-sm btn-outline-info" id="btnSslDownload">
+                        <i class="bi bi-download"></i> {{ t('set.ssl_download_cert') }}
+                    </a>
+                </div>
+                <div class="small text-muted mt-2" id="sslStatus"></div>
+                <div class="small mt-2" id="sslCertInfo" style="display:none">
+                    <div class="border rounded p-2 bg-light">
+                        <div><strong>{{ t('set.ssl_subject') }}:</strong> <span id="sslSubject"></span></div>
+                        <div><strong>{{ t('set.ssl_valid_until') }}:</strong> <span id="sslValidUntil"></span></div>
+                        <div class="text-muted" style="font-size:0.7rem; word-break:break-all">
+                            <strong>SHA256:</strong> <span id="sslFingerprint"></span>
+                        </div>
+                    </div>
+                </div>
             </div>
         </div>
 
@@ -1033,6 +1138,91 @@
             favMarkers.push(placeMarker('favorite', f.lat, f.lon, f.name));
         });
     }
+    // ── HTTPS / SSL controls ─────────────────────────────────
+    (function() {
+        const T_SSL = {
+            saving: {{ t('set.ssl_saving')|tojson }},
+            saved: {{ t('set.ssl_saved_restart')|tojson }},
+            error: {{ t('set.ssl_error')|tojson }},
+            generating: {{ t('set.ssl_generating')|tojson }},
+            generated: {{ t('set.ssl_generated')|tojson }},
+            cert_missing: {{ t('set.ssl_cert_missing')|tojson }},
+            valid_until: {{ t('set.ssl_valid_until')|tojson }},
+            insecure_warn: {{ t('set.ssl_insecure_warn')|tojson }},
+        };
+        const status = document.getElementById('sslStatus');
+        const certBox = document.getElementById('sslCertInfo');
+
+        function setStatus(msg, cls) {
+            status.className = 'small mt-2 text-' + (cls || 'muted');
+            status.textContent = msg;
+        }
+        function showCertInfo(info) {
+            if (!info) { certBox.style.display = 'none'; return; }
+            document.getElementById('sslSubject').textContent = info.subject || '—';
+            document.getElementById('sslValidUntil').textContent = (info.not_after || '').slice(0, 10);
+            document.getElementById('sslFingerprint').textContent = info.fingerprint_sha256 || '';
+            certBox.style.display = '';
+        }
+
+        async function loadInfo() {
+            try {
+                const r = await fetch('/api/ssl/info');
+                if (!r.ok) return;
+                const data = await r.json();
+                document.getElementById('ssl' + (data.mode === 'auto' ? 'Auto' : data.mode === 'custom' ? 'Custom' : 'Off')).checked = true;
+                document.getElementById('sslCustomFields').style.display = data.mode === 'custom' ? '' : 'none';
+                document.getElementById('sslCertPath').value = data.custom_cert || '';
+                document.getElementById('sslKeyPath').value = data.custom_key || '';
+                showCertInfo(data.cert_info);
+                if (data.request_scheme === 'http' && location.hostname !== 'localhost' && location.hostname !== '127.0.0.1') {
+                    setStatus(T_SSL.insecure_warn, 'warning');
+                }
+            } catch (e) { console.warn('ssl info load failed', e); }
+        }
+
+        document.querySelectorAll('input[name="sslMode"]').forEach(el => {
+            el.addEventListener('change', () => {
+                document.getElementById('sslCustomFields').style.display = el.value === 'custom' ? '' : 'none';
+            });
+        });
+
+        document.getElementById('btnSslSave').addEventListener('click', async () => {
+            const mode = document.querySelector('input[name="sslMode"]:checked').value;
+            setStatus(T_SSL.saving);
+            try {
+                const r = await fetch('/api/ssl/save', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({
+                        mode: mode,
+                        cert: document.getElementById('sslCertPath').value,
+                        key: document.getElementById('sslKeyPath').value,
+                    }),
+                });
+                const data = await r.json();
+                if (data.ok) setStatus(T_SSL.saved, 'success');
+                else setStatus(T_SSL.error + ' ' + (data.error || ''), 'danger');
+            } catch (e) { setStatus(T_SSL.error + ' ' + e.message, 'danger'); }
+        });
+
+        document.getElementById('btnSslGenerate').addEventListener('click', async () => {
+            setStatus(T_SSL.generating);
+            try {
+                const r = await fetch('/api/ssl/generate', { method: 'POST' });
+                const data = await r.json();
+                if (data.ok) {
+                    setStatus(T_SSL.generated, 'success');
+                    showCertInfo(data.cert_info);
+                } else {
+                    setStatus(T_SSL.error + ' ' + (data.error || ''), 'danger');
+                }
+            } catch (e) { setStatus(T_SSL.error + ' ' + e.message, 'danger'); }
+        });
+
+        loadInfo();
+    })();
+
     function startAddFavorite() {
         const name = document.getElementById('favName').value.trim();
         console.log('[loc] startAddFavorite, name=', JSON.stringify(name));

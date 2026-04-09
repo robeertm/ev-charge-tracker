@@ -62,10 +62,64 @@ class TeslaConnector(VehicleConnector):
         if force:
             vehicle.sync_wake_up()
         data = vehicle.get_vehicle_data()
-        cs = data.get('charge_state', {})
-        vs = data.get('vehicle_state', {})
-        ds = data.get('drive_state', {})
-        cls_ = data.get('climate_state', {})
+        cs = data.get('charge_state', {}) or {}
+        vs = data.get('vehicle_state', {}) or {}
+        ds = data.get('drive_state', {}) or {}
+        cls_ = data.get('climate_state', {}) or {}
+        cfg = data.get('vehicle_config', {}) or {}
+
+        # Tire pressure warnings — Tesla returns pressure in bar; the
+        # recommended values live in tpms_rcp_*. If actual is significantly
+        # below the recommended cold pressure, raise a warning.
+        def _tire_warn(actual_key, rcp_key):
+            actual = vs.get(actual_key)
+            rcp = vs.get(rcp_key)
+            if actual is None or rcp is None:
+                return False
+            try:
+                return float(actual) < (float(rcp) - 0.2)
+            except (TypeError, ValueError):
+                return False
+
+        warn_fl = _tire_warn('tpms_pressure_fl', 'tpms_rcp_front_value')
+        warn_fr = _tire_warn('tpms_pressure_fr', 'tpms_rcp_front_value')
+        warn_rl = _tire_warn('tpms_pressure_rl', 'tpms_rcp_rear_value')
+        warn_rr = _tire_warn('tpms_pressure_rr', 'tpms_rcp_rear_value')
+        any_warn = warn_fl or warn_fr or warn_rl or warn_rr
+
+        # Charging session: minutes-to-full + kWh added in current session
+        est_charge_min = cs.get('minutes_to_full_charge') or None
+        # Tesla doesn't expose AC vs DC charge limit separately — use the
+        # global limit for both.
+        limit = cs.get('charge_limit_soc')
+
+        # Software update available?
+        sw = vs.get('software_update', {}) or {}
+        sw_available = sw.get('status') == 'available'
+        sw_version = vs.get('car_version', '')
+
+        # Vehicle name / model
+        car_type = cfg.get('car_type', '')
+        car_name = car_type.replace('models', 'Model S').replace('modelx', 'Model X') \
+                           .replace('model3', 'Model 3').replace('modely', 'Model Y')
+        model_label = f"Tesla {car_name}".strip() or 'Tesla'
+
+        # Build raw_data with the extras we don't have first-class fields for
+        # (so the user can see them via the JSON debug dump)
+        raw = {
+            'vin': data.get('vin'),
+            'firmware': sw_version,
+            'software_update_available': sw_available,
+            'sentry_mode': vs.get('sentry_mode', False),
+            'tpms_pressure_fl': vs.get('tpms_pressure_fl'),
+            'tpms_pressure_fr': vs.get('tpms_pressure_fr'),
+            'tpms_pressure_rl': vs.get('tpms_pressure_rl'),
+            'tpms_pressure_rr': vs.get('tpms_pressure_rr'),
+            'charge_energy_added_kwh': cs.get('charge_energy_added'),
+            'charger_voltage': cs.get('charger_voltage'),
+            'charger_actual_current': cs.get('charger_actual_current'),
+            'usable_battery_level': cs.get('usable_battery_level'),
+        }
 
         return VehicleStatus(
             soc_percent=cs.get('battery_level'),
@@ -75,22 +129,32 @@ class TeslaConnector(VehicleConnector):
             is_locked=vs.get('locked', True),
             charge_power_kw=cs.get('charger_power'),
             estimated_range_km=int(cs.get('battery_range', 0) * 1.60934) if cs.get('battery_range') else None,
-            charge_limit_ac=cs.get('charge_limit_soc'),
-            charge_limit_dc=cs.get('charge_limit_soc'),
+            charge_limit_ac=limit,
+            charge_limit_dc=limit,
+            est_charge_duration_min=est_charge_min,
+            est_fast_charge_duration_min=None,
             climate_temp=cls_.get('inside_temp'),
             climate_on=cls_.get('is_climate_on', False),
             location_lat=ds.get('latitude'),
             location_lon=ds.get('longitude'),
-            last_updated=str(data.get('vehicle_state', {}).get('timestamp', '')),
+            last_updated=str(vs.get('timestamp', '')),
             vehicle_name=data.get('display_name'),
-            vehicle_model=f"Tesla {data.get('vehicle_config', {}).get('car_type', '')}",
+            vehicle_model=model_label,
             front_left_door_open=bool(vs.get('df', 0)),
             front_right_door_open=bool(vs.get('pf', 0)),
             back_left_door_open=bool(vs.get('dr', 0)),
             back_right_door_open=bool(vs.get('pr', 0)),
             trunk_open=bool(vs.get('rt', 0)),
             hood_open=bool(vs.get('ft', 0)),
-            raw_data={'vin': data.get('vin')},
+            tire_warn_all=any_warn,
+            tire_warn_fl=warn_fl,
+            tire_warn_fr=warn_fr,
+            tire_warn_rl=warn_rl,
+            tire_warn_rr=warn_rr,
+            defrost=bool(cls_.get('defrost_mode', 0)),
+            rear_window_heater=bool(cls_.get('rear_defrost_active', False)),
+            steering_wheel_heater=bool(cls_.get('steering_wheel_heater', False)),
+            raw_data=raw,
         )
 
     @staticmethod

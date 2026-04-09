@@ -146,6 +146,38 @@
                         </div>
                     </div>
 
+                    <!-- Standort der Ladung -->
+                    <div class="mb-3">
+                        <label class="form-label">
+                            <i class="bi bi-geo-alt"></i> {{ t('input.location') }}
+                            <small class="text-muted">{{ t('input.optional') }}</small>
+                        </label>
+                        <input type="text" class="form-control mb-1" id="location_name"
+                               name="location_name" placeholder="{{ t('input.location_name_ph') }}">
+                        <div class="input-group input-group-sm mb-1">
+                            <span class="input-group-text">Lat</span>
+                            <input type="number" step="0.000001" id="location_lat" name="location_lat" class="form-control">
+                            <span class="input-group-text">Lon</span>
+                            <input type="number" step="0.000001" id="location_lon" name="location_lon" class="form-control">
+                        </div>
+                        <div class="d-flex gap-1 flex-wrap">
+                            <button type="button" class="btn btn-sm btn-outline-info" id="btnGpsLocation"
+                                    title="{{ t('input.location_gps_title') }}">
+                                <i class="bi bi-crosshair"></i> {{ t('input.location_gps') }}
+                            </button>
+                            <button type="button" class="btn btn-sm btn-outline-success" id="btnHomeLocation">
+                                <i class="bi bi-house-fill"></i> {{ t('input.location_home') }}
+                            </button>
+                            <button type="button" class="btn btn-sm btn-outline-warning" id="btnWorkLocation">
+                                <i class="bi bi-briefcase-fill"></i> {{ t('input.location_work') }}
+                            </button>
+                            <button type="button" class="btn btn-sm btn-outline-secondary" id="btnClearLocation">
+                                <i class="bi bi-x"></i>
+                            </button>
+                        </div>
+                        <div class="small text-muted mt-1" id="locationStatus"></div>
+                    </div>
+
                     <!-- Notizen -->
                     <div class="mb-3">
                         <label for="notes" class="form-label">{{ t('input.notes') }} <small class="text-muted">{{ t('input.optional') }}</small></label>
@@ -516,5 +548,100 @@ document.getElementById('chargeForm').addEventListener('submit', () => {
     localStorage.removeItem(CHARGE_KEY);
 });
 {% endif %}
+
+// ── Location capture ─────────────────────────────────────────────
+(function() {
+    const LOC = {
+        gps_unsupported: {{ t('input.loc_gps_unsupported')|tojson }},
+        gps_loading:     {{ t('input.loc_gps_loading')|tojson }},
+        gps_denied:      {{ t('input.loc_gps_denied')|tojson }},
+        gps_set:         {{ t('input.loc_gps_set')|tojson }},
+        not_https:       {{ t('input.loc_not_https')|tojson }},
+        no_home:         {{ t('input.loc_no_home')|tojson }},
+        no_work:         {{ t('input.loc_no_work')|tojson }},
+        cleared:         {{ t('input.loc_cleared')|tojson }},
+        home_set:        {{ t('input.loc_home_set')|tojson }},
+        work_set:        {{ t('input.loc_work_set')|tojson }},
+        looking_up:      {{ t('input.loc_looking_up')|tojson }},
+    };
+    const homeLat = {{ home_lat or 'null' }};
+    const homeLon = {{ home_lon or 'null' }};
+    const homeLabel = {{ home_label|tojson }};
+    const workLat = {{ work_lat or 'null' }};
+    const workLon = {{ work_lon or 'null' }};
+    const workLabel = {{ work_label|tojson }};
+
+    const latIn = document.getElementById('location_lat');
+    const lonIn = document.getElementById('location_lon');
+    const nameIn = document.getElementById('location_name');
+    const status = document.getElementById('locationStatus');
+
+    function setStatus(msg) { status.textContent = msg; }
+
+    function setCoords(lat, lon, name) {
+        latIn.value = parseFloat(lat).toFixed(6);
+        lonIn.value = parseFloat(lon).toFixed(6);
+        if (name) nameIn.value = name;
+    }
+
+    async function reverseGeocode(lat, lon) {
+        try {
+            const r = await fetch(`/api/locations/reverse?lat=${lat}&lon=${lon}`);
+            if (!r.ok) return null;
+            const data = await r.json();
+            return data.address || null;
+        } catch (e) { return null; }
+    }
+
+    document.getElementById('btnGpsLocation').addEventListener('click', async () => {
+        if (!navigator.geolocation) { setStatus(LOC.gps_unsupported); return; }
+        // Geolocation API only works on https:// or http://localhost
+        if (location.protocol !== 'https:' && location.hostname !== 'localhost' && location.hostname !== '127.0.0.1') {
+            setStatus(LOC.not_https);
+            return;
+        }
+        setStatus(LOC.gps_loading);
+        navigator.geolocation.getCurrentPosition(
+            async pos => {
+                const lat = pos.coords.latitude;
+                const lon = pos.coords.longitude;
+                setCoords(lat, lon);
+                setStatus(LOC.gps_set + ' (±' + Math.round(pos.coords.accuracy) + ' m)');
+                if (!nameIn.value.trim()) {
+                    setStatus(LOC.looking_up);
+                    const addr = await reverseGeocode(lat, lon);
+                    if (addr) {
+                        // Use the first 60 chars of the address as the name
+                        nameIn.value = addr.split(',').slice(0, 2).join(',').slice(0, 60);
+                    }
+                    setStatus(LOC.gps_set + ' (±' + Math.round(pos.coords.accuracy) + ' m)');
+                }
+            },
+            err => {
+                setStatus(LOC.gps_denied + ' ' + err.message);
+            },
+            { enableHighAccuracy: true, timeout: 10000, maximumAge: 60000 }
+        );
+    });
+
+    document.getElementById('btnHomeLocation').addEventListener('click', () => {
+        if (homeLat == null || homeLon == null) { setStatus(LOC.no_home); return; }
+        setCoords(homeLat, homeLon, homeLabel || 'Home');
+        setStatus(LOC.home_set);
+    });
+
+    document.getElementById('btnWorkLocation').addEventListener('click', () => {
+        if (workLat == null || workLon == null) { setStatus(LOC.no_work); return; }
+        setCoords(workLat, workLon, workLabel || 'Work');
+        setStatus(LOC.work_set);
+    });
+
+    document.getElementById('btnClearLocation').addEventListener('click', () => {
+        latIn.value = '';
+        lonIn.value = '';
+        nameIn.value = '';
+        setStatus(LOC.cleared);
+    });
+})();
 </script>
 {% endblock %}

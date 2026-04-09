@@ -1,5 +1,45 @@
 # Changelog
 
+## v2.4.0 (2026-04-09)
+
+### HTTPS / TLS support
+- **Self-signed certificate** auto-generation via the `cryptography` library (preferred) or `openssl` CLI (fallback). Cert is stored in `data/ssl/server.{crt,key}` and reused across restarts. SAN entries cover `localhost`, `127.0.0.1`, and the LAN IP, so the same cert works on desktop AND smartphone.
+- **Three modes** in Settings → "HTTPS / Sicherheit": `off` (HTTP), `auto` (self-signed), `custom` (paths to your own Let's Encrypt cert).
+- **Cert metadata viewer** — subject, valid-until date, SHA256 fingerprint shown in the UI. Parsing falls back from `cryptography` to `openssl x509 -text` so it works without the library.
+- **"Cert herunterladen"** button serves the public cert as a `.crt` download — install it on your iPhone/Android via Profile to get rid of browser warnings permanently.
+- **HTTP/insecure warning** banner in Settings if the user accesses the app over HTTP from a non-localhost address (Geolocation API and PWA features won't work over plain HTTP).
+
+### Brand feature matrix
+- New `services/vehicle/feature_matrix.py` with hand-curated capabilities for all 14 brands across 10 features (SoC, GPS, 12V battery, SoH, recuperation, 30-day consumption, doors/locks, climate, tire pressure, live status).
+- **`/api/vehicle/features/<brand>`** returns the matrix for the selected brand.
+- **Settings → Vehicle API** shows a 10-item grid with green/yellow/red indicators when a brand is picked. No more "wait, why isn't my Polestar showing recuperation data" surprises.
+
+### Tesla connector expansion
+- **Tire pressure warnings** computed from `tpms_pressure_*` vs `tpms_rcp_*_value` recommended pressures.
+- **Climate detail**: defrost, rear window heater, steering wheel heater.
+- **Software update detection** via `vehicle_state.software_update.status`.
+- **Charging session detail**: `minutes_to_full_charge`, `charge_energy_added`, charger voltage and current — exposed in `raw_data`.
+- **Sentry mode state** for the security-conscious.
+
+### Manual location for charges
+- **Charge form** ([templates/input.html](templates/input.html)) gets a new "Standort der Ladestation" section with:
+  - Free-text location name (e.g. "Aldi Berlin Mitte", "Ionity A2")
+  - Lat/lon fields
+  - **"Mein Standort"** button uses the browser's Geolocation API (works on smartphones over HTTPS or on localhost)
+  - **"Zuhause"** / **"Arbeit"** quick-fill from your saved Settings locations
+  - Reverse-geocoding via Nominatim auto-fills the name field if you didn't type one
+  - **Clear** button
+- Captured charges feed the existing `Charge.location_lat/lon/name` columns, which the **charging stations memory** in the highlights service already groups by location for "cheapest stations on my regular routes".
+
+### Database
+- New `AppConfig` keys: `ssl_mode`, `ssl_custom_cert`, `ssl_custom_key`. Auto-created on first save.
+
+### Dependencies
+- Added `cryptography>=42.0.0` to `requirements.txt` (previously optional via openssl CLI).
+
+### i18n
+- 47 new translation keys × 6 languages.
+
 ## v2.3.4 (2026-04-09)
 
 ### Favorites picker — visible feedback + diagnostics

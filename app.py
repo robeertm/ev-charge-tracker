@@ -276,7 +276,13 @@ def register_routes(app):
                                pv_price=AppConfig.get('pv_price_eur_per_kwh', '0.00'),
                                max_ac_kw=AppConfig.get('max_ac_kw', '11'),
                                battery_kwh=_get_battery_kwh(),
-                               vehicle_configured=vehicle_configured)
+                               vehicle_configured=vehicle_configured,
+                               home_lat=AppConfig.get('home_lat', ''),
+                               home_lon=AppConfig.get('home_lon', ''),
+                               home_label=AppConfig.get('home_label', ''),
+                               work_lat=AppConfig.get('work_lat', ''),
+                               work_lon=AppConfig.get('work_lon', ''),
+                               work_label=AppConfig.get('work_label', ''))
 
     # ── HISTORY ────────────────────────────────────────────────
     @app.route('/history')
@@ -864,6 +870,70 @@ def register_routes(app):
         from services.stats_service import get_summary_stats
         return jsonify(get_summary_stats())
 
+    # ── BRAND FEATURE MATRIX ──────────────────────────────────
+    @app.route('/api/vehicle/features/<brand>')
+    def api_vehicle_features(brand):
+        from services.vehicle.feature_matrix import get_features, FEATURE_KEYS
+        return jsonify({'brand': brand, 'keys': FEATURE_KEYS, 'features': get_features(brand)})
+
+    # ── HTTPS / SSL ────────────────────────────────────────────
+    @app.route('/api/ssl/info')
+    def api_ssl_info():
+        from services.ssl_service import get_cert_info, _local_ip_guess
+        from pathlib import Path
+        cert_dir = Path(Config.SQLALCHEMY_DATABASE_URI.replace('sqlite:///', '')).parent / 'ssl'
+        info = get_cert_info(cert_dir / 'server.crt')
+        return jsonify({
+            'mode': AppConfig.get('ssl_mode', 'off'),
+            'custom_cert': AppConfig.get('ssl_custom_cert', ''),
+            'custom_key': AppConfig.get('ssl_custom_key', ''),
+            'cert_info': info,
+            'cert_path': str(cert_dir / 'server.crt'),
+            'lan_ip': _local_ip_guess(),
+            'request_scheme': request.scheme,
+        })
+
+    @app.route('/api/ssl/save', methods=['POST'])
+    def api_ssl_save():
+        data = request.get_json() or {}
+        mode = data.get('mode', 'off')
+        if mode not in ('off', 'auto', 'custom'):
+            return jsonify({'error': 'invalid_mode'}), 400
+        AppConfig.set('ssl_mode', mode)
+        if mode == 'custom':
+            AppConfig.set('ssl_custom_cert', data.get('cert', ''))
+            AppConfig.set('ssl_custom_key', data.get('key', ''))
+        return jsonify({'ok': True, 'restart_required': True})
+
+    @app.route('/api/ssl/generate', methods=['POST'])
+    def api_ssl_generate():
+        """Force-generate a new self-signed cert (deletes existing one)."""
+        from services.ssl_service import _ensure_self_signed_cert, get_cert_info
+        from pathlib import Path
+        cert_dir = Path(Config.SQLALCHEMY_DATABASE_URI.replace('sqlite:///', '')).parent / 'ssl'
+        # Delete existing files so the function regenerates
+        for name in ('server.crt', 'server.key'):
+            p = cert_dir / name
+            if p.exists():
+                p.unlink()
+        try:
+            cert_path, _ = _ensure_self_signed_cert(cert_dir)
+            return jsonify({'ok': True, 'cert_info': get_cert_info(cert_path), 'restart_required': True})
+        except Exception as e:
+            return jsonify({'error': str(e)}), 500
+
+    @app.route('/api/ssl/download/cert')
+    def api_ssl_download_cert():
+        """Serve the public cert so the user can install it on their phone."""
+        from pathlib import Path
+        cert_dir = Path(Config.SQLALCHEMY_DATABASE_URI.replace('sqlite:///', '')).parent / 'ssl'
+        cert = cert_dir / 'server.crt'
+        if not cert.exists():
+            return jsonify({'error': 'no_cert'}), 404
+        return send_file(str(cert), as_attachment=True,
+                         download_name='ev-charge-tracker.crt',
+                         mimetype='application/x-x509-ca-cert')
+
     # ── UPDATE ENDPOINTS ───────────────────────────────────────
     @app.route('/api/update/check')
     def api_update_check():
@@ -1217,12 +1287,36 @@ def _int(val):
 
 if __name__ == '__main__':
     app = create_app()
+
+    # ── HTTPS setup ────────────────────────────────────────
+    ssl_context = None
+    scheme = 'http'
+    with app.app_context():
+        ssl_mode = AppConfig.get('ssl_mode', 'off')
+        if ssl_mode != 'off':
+            try:
+                from services.ssl_service import build_ssl_context
+                from pathlib import Path
+                cert_dir = Path(Config.SQLALCHEMY_DATABASE_URI.replace('sqlite:///', '')).parent / 'ssl'
+                ssl_context = build_ssl_context(
+                    ssl_mode,
+                    cert_dir,
+                    custom_cert=AppConfig.get('ssl_custom_cert', ''),
+                    custom_key=AppConfig.get('ssl_custom_key', ''),
+                )
+                if ssl_context is not None:
+                    scheme = 'https'
+            except Exception as e:
+                logger.warning(f"HTTPS setup failed: {e} — falling back to HTTP")
+                ssl_context = None
+
     print(f"\n⚡ EV Charge Tracker v{Config.APP_VERSION}")
     print(f"🚗 {Config.CAR_MODEL}")
-    print(f"🌐 http://localhost:{Config.APP_PORT}")
-    print(f"📱 Vom Smartphone: http://<deine-ip>:{Config.APP_PORT}\n")
+    print(f"🌐 {scheme}://localhost:{Config.APP_PORT}")
+    print(f"📱 Vom Smartphone: {scheme}://<deine-ip>:{Config.APP_PORT}\n")
     # debug=False — the auto-reloader passes a listening socket via the
     # WERKZEUG_SERVER_FD env var, which gets propagated through the updater
     # chain and crashes the freshly-spawned Flask with EBADF on restart.
     # For a self-hosted app, debug mode is the wrong default anyway.
-    app.run(host=Config.APP_HOST, port=Config.APP_PORT, debug=False)
+    app.run(host=Config.APP_HOST, port=Config.APP_PORT,
+            ssl_context=ssl_context, debug=False)
