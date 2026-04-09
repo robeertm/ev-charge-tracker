@@ -1221,4 +1221,8 @@ if __name__ == '__main__':
     print(f"🚗 {Config.CAR_MODEL}")
     print(f"🌐 http://localhost:{Config.APP_PORT}")
     print(f"📱 Vom Smartphone: http://<deine-ip>:{Config.APP_PORT}\n")
-    app.run(host=Config.APP_HOST, port=Config.APP_PORT, debug=True)
+    # debug=False — the auto-reloader passes a listening socket via the
+    # WERKZEUG_SERVER_FD env var, which gets propagated through the updater
+    # chain and crashes the freshly-spawned Flask with EBADF on restart.
+    # For a self-hosted app, debug mode is the wrong default anyway.
+    app.run(host=Config.APP_HOST, port=Config.APP_PORT, debug=False)

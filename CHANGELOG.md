@@ -1,5 +1,14 @@
 # Changelog
 
+## v2.3.3 (2026-04-09)
+
+### The actual updater fix (root cause)
+- **`debug=True` → `debug=False` in `app.py`** — the Werkzeug auto-reloader passes a listening socket to its child via the `WERKZEUG_SERVER_FD` environment variable. That env var was propagating from the dying Flask through `os._exit` → `updater.py` → `updater_helper.py` → freshly-spawned Flask, where `socket.fromfd(WERKZEUG_SERVER_FD)` then crashed with `OSError: [Errno 9] Bad file descriptor`. For a self-hosted app, debug mode is the wrong default anyway.
+- **Helper strips `WERKZEUG_*` env vars** before spawning, as belt-and-suspenders for older `app.py` files that still have `debug=True`.
+
+### Fixes
+- **Favorites can now be set on the map** — the `btnAddFav` button was missing `type="button"` and used a brittle one-shot click handler. Both fixed: button now has explicit type, and the favorites flow uses the same `pickMode` pattern as home/work picking. Pressing Enter in the favorite name field now also triggers add-mode. Errors are logged to status with the actual response code.
+
 ## v2.3.2 (2026-04-09)
 
 ### Updater fixes (the actual restart problem)

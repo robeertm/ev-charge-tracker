@@ -181,7 +181,7 @@
                         <ul class="list-group list-group-flush small" id="favList" style="max-height:130px; overflow-y:auto"></ul>
                         <div class="input-group input-group-sm mt-1">
                             <input type="text" id="favName" class="form-control" placeholder="{{ t('set.loc_fav_name') }}">
-                            <button class="btn btn-info" id="btnAddFav"><i class="bi bi-plus"></i></button>
+                            <button type="button" class="btn btn-info" id="btnAddFav"><i class="bi bi-plus"></i> {{ t('set.loc_set_from_map') }}</button>
                         </div>
                     </div>
                 </div>
@@ -900,14 +900,15 @@
     refreshWorkMarker();
 
     // Click-to-set mode
-    let pickMode = null;  // 'home' | 'work' | null
+    let pickMode = null;  // 'home' | 'work' | 'favorite' | null
+    let pendingFavName = null;
     document.getElementById('btnSetHome').addEventListener('click', () => {
         pickMode = 'home'; setStatus(T_LOC.click_home);
     });
     document.getElementById('btnSetWork').addEventListener('click', () => {
         pickMode = 'work'; setStatus(T_LOC.click_work);
     });
-    map.on('click', e => {
+    map.on('click', async e => {
         if (!pickMode) return;
         const lat = e.latlng.lat.toFixed(6);
         const lon = e.latlng.lng.toFixed(6);
@@ -915,12 +916,36 @@
             document.getElementById('homeLat').value = lat;
             document.getElementById('homeLon').value = lon;
             refreshHomeMarker();
-        } else {
+            setStatus(T_LOC.picked + ' ' + lat + ', ' + lon);
+        } else if (pickMode === 'work') {
             document.getElementById('workLat').value = lat;
             document.getElementById('workLon').value = lon;
             refreshWorkMarker();
+            setStatus(T_LOC.picked + ' ' + lat + ', ' + lon);
+        } else if (pickMode === 'favorite' && pendingFavName) {
+            // Capture the name now — we'll clear pickMode below
+            const name = pendingFavName;
+            pickMode = null; pendingFavName = null;
+            setStatus(T_LOC.saving);
+            try {
+                const r = await fetch('/api/locations/favorites', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({ name: name, lat: parseFloat(lat), lon: parseFloat(lon) }),
+                });
+                if (r.ok) {
+                    document.getElementById('favName').value = '';
+                    setStatus(T_LOC.fav_added);
+                    loadFavs();
+                } else {
+                    const data = await r.json().catch(() => ({}));
+                    setStatus(T_LOC.error + ' ' + (data.error || r.status));
+                }
+            } catch (err) {
+                setStatus(T_LOC.error + ' ' + err.message);
+            }
+            return;
         }
-        setStatus(T_LOC.picked + ' ' + lat + ', ' + lon);
         pickMode = null;
     });
 
@@ -975,22 +1000,16 @@
             favMarkers.push(placeMarker('favorite', f.lat, f.lon, f.name));
         });
     }
-    document.getElementById('btnAddFav').addEventListener('click', async () => {
+    function startAddFavorite() {
         const name = document.getElementById('favName').value.trim();
         if (!name) { setStatus(T_LOC.fav_need_name); return; }
+        pendingFavName = name;
+        pickMode = 'favorite';
         setStatus(T_LOC.fav_click);
-        const handler = async (e) => {
-            map.off('click', handler);
-            await fetch('/api/locations/favorites', {
-                method: 'POST',
-                headers: {'Content-Type': 'application/json'},
-                body: JSON.stringify({ name, lat: e.latlng.lat, lon: e.latlng.lng }),
-            });
-            document.getElementById('favName').value = '';
-            setStatus(T_LOC.fav_added);
-            loadFavs();
-        };
-        map.on('click', handler);
+    }
+    document.getElementById('btnAddFav').addEventListener('click', startAddFavorite);
+    document.getElementById('favName').addEventListener('keydown', e => {
+        if (e.key === 'Enter') { e.preventDefault(); startAddFavorite(); }
     });
     loadFavs();
 })();

@@ -129,11 +129,17 @@ def _restart_app(app_dir: Path) -> None:
             cmd = [nohup, str(py), str(app_py)]
         _log(f"spawning: {' '.join(cmd)}")
 
+        # Strip Werkzeug reloader env vars: they propagate from the dying
+        # Flask parent through this updater chain and crash the freshly-
+        # spawned Flask with EBADF when it tries to inherit the dead FD.
+        clean_env = {k: v for k, v in os.environ.items() if not k.startswith('WERKZEUG_')}
+
         try:
             if os.name == 'nt':
                 p = subprocess.Popen(
                     cmd,
                     cwd=str(app_dir),
+                    env=clean_env,
                     stdin=subprocess.DEVNULL,
                     stdout=log_fh or subprocess.DEVNULL,
                     stderr=log_fh or subprocess.DEVNULL,
@@ -144,6 +150,7 @@ def _restart_app(app_dir: Path) -> None:
                 p = subprocess.Popen(
                     cmd,
                     cwd=str(app_dir),
+                    env=clean_env,
                     stdin=subprocess.DEVNULL,
                     stdout=log_fh or subprocess.DEVNULL,
                     stderr=log_fh or subprocess.DEVNULL,
@@ -192,7 +199,9 @@ def _restart_app(app_dir: Path) -> None:
     _log(f"fallback spawn: nohup bash {start}")
     try:
         nohup = '/usr/bin/nohup' if os.path.exists('/usr/bin/nohup') else 'nohup'
+        clean_env = {k: v for k, v in os.environ.items() if not k.startswith('WERKZEUG_')}
         subprocess.Popen([nohup, '/bin/bash', str(start)], cwd=str(app_dir),
+                         env=clean_env,
                          stdin=subprocess.DEVNULL,
                          stdout=log_fh or subprocess.DEVNULL,
                          stderr=log_fh or subprocess.DEVNULL,
