@@ -50,7 +50,7 @@
 <!-- Toolbar -->
 <div class="card mb-3">
     <div class="card-body py-2">
-        <div class="d-flex flex-wrap gap-1">
+        <div class="d-flex flex-wrap gap-1 align-items-center">
             <button type="button" class="btn btn-sm btn-primary" id="btnSyncNow">
                 <i class="bi bi-broadcast"></i> {{ t('trips.sync_now') }}
             </button>
@@ -59,6 +59,18 @@
             </button>
             <a href="/api/trips/export.csv" class="btn btn-sm btn-outline-secondary"><i class="bi bi-filetype-csv"></i> CSV</a>
             <a href="/api/trips/export.gpx" class="btn btn-sm btn-outline-secondary"><i class="bi bi-geo"></i> GPX</a>
+            {% if gps_freshness %}
+            <span class="ms-auto small text-muted">
+                <i class="bi bi-geo-alt-fill"></i>
+                {% if gps_freshness.minutes_ago < 60 %}
+                    {{ t('trips.fresh_min', minutes=gps_freshness.minutes_ago) }}
+                {% elif gps_freshness.minutes_ago < 1440 %}
+                    {{ t('trips.fresh_hr', hours=(gps_freshness.minutes_ago // 60)) }}
+                {% else %}
+                    {{ t('trips.fresh_d', days=(gps_freshness.minutes_ago // 1440)) }}
+                {% endif %}
+            </span>
+            {% endif %}
         </div>
         <div id="toolbarStatus" class="small text-muted mt-1"></div>
     </div>

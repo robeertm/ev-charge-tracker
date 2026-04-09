@@ -445,5 +445,8 @@
   "trips.tb_backfilling": "Rebuilding driving log from history…",
   "trips.tb_backfilled": "Driving log created:",
   "trips.tb_backfill_failed": "Backfill failed:",
-  "trips.tb_backfill_confirm": "Delete existing parking events and rebuild from sync history?"
+  "trips.tb_backfill_confirm": "Delete existing parking events and rebuild from sync history?",
+  "trips.fresh_min": "GPS {minutes} min ago",
+  "trips.fresh_hr": "GPS {hours} h ago",
+  "trips.fresh_d": "GPS {days} d ago"
 }

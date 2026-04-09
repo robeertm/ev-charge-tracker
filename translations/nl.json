@@ -445,5 +445,8 @@
   "trips.tb_backfilling": "Ritregistratie opnieuw opbouwen…",
   "trips.tb_backfilled": "Ritregistratie aangemaakt:",
   "trips.tb_backfill_failed": "Backfill mislukt:",
-  "trips.tb_backfill_confirm": "Bestaande parkeerevenementen verwijderen en opnieuw opbouwen uit synchronisatiehistorie?"
+  "trips.tb_backfill_confirm": "Bestaande parkeerevenementen verwijderen en opnieuw opbouwen uit synchronisatiehistorie?",
+  "trips.fresh_min": "GPS {minutes} min geleden",
+  "trips.fresh_hr": "GPS {hours} u geleden",
+  "trips.fresh_d": "GPS {days} d geleden"
 }

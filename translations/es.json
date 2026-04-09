@@ -445,5 +445,8 @@
   "trips.tb_backfilling": "Reconstruyendo el libro de viajes…",
   "trips.tb_backfilled": "Libro de viajes creado:",
   "trips.tb_backfill_failed": "Backfill fallido:",
-  "trips.tb_backfill_confirm": "¿Eliminar eventos de aparcamiento existentes y reconstruir desde la historia de sync?"
+  "trips.tb_backfill_confirm": "¿Eliminar eventos de aparcamiento existentes y reconstruir desde la historia de sync?",
+  "trips.fresh_min": "GPS hace {minutes} min",
+  "trips.fresh_hr": "GPS hace {hours} h",
+  "trips.fresh_d": "GPS hace {days} d"
 }

@@ -445,5 +445,8 @@
   "trips.tb_backfilling": "Ricostruzione del libro di bordo…",
   "trips.tb_backfilled": "Libro di bordo creato:",
   "trips.tb_backfill_failed": "Backfill fallito:",
-  "trips.tb_backfill_confirm": "Eliminare gli eventi di parcheggio esistenti e ricostruire dalla cronologia sync?"
+  "trips.tb_backfill_confirm": "Eliminare gli eventi di parcheggio esistenti e ricostruire dalla cronologia sync?",
+  "trips.fresh_min": "GPS {minutes} min fa",
+  "trips.fresh_hr": "GPS {hours} h fa",
+  "trips.fresh_d": "GPS {days} g fa"
 }

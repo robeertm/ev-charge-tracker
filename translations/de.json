@@ -445,5 +445,8 @@
   "trips.tb_backfilling": "Baue Fahrtenbuch aus Historie neu auf…",
   "trips.tb_backfilled": "Fahrtenbuch erstellt:",
   "trips.tb_backfill_failed": "Backfill fehlgeschlagen:",
-  "trips.tb_backfill_confirm": "Vorhandene Parkereignisse löschen und aus Sync-Historie neu aufbauen?"
+  "trips.tb_backfill_confirm": "Vorhandene Parkereignisse löschen und aus Sync-Historie neu aufbauen?",
+  "trips.fresh_min": "GPS vor {minutes} min",
+  "trips.fresh_hr": "GPS vor {hours} h",
+  "trips.fresh_d": "GPS vor {days} Tagen"
 }

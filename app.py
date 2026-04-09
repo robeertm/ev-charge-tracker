@@ -1067,10 +1067,14 @@ def register_routes(app):
             is_brand_supports_location,
         )
 
-        # Auto-fresh: if a vehicle brand is configured, the brand supports GPS,
-        # and the last sync (with GPS) is stale (>30 min), do a force refresh
-        # so the user sees current data when they open the page.
-        # Skipped if rate limit is near or auto-sync is disabled.
+        # Auto-fresh runs in a BACKGROUND thread so the page renders
+        # immediately with whatever GPS data we already have. The user can
+        # see freshness in the header and hit "Jetzt synchronisieren" if
+        # they want to wait for fresh data right now.
+        #
+        # Conditions: brand configured, brand supports GPS, auto-sync on,
+        # last GPS sync >2h old, daily API counter <180/200, and not already
+        # currently in a background fresh from a recent visit.
         try:
             brand = AppConfig.get('vehicle_api_brand', '')
             auto_sync_enabled = AppConfig.get('vehicle_sync_enabled', 'false') == 'true'
@@ -1082,32 +1086,69 @@ def register_routes(app):
                                  .first())
                 stale = True
                 if last_with_gps:
-                    stale = (_dt.now() - last_with_gps.timestamp) > _td(minutes=30)
-                # Rate limit guard (200/day)
+                    stale = (_dt.now() - last_with_gps.timestamp) > _td(hours=2)
                 today_str = date.today().isoformat()
                 counter_date = AppConfig.get('vehicle_api_counter_date', '')
                 if counter_date != today_str:
                     AppConfig.set('vehicle_api_counter_date', today_str)
                     AppConfig.set('vehicle_api_counter', '0')
                 api_count = int(AppConfig.get('vehicle_api_counter', '0'))
-                if stale and api_count < 180:
+
+                # De-bounce: don't fire if a previous /trips visit kicked one
+                # off in the last 5 minutes (the request might still be in
+                # flight; the Kia API takes 5-10 s).
+                last_bg_str = AppConfig.get('trips_last_bg_fresh_at', '')
+                bg_in_progress = False
+                if last_bg_str:
+                    try:
+                        last_bg = _dt.fromisoformat(last_bg_str)
+                        bg_in_progress = (_dt.now() - last_bg) < _td(minutes=5)
+                    except ValueError:
+                        pass
+
+                if stale and api_count < 180 and not bg_in_progress:
+                    AppConfig.set('trips_last_bg_fresh_at', _dt.now().isoformat())
                     AppConfig.set('vehicle_api_counter', str(api_count + 1))
-                    from services.vehicle import get_connector
-                    import json as _json
-                    creds = _get_vehicle_credentials()
-                    connector = get_connector(brand, creds)
-                    status = connector.get_status(force=True)
-                    _save_vehicle_sync(status, _get_battery_kwh(),
-                                       raw_json=_json.dumps(status.raw_data))
-                    logger.info("trips_page: triggered auto-fresh live sync")
+
+                    def _bg_fresh(captured_app, captured_brand):
+                        with captured_app.app_context():
+                            try:
+                                from services.vehicle import get_connector
+                                import json as _json
+                                creds = _get_vehicle_credentials()
+                                connector = get_connector(captured_brand, creds)
+                                status = connector.get_status(force=True)
+                                _save_vehicle_sync(status, _get_battery_kwh(),
+                                                   raw_json=_json.dumps(status.raw_data))
+                                logger.info("trips_page: background auto-fresh complete")
+                            except Exception as e:
+                                logger.warning(f"trips_page background auto-fresh failed: {e}")
+
+                    import threading as _th
+                    _th.Thread(target=_bg_fresh, args=(app, brand), daemon=True).start()
+                    logger.info("trips_page: background auto-fresh started")
         except Exception as e:
-            logger.warning(f"trips_page auto-fresh failed: {e}")
+            logger.warning(f"trips_page auto-fresh dispatch failed: {e}")
 
         trips = get_trips(limit=200)
         events = get_parking_events(limit=200)
         summary = get_trip_summary()
         locations = _load_locations()
+
+        # Freshness info for the UI
+        last_with_gps = (VehicleSync.query
+                         .filter(VehicleSync.location_lat.isnot(None))
+                         .order_by(VehicleSync.timestamp.desc())
+                         .first())
+        gps_freshness = None
+        if last_with_gps:
+            gps_freshness = {
+                'timestamp': last_with_gps.timestamp.isoformat(),
+                'minutes_ago': int((datetime.now() - last_with_gps.timestamp).total_seconds() / 60),
+            }
+
         return render_template('trips.html',
+                               gps_freshness=gps_freshness,
                                trips=trips, events=[
                                    {'id': e.id, 'arrived_at': e.arrived_at.isoformat(),
                                     'departed_at': e.departed_at.isoformat() if e.departed_at else None,

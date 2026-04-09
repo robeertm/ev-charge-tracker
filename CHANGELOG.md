@@ -1,5 +1,16 @@
 # Changelog
 
+## v2.4.3 (2026-04-09)
+
+### Trips page is fast again
+- **Background auto-fresh** — the live vehicle sync that runs when you open `/trips` no longer blocks page rendering. It now runs in a daemon thread, so the page renders in ~12 ms instead of 5-10 s waiting for Kia to wake the car. The page will show whatever GPS data we already have; the background sync drops in updated data that will appear on the next reload.
+- **Threshold raised** from 30 minutes to 2 hours. With smart-mode enabled and the background-fresh debounce, the API counter doesn't get burned on every visit during the day.
+- **5-minute debounce** so two `/trips` visits in quick succession only kick off one background sync (and the second one isn't told a stale "in flight" sync was a fresh sync).
+- **GPS freshness indicator** in the toolbar: "GPS vor 12 min", "GPS vor 3 h", "GPS vor 2 Tagen". You can see at a glance how stale the map data is and decide whether to hit "Jetzt synchronisieren" manually.
+
+### Translations
+- 3 new keys × 6 languages.
+
 ## v2.4.2 (2026-04-09)
 
 ### Fahrtenbuch — actually working with sparse Kia polling

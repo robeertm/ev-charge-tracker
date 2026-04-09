@@ -445,5 +445,8 @@
   "trips.tb_backfilling": "Reconstruction du carnet de bord…",
   "trips.tb_backfilled": "Carnet de bord créé :",
   "trips.tb_backfill_failed": "Backfill échoué :",
-  "trips.tb_backfill_confirm": "Supprimer les événements de stationnement existants et reconstruire à partir de la sync ?"
+  "trips.tb_backfill_confirm": "Supprimer les événements de stationnement existants et reconstruire à partir de la sync ?",
+  "trips.fresh_min": "GPS il y a {minutes} min",
+  "trips.fresh_hr": "GPS il y a {hours} h",
+  "trips.fresh_d": "GPS il y a {days} j"
 }
