@@ -13,6 +13,21 @@ logger = logging.getLogger(__name__)
 GITHUB_API = f"https://api.github.com/repos/{Config.GITHUB_REPO}/releases/latest"
 
 
+def _parse_version(v):
+    """Parse 'X.Y.Z' (or 'X.Y.Z-suffix') into a tuple of ints for comparison.
+    Returns (0,) on parse failure so it sorts as oldest."""
+    try:
+        core = v.split('-', 1)[0]  # strip pre-release suffix
+        return tuple(int(p) for p in core.split('.'))
+    except (ValueError, AttributeError):
+        return (0,)
+
+
+def _is_newer(latest, current):
+    """Return True only if `latest` is strictly newer than `current`."""
+    return _parse_version(latest) > _parse_version(current)
+
+
 def check_for_update():
     """Check GitHub for a newer release. Returns (new_version, download_url) or (None, None)."""
     try:
@@ -23,7 +38,7 @@ def check_for_update():
         latest = data.get('tag_name', '').lstrip('v')
         current = Config.APP_VERSION
 
-        if latest and latest != current:
+        if latest and _is_newer(latest, current):
             zip_url = data.get('zipball_url', '')
             return latest, zip_url
         return None, None
