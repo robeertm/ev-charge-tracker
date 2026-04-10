@@ -448,5 +448,13 @@
   "trips.tb_backfill_confirm": "¿Eliminar eventos de aparcamiento existentes y reconstruir desde la historia de sync?",
   "trips.fresh_min": "GPS hace {minutes} min",
   "trips.fresh_hr": "GPS hace {hours} h",
-  "trips.fresh_d": "GPS hace {days} d"
+  "trips.fresh_d": "GPS hace {days} d",
+  "trips.home": "Casa",
+  "trips.work": "Trabajo",
+  "trips.resolving": "Resolviendo dirección…",
+  "set.api_smart_window_label": "Ventana activa Smart-sync",
+  "set.api_smart_from": "de",
+  "set.api_smart_to": "a",
+  "set.api_smart_every": "cada",
+  "set.api_smart_hint": "Fuera de la ventana no se sincroniza nada. 10 min × 16 h ≈ 96 llamadas API/día (límite 200)."
 }

@@ -410,8 +410,6 @@
             lines.push('<i class="bi bi-battery-charging text-info"></i> {{ t("dash.h_biggest") }} <strong>' + h.biggest_charge.kwh.toFixed(1) + ' kWh</strong>');
         if (h.longest_trip)
             lines.push('<i class="bi bi-signpost text-primary"></i> {{ t("dash.h_longest_trip") }} <strong>' + h.longest_trip.km + ' km</strong>');
-        if (h.fastest_trip)
-            lines.push('<i class="bi bi-speedometer2 text-warning"></i> {{ t("dash.h_fastest_trip") }} <strong>' + h.fastest_trip.avg_speed_kmh + ' km/h</strong>');
         if (h.longest_park)
             lines.push('<i class="bi bi-p-square text-secondary"></i> {{ t("dash.h_longest_park") }} <strong>' + h.longest_park.days + ' d</strong>');
         box.innerHTML = lines.length ? lines.join('<br>') : '<div class="text-muted">{{ t("dash.h_empty") }}</div>';

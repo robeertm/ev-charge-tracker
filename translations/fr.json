@@ -448,5 +448,13 @@
   "trips.tb_backfill_confirm": "Supprimer les événements de stationnement existants et reconstruire à partir de la sync ?",
   "trips.fresh_min": "GPS il y a {minutes} min",
   "trips.fresh_hr": "GPS il y a {hours} h",
-  "trips.fresh_d": "GPS il y a {days} j"
+  "trips.fresh_d": "GPS il y a {days} j",
+  "trips.home": "Domicile",
+  "trips.work": "Travail",
+  "trips.resolving": "Résolution de l'adresse…",
+  "set.api_smart_window_label": "Plage horaire du Smart-sync",
+  "set.api_smart_from": "de",
+  "set.api_smart_to": "à",
+  "set.api_smart_every": "toutes les",
+  "set.api_smart_hint": "En dehors de la plage aucune synchronisation n'a lieu. 10 min × 16 h ≈ 96 appels API/jour (limite 200)."
 }

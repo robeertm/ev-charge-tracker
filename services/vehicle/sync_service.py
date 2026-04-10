@@ -3,15 +3,76 @@ import json
 import logging
 import threading
 import time
-from datetime import datetime
+from datetime import datetime, timedelta
 
 logger = logging.getLogger(__name__)
 
 _sync_thread = None
 _sync_running = False
 
-MIN_INTERVAL_HOURS = 1  # 1 hour minimum (Kia EU: 200 calls/day, protect 12V)
+MIN_INTERVAL_HOURS = 1  # cached/force modes: 1 hour minimum
 DEFAULT_INTERVAL_HOURS = 4
+
+# Smart mode defaults: sample every 10 min between 06:00 and 22:00, sleep at night.
+DEFAULT_SMART_INTERVAL_MIN = 10
+MIN_SMART_INTERVAL_MIN = 5
+DEFAULT_SMART_START_HOUR = 6
+DEFAULT_SMART_END_HOUR = 22
+
+
+def _in_smart_window(hour: int, start_h: int, end_h: int) -> bool:
+    """Active window check, handling the (unlikely) wrap-past-midnight case."""
+    if start_h <= end_h:
+        return start_h <= hour < end_h
+    # e.g. 22..6 = active from 22:00 through 05:59
+    return hour >= start_h or hour < end_h
+
+
+def _compute_sleep_secs(app) -> tuple[int, bool]:
+    """Return (sleep_seconds, should_sync_now).
+
+    For smart mode, respects the configurable active window and
+    fine-grained interval; outside the window we sleep until it opens
+    again and report should_sync_now=False. For cached/force, keeps the
+    hourly cadence of previous versions.
+    """
+    with app.app_context():
+        from models.database import AppConfig
+        mode = AppConfig.get('vehicle_sync_mode', 'cached')
+        if mode == 'smart':
+            try:
+                start_h = int(AppConfig.get('smart_active_start_hour', str(DEFAULT_SMART_START_HOUR)))
+                end_h = int(AppConfig.get('smart_active_end_hour', str(DEFAULT_SMART_END_HOUR)))
+                interval_min = int(AppConfig.get('smart_active_interval_min', str(DEFAULT_SMART_INTERVAL_MIN)))
+            except (ValueError, TypeError):
+                start_h = DEFAULT_SMART_START_HOUR
+                end_h = DEFAULT_SMART_END_HOUR
+                interval_min = DEFAULT_SMART_INTERVAL_MIN
+            interval_min = max(interval_min, MIN_SMART_INTERVAL_MIN)
+
+            now = datetime.now()
+            if _in_smart_window(now.hour, start_h, end_h):
+                return (interval_min * 60, True)
+
+            # Outside window: sleep until it opens. If start==end (disabled),
+            # fall back to cached behavior.
+            if start_h == end_h:
+                return (interval_min * 60, True)
+            target = now.replace(hour=start_h, minute=0, second=0, microsecond=0)
+            if start_h <= end_h and now.hour >= end_h:
+                target += timedelta(days=1)
+            elif start_h > end_h and now.hour >= end_h and now.hour < start_h:
+                pass  # target is already today
+            secs = int((target - now).total_seconds())
+            return (max(secs, 60), False)
+
+        # cached / force: hourly cadence
+        try:
+            hours = float(AppConfig.get('vehicle_sync_interval_hours', str(DEFAULT_INTERVAL_HOURS)))
+        except (ValueError, TypeError):
+            hours = DEFAULT_INTERVAL_HOURS
+        hours = max(hours, MIN_INTERVAL_HOURS)
+        return (int(hours * 3600), True)
 
 
 def _do_sync(app):
@@ -116,27 +177,28 @@ def _do_sync(app):
 
 
 def _sync_loop(app):
-    """Background loop that syncs at configured interval."""
+    """Background loop that syncs at configured interval.
+
+    Smart mode: fine-grained cadence (every 10min by default) during the
+    active window, full stop at night. Cached/force: hourly cadence.
+    """
     global _sync_running
     _sync_running = True
     logger.info("Vehicle sync service started")
 
     while _sync_running:
-        try:
-            _do_sync(app)
-        except Exception as e:
-            logger.error(f"Vehicle sync error: {e}")
-
-        # Read interval from config each cycle (allows live changes)
-        with app.app_context():
-            from models.database import AppConfig
+        sleep_secs, should_sync = _compute_sleep_secs(app)
+        if should_sync:
             try:
-                interval = float(AppConfig.get('vehicle_sync_interval_hours', str(DEFAULT_INTERVAL_HOURS)))
-            except (ValueError, TypeError):
-                interval = DEFAULT_INTERVAL_HOURS
-            interval = max(interval, MIN_INTERVAL_HOURS)
+                _do_sync(app)
+            except Exception as e:
+                logger.error(f"Vehicle sync error: {e}")
+        else:
+            logger.info(
+                f"Vehicle sync: outside smart-mode active window, "
+                f"sleeping {sleep_secs // 60} min"
+            )
 
-        sleep_secs = interval * 3600
         # Sleep in small increments so we can stop quickly
         slept = 0
         while slept < sleep_secs and _sync_running:

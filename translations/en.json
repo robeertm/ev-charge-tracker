@@ -448,5 +448,13 @@
   "trips.tb_backfill_confirm": "Delete existing parking events and rebuild from sync history?",
   "trips.fresh_min": "GPS {minutes} min ago",
   "trips.fresh_hr": "GPS {hours} h ago",
-  "trips.fresh_d": "GPS {days} d ago"
+  "trips.fresh_d": "GPS {days} d ago",
+  "trips.home": "Home",
+  "trips.work": "Work",
+  "trips.resolving": "Resolving address…",
+  "set.api_smart_window_label": "Smart-sync active window",
+  "set.api_smart_from": "from",
+  "set.api_smart_to": "to",
+  "set.api_smart_every": "every",
+  "set.api_smart_hint": "Outside the window no sync runs at all. 10 min × 16 h ≈ 96 API calls/day (limit 200)."
 }

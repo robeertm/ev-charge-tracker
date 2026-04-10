@@ -448,5 +448,13 @@
   "trips.tb_backfill_confirm": "Vorhandene Parkereignisse löschen und aus Sync-Historie neu aufbauen?",
   "trips.fresh_min": "GPS vor {minutes} min",
   "trips.fresh_hr": "GPS vor {hours} h",
-  "trips.fresh_d": "GPS vor {days} Tagen"
+  "trips.fresh_d": "GPS vor {days} Tagen",
+  "trips.home": "Zuhause",
+  "trips.work": "Arbeit",
+  "trips.resolving": "Adresse wird ermittelt…",
+  "set.api_smart_window_label": "Smart-Sync Zeitfenster",
+  "set.api_smart_from": "von",
+  "set.api_smart_to": "bis",
+  "set.api_smart_every": "alle",
+  "set.api_smart_hint": "Außerhalb des Zeitfensters wird gar nicht synchronisiert. 10 min × 16 h = ca. 96 API-Calls/Tag (Limit 200)."
 }

@@ -453,10 +453,7 @@ def generate_report():
             rows.append(('Groesste Ladung', f"{c['kwh']:.1f} kWh ({c['type']}, {c['date']})"))
         if 'longest_trip' in highlights:
             t = highlights['longest_trip']
-            rows.append(('Laengste Fahrt', f"{t['km']} km - {t['duration_min']} min"))
-        if 'fastest_trip' in highlights:
-            t = highlights['fastest_trip']
-            rows.append(('Schnellste Fahrt', f"O {t['avg_speed_kmh']} km/h ({t['km']} km)"))
+            rows.append(('Laengste Fahrt', f"{t['km']} km"))
         if 'longest_park' in highlights:
             p = highlights['longest_park']
             rows.append(('Laengste Standzeit', f"{p['days']} Tage ({p['label']})"))
@@ -475,23 +472,22 @@ def generate_report():
         pdf.set_text_color(120, 120, 120)
         pdf.cell(0, 5, pdf._clean(
             f"{trip_summary['count']} Fahrten - {trip_summary['total_km']:,.0f} km - "
-            f"{trip_summary['total_hours']:.1f} h - Home<->Work: {trip_summary['home_work_km']:,.0f} km"
+            f"Home<->Work: {trip_summary['home_work_km']:,.0f} km"
         ), align='C', new_x='LMARGIN', new_y='NEXT')
         pdf.ln(2)
 
-        headers = ['Datum', 'Von', 'Nach', 'km', 'min', 'Ø km/h']
-        cw = [22, 60, 60, 14, 14, 18]
+        headers = ['Datum', 'Von', 'Nach', 'km', 'SoC']
+        cw = [22, 76, 76, 14, 14]
         rows = []
         for tr in trips[:80]:
             d = (tr['from'].get('departed_at') or '')[:10]
-            from_ = (tr['from'].get('name') or tr['from'].get('label') or
-                     f"{tr['from']['lat']:.3f},{tr['from']['lon']:.3f}")[:28]
-            to_ = (tr['to'].get('name') or tr['to'].get('label') or
-                   f"{tr['to']['lat']:.3f},{tr['to']['lon']:.3f}")[:28]
+            from_ = (tr['from'].get('address') or tr['from'].get('name')
+                     or tr['from'].get('label') or '-')[:40]
+            to_ = (tr['to'].get('address') or tr['to'].get('name')
+                   or tr['to'].get('label') or '-')[:40]
+            soc = f"-{tr['soc_used']}%" if tr.get('soc_used') else '-'
             rows.append([d, from_, to_,
-                         str(tr['km']) if tr['km'] else '-',
-                         str(tr['duration_min']) if tr['duration_min'] else '-',
-                         str(tr['avg_speed_kmh']) if tr['avg_speed_kmh'] else '-'])
+                         str(tr['km']) if tr['km'] else '-', soc])
         pdf.add_table(headers, rows, cw)
 
     # === Maintenance log ===

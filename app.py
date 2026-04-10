@@ -487,6 +487,9 @@ def register_routes(app):
                 AppConfig.set('vehicle_sync_enabled', enabled)
                 AppConfig.set('vehicle_sync_interval_hours', request.form.get('vehicle_sync_interval', '4'))
                 AppConfig.set('vehicle_sync_mode', request.form.get('vehicle_sync_mode', 'cached'))
+                AppConfig.set('smart_active_start_hour', request.form.get('smart_active_start_hour', '6'))
+                AppConfig.set('smart_active_end_hour', request.form.get('smart_active_end_hour', '22'))
+                AppConfig.set('smart_active_interval_min', request.form.get('smart_active_interval_min', '10'))
                 from services.vehicle.sync_service import stop_sync, start_sync
                 stop_sync()
                 import time as _time
@@ -538,6 +541,9 @@ def register_routes(app):
                 AppConfig.set('vehicle_sync_enabled', enabled)
                 AppConfig.set('vehicle_sync_interval_hours', request.form.get('vehicle_sync_interval', '4'))
                 AppConfig.set('vehicle_sync_mode', request.form.get('vehicle_sync_mode', 'cached'))
+                AppConfig.set('smart_active_start_hour', request.form.get('smart_active_start_hour', '6'))
+                AppConfig.set('smart_active_end_hour', request.form.get('smart_active_end_hour', '22'))
+                AppConfig.set('smart_active_interval_min', request.form.get('smart_active_interval_min', '10'))
                 from services.vehicle.sync_service import stop_sync, start_sync
                 stop_sync()  # Always stop first to pick up new settings
                 import time as _time
@@ -601,6 +607,9 @@ def register_routes(app):
                                vehicle_sync_enabled=AppConfig.get('vehicle_sync_enabled', 'false'),
                                vehicle_sync_interval=AppConfig.get('vehicle_sync_interval_hours', '4'),
                                vehicle_sync_mode=AppConfig.get('vehicle_sync_mode', 'cached'),
+                               smart_active_start_hour=AppConfig.get('smart_active_start_hour', '6'),
+                               smart_active_end_hour=AppConfig.get('smart_active_end_hour', '22'),
+                               smart_active_interval_min=AppConfig.get('smart_active_interval_min', '10'),
                                last_vehicle_sync=last_sync,
                                battery_kwh=AppConfig.get('battery_kwh', str(Config.BATTERY_CAPACITY_KWH)),
                                max_ac_kw=AppConfig.get('max_ac_kw', ''),
@@ -1130,6 +1139,27 @@ def register_routes(app):
         except Exception as e:
             logger.warning(f"trips_page auto-fresh dispatch failed: {e}")
 
+        # Kick off a background worker that fills in missing addresses for
+        # parking events. Uses Nominatim (1 req/s, permanent DB cache), so
+        # after the first full pass this becomes a no-op.
+        try:
+            from services.trips_service import ParkingEvent as _PE
+            missing = (_PE.query.filter(_PE.address.is_(None))
+                       .count())
+            if missing:
+                def _bg_geocode(captured_app):
+                    with captured_app.app_context():
+                        try:
+                            from services.trips_service import geocode_missing_events
+                            n = geocode_missing_events(limit=50)
+                            logger.info(f"trips_page: geocoded {n} events")
+                        except Exception as e:
+                            logger.warning(f"trips_page geocode failed: {e}")
+                import threading as _th2
+                _th2.Thread(target=_bg_geocode, args=(app,), daemon=True).start()
+        except Exception as e:
+            logger.warning(f"trips_page geocode dispatch failed: {e}")
+
         trips = get_trips(limit=200)
         events = get_parking_events(limit=200)
         summary = get_trip_summary()
@@ -1166,19 +1196,18 @@ def register_routes(app):
         trips = get_trips()
         out = _io.StringIO()
         writer = csv.writer(out, delimiter=';')
-        writer.writerow(['Datum', 'Von', 'Nach', 'km', 'Dauer (min)', 'Ø km/h', 'SoC %'])
+        writer.writerow(['Datum', 'Von', 'Nach', 'km', 'SoC %'])
         for t in trips:
-            from_label = (t['from'].get('name')
-                          or t['from'].get('label')
-                          or f"{t['from']['lat']:.4f},{t['from']['lon']:.4f}")
-            to_label = (t['to'].get('name')
-                        or t['to'].get('label')
-                        or f"{t['to']['lat']:.4f},{t['to']['lon']:.4f}")
+            from_label = (t['from'].get('address')
+                          or t['from'].get('name')
+                          or t['from'].get('label') or '')
+            to_label = (t['to'].get('address')
+                        or t['to'].get('name')
+                        or t['to'].get('label') or '')
             writer.writerow([
                 (t['from']['departed_at'] or '')[:10],
                 from_label, to_label,
-                t['km'] or '', t['duration_min'] or '',
-                t['avg_speed_kmh'] or '', t['soc_used'] or '',
+                t['km'] or '', t['soc_used'] or '',
             ])
         from flask import Response
         return Response(out.getvalue(), mimetype='text/csv',
@@ -1208,6 +1237,16 @@ def register_routes(app):
         out.append('</gpx>')
         return Response('\n'.join(out), mimetype='application/gpx+xml',
                         headers={'Content-Disposition': 'attachment;filename=fahrtenbuch.gpx'})
+
+    @app.route('/api/trips/geocode_missing', methods=['POST'])
+    def api_trips_geocode_missing():
+        """Resolve addresses for parking events without one (manual trigger)."""
+        from services.trips_service import geocode_missing_events
+        try:
+            n = geocode_missing_events(limit=100)
+            return jsonify({'ok': True, 'filled': n})
+        except Exception as e:
+            return jsonify({'error': str(e)}), 500
 
     @app.route('/api/trips/backfill', methods=['POST'])
     def api_trips_backfill():

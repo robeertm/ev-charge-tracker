@@ -10,8 +10,13 @@ Park-event lifecycle:
 - The latest event for a fully-stopped car stays open with departed_at = NULL.
 
 Trips are derived implicitly: each closed parking event has a successor
-event whose arrival defines the trip end. Trip distance = odo difference,
-duration = arrived_at(next) - departed_at(prev).
+event whose arrival defines the trip end. Trip distance = odo difference.
+
+We deliberately do NOT compute trip duration or average speed: with a
+sparse polling cadence (even in smart mode) the "arrived_at" of the next
+event can be up to the polling interval late, so any duration/speed
+figure would mislead. Km from the odometer is rock-solid — that's what
+we report.
 """
 from __future__ import annotations
 
@@ -189,22 +194,9 @@ def get_trips(limit: Optional[int] = None,
         km = None
         if prev.odometer_arrived is not None and curr.odometer_arrived is not None:
             km = max(curr.odometer_arrived - prev.odometer_arrived, 0)
-        # Trip duration: tightest bound is from prev.last_seen_at (the most
-        # recent sync that confirmed the car was at the previous location)
-        # to curr.arrived_at (the first sync at the new location). With
-        # sparse polling this still overstates the actual driving time, but
-        # it's the closest we can get without GPS during the trip itself.
-        duration_min = None
-        anchor = prev.last_seen_at or prev.arrived_at
-        if anchor and curr.arrived_at:
-            delta = (curr.arrived_at - anchor).total_seconds() / 60
-            duration_min = int(round(delta)) if delta > 0 else None
         soc_used = None
         if prev.soc_arrived is not None and curr.soc_arrived is not None:
             soc_used = max(prev.soc_arrived - curr.soc_arrived, 0)
-        avg_speed = None
-        if km and duration_min and duration_min > 0:
-            avg_speed = round(km / (duration_min / 60.0), 1)
         trips.append({
             'from': {
                 'lat': prev.lat, 'lon': prev.lon,
@@ -219,8 +211,6 @@ def get_trips(limit: Optional[int] = None,
                 'arrived_at': curr.arrived_at.isoformat() if curr.arrived_at else None,
             },
             'km': km,
-            'duration_min': duration_min,
-            'avg_speed_kmh': avg_speed,
             'soc_used': soc_used,
         })
 
@@ -231,10 +221,9 @@ def get_trips(limit: Optional[int] = None,
 
 
 def get_trip_summary(since: Optional[datetime] = None):
-    """Aggregate trip statistics: total km, total duration, count, home<->work split."""
+    """Aggregate trip statistics: total km, count, home<->work split."""
     trips = get_trips(since=since)
     total_km = sum(t['km'] for t in trips if t['km'])
-    total_min = sum(t['duration_min'] for t in trips if t['duration_min'])
     home_work_km = sum(
         t['km'] for t in trips
         if t['km'] and {t['from']['label'], t['to']['label']} == {'home', 'work'}
@@ -242,7 +231,6 @@ def get_trip_summary(since: Optional[datetime] = None):
     return {
         'count': len(trips),
         'total_km': round(total_km, 1) if total_km else 0,
-        'total_hours': round(total_min / 60.0, 1) if total_min else 0,
         'home_work_km': round(home_work_km, 1) if home_work_km else 0,
         'avg_km': round(total_km / len(trips), 1) if trips and total_km else 0,
     }
@@ -288,6 +276,39 @@ def backfill_parking_events(wipe_existing: bool = False) -> dict:
         'syncs_processed': len(syncs),
         'events_after': ParkingEvent.query.count(),
     }
+
+
+def geocode_missing_events(limit: int = 50) -> int:
+    """Resolve addresses for parking events that don't yet have one.
+
+    Called on /trips page load (background thread) and from /api/trips/geocode_missing.
+    Hits Nominatim with the in-service 1.1s rate limiter + permanent DB cache,
+    so repeat calls are cheap. Returns the number of events that got filled in.
+    """
+    from services.geocode_service import reverse
+    from models.database import AppConfig as _AppConfig
+
+    pending = (ParkingEvent.query
+               .filter(ParkingEvent.address.is_(None))
+               .order_by(ParkingEvent.arrived_at.desc())
+               .limit(limit)
+               .all())
+    if not pending:
+        return 0
+
+    lang = _AppConfig.get('app_language', 'de')
+    filled = 0
+    for evt in pending:
+        try:
+            addr = reverse(evt.lat, evt.lon, language=lang)
+            if addr:
+                evt.address = addr
+                filled += 1
+        except Exception:
+            continue
+    if filled:
+        db.session.commit()
+    return filled
 
 
 def is_brand_supports_location(brand: str) -> bool:

@@ -1,5 +1,32 @@
 # Changelog
 
+## v2.5.0 (2026-04-10)
+
+### Fahrtenbuch: honest numbers, smarter sync, real addresses
+
+#### Dropped misleading trip duration / avg-speed
+- **Trip duration, "Fahrzeit" KPI and "Ø km/h" column removed.** With any realistic polling cadence the "arrived_at" of the next parking event is off by up to the sample interval, so any duration/speed number was a fiction. What we report now is what we actually know: **km from the odometer** and **SoC used**.
+- PDF "Fahrtenbuch" table drops min / km-h columns and widens From / To columns instead.
+- Highlights page drops "Schnellste Fahrt"; "Längste Fahrt" shows km only.
+- CSV export drops the dauer/km-h columns.
+
+#### Smart-sync active window
+- **New `smart_active_start_hour` / `smart_active_end_hour` / `smart_active_interval_min`** AppConfig keys (defaults 6 / 22 / 10). Fully configurable from Settings → Vehicle API (the new row appears when `Smart` mode is selected).
+- Smart mode now runs **every 10 min between 06:00 and 22:00 by default** and **does not sync at all at night** — better granularity for catching real movement without burning the 190/200 daily Kia quota and without waking the car's 12V battery while you sleep.
+- With the default 10 min × 16 h = ca. 96 cached calls/day plus the existing "force if GPS stale >6 h and not charging" logic for the Live upgrades. Settings hint shows the math next to the row.
+- `_compute_sleep_secs()` in [services/vehicle/sync_service.py](services/vehicle/sync_service.py) handles both smart-window and the legacy hourly cadence for `cached`/`force` modes. Outside the window the loop sleeps until the window opens without firing any API calls.
+- Interval options: 5 / 10 / 15 / 20 / 30 / 45 / 60 min. Minimum hardcoded to 5 min.
+
+#### Unknown locations are always resolved to an address / POI
+- **No more raw `53.12, 10.45` coordinates** in the Fahrtenbuch. Every parking event gets its `address` field populated via Nominatim reverse-geocoding. POIs (shops, restaurants, parking lots) are captured too because Nominatim's `display_name` leads with the POI name when one exists.
+- **Background worker** fires on every `/trips` page load and fills addresses for any parking event that doesn't have one yet (up to 50 per run, 1 req/s per Nominatim ToS, permanent DB cache → after the first full pass it's a no-op).
+- **New `POST /api/trips/geocode_missing`** for manual re-trigger.
+- Trips table now shows: 🏠 Zuhause / 💼 Arbeit / ⭐ Favorit / full street address — never raw coordinates. While a new event is waiting to be resolved, the row shows "Adresse wird ermittelt…".
+- New `geocode_missing_events()` helper in `services/trips_service.py`.
+
+### Translations
+- 8 new keys × 6 languages (`trips.home`, `trips.work`, `trips.resolving`, `set.api_smart_window_label`, `set.api_smart_from`, `set.api_smart_to`, `set.api_smart_every`, `set.api_smart_hint`).
+
 ## v2.4.3 (2026-04-09)
 
 ### Trips page is fast again

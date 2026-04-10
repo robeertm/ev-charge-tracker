@@ -448,5 +448,13 @@
   "trips.tb_backfill_confirm": "Bestaande parkeerevenementen verwijderen en opnieuw opbouwen uit synchronisatiehistorie?",
   "trips.fresh_min": "GPS {minutes} min geleden",
   "trips.fresh_hr": "GPS {hours} u geleden",
-  "trips.fresh_d": "GPS {days} d geleden"
+  "trips.fresh_d": "GPS {days} d geleden",
+  "trips.home": "Thuis",
+  "trips.work": "Werk",
+  "trips.resolving": "Adres ophalen…",
+  "set.api_smart_window_label": "Smart-sync actief venster",
+  "set.api_smart_from": "van",
+  "set.api_smart_to": "tot",
+  "set.api_smart_every": "elke",
+  "set.api_smart_hint": "Buiten het venster wordt niet gesynchroniseerd. 10 min × 16 u ≈ 96 API-calls/dag (limiet 200)."
 }

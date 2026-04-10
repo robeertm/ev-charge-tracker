@@ -48,17 +48,7 @@ def get_highlights() -> dict:
             longest = max(with_km, key=lambda t: t['km'])
             out['longest_trip'] = {
                 'km': longest['km'],
-                'duration_min': longest['duration_min'],
                 'date': longest['from']['departed_at'],
-            }
-        # Fastest trip (avg speed)
-        with_spd = [t for t in trips if t['avg_speed_kmh']]
-        if with_spd:
-            fastest = max(with_spd, key=lambda t: t['avg_speed_kmh'])
-            out['fastest_trip'] = {
-                'km': fastest['km'],
-                'avg_speed_kmh': fastest['avg_speed_kmh'],
-                'date': fastest['from']['departed_at'],
             }
 
     # Longest park (closed events with longest spread)

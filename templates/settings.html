@@ -423,6 +423,44 @@
                             <div class="alert alert-warning py-1 px-2 small mt-2 mb-0" id="cachedGpsWarning" style="display:none">
                                 <i class="bi bi-info-circle"></i> {{ t('set.api_cached_gps_warning') }}
                             </div>
+                            <div id="smartWindowRow" class="row g-2 align-items-center mt-2" style="display:none">
+                                <div class="col-12">
+                                    <div class="small text-muted mb-1"><i class="bi bi-clock-history"></i> {{ t('set.api_smart_window_label') }}</div>
+                                </div>
+                                <div class="col-auto">
+                                    <div class="input-group input-group-sm" style="width:130px">
+                                        <span class="input-group-text">{{ t('set.api_smart_from') }}</span>
+                                        <select class="form-select form-select-sm" name="smart_active_start_hour">
+                                            {% for h in range(0, 24) %}
+                                            <option value="{{ h }}" {% if (smart_active_start_hour|int) == h %}selected{% endif %}>{{ "%02d"|format(h) }}</option>
+                                            {% endfor %}
+                                        </select>
+                                    </div>
+                                </div>
+                                <div class="col-auto">
+                                    <div class="input-group input-group-sm" style="width:130px">
+                                        <span class="input-group-text">{{ t('set.api_smart_to') }}</span>
+                                        <select class="form-select form-select-sm" name="smart_active_end_hour">
+                                            {% for h in range(0, 24) %}
+                                            <option value="{{ h }}" {% if (smart_active_end_hour|int) == h %}selected{% endif %}>{{ "%02d"|format(h) }}</option>
+                                            {% endfor %}
+                                        </select>
+                                    </div>
+                                </div>
+                                <div class="col-auto">
+                                    <div class="input-group input-group-sm" style="width:170px">
+                                        <span class="input-group-text">{{ t('set.api_smart_every') }}</span>
+                                        <select class="form-select form-select-sm" name="smart_active_interval_min">
+                                            {% for val in [5, 10, 15, 20, 30, 45, 60] %}
+                                            <option value="{{ val }}" {% if (smart_active_interval_min|int) == val %}selected{% endif %}>{{ val }} min</option>
+                                            {% endfor %}
+                                        </select>
+                                    </div>
+                                </div>
+                                <div class="col-12">
+                                    <div class="small text-muted fst-italic">{{ t('set.api_smart_hint') }}</div>
+                                </div>
+                            </div>
                         </div>
                     </div>
                 </form>
@@ -436,19 +474,22 @@
                 </div>
                 {% endif %}
                 <script>
-                // Show cached-GPS warning when relevant
+                // Show cached-GPS warning + smart-window row when relevant
                 (function() {
-                    function updateGpsWarning() {
+                    function updateUi() {
                         const sel = document.getElementById('vehicleSyncModeSel');
                         const brand = document.getElementById('vehicle_api_brand').value;
                         const w = document.getElementById('cachedGpsWarning');
+                        const smartRow = document.getElementById('smartWindowRow');
                         const isCached = sel && sel.value === 'cached';
+                        const isSmart = sel && sel.value === 'smart';
                         const wantsGps = ['kia', 'hyundai'].includes(brand);
                         w.style.display = (isCached && wantsGps) ? '' : 'none';
+                        smartRow.style.display = isSmart ? '' : 'none';
                     }
-                    document.getElementById('vehicleSyncModeSel').addEventListener('change', updateGpsWarning);
-                    document.getElementById('vehicle_api_brand').addEventListener('change', updateGpsWarning);
-                    updateGpsWarning();
+                    document.getElementById('vehicleSyncModeSel').addEventListener('change', updateUi);
+                    document.getElementById('vehicle_api_brand').addEventListener('change', updateUi);
+                    updateUi();
                 })();
                 </script>
 

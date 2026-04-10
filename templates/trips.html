@@ -13,7 +13,7 @@
 
 <!-- Summary -->
 <div class="row g-2 mb-3">
-    <div class="col-6 col-md-3">
+    <div class="col-4">
         <div class="card kpi-card border-primary">
             <div class="card-body text-center p-2">
                 <div class="kpi-label">{{ t('trips.total_trips') }}</div>
@@ -21,7 +21,7 @@
             </div>
         </div>
     </div>
-    <div class="col-6 col-md-3">
+    <div class="col-4">
         <div class="card kpi-card border-info">
             <div class="card-body text-center p-2">
                 <div class="kpi-label">{{ t('trips.total_km') }}</div>
@@ -29,15 +29,7 @@
             </div>
         </div>
     </div>
-    <div class="col-6 col-md-3">
-        <div class="card kpi-card border-secondary">
-            <div class="card-body text-center p-2">
-                <div class="kpi-label">{{ t('trips.total_hours') }}</div>
-                <div class="kpi-value text-secondary">{{ "%.1f"|format(summary.total_hours) }} h</div>
-            </div>
-        </div>
-    </div>
-    <div class="col-6 col-md-3">
+    <div class="col-4">
         <div class="card kpi-card border-success">
             <div class="card-body text-center p-2">
                 <div class="kpi-label">{{ t('trips.home_work') }}</div>
@@ -98,8 +90,6 @@
                         <th>{{ t('trips.col_from') }}</th>
                         <th>{{ t('trips.col_to') }}</th>
                         <th class="text-end">km</th>
-                        <th class="text-end">{{ t('trips.col_duration') }}</th>
-                        <th class="text-end">Ø km/h</th>
                         <th class="text-end">SoC</th>
                     </tr>
                 </thead>
@@ -107,21 +97,25 @@
                 {% for tr in trips %}
                     <tr>
                         <td class="small">{% if tr.from.departed_at %}{{ tr.from.departed_at[:16] | replace('T', ' ') }}{% endif %}</td>
-                        <td>
-                            {% if tr.from.label == 'home' %}<i class="bi bi-house-fill text-success"></i>{% elif tr.from.label == 'work' %}<i class="bi bi-briefcase-fill text-warning"></i>{% elif tr.from.label == 'favorite' %}<i class="bi bi-star-fill text-info"></i>{% endif %}
-                            {{ tr.from.name or tr.from.address or '%.4f, %.4f'|format(tr.from.lat, tr.from.lon) }}
+                        <td class="small">
+                            {% if tr.from.label == 'home' %}<i class="bi bi-house-fill text-success"></i> {{ tr.from.name or t('trips.home') }}
+                            {% elif tr.from.label == 'work' %}<i class="bi bi-briefcase-fill text-warning"></i> {{ tr.from.name or t('trips.work') }}
+                            {% elif tr.from.label == 'favorite' %}<i class="bi bi-star-fill text-info"></i> {{ tr.from.name }}
+                            {% elif tr.from.address %}{{ tr.from.address }}
+                            {% else %}<span class="text-muted fst-italic">{{ t('trips.resolving') }}</span>{% endif %}
                         </td>
-                        <td>
-                            {% if tr.to.label == 'home' %}<i class="bi bi-house-fill text-success"></i>{% elif tr.to.label == 'work' %}<i class="bi bi-briefcase-fill text-warning"></i>{% elif tr.to.label == 'favorite' %}<i class="bi bi-star-fill text-info"></i>{% endif %}
-                            {{ tr.to.name or tr.to.address or '%.4f, %.4f'|format(tr.to.lat, tr.to.lon) }}
+                        <td class="small">
+                            {% if tr.to.label == 'home' %}<i class="bi bi-house-fill text-success"></i> {{ tr.to.name or t('trips.home') }}
+                            {% elif tr.to.label == 'work' %}<i class="bi bi-briefcase-fill text-warning"></i> {{ tr.to.name or t('trips.work') }}
+                            {% elif tr.to.label == 'favorite' %}<i class="bi bi-star-fill text-info"></i> {{ tr.to.name }}
+                            {% elif tr.to.address %}{{ tr.to.address }}
+                            {% else %}<span class="text-muted fst-italic">{{ t('trips.resolving') }}</span>{% endif %}
                         </td>
                         <td class="text-end">{% if tr.km %}{{ tr.km }}{% endif %}</td>
-                        <td class="text-end">{% if tr.duration_min %}{{ tr.duration_min }} min{% endif %}</td>
-                        <td class="text-end">{% if tr.avg_speed_kmh %}{{ tr.avg_speed_kmh }}{% endif %}</td>
                         <td class="text-end">{% if tr.soc_used %}−{{ tr.soc_used }}%{% endif %}</td>
                     </tr>
                 {% else %}
-                    <tr><td colspan="7" class="text-center text-muted py-4">{{ t('trips.empty') }}</td></tr>
+                    <tr><td colspan="5" class="text-center text-muted py-4">{{ t('trips.empty') }}</td></tr>
                 {% endfor %}
                 </tbody>
             </table>
