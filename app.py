@@ -6,6 +6,15 @@ import logging
 from datetime import datetime, date
 from flask import Flask, render_template, request, redirect, url_for, flash, jsonify, send_file
 
+# Make stdout/stderr tolerant of Unicode (Windows cmd with legacy code pages
+# would otherwise UnicodeEncodeError on our startup banner and emoji-heavy
+# log lines). Python 3.7+ exposes reconfigure on TextIOWrapper.
+for _stream in (sys.stdout, sys.stderr):
+    try:
+        _stream.reconfigure(encoding='utf-8', errors='replace')
+    except Exception:
+        pass
+
 from models.database import (
     db, Charge, AppConfig, ThgQuota, VehicleSync,
     ParkingEvent, MaintenanceEntry,

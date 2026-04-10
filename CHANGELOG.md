@@ -1,5 +1,14 @@
 # Changelog
 
+## v2.5.3 (2026-04-10)
+
+### Cross-platform polish
+
+- **Windows: startup banner & emoji log lines** — `app.py` reconfigures stdout/stderr to UTF-8 with `errors='replace'` at import time, so `python app.py` in a legacy cmd code page no longer raises `UnicodeEncodeError` on the "⚡ EV Charge Tracker" banner. `start.bat` already set `chcp 65001` for its own window, but manual launches from an unconfigured shell now survive too.
+- **Linux: IP discovery in `start.sh`** — now tries `ip -4 -o addr show scope global` first (modern distros), then `hostname -I` (glibc), then `ifconfig` (BSD / macOS / older). Each branch is tolerant of missing binaries. Previously Alpine/BusyBox machines saw an empty "Smartphone-URL" line for no good reason.
+- **Updater: restore exec bit after update** — GitHub source zips strip the POSIX exec bit, so after an in-app update `./start.sh` was no longer directly executable on Linux/macOS. [`updater_helper.py`](updater_helper.py) now `chmod +x`'s `start.sh` and `start.command` right after the file swap on non-Windows platforms.
+- **`datetime.utcnow()` → timezone-aware** — `services/ssl_service.py` replaces the deprecated call with `datetime.now(timezone.utc)` for cert generation. `get_cert_info()` also handles both `not_valid_before`/`after` (cryptography <42) and `not_valid_before_utc`/`after_utc` (>=42) so it works across versions without a DeprecationWarning.
+
 ## v2.5.2 (2026-04-10)
 
 ### Unified vehicle sync log line

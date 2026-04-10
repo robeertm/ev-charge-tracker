@@ -44,8 +44,9 @@ def _ensure_self_signed_cert(cert_dir: Path, common_name: str = 'EV Charge Track
         from cryptography.x509.oid import NameOID
         from cryptography.hazmat.primitives import hashes, serialization
         from cryptography.hazmat.primitives.asymmetric import rsa
-        import datetime
+        import datetime as _dt
 
+        now = _dt.datetime.now(_dt.timezone.utc)
         key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
         # SAN entries — include localhost + best-effort LAN IP so the cert
         # is valid for both desktop and smartphone clients on the same network.
@@ -67,8 +68,8 @@ def _ensure_self_signed_cert(cert_dir: Path, common_name: str = 'EV Charge Track
             .issuer_name(name)
             .public_key(key.public_key())
             .serial_number(x509.random_serial_number())
-            .not_valid_before(datetime.datetime.utcnow() - datetime.timedelta(days=1))
-            .not_valid_after(datetime.datetime.utcnow() + datetime.timedelta(days=3650))
+            .not_valid_before(now - _dt.timedelta(days=1))
+            .not_valid_after(now + _dt.timedelta(days=3650))
             .add_extension(x509.SubjectAlternativeName(san_entries), critical=False)
             .sign(key, hashes.SHA256())
         )
@@ -193,10 +194,14 @@ def get_cert_info(cert_path: Path) -> Optional[dict]:
         cert = x509.load_pem_x509_certificate(cert_path.read_bytes())
         fp = cert.fingerprint(hashes.SHA256()).hex()
         fp_pretty = ':'.join(fp[i:i + 2] for i in range(0, len(fp), 2)).upper()
+        # cryptography >=42 deprecates not_valid_before/after in favor of
+        # the _utc variants; support both so we work across versions.
+        nb = getattr(cert, 'not_valid_before_utc', None) or cert.not_valid_before
+        na = getattr(cert, 'not_valid_after_utc', None) or cert.not_valid_after
         return {
             'subject': cert.subject.rfc4514_string(),
-            'not_before': cert.not_valid_before.isoformat(),
-            'not_after': cert.not_valid_after.isoformat(),
+            'not_before': nb.isoformat(),
+            'not_after': na.isoformat(),
             'fingerprint_sha256': fp_pretty,
         }
     except ImportError:

@@ -343,6 +343,13 @@ def main() -> int:
                 except Exception as e:
                     print(f"[updater] pip install failed: {e}", file=sys.stderr)
 
+        # GitHub source zips strip the POSIX exec bit, so start scripts
+        # come out non-executable. Restore the bit so `./start.sh` works
+        # on Linux/macOS after an update. (No-op on Windows.)
+        if os.name != 'nt':
+            for script in ('start.sh', 'start.command'):
+                _ensure_executable(app_dir / script)
+
         # Clean up staging now that the install is complete
         _safe_rmtree(staging)
 

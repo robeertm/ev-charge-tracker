@@ -76,12 +76,20 @@ if [ ! -f "data/ev_tracker.db" ]; then
 fi
 
 # ── Get local IP for smartphone access ─────────────────
+# Prefer `ip -4 addr` (modern Linux), fall back to `hostname -I`
+# (glibc), then `ifconfig` (older/BSD/macOS). Any of them may be
+# unavailable depending on distro — that's fine, the app still starts.
 LOCAL_IP=""
-if command -v hostname &>/dev/null; then
+if command -v ip &>/dev/null; then
+    LOCAL_IP=$(ip -4 -o addr show scope global 2>/dev/null \
+               | awk '{print $4}' | cut -d/ -f1 | head -1)
+fi
+if [ -z "$LOCAL_IP" ] && command -v hostname &>/dev/null; then
     LOCAL_IP=$(hostname -I 2>/dev/null | awk '{print $1}' || true)
 fi
 if [ -z "$LOCAL_IP" ] && command -v ifconfig &>/dev/null; then
-    LOCAL_IP=$(ifconfig | grep 'inet ' | grep -v '127.0.0.1' | awk '{print $2}' | head -1)
+    LOCAL_IP=$(ifconfig 2>/dev/null | grep 'inet ' | grep -v '127.0.0.1' \
+               | awk '{print $2}' | sed 's/addr://' | head -1)
 fi
 
 echo ""
