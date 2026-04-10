@@ -13,31 +13,41 @@ Built for EV owners who want **full control over their charging data** — runs 
 
 ## Screenshots
 
-> Drop your screenshots into `docs/screenshots/` with the filenames below and they will appear here automatically.
-
 ### Dashboard
 ![Dashboard](docs/screenshots/dashboard.png)
-*Live vehicle status, KPI cards, and charts at a glance.*
+*Monthly cost chart, AC/DC/PV breakdown, yearly summary — everything on one page.*
 
 ### Dark Mode
 ![Dark Mode](docs/screenshots/dashboard-dark.png)
 *Day/night toggle synced across all tabs.*
 
+### Live Vehicle Status
+![Vehicle](docs/screenshots/vehicle.png) ![Vehicle Dark](docs/screenshots/vehicle-dark.png)
+*Battery, range, odometer, 12V, SoH, tyre pressure, doors — pulled directly from the car via Vehicle API. Cached or live-refresh on demand.*
+
+### Fahrtenbuch (Trip Log)
+![Trips](docs/screenshots/trips.png)
+*Auto-built from GPS pings: trips, totals, commute distance, map of all stops, smart-sync every 10 min during waking hours.*
+
 ### New Charge — Start/Stop tracking
 ![New Charge](docs/screenshots/input.png)
-*Start/Stop buttons trigger force-refresh from your car. Auto-fills SoC, odometer, and CO2 from the live grid.*
+*AC / DC / **PV** button row, auto-fills SoC, odometer, and CO2 from the live grid. Start/Stop triggers a force-refresh from the car.*
 
 ### History
 ![History](docs/screenshots/history.png)
 *Filter by year and charge type, inline edit km, CSV export.*
 
-### Settings
-![Settings](docs/screenshots/settings.png)
-*Vehicle, PV system, GHG quota, ENTSO-E, language, and Vehicle API — all configurable from the UI.*
+### Maintenance Log
+![Maintenance](docs/screenshots/maintenance.png)
+*Inspections, tyres, parts — with cost tracking and next-service reminders by date or odometer.*
 
-### PDF Report
-![PDF Report](docs/screenshots/report.png)
-*Multi-page PDF with 10 charts and detailed monthly/yearly breakdowns.*
+### Live Log Viewer
+![Logs](docs/screenshots/logs.png)
+*In-app log window: auto-refresh, level filter, text search, optional HTTP access logging, CSV download.*
+
+### Settings — Vehicle API
+![Settings](docs/screenshots/settings.png)
+*Vehicle API auto-sync with configurable smart window (default 06:00 – 22:00, every 10 min). 14 supported brands, GHG quota, ENTSO-E, HTTPS, PV system — all configurable from the UI.*
 
 ---
 
