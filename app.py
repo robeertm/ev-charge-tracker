@@ -576,12 +576,16 @@ def register_routes(app):
                 if brand:
                     try:
                         from services.vehicle import get_connector
+                        from services.vehicle.sync_service import log_sync_result
                         import json as _json
                         creds = _get_vehicle_credentials()
                         connector = get_connector(brand, creds)
                         status = connector.get_status(force=force)
                         _save_vehicle_sync(status, _get_battery_kwh(),
                                            raw_json=_json.dumps(status.raw_data))
+                        log_sync_result(status,
+                                        mode_label='force' if force else 'cached',
+                                        source='settings')
                         parts = []
                         if status.soc_percent is not None:
                             parts.append(f'SoC: {status.soc_percent}%')
@@ -873,12 +877,16 @@ def register_routes(app):
 
         try:
             from services.vehicle import get_connector
+            from services.vehicle.sync_service import log_sync_result
             import json as _json
             creds = _get_vehicle_credentials()
             connector = get_connector(brand, creds)
             s = connector.get_status(force=force)
             sync = _save_vehicle_sync(s, _get_battery_kwh(),
                                       raw_json=_json.dumps(s.raw_data))
+            log_sync_result(s,
+                            mode_label='force' if force else 'cached',
+                            source='dashboard')
             return jsonify({
                 'soc': s.soc_percent,
                 'odometer': s.odometer_km,
@@ -1137,13 +1145,15 @@ def register_routes(app):
                         with captured_app.app_context():
                             try:
                                 from services.vehicle import get_connector
+                                from services.vehicle.sync_service import log_sync_result
                                 import json as _json
                                 creds = _get_vehicle_credentials()
                                 connector = get_connector(captured_brand, creds)
                                 status = connector.get_status(force=True)
                                 _save_vehicle_sync(status, _get_battery_kwh(),
                                                    raw_json=_json.dumps(status.raw_data))
-                                logger.info("trips_page: background auto-fresh complete")
+                                log_sync_result(status, mode_label='force',
+                                                source='trips-auto')
                             except Exception as e:
                                 logger.warning(f"trips_page background auto-fresh failed: {e}")
 
@@ -1297,12 +1307,14 @@ def register_routes(app):
 
         try:
             from services.vehicle import get_connector
+            from services.vehicle.sync_service import log_sync_result
             import json as _json
             creds = _get_vehicle_credentials()
             connector = get_connector(brand, creds)
             status = connector.get_status(force=True)
             sync = _save_vehicle_sync(status, _get_battery_kwh(),
                                       raw_json=_json.dumps(status.raw_data))
+            log_sync_result(status, mode_label='force', source='manual')
             return jsonify({
                 'ok': True,
                 'has_location': sync.location_lat is not None,

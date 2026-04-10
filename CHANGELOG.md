@@ -1,5 +1,26 @@
 # Changelog
 
+## v2.5.2 (2026-04-10)
+
+### Unified vehicle sync log line
+- **Every vehicle sync now logs the same structured one-liner** regardless of which code path triggered it:
+  ```
+  Vehicle sync [smart->force, src=bg-loop]: SoC=73%, odo=14283km, GPS=yes, charging=False, api=34/200
+  ```
+- **mode** reflects the actual API mode that was used:
+  - `cached` / `force` for the straight modes
+  - `smart->cached` (smart mode ran cached because GPS fresh or car charging)
+  - `smart->force` (smart mode escalated to force because GPS stale and not charging)
+- **src** reflects the caller, so you can tell which trigger caused the call:
+  - `bg-loop` — background sync service (the 10-min smart cadence)
+  - `trips-auto` — auto-fresh on `/trips` page load (background thread)
+  - `manual` — "Jetzt synchronisieren" button on the trips page
+  - `settings` — "Sync (Cached)" / "Sync (Live)" buttons in Settings
+  - `dashboard` — the cached/live refresh on the dashboard widget
+- **GPS=yes/no** — whether the response carried a location (important for the Fahrtenbuch; Kia cached mode usually returns `no`).
+- **api=N/200** — current daily API counter right after the call, so you can see budget burn in real time in the `/logs` feed.
+- New helper `log_sync_result()` in [services/vehicle/sync_service.py](services/vehicle/sync_service.py) is the single source of truth — all five call sites now route through it.
+
 ## v2.5.1 (2026-04-10)
 
 ### Live log viewer

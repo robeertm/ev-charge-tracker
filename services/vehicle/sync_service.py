@@ -20,6 +20,31 @@ DEFAULT_SMART_START_HOUR = 6
 DEFAULT_SMART_END_HOUR = 22
 
 
+def log_sync_result(status, mode_label: str, source: str) -> None:
+    """Unified one-line summary of a completed vehicle sync.
+
+    mode_label: 'cached' | 'force' | 'smart->cached' | 'smart->force'
+    source:     'bg-loop' | 'trips-auto' | 'manual' | 'settings'
+
+    Reads the current daily API counter for the trailing api=N/200 suffix so
+    the user can see budget consumption in the /logs feed without guessing.
+    """
+    try:
+        from models.database import AppConfig
+        counter = AppConfig.get('vehicle_api_counter', '0')
+    except Exception:
+        counter = '?'
+    has_gps = getattr(status, 'location_lat', None) is not None
+    logger.info(
+        f"Vehicle sync [{mode_label}, src={source}]: "
+        f"SoC={status.soc_percent}%, "
+        f"odo={status.odometer_km}km, "
+        f"GPS={'yes' if has_gps else 'no'}, "
+        f"charging={bool(status.is_charging)}, "
+        f"api={counter}/200"
+    )
+
+
 def _in_smart_window(hour: int, start_h: int, end_h: int) -> bool:
     """Active window check, handling the (unlikely) wrap-past-midnight case."""
     if start_h <= end_h:
@@ -117,8 +142,10 @@ def _do_sync(app):
         #            …and the car is not currently charging.
         mode = AppConfig.get('vehicle_sync_mode', 'cached')
         force = (mode == 'force')
+        mode_label = mode  # 'cached' | 'force' | 'smart' (overridden below)
 
         if mode == 'smart':
+            mode_label = 'smart->cached'
             try:
                 from datetime import datetime, timedelta
                 from models.database import VehicleSync
@@ -144,17 +171,15 @@ def _do_sync(app):
                     stale = (age_hours >= max_hours)
                 if not is_charging and stale:
                     force = True
+                    mode_label = 'smart->force'
                     logger.info(
                         f"Smart sync: forcing live refresh (gps stale, "
                         f"max_hours={max_hours}, charging={is_charging})"
                     )
-
-                # Also: do a quick cached pre-fetch to detect movement?
-                # No — that would double the API call cost. We rely on the
-                # next cycle catching new positions instead.
             except Exception as e:
                 logger.warning(f"Smart-mode decision failed, using cached: {e}")
                 force = False
+                mode_label = 'smart->cached'
 
         connector = get_connector(brand, creds)
         status = connector.get_status(force=force)
@@ -169,10 +194,7 @@ def _do_sync(app):
         sync = _save_vehicle_sync(status, _get_battery_kwh(),
                                   raw_json=json.dumps(status.raw_data))
 
-        logger.info(
-            f"Vehicle sync: SoC={status.soc_percent}%, "
-            f"odo={status.odometer_km}km, charging={status.is_charging}"
-        )
+        log_sync_result(status, mode_label=mode_label, source='bg-loop')
         return sync
 
 
