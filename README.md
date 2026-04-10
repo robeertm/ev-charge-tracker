@@ -57,29 +57,58 @@ Built for EV owners who want **full control over their charging data** — runs 
 ## Features
 
 ### Tracking
-- **Mobile-friendly input form** — quickly log charges from your phone
+- **Mobile-friendly input form** — quickly log charges from your phone, with optional GPS-captured station location ("Mein Standort" via browser Geolocation, "Zuhause"/"Arbeit" quick-fill, reverse-geocoded names via Nominatim)
 - **Start/Stop charge tracking** — force-refresh from vehicle, auto-fill date/time/SoC/odometer, auto-stop when charge limit reached
 - **Live vehicle status widget** on dashboard — SoC, range, odometer, doors, tires, climate, SoH, location
+- **Vehicle history** — every sync persists SoC, range, odometer, 12V, SoH, recuperation, 30-day consumption, GPS. Stored only when a tracked value changes (compact, audit-friendly history)
 - **History** with filtering, inline km editing, CSV export
 
+### Driving log / Fahrtenbuch
+- **Auto-detected parking events** — every vehicle sync hooks into a parking-event log; >100 m means "moved", new event opened, previous closed with arrival/departure odometer + SoC
+- **Home / Work / Favorites** — pick locations on a Leaflet/OpenStreetMap card in Settings; events are auto-classified (home / work / favorite / other) within a 200 m radius
+- **Trips page** at `/trips` — KPI cards (count, km, drive time, commute km), marker-cluster map, full table with from/to/km/duration/avg-speed/SoC
+- **CSV + GPX export** — `/api/trips/export.csv` for the tax advisor, `/api/trips/export.gpx` for Google Earth / Komoot / OsmAnd
+- **Smart sync mode** — runs cached by default but auto-upgrades to a force-refresh when GPS is older than 6 h and the car is not charging, so the Fahrtenbuch stays current without burning the daily API quota
+- **Backfill** — replays existing vehicle syncs through the parking hook to retroactively rebuild the driving log
+
+### Maintenance log / Wartungs-Logbuch
+- **`/maintenance` page** — track inspections, tires, brakes, wipers, 12V battery, cabin filter, MOT/TUEV with date, odometer, cost and notes
+- **Smart reminders** — entries can have a `next_due_km` and/or `next_due_date`; due-soon / overdue banner with sensible defaults per item type (e.g. inspection = 12 months / 30 000 km)
+
 ### Analytics
-- **Dashboard** with KPI cards and Chart.js visualizations
-- **PDF Report** — multi-page report with 10 charts, KPI overview, monthly/yearly/AC-DC-PV tables
+- **Dashboard** with KPI cards, Chart.js visualizations, and 7 vehicle-history mini time-series (SoC, range, odometer, 12V, SoH, recuperation, consumption)
+- **Range calculator** card — uses live SoC + battery capacity + 30-day consumption + outdoor temperature (Open-Meteo at home location), with a temperature penalty curve
+- **Weather correlation** chart — bar (kWh/month) + line (avg outdoor degC) showing exactly why winter is more expensive
+- **Highlights / fun facts** — cheapest/most expensive charge, biggest single charge, longest trip, fastest trip, longest park
+- **PDF Report** — multi-page report with 10 charts, KPI overview, monthly/yearly/AC-DC-PV tables, vehicle-history time-series, Fahrtenbuch (last 80 trips with home<->work km for the German Pendlerpauschale), Wartungs-Logbuch, highlights page
 - **CO2 break-even chart** — cumulative savings vs. battery production CO2 (well-to-wheel)
 - **Recuperation stats** — total energy recovered, extra km, recuperation charge cycles
 - **Cost & consumption per 100km** — net of GHG quota payouts
+- **THG quota reminder** — banner Jan 1 - Mar 31 if no quota is logged for the previous year
 
 ### Integrations
 - **14 vehicle brands** via API (see table below) — auto-fetch SoC, odometer, charging status
+- **Brand feature matrix** in Settings — 10-item green/yellow/red grid per brand (SoC, GPS, 12V, SoH, recuperation, 30-day consumption, doors, climate, tires, live status). No more "wait, why isn't my car showing X" surprises.
 - **ENTSO-E integration** — fetch hourly CO2 grid intensity for Germany, auto-backfill missing values
+- **Open-Meteo** — daily mean temperatures for the range calculator and weather correlation, with DB cache (no key, no rate limits)
+- **Nominatim reverse geocoding** — for street addresses on parking events and charge locations, with permanent DB cache and ToS-compliant rate limiter
 - **CSV import** — upload Google Sheet CSV directly in settings UI
 - **PV charging support** — third charge type with auto-calculated CO2 from PV system specs
 
+### Security / HTTPS
+- **Self-signed certificate** auto-generation via `cryptography` (or `openssl` CLI fallback). SAN entries cover `localhost`, `127.0.0.1`, and the LAN IP, so the same cert works on desktop AND smartphone
+- **Three modes** in Settings: `off` (HTTP), `auto` (self-signed), `custom` (paths to your own Let's Encrypt cert)
+- **Cert metadata viewer** + downloadable `.crt` to install on your phone via Profile (kills browser warnings permanently)
+- HTTPS is required for the Geolocation API on smartphones — the auto mode gets you there in two clicks
+
+### Self-hosting / updates
+- **In-app updater** — "Update verfuegbar" button in Settings actually rolls out the new release on your machine (download zip, stage, detached helper swaps files, pip install, restart). No `git pull`, no terminal.
+- **Restart button** in Settings for applying HTTPS changes or new certs
+- **API rate limiter** — tracks daily API calls (Kia EU: 190/200 limit), counter on dashboard
+
 ### UX
 - **Dark/Light mode** — toggle in navbar, synced across all tabs via localStorage
-- **6 languages** — German, English, French, Spanish, Italian, Dutch
-- **Auto-updater** via GitHub releases
-- **API rate limiter** — tracks daily API calls (Kia EU: 190/200 limit)
+- **6 languages** — German, English, French, Spanish, Italian, Dutch (~447 translated strings per locale)
 
 ---
 
@@ -191,7 +220,7 @@ Switchable from Settings > Language:
 - Italiano
 - Nederlands
 
-286 translated strings per language. Falls back to German if a key is missing. New languages can be added by dropping a `<lang>.json` file into `translations/`.
+~447 translated strings per language. Falls back to German if a key is missing. New languages can be added by dropping a `<lang>.json` file into `translations/`.
 
 ---
 
