@@ -456,5 +456,15 @@
   "set.api_smart_from": "von",
   "set.api_smart_to": "bis",
   "set.api_smart_every": "alle",
-  "set.api_smart_hint": "Außerhalb des Zeitfensters wird gar nicht synchronisiert. 10 min × 16 h = ca. 96 API-Calls/Tag (Limit 200)."
+  "set.api_smart_hint": "Außerhalb des Zeitfensters wird gar nicht synchronisiert. 10 min × 16 h = ca. 96 API-Calls/Tag (Limit 200).",
+  "nav.logs": "Logs",
+  "logs.title": "Live-Logs",
+  "logs.auto_refresh": "Auto-Refresh",
+  "logs.auto_scroll": "Auto-Scroll",
+  "logs.show_requests": "HTTP-Requests",
+  "logs.level": "Level",
+  "logs.lvl_all": "Alle",
+  "logs.filter_placeholder": "Filter (Logger oder Text)",
+  "logs.clear": "Leeren",
+  "logs.download": "Download"
 }

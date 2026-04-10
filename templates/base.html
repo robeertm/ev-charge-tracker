@@ -50,6 +50,11 @@
                         </a>
                     </li>
                     <li class="nav-item">
+                        <a class="nav-link {% if request.endpoint == 'logs_page' %}active{% endif %}" href="/logs">
+                            <i class="bi bi-terminal"></i> {{ t('nav.logs') }}
+                        </a>
+                    </li>
+                    <li class="nav-item">
                         <a class="nav-link {% if request.endpoint == 'settings' %}active{% endif %}" href="/settings">
                             <i class="bi bi-gear"></i> {{ t('nav.settings') }}
                         </a>

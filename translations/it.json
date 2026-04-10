@@ -456,5 +456,15 @@
   "set.api_smart_from": "da",
   "set.api_smart_to": "a",
   "set.api_smart_every": "ogni",
-  "set.api_smart_hint": "Fuori dalla finestra nessuna sincronizzazione. 10 min × 16 h ≈ 96 chiamate API/giorno (limite 200)."
+  "set.api_smart_hint": "Fuori dalla finestra nessuna sincronizzazione. 10 min × 16 h ≈ 96 chiamate API/giorno (limite 200).",
+  "nav.logs": "Log",
+  "logs.title": "Log in diretta",
+  "logs.auto_refresh": "Aggiornamento auto",
+  "logs.auto_scroll": "Scorrimento auto",
+  "logs.show_requests": "Richieste HTTP",
+  "logs.level": "Livello",
+  "logs.lvl_all": "Tutti",
+  "logs.filter_placeholder": "Filtro (logger o testo)",
+  "logs.clear": "Pulisci",
+  "logs.download": "Scarica"
 }

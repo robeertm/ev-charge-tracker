@@ -1,5 +1,19 @@
 # Changelog
 
+## v2.5.1 (2026-04-10)
+
+### Live log viewer
+- **New `/logs` page** with its own nav entry. Shows whatever the app's Python loggers emit: vehicle sync activity, parking hook decisions, Nominatim reverse lookups, updater events, ENTSO-E calls, errors — everything that used to only be visible in the terminal.
+- **In-memory ring buffer** (last 2000 records) via a custom `RingBufferHandler` attached to the root logger on startup. Thread-safe, zero disk I/O, zero config. New file: [services/log_service.py](services/log_service.py).
+- **Live polling** every 2 s via `/api/logs?after=<last_id>` — only new records cross the wire, so the tab stays cheap even when it's sitting open all day. Delta-based, not a full re-fetch.
+- **HTTP access logging is opt-in**, toggle in the toolbar. Off by default (keeps the feed clean); flip it on and every `GET /api/...` line from werkzeug shows up too. The preference is persisted in AppConfig (`log_show_requests`) so it survives restarts.
+- **Toolbar controls**: auto-refresh on/off, auto-scroll on/off, level filter (DEBUG+ / INFO+ / WARNING+ / ERROR+), free-text filter (matches logger name + message), clear, download as `.log` file.
+- **Color-coded by level** — DEBUG grey, WARNING amber, ERROR red, CRITICAL bold red — in both light and dark mode. Monospace font, timestamp with milliseconds.
+- `POST /api/logs/clear` and `POST /api/logs/requests` round out the API.
+
+### Translations
+- 11 new keys × 6 languages.
+
 ## v2.5.0 (2026-04-10)
 
 ### Fahrtenbuch: honest numbers, smarter sync, real addresses

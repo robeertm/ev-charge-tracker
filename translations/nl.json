@@ -456,5 +456,15 @@
   "set.api_smart_from": "van",
   "set.api_smart_to": "tot",
   "set.api_smart_every": "elke",
-  "set.api_smart_hint": "Buiten het venster wordt niet gesynchroniseerd. 10 min × 16 u ≈ 96 API-calls/dag (limiet 200)."
+  "set.api_smart_hint": "Buiten het venster wordt niet gesynchroniseerd. 10 min × 16 u ≈ 96 API-calls/dag (limiet 200).",
+  "nav.logs": "Logs",
+  "logs.title": "Live logs",
+  "logs.auto_refresh": "Auto-verversen",
+  "logs.auto_scroll": "Auto-scrollen",
+  "logs.show_requests": "HTTP-verzoeken",
+  "logs.level": "Niveau",
+  "logs.lvl_all": "Alle",
+  "logs.filter_placeholder": "Filter (logger of tekst)",
+  "logs.clear": "Wissen",
+  "logs.download": "Downloaden"
 }

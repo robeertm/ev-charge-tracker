@@ -456,5 +456,15 @@
   "set.api_smart_from": "from",
   "set.api_smart_to": "to",
   "set.api_smart_every": "every",
-  "set.api_smart_hint": "Outside the window no sync runs at all. 10 min × 16 h ≈ 96 API calls/day (limit 200)."
+  "set.api_smart_hint": "Outside the window no sync runs at all. 10 min × 16 h ≈ 96 API calls/day (limit 200).",
+  "nav.logs": "Logs",
+  "logs.title": "Live logs",
+  "logs.auto_refresh": "Auto-refresh",
+  "logs.auto_scroll": "Auto-scroll",
+  "logs.show_requests": "HTTP requests",
+  "logs.level": "Level",
+  "logs.lvl_all": "All",
+  "logs.filter_placeholder": "Filter (logger or text)",
+  "logs.clear": "Clear",
+  "logs.download": "Download"
 }

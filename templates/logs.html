@@ -1,0 +1,187 @@
+{% extends "base.html" %}
+{% block title %}{{ t('logs.title') }} — EV Charge Tracker{% endblock %}
+{% block content %}
+<h4 class="mb-3"><i class="bi bi-terminal"></i> {{ t('logs.title') }}</h4>
+
+<div class="card mb-3">
+    <div class="card-body py-2">
+        <div class="d-flex flex-wrap gap-2 align-items-center">
+            <div class="form-check form-switch mb-0">
+                <input class="form-check-input" type="checkbox" id="chkAutoRefresh" checked>
+                <label class="form-check-label small" for="chkAutoRefresh">{{ t('logs.auto_refresh') }}</label>
+            </div>
+            <div class="form-check form-switch mb-0">
+                <input class="form-check-input" type="checkbox" id="chkAutoScroll" checked>
+                <label class="form-check-label small" for="chkAutoScroll">{{ t('logs.auto_scroll') }}</label>
+            </div>
+            <div class="form-check form-switch mb-0">
+                <input class="form-check-input" type="checkbox" id="chkShowRequests" {% if req_log_enabled %}checked{% endif %}>
+                <label class="form-check-label small" for="chkShowRequests">{{ t('logs.show_requests') }}</label>
+            </div>
+            <div class="input-group input-group-sm" style="width:160px">
+                <span class="input-group-text">{{ t('logs.level') }}</span>
+                <select class="form-select form-select-sm" id="selLevel">
+                    <option value="">{{ t('logs.lvl_all') }}</option>
+                    <option value="DEBUG">DEBUG+</option>
+                    <option value="INFO" selected>INFO+</option>
+                    <option value="WARNING">WARNING+</option>
+                    <option value="ERROR">ERROR+</option>
+                </select>
+            </div>
+            <div class="input-group input-group-sm" style="width:240px">
+                <span class="input-group-text"><i class="bi bi-funnel"></i></span>
+                <input type="text" class="form-control form-control-sm" id="txtFilter"
+                       placeholder="{{ t('logs.filter_placeholder') }}">
+            </div>
+            <button type="button" class="btn btn-sm btn-outline-secondary" id="btnClear">
+                <i class="bi bi-x-circle"></i> {{ t('logs.clear') }}
+            </button>
+            <button type="button" class="btn btn-sm btn-outline-secondary" id="btnDownload">
+                <i class="bi bi-download"></i> {{ t('logs.download') }}
+            </button>
+            <span class="ms-auto small text-muted" id="lblCount">0</span>
+        </div>
+    </div>
+</div>
+
+<div class="card">
+    <div class="card-body p-0">
+        <pre id="logView" class="mb-0 small"
+             style="height:66vh; overflow:auto; padding:0.75rem 1rem;
+                    font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+                    line-height: 1.4; font-size: 12px;"></pre>
+    </div>
+</div>
+
+<style>
+.log-row { white-space: pre-wrap; word-break: break-word; }
+.log-DEBUG   { color: #888; }
+.log-INFO    { color: inherit; }
+.log-WARNING { color: #d97706; }
+.log-ERROR   { color: #dc2626; font-weight: 600; }
+.log-CRITICAL{ color: #b91c1c; font-weight: 700; }
+[data-bs-theme="dark"] .log-DEBUG   { color: #888; }
+[data-bs-theme="dark"] .log-WARNING { color: #fbbf24; }
+[data-bs-theme="dark"] .log-ERROR   { color: #f87171; }
+.log-ts     { color: #6b7280; }
+.log-name   { color: #2563eb; }
+[data-bs-theme="dark"] .log-name { color: #60a7fa; }
+</style>
+
+<script>
+(function() {
+    const view = document.getElementById('logView');
+    const lblCount = document.getElementById('lblCount');
+    const chkAuto = document.getElementById('chkAutoRefresh');
+    const chkScroll = document.getElementById('chkAutoScroll');
+    const chkReq = document.getElementById('chkShowRequests');
+    const selLevel = document.getElementById('selLevel');
+    const txtFilter = document.getElementById('txtFilter');
+
+    let lastId = 0;
+    let totalShown = 0;
+    let polling = false;
+
+    function fmtTs(unix) {
+        const d = new Date(unix * 1000);
+        const pad = n => String(n).padStart(2, '0');
+        return pad(d.getHours()) + ':' + pad(d.getMinutes()) + ':' + pad(d.getSeconds()) + '.' +
+               String(d.getMilliseconds()).padStart(3, '0');
+    }
+
+    function escapeHtml(s) {
+        return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+    }
+
+    function renderRow(e) {
+        const row = document.createElement('div');
+        row.className = 'log-row log-' + e.level;
+        row.dataset.logger = e.logger;
+        row.dataset.message = e.message.toLowerCase();
+        row.innerHTML =
+            '<span class="log-ts">' + fmtTs(e.ts) + '</span> ' +
+            '<span class="log-' + e.level + '">[' + e.level.padEnd(7) + ']</span> ' +
+            '<span class="log-name">' + escapeHtml(e.logger) + '</span>: ' +
+            escapeHtml(e.message);
+        return row;
+    }
+
+    function applyFilter() {
+        const q = txtFilter.value.trim().toLowerCase();
+        const rows = view.querySelectorAll('.log-row');
+        let shown = 0;
+        rows.forEach(r => {
+            const match = !q || r.dataset.message.indexOf(q) !== -1 || r.dataset.logger.toLowerCase().indexOf(q) !== -1;
+            r.style.display = match ? '' : 'none';
+            if (match) shown++;
+        });
+        lblCount.textContent = shown + ' / ' + rows.length;
+    }
+
+    async function poll() {
+        if (polling) return;
+        polling = true;
+        try {
+            const params = new URLSearchParams({
+                after: lastId,
+                level: selLevel.value,
+                include_requests: chkReq.checked ? '1' : '0',
+                limit: '500',
+            });
+            const r = await fetch('/api/logs?' + params);
+            const data = await r.json();
+            const entries = data.entries || [];
+            if (entries.length) {
+                entries.forEach(e => {
+                    if (e.id > lastId) lastId = e.id;
+                    view.appendChild(renderRow(e));
+                });
+                // Trim to ~2000 lines
+                while (view.childElementCount > 2000) {
+                    view.removeChild(view.firstChild);
+                }
+                applyFilter();
+                if (chkScroll.checked) view.scrollTop = view.scrollHeight;
+            }
+        } catch (e) { /* swallow */ }
+        polling = false;
+    }
+
+    let timer = setInterval(() => { if (chkAuto.checked) poll(); }, 2000);
+
+    // When level changes, re-fetch full set (reset lastId)
+    selLevel.addEventListener('change', () => { view.innerHTML = ''; lastId = 0; poll(); });
+    chkReq.addEventListener('change', async () => {
+        await fetch('/api/logs/requests', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({ enabled: chkReq.checked }),
+        });
+        view.innerHTML = ''; lastId = 0; poll();
+    });
+    txtFilter.addEventListener('input', applyFilter);
+
+    document.getElementById('btnClear').addEventListener('click', async () => {
+        await fetch('/api/logs/clear', { method: 'POST' });
+        view.innerHTML = '';
+        lastId = 0;
+        applyFilter();
+    });
+
+    document.getElementById('btnDownload').addEventListener('click', () => {
+        const lines = [];
+        view.querySelectorAll('.log-row').forEach(r => lines.push(r.textContent));
+        const blob = new Blob([lines.join('\n')], { type: 'text/plain' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = 'ev-tracker-' + new Date().toISOString().slice(0, 19).replace(/[:T]/g, '-') + '.log';
+        a.click();
+        URL.revokeObjectURL(url);
+    });
+
+    // Initial load
+    poll();
+})();
+</script>
+{% endblock %}

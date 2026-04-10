@@ -456,5 +456,15 @@
   "set.api_smart_from": "de",
   "set.api_smart_to": "à",
   "set.api_smart_every": "toutes les",
-  "set.api_smart_hint": "En dehors de la plage aucune synchronisation n'a lieu. 10 min × 16 h ≈ 96 appels API/jour (limite 200)."
+  "set.api_smart_hint": "En dehors de la plage aucune synchronisation n'a lieu. 10 min × 16 h ≈ 96 appels API/jour (limite 200).",
+  "nav.logs": "Journaux",
+  "logs.title": "Journaux en direct",
+  "logs.auto_refresh": "Actualisation auto",
+  "logs.auto_scroll": "Défilement auto",
+  "logs.show_requests": "Requêtes HTTP",
+  "logs.level": "Niveau",
+  "logs.lvl_all": "Tous",
+  "logs.filter_placeholder": "Filtre (logger ou texte)",
+  "logs.clear": "Vider",
+  "logs.download": "Télécharger"
 }

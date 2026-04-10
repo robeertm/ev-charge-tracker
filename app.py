@@ -16,6 +16,12 @@ from services.i18n import t
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
+# In-memory log ring buffer for the /logs page
+from services.log_service import install as _install_log_ring, set_request_logging as _set_req_log
+_install_log_ring(level=logging.INFO)
+# Werkzeug access logging defaults to OFF (user can toggle on /logs page)
+_set_req_log(False)
+
 
 def create_app(config_class=Config):
     app = Flask(__name__)
@@ -91,6 +97,14 @@ def create_app(config_class=Config):
     try:
         from services.vehicle.sync_service import start_sync
         start_sync(app)
+    except Exception:
+        pass
+
+    # Honor persisted request-log toggle
+    try:
+        with app.app_context():
+            if AppConfig.get('log_show_requests', 'false') == 'true':
+                _set_req_log(True)
     except Exception:
         pass
 
@@ -1372,6 +1386,45 @@ def register_routes(app):
         from services.geocode_service import reverse
         addr = reverse(lat, lon, language=AppConfig.get('app_language', 'de'))
         return jsonify({'address': addr})
+
+    # ── LOG VIEWER ─────────────────────────────────────────────
+    @app.route('/logs')
+    def logs_page():
+        req_log_enabled = AppConfig.get('log_show_requests', 'false') == 'true'
+        return render_template('logs.html', req_log_enabled=req_log_enabled)
+
+    @app.route('/api/logs')
+    def api_logs():
+        from services.log_service import get_entries
+        try:
+            after = int(request.args.get('after', '0'))
+        except (TypeError, ValueError):
+            after = 0
+        level = request.args.get('level') or None
+        include_req = request.args.get('include_requests', '1') != '0'
+        try:
+            limit = int(request.args.get('limit', '500'))
+        except (TypeError, ValueError):
+            limit = 500
+        entries = get_entries(after_id=after, level=level,
+                              include_requests=include_req, limit=limit)
+        return jsonify({'entries': entries})
+
+    @app.route('/api/logs/clear', methods=['POST'])
+    def api_logs_clear():
+        from services.log_service import clear
+        clear()
+        return jsonify({'ok': True})
+
+    @app.route('/api/logs/requests', methods=['POST'])
+    def api_logs_requests():
+        """Toggle werkzeug HTTP access logging on/off."""
+        from services.log_service import set_request_logging
+        data = request.get_json(silent=True) or {}
+        enabled = bool(data.get('enabled', False))
+        set_request_logging(enabled)
+        AppConfig.set('log_show_requests', 'true' if enabled else 'false')
+        return jsonify({'ok': True, 'enabled': enabled})
 
     # ── MAINTENANCE / WARTUNG ──────────────────────────────────
     @app.route('/maintenance', methods=['GET', 'POST'])
