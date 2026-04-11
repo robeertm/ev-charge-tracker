@@ -83,11 +83,12 @@ def create_app(config_class=Config):
 
         db.session.commit()
 
-        # One-time scale fix: historical total_regenerated_kwh was stored as
-        # raw/10; correct is raw/100 (the raw API value is in hundredths of kWh,
-        # and represents a rolling 3-month window, not a lifetime total).
-        # Divide existing values by 10 once, then (re)compute the monotonic
-        # regen_cumulative_kwh from the corrected series.
+        # Scale fix v1 (shipped in v2.5.4): the pre-v2.5.4 code stored
+        # total_regenerated_kwh as raw/10, so v1 divided existing rows by 10.
+        # That was not enough — the raw API value (Kia/Hyundai) is actually
+        # in Wh, so the correct divisor is /1000 end-to-end. v2 applies the
+        # remaining /10 on top of v1 to reach /100 total for pre-v2.5.4 rows
+        # and /10 for v2.5.4 rows, so either path lands on raw/1000 kWh.
         if AppConfig.get('regen_scale_fix_v1', '') != 'done':
             db.session.execute(text(
                 'UPDATE vehicle_syncs SET total_regenerated_kwh = total_regenerated_kwh / 10.0 '
@@ -95,7 +96,18 @@ def create_app(config_class=Config):
             ))
             db.session.commit()
             AppConfig.set('regen_scale_fix_v1', 'done')
-            logger.info("Applied regen scale fix: total_regenerated_kwh /= 10 on all rows")
+            logger.info("Applied regen scale fix v1: total_regenerated_kwh /= 10 on all rows")
+
+        if AppConfig.get('regen_scale_fix_v2', '') != 'done':
+            db.session.execute(text(
+                'UPDATE vehicle_syncs SET total_regenerated_kwh = total_regenerated_kwh / 10.0 '
+                'WHERE total_regenerated_kwh IS NOT NULL'
+            ))
+            # Wipe cumulative so the backfill below recomputes from the corrected series
+            db.session.execute(text('UPDATE vehicle_syncs SET regen_cumulative_kwh = NULL'))
+            db.session.commit()
+            AppConfig.set('regen_scale_fix_v2', 'done')
+            logger.info("Applied regen scale fix v2: final /10 to reach raw/1000 (Wh → kWh)")
 
         # Backfill regen_cumulative_kwh if any row is missing it.
         _missing = db.session.execute(text(
@@ -225,8 +237,9 @@ def _build_vehicle_sync(status, battery_kwh, raw_json=''):
     regen_kwh = None
     if status.total_power_regenerated_kwh is not None:
         try:
-            # Raw API value is in hundredths of kWh for a rolling 3-month window
-            regen_kwh = round(float(status.total_power_regenerated_kwh) / 100.0, 2)
+            # Raw API value (Kia/Hyundai) is in Wh for a rolling 3-month window.
+            # Divide by 1000 to get kWh.
+            regen_kwh = round(float(status.total_power_regenerated_kwh) / 1000.0, 2)
         except (ValueError, TypeError):
             pass
     cons_30d = None

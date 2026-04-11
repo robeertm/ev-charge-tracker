@@ -1,5 +1,16 @@
 # Changelog
 
+## v2.5.5 (2026-04-11)
+
+### Regen scale hotfix: raw is Wh, not hundredths of kWh
+
+v2.5.4 divided the raw Kia/Hyundai `total_power_regenerated` by 100, which still left values 10× too high. The actual unit is **Wh** (watt-hours) for a rolling 3-month window — the correct divisor is **1000**. On a real Kia Niro EV dataset the v2.5.4 values showed a regen rate of 0.75 kWh/km (physically impossible); after this fix the rate settles at ~0.075 kWh/km (matches the car's spec).
+
+- **`_build_vehicle_sync`** now divides by 1000.0 instead of 100.0.
+- **New migration `regen_scale_fix_v2`** applies a second `/10` pass on `total_regenerated_kwh` — so pre-v2.5.4 rows (already `/10`'d by v1) land on `/100` total, and v2.5.4 rows land on `/10`. Both converge on the correct `raw/1000` kWh scale.
+- **`regen_cumulative_kwh` is wiped and recomputed** after the v2 migration so the monotonic series matches the corrected inputs.
+- Live vehicle widget and dashboard "Gemessene Rekuperation" card now show realistic numbers.
+
 ## v2.5.4 (2026-04-11)
 
 ### Rekuperation: korrekt interpretiert, kumuliert, pro Fahrt
