@@ -146,18 +146,37 @@ def get_summary_stats():
         battery_kwh = float(AppConfig.get('battery_kwh', '64'))
     except (ValueError, TypeError):
         battery_kwh = 64.0
+    try:
+        static_recup_rate = float(AppConfig.get('recuperation_kwh_per_km', '0.086'))
+    except (ValueError, TypeError):
+        static_recup_rate = 0.086
 
-    # Recuperation: prefer measured rate (kWh/km from last 90d of vehicle syncs)
-    # over the user-configured static value.
-    recup_kwh_per_km, recup_rate_source = get_recup_rate_kwh_per_km()
-
-    # Prefer the real measured lifetime cumulative regen when we have it,
-    # otherwise extrapolate from the configured rate × km driven.
+    # Hybrid recuperation total:
+    #   km before vehicle-API tracking started → km × configured static rate (0.086)
+    #   km from first vehicle sync onwards     → real measured cumulative kWh
+    # This preserves the historical estimate AND layers measured values on top
+    # as they come in, without double-counting.
     regen_stats = get_regen_stats()
-    if regen_stats and regen_stats.get('lifetime', 0) > 0:
-        total_recuperation = round(regen_stats['lifetime'], 1)
+    historical_km = 0
+    historical_regen = 0
+    measured_regen = 0
+    if regen_stats:
+        first_sync = (VehicleSync.query
+                      .filter(VehicleSync.odometer_km.isnot(None))
+                      .order_by(VehicleSync.timestamp.asc())
+                      .first())
+        if first_sync and first_sync.odometer_km:
+            historical_km = first_sync.odometer_km
+            historical_regen = historical_km * static_recup_rate
+        measured_regen = regen_stats.get('lifetime', 0) or 0
+        total_recuperation = round(historical_regen + measured_regen, 1)
     else:
-        total_recuperation = round(total_km * recup_kwh_per_km, 1) if total_km > 0 else 0
+        total_recuperation = round(total_km * static_recup_rate, 1) if total_km > 0 else 0
+
+    # Rate shown on the dashboard is the CURRENT measured efficiency when
+    # we have it — useful for seeing real driving style. Historical portion
+    # still uses the static rate above.
+    recup_kwh_per_km, recup_rate_source = get_recup_rate_kwh_per_km()
     # Verbrauch mit Rekup. = was aus dem Netz geladen wurde pro 100km
     consumption_with_recup = round(total_kwh / (total_km / 100), 3) if total_km > 0 else 0
     # Verbrauch ohne Rekup. = tatsächlicher Gesamtverbrauch des Autos pro 100km
@@ -206,6 +225,10 @@ def get_summary_stats():
         'recup_rate_kwh_per_km': round(recup_kwh_per_km, 4),
         'recup_rate_source': recup_rate_source,
         'regen_stats': regen_stats,
+        'historical_regen_km': historical_km,
+        'historical_regen_kwh': round(historical_regen, 1),
+        'measured_regen_kwh': round(measured_regen, 2),
+        'static_recup_rate': static_recup_rate,
     }
 
 

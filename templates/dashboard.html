@@ -516,7 +516,13 @@
             <div class="card-body text-center p-2">
                 <div class="kpi-label">{{ t('dash.recuperation') }}{% if stats.recup_rate_source == 'measured' %} <i class="bi bi-broadcast text-success" title="{{ t('dash.regen_auto') }}"></i>{% endif %}</div>
                 <div class="kpi-value text-success">{{ "{:,.0f}".format(stats.total_recuperation).replace(",", ".") }} kWh</div>
-                <div class="kpi-label mt-1" style="text-transform:none; letter-spacing:0">{{ stats.recup_cycles }} {{ t('dash.cycles') }} · {{ "%.3f"|format(stats.recup_rate_kwh_per_km) }} kWh/km</div>
+                <div class="kpi-label mt-1" style="text-transform:none; letter-spacing:0">
+                    {% if stats.historical_regen_kwh > 0 and stats.measured_regen_kwh is defined %}
+                    {{ "{:,.0f}".format(stats.historical_regen_kwh).replace(",", ".") }} + {{ "%.1f"|format(stats.measured_regen_kwh) }} <small>({{ t('dash.regen_measured') }})</small>
+                    {% else %}
+                    {{ stats.recup_cycles }} {{ t('dash.cycles') }} · {{ "%.3f"|format(stats.recup_rate_kwh_per_km) }} kWh/km
+                    {% endif %}
+                </div>
             </div>
         </div>
     </div>

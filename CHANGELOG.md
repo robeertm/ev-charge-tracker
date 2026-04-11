@@ -1,5 +1,22 @@
 # Changelog
 
+## v2.5.6 (2026-04-11)
+
+### Hybrid recuperation: keep the km × 0.086 estimate, layer measured on top
+
+v2.5.4/5 replaced the full lifetime recuperation with the tiny measured cumulative (6.92 kWh for the first 92 km of tracking), which threw away years of historical km where the old `km × 0.086` estimate was the best number available.
+
+This release uses a hybrid:
+
+- **km before the first vehicle sync** → `first_sync_odometer × static_rate` (default 0.086 kWh/km, still configurable in Settings)
+- **km from that point on** → real measured `regen_cumulative_kwh` from the vehicle API
+
+Result on a real Kia Niro dataset: `82217 × 0.086 + 6.92 = 7077.6 kWh` — matches the pre-v2.5.4 lifetime total, and from here on grows only via measured values as the car drives.
+
+- The Recuperation KPI card now shows `7.071 + 6.9 (kumuliert)` to make the split obvious.
+- The measured rate (0.075 kWh/km from the last 90d) is still shown with the broadcast icon — that's the *current driving efficiency*, separate from the historical baseline.
+- The "Gemessene Rekuperation" card remains unchanged: it only shows real per-period measurements and never touches the historical km × 0.086 portion.
+
 ## v2.5.5 (2026-04-11)
 
 ### Regen scale hotfix: raw is Wh, not hundredths of kWh
