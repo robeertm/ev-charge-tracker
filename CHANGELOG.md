@@ -1,5 +1,9 @@
 # Changelog
 
+## v2.5.7 (2026-04-11)
+
+- **Lade- und Rekup-Zyklen als ganze Zahlen** — `charge_cycles` und `recup_cycles` in `get_summary_stats` runden jetzt auf ganze Zyklen statt eine Nachkommastelle. Fraktions-Zyklen ergeben keinen intuitiven Sinn; ein ganzer Zyklus ist die Maßeinheit.
+
 ## v2.5.6 (2026-04-11)
 
 ### Hybrid recuperation: keep the km × 0.086 estimate, layer measured on top

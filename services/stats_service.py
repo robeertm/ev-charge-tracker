@@ -184,8 +184,8 @@ def get_summary_stats():
     # km extra durch Rekuperation
     recup_extra_km = round(total_recuperation / (consumption_without_recup / 100), 0) if consumption_without_recup > 0 else 0
     # Ladezyklen
-    charge_cycles = round(total_kwh / battery_kwh, 1) if battery_kwh > 0 else 0
-    recup_cycles = round(total_recuperation / battery_kwh, 1) if battery_kwh > 0 else 0
+    charge_cycles = int(round(total_kwh / battery_kwh)) if battery_kwh > 0 else 0
+    recup_cycles = int(round(total_recuperation / battery_kwh)) if battery_kwh > 0 else 0
     # Kosten pro 100km
     cost_per_100km = round(total_cost / total_km * 100, 2) if total_km > 0 else 0
     net_cost_per_100km = round((total_cost - total_thg) / total_km * 100, 2) if total_km > 0 else 0
