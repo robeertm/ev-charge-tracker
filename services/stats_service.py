@@ -1,7 +1,124 @@
 """Statistics and aggregation service."""
+import bisect
 from datetime import date, datetime, timedelta
 from sqlalchemy import func, extract
 from models.database import db, Charge, ThgQuota, AppConfig, VehicleSync
+
+
+def _measured_regen_rate_kwh_per_km():
+    """Compute kWh recuperated per km from the last ~90 days of vehicle syncs.
+
+    Uses the monotonic regen_cumulative_kwh (delta) divided by the odometer
+    delta over the same window. Returns None if there's insufficient data,
+    in which case callers should fall back to the configured static rate.
+    """
+    cutoff = datetime.now() - timedelta(days=90)
+    rows = (VehicleSync.query
+            .filter(VehicleSync.timestamp >= cutoff,
+                    VehicleSync.regen_cumulative_kwh.isnot(None),
+                    VehicleSync.odometer_km.isnot(None))
+            .order_by(VehicleSync.timestamp.asc())
+            .all())
+    if len(rows) < 2:
+        return None
+    regen_delta = rows[-1].regen_cumulative_kwh - rows[0].regen_cumulative_kwh
+    km_delta = rows[-1].odometer_km - rows[0].odometer_km
+    if km_delta <= 10 or regen_delta <= 0:
+        return None
+    return round(regen_delta / km_delta, 4)
+
+
+def get_recup_rate_kwh_per_km():
+    """Return the recuperation rate in kWh/km.
+
+    Prefers a measured rate from the last 90 days of vehicle syncs (when
+    available). Falls back to the user-configured static value (default 0.086).
+    Returns a tuple (rate, source) where source is 'measured' or 'configured'.
+    """
+    measured = _measured_regen_rate_kwh_per_km()
+    if measured is not None and measured > 0:
+        return measured, 'measured'
+    try:
+        rate = float(AppConfig.get('recuperation_kwh_per_km', '0.086'))
+    except (ValueError, TypeError):
+        rate = 0.086
+    return rate, 'configured'
+
+
+def _regen_cumulative_at(rows_sorted, ts):
+    """Helper: cumulative regen at or before `ts` (using sorted list of syncs).
+
+    rows_sorted is a list of (timestamp, cumulative) tuples ordered by timestamp.
+    Returns 0.0 if there's no data before ts.
+    """
+    if not rows_sorted or ts is None:
+        return 0.0
+    keys = [r[0] for r in rows_sorted]
+    idx = bisect.bisect_right(keys, ts) - 1
+    if idx < 0:
+        return 0.0
+    return rows_sorted[idx][1]
+
+
+def get_regen_stats():
+    """Return measured recuperation aggregated by time period.
+
+    Uses the monotonic `regen_cumulative_kwh` column. Requires vehicle sync
+    data from a brand that reports regen (Kia/Hyundai). Returns None if
+    there is no regen data at all.
+    """
+    rows = (VehicleSync.query
+            .filter(VehicleSync.regen_cumulative_kwh.isnot(None))
+            .order_by(VehicleSync.timestamp.asc())
+            .all())
+    if not rows:
+        return None
+
+    lookup = [(r.timestamp, r.regen_cumulative_kwh) for r in rows]
+    now = datetime.now()
+    today_start = datetime.combine(now.date(), datetime.min.time())
+    week_start = today_start - timedelta(days=now.weekday())
+    month_start = datetime(now.year, now.month, 1)
+    year_start = datetime(now.year, 1, 1)
+    d30_start = now - timedelta(days=30)
+    d90_start = now - timedelta(days=90)
+
+    cum_now = lookup[-1][1]
+    first_ts = lookup[0][0]
+    first_cum = lookup[0][1]
+
+    def _delta(start):
+        # cumulative at last sync <= now minus cumulative at last sync <= start
+        return round(cum_now - _regen_cumulative_at(lookup, start), 2)
+
+    # Estimated km via recup rate — so "X kWh ≈ Y km range-equivalent"
+    rate, _ = get_recup_rate_kwh_per_km()
+
+    stats = {
+        'today': _delta(today_start),
+        'this_week': _delta(week_start),
+        'this_month': _delta(month_start),
+        'last_30d': _delta(d30_start),
+        'last_90d': _delta(d90_start),
+        'this_year': _delta(year_start),
+        'lifetime': round(cum_now - first_cum, 2),
+        'first_sync': first_ts.isoformat(),
+        'sync_count': len(rows),
+        'rate_kwh_per_km': rate,
+    }
+    # km equivalents (how many km you could drive from that recuperated energy)
+    # Using the average consumption as rough equivalence
+    try:
+        total_km = max((c.odometer for c in Charge.query.all() if c.odometer), default=0)
+        total_kwh = sum(c.kwh_loaded or 0 for c in Charge.query.all())
+        kwh_per_100km = (total_kwh / (total_km / 100)) if total_km > 0 else 17
+    except Exception:
+        kwh_per_100km = 17
+    if kwh_per_100km > 0:
+        stats['lifetime_km_equiv'] = int(round(stats['lifetime'] / kwh_per_100km * 100))
+    else:
+        stats['lifetime_km_equiv'] = 0
+    return stats
 
 
 def get_summary_stats():
@@ -29,13 +146,18 @@ def get_summary_stats():
         battery_kwh = float(AppConfig.get('battery_kwh', '64'))
     except (ValueError, TypeError):
         battery_kwh = 64.0
-    try:
-        recup_kwh_per_km = float(AppConfig.get('recuperation_kwh_per_km', '0.086'))
-    except (ValueError, TypeError):
-        recup_kwh_per_km = 0.086
 
-    # Recuperation & consumption
-    total_recuperation = round(total_km * recup_kwh_per_km, 1) if total_km > 0 else 0
+    # Recuperation: prefer measured rate (kWh/km from last 90d of vehicle syncs)
+    # over the user-configured static value.
+    recup_kwh_per_km, recup_rate_source = get_recup_rate_kwh_per_km()
+
+    # Prefer the real measured lifetime cumulative regen when we have it,
+    # otherwise extrapolate from the configured rate × km driven.
+    regen_stats = get_regen_stats()
+    if regen_stats and regen_stats.get('lifetime', 0) > 0:
+        total_recuperation = round(regen_stats['lifetime'], 1)
+    else:
+        total_recuperation = round(total_km * recup_kwh_per_km, 1) if total_km > 0 else 0
     # Verbrauch mit Rekup. = was aus dem Netz geladen wurde pro 100km
     consumption_with_recup = round(total_kwh / (total_km / 100), 3) if total_km > 0 else 0
     # Verbrauch ohne Rekup. = tatsächlicher Gesamtverbrauch des Autos pro 100km
@@ -81,6 +203,9 @@ def get_summary_stats():
         'recup_cycles': recup_cycles,
         'cost_per_100km': cost_per_100km,
         'net_cost_per_100km': net_cost_per_100km,
+        'recup_rate_kwh_per_km': round(recup_kwh_per_km, 4),
+        'recup_rate_source': recup_rate_source,
+        'regen_stats': regen_stats,
     }
 
 
@@ -191,7 +316,10 @@ def get_vehicle_history(days=None):
         'odometer_km': [r.odometer_km for r in rows],
         'battery_12v': [r.battery_12v_percent for r in rows],
         'soh': [r.battery_soh_percent for r in rows],
-        'regen_kwh': [r.total_regenerated_kwh for r in rows],
+        # Cumulative (monotonic) — real measured recup since tracking started
+        'regen_kwh': [r.regen_cumulative_kwh for r in rows],
+        # Raw rolling 3-month window value (kept for reference / tooltips)
+        'regen_3mo': [r.total_regenerated_kwh for r in rows],
         'consumption_30d': [r.consumption_30d_kwh_per_100km for r in rows],
         'lat': [r.location_lat for r in rows],
         'lon': [r.location_lon for r in rows],
@@ -208,7 +336,8 @@ def get_vehicle_history(days=None):
             'odometer_km': last.odometer_km,
             'battery_12v': last.battery_12v_percent,
             'soh': last.battery_soh_percent,
-            'regen_kwh': last.total_regenerated_kwh,
+            'regen_kwh': last.regen_cumulative_kwh,
+            'regen_3mo': last.total_regenerated_kwh,
             'consumption_30d': last.consumption_30d_kwh_per_100km,
             'lat': last.location_lat,
             'lon': last.location_lon,

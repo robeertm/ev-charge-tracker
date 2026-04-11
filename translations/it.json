@@ -466,5 +466,18 @@
   "logs.lvl_all": "Tutti",
   "logs.filter_placeholder": "Filtro (logger o testo)",
   "logs.clear": "Pulisci",
-  "logs.download": "Scarica"
+  "logs.download": "Scarica",
+  "dash.regen_by_period": "Recupero misurato",
+  "dash.regen_since": "Dal",
+  "dash.regen_today": "Oggi",
+  "dash.regen_week": "Settimana",
+  "dash.regen_month": "Mese",
+  "dash.regen_30d": "30 giorni",
+  "dash.regen_year": "Anno",
+  "dash.regen_total": "Totale",
+  "dash.regen_measured": "cumulato",
+  "dash.regen_auto": "Auto dal veicolo",
+  "trips.col_regen": "Recup",
+  "set.recup_auto": "auto",
+  "set.recup_measured": "Misurato (90 giorni)"
 }

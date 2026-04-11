@@ -1,5 +1,44 @@
 # Changelog
 
+## v2.5.4 (2026-04-11)
+
+### Rekuperation: korrekt interpretiert, kumuliert, pro Fahrt
+
+The Kia/Hyundai API returns `total_power_regenerated` as **hundredths of kWh for a rolling 3-month window** — not lifetime, not tenths. Every stat that touched that value was previously off by a factor of 10 and mistook the rolling window for a cumulative total. This release fixes the interpretation and builds real per-period / per-trip statistics on top of it.
+
+#### Data fix
+- **Divisor corrected** in `_build_vehicle_sync` ([app.py](app.py)): raw value is divided by **100** (not 10). A raw reading of `21534` now stores the correct `215.34 kWh` instead of `2153.4 kWh`.
+- **One-time migration** on startup divides every existing `vehicle_syncs.total_regenerated_kwh` by 10 to retroactively fix rows written under the old scale. Gated by `regen_scale_fix_v1` in AppConfig so it only runs once.
+- **New column `regen_cumulative_kwh`** on `vehicle_syncs` — monotonically increasing "measured regen since first sync". Built from delta-walking the raw series: positive deltas add up, rollovers (new raw < previous raw, meaning a month fell off the 3-month window) contribute 0. Backfilled for existing rows automatically on first boot after upgrade.
+
+#### Dynamic recuperation rate
+- **`kWh/km` recuperation rate is now measured from the last 90 days of vehicle syncs** (cumulative regen delta / odometer delta) instead of the hardcoded `0.086`. Falls back to the configured static value when there's no vehicle data. Settings page shows a green "automatisch" badge + the measured rate when in use.
+- `get_summary_stats` now prefers the real measured lifetime cumulative over the extrapolated `total_km * recup_rate` estimate whenever vehicle history is available.
+
+#### New `get_regen_stats()`
+- Returns measured recuperation aggregated by: **today, this week, this month, last 30d, last 90d, this year, lifetime**, plus `km_equivalent` (lifetime regen converted to km at the car's actual consumption).
+- Uses `bisect` lookups against a single sorted pull of the cumulative series — O(log n) per query.
+
+#### Per-trip recuperation
+- Each trip in `get_trips()` gets a `regen_kwh` field via cumulative-at-timestamp lookups at `departed_at` and `arrived_at`.
+- Trip summary (`get_trip_summary`) adds `total_regen_kwh` and `regen_per_km` across the visible window.
+- New **Rekup** column in the `/trips` table and in the PDF Fahrtenbuch table (80 most recent trips).
+
+#### Dashboard
+- New **"Gemessene Rekuperation"** card directly under the KPI grid: 6 period cards + km-equivalent, only shown when vehicle sync data exists.
+- **Recuperation KPI card** now shows the measured `kWh/km` rate instead of the configured one, plus a `bi-broadcast` icon when the rate is being pulled live from the car.
+- **Vehicle-history Regen chart** switched from the rolling 3-month raw value (which fluctuates month-to-month) to the monotonic cumulative, so the line actually grows instead of wiggling.
+- **Live vehicle widget** label updated to `Rekuperiert (3 Mon.)` and the double `/10` bug fixed — the widget now shows the correct kWh value.
+
+#### PDF report
+- New page **"Gemessene Rekuperation"** with an 8-cell KPI table (today / week / month / 30d / 90d / year / lifetime / km-equivalent) + the auto-detected rate.
+- Fahrtenbuch table gets a **Rekup** column (column widths adjusted).
+- Vehicle-history "Rekuperation gesamt" chart title updated to "Rekuperation (gemessen, kumuliert)".
+- `regen_delta` summary line on the vehicle-history page is now labelled "Rekup. kumuliert".
+
+#### Translations
+- 13 new keys × 6 languages for the regen period cards, the settings badge, and the trips column.
+
 ## v2.5.3 (2026-04-10)
 
 ### Cross-platform polish

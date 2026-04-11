@@ -56,6 +56,7 @@ def create_app(config_class=Config):
             ('battery_12v_percent', 'INTEGER'),
             ('battery_soh_percent', 'REAL'),
             ('total_regenerated_kwh', 'REAL'),
+            ('regen_cumulative_kwh', 'REAL'),
             ('consumption_30d_kwh_per_100km', 'REAL'),
             ('location_lat', 'REAL'),
             ('location_lon', 'REAL'),
@@ -81,6 +82,29 @@ def create_app(config_class=Config):
             pass  # table might not exist yet on a fresh install — create_all() will handle it
 
         db.session.commit()
+
+        # One-time scale fix: historical total_regenerated_kwh was stored as
+        # raw/10; correct is raw/100 (the raw API value is in hundredths of kWh,
+        # and represents a rolling 3-month window, not a lifetime total).
+        # Divide existing values by 10 once, then (re)compute the monotonic
+        # regen_cumulative_kwh from the corrected series.
+        if AppConfig.get('regen_scale_fix_v1', '') != 'done':
+            db.session.execute(text(
+                'UPDATE vehicle_syncs SET total_regenerated_kwh = total_regenerated_kwh / 10.0 '
+                'WHERE total_regenerated_kwh IS NOT NULL'
+            ))
+            db.session.commit()
+            AppConfig.set('regen_scale_fix_v1', 'done')
+            logger.info("Applied regen scale fix: total_regenerated_kwh /= 10 on all rows")
+
+        # Backfill regen_cumulative_kwh if any row is missing it.
+        _missing = db.session.execute(text(
+            'SELECT COUNT(*) FROM vehicle_syncs '
+            'WHERE total_regenerated_kwh IS NOT NULL AND regen_cumulative_kwh IS NULL'
+        )).scalar() or 0
+        if _missing > 0:
+            _backfill_regen_cumulative()
+            logger.info(f"Backfilled regen_cumulative_kwh for {_missing} vehicle_syncs rows")
 
     register_routes(app)
 
@@ -169,12 +193,40 @@ def _calc_soh_percent(status, battery_kwh):
     return None
 
 
+def _backfill_regen_cumulative():
+    """Walk vehicle_syncs in timestamp order and (re)compute regen_cumulative_kwh.
+
+    The raw total_regenerated_kwh is a **rolling 3-month window** (Kia/Hyundai).
+    To get a monotonic lifetime-ish value we sum positive deltas between syncs
+    and skip negative deltas (which mark the moment a month rolls off the window).
+    First data point anchors the cumulative at 0 — so the result is
+    'measured regen since tracking started', not lifetime regen.
+    """
+    rows = VehicleSync.query.order_by(VehicleSync.timestamp.asc()).all()
+    cum = 0.0
+    last_raw = None
+    for r in rows:
+        raw = r.total_regenerated_kwh
+        if raw is None:
+            # Preserve existing non-null cumulative (from previous rows)
+            if last_raw is not None:
+                r.regen_cumulative_kwh = round(cum, 2)
+            continue
+        if last_raw is not None and raw >= last_raw:
+            cum += (raw - last_raw)
+        # else: first reading → anchor, or rollover → skip
+        last_raw = raw
+        r.regen_cumulative_kwh = round(cum, 2)
+    db.session.commit()
+
+
 def _build_vehicle_sync(status, battery_kwh, raw_json=''):
     """Build a VehicleSync row from a connector VehicleStatus."""
     regen_kwh = None
     if status.total_power_regenerated_kwh is not None:
         try:
-            regen_kwh = round(float(status.total_power_regenerated_kwh) / 10.0, 1)
+            # Raw API value is in hundredths of kWh for a rolling 3-month window
+            regen_kwh = round(float(status.total_power_regenerated_kwh) / 100.0, 2)
         except (ValueError, TypeError):
             pass
     cons_30d = None
@@ -214,6 +266,18 @@ def _save_vehicle_sync(status, battery_kwh, raw_json=''):
     """
     new_sync = _build_vehicle_sync(status, battery_kwh, raw_json=raw_json)
     last = VehicleSync.query.order_by(VehicleSync.timestamp.desc()).first()
+
+    # Compute monotonic cumulative regen from the rolling 3-month raw value
+    if new_sync.total_regenerated_kwh is not None:
+        if last is not None and last.total_regenerated_kwh is not None:
+            prev_cum = last.regen_cumulative_kwh or 0.0
+            prev_raw = last.total_regenerated_kwh
+            new_raw = new_sync.total_regenerated_kwh
+            delta = (new_raw - prev_raw) if new_raw >= prev_raw else 0.0
+            new_sync.regen_cumulative_kwh = round(prev_cum + delta, 2)
+        else:
+            # First ever reading — anchor at 0
+            new_sync.regen_cumulative_kwh = 0.0
 
     if new_sync.differs_from(last):
         db.session.add(new_sync)
@@ -620,6 +684,10 @@ def register_routes(app):
         # Last vehicle sync
         last_sync = VehicleSync.query.order_by(VehicleSync.timestamp.desc()).first()
 
+        # Measured recup rate (from last 90 days of vehicle syncs)
+        from services.stats_service import get_recup_rate_kwh_per_km
+        measured_recup, measured_recup_source = get_recup_rate_kwh_per_km()
+
         return render_template('settings.html',
                                entsoe_key=AppConfig.get('entsoe_api_key', ''),
                                car_model_val=AppConfig.get('car_model', Config.CAR_MODEL),
@@ -643,6 +711,8 @@ def register_routes(app):
                                battery_co2_per_kwh=AppConfig.get('battery_co2_per_kwh', '100'),
                                fossil_co2_per_km=AppConfig.get('fossil_co2_per_km', '164'),
                                recuperation_kwh_per_km=AppConfig.get('recuperation_kwh_per_km', '0.086'),
+                               measured_recup_rate=measured_recup,
+                               measured_recup_source=measured_recup_source,
                                pv_kwp=AppConfig.get('pv_kwp', ''),
                                pv_yield_per_kwp=AppConfig.get('pv_yield_per_kwp', '950'),
                                pv_lifetime=AppConfig.get('pv_lifetime', '25'),
@@ -912,7 +982,9 @@ def register_routes(app):
                 'climate_temp': s.climate_temp,
                 'climate_on': s.climate_on,
                 'total_consumed_kwh': s.total_power_consumed_kwh,
-                'total_regenerated_kwh': s.total_power_regenerated_kwh,
+                # Scaled kWh for the rolling 3-month window (raw / 100)
+                'total_regenerated_kwh': sync.total_regenerated_kwh,
+                'regen_cumulative_kwh': sync.regen_cumulative_kwh,
                 'location_lat': s.location_lat,
                 'location_lon': s.location_lon,
                 'last_updated': s.last_updated,

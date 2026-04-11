@@ -103,13 +103,16 @@ class VehicleSync(db.Model):
     # Extended history columns
     battery_12v_percent = db.Column(db.Integer)
     battery_soh_percent = db.Column(db.Float)
-    total_regenerated_kwh = db.Column(db.Float)
+    total_regenerated_kwh = db.Column(db.Float)  # rolling 3-month window (Kia/Hyundai)
+    regen_cumulative_kwh = db.Column(db.Float)   # monotonic total since first sync
     consumption_30d_kwh_per_100km = db.Column(db.Float)
     location_lat = db.Column(db.Float)
     location_lon = db.Column(db.Float)
     raw_json = db.Column(db.Text)
 
-    # Fields used for change detection (any difference triggers a new row)
+    # Fields used for change detection (any difference triggers a new row).
+    # regen_cumulative_kwh is derived from total_regenerated_kwh and must NOT
+    # be in this list, otherwise rollover-zero deltas would still trigger rows.
     TRACKED_FIELDS = (
         'soc_percent', 'odometer_km', 'estimated_range_km',
         'battery_12v_percent', 'battery_soh_percent',

@@ -466,5 +466,18 @@
   "logs.lvl_all": "Tous",
   "logs.filter_placeholder": "Filtre (logger ou texte)",
   "logs.clear": "Vider",
-  "logs.download": "Télécharger"
+  "logs.download": "Télécharger",
+  "dash.regen_by_period": "Récupération mesurée",
+  "dash.regen_since": "Depuis",
+  "dash.regen_today": "Aujourd'hui",
+  "dash.regen_week": "Semaine",
+  "dash.regen_month": "Mois",
+  "dash.regen_30d": "30 jours",
+  "dash.regen_year": "Année",
+  "dash.regen_total": "Total",
+  "dash.regen_measured": "cumulé",
+  "dash.regen_auto": "Auto du véhicule",
+  "trips.col_regen": "Récup",
+  "set.recup_auto": "auto",
+  "set.recup_measured": "Mesuré (90 jours)"
 }

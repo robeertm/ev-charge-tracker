@@ -466,5 +466,18 @@
   "logs.lvl_all": "Alle",
   "logs.filter_placeholder": "Filter (logger of tekst)",
   "logs.clear": "Wissen",
-  "logs.download": "Downloaden"
+  "logs.download": "Downloaden",
+  "dash.regen_by_period": "Gemeten recuperatie",
+  "dash.regen_since": "Sinds",
+  "dash.regen_today": "Vandaag",
+  "dash.regen_week": "Week",
+  "dash.regen_month": "Maand",
+  "dash.regen_30d": "30 dagen",
+  "dash.regen_year": "Jaar",
+  "dash.regen_total": "Totaal",
+  "dash.regen_measured": "cumulatief",
+  "dash.regen_auto": "Auto van voertuig",
+  "trips.col_regen": "Recup",
+  "set.recup_auto": "auto",
+  "set.recup_measured": "Gemeten (90 dagen)"
 }

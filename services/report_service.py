@@ -222,7 +222,7 @@ def _generate_vehicle_history_charts(vh, tmp_dir):
     out['vh_odo']    = _line_chart('vh_odo',    series['odometer_km'],     'km',          'Tachostand',             C_DARK)
     out['vh_12v']    = _line_chart('vh_12v',    series['battery_12v'],     '%',           '12V Batterie',           C_WARNING)
     out['vh_soh']    = _line_chart('vh_soh',    series['soh'],             '%',           'SoH (State of Health)',  C_DANGER)
-    out['vh_regen']  = _line_chart('vh_regen',  series['regen_kwh'],       'kWh',         'Rekuperation gesamt',    C_INFO)
+    out['vh_regen']  = _line_chart('vh_regen',  series['regen_kwh'],       'kWh',         'Rekuperation (gemessen, kumuliert)', C_INFO)
     out['vh_cons']   = _line_chart('vh_cons',   series['consumption_30d'], 'kWh/100km',  'O 30 Tage Verbrauch',    C_PV)
     return {k: v for k, v in out.items() if v}
 
@@ -418,7 +418,7 @@ def generate_report():
         if sm.get('soh_delta') is not None:
             info_parts.append(f"SoH Delta: {sm['soh_delta']:+.1f} %")
         if sm.get('regen_delta') is not None:
-            info_parts.append(f"Rekup. Delta: {sm['regen_delta']:+.0f} kWh")
+            info_parts.append(f"Rekup. kumuliert: {sm['regen_delta']:+.0f} kWh")
         pdf.set_font('Helvetica', 'I', 8)
         pdf.set_text_color(120, 120, 120)
         pdf.cell(0, 5, pdf._clean(' - '.join(info_parts)), align='C', new_x='LMARGIN', new_y='NEXT')
@@ -433,6 +433,34 @@ def generate_report():
             pdf.set_text_color(33, 33, 33)
             pdf.cell(0, 5, pdf._clean(f"Letzter Standort: {last['lat']:.5f}, {last['lon']:.5f}"),
                      align='C', new_x='LMARGIN', new_y='NEXT')
+
+    # === Measured regen stats (only if we have vehicle API data) ===
+    regen_stats = stats.get('regen_stats')
+    if regen_stats:
+        pdf.add_page()
+        pdf.section_title('Gemessene Rekuperation')
+        pdf.set_font('Helvetica', 'I', 8)
+        pdf.set_text_color(120, 120, 120)
+        pdf.cell(0, 5, pdf._clean(
+            f"Gemessen vom Auto seit {regen_stats['first_sync'][:10]} - "
+            f"Rate: {regen_stats['rate_kwh_per_km']:.3f} kWh/km"
+        ), align='C', new_x='LMARGIN', new_y='NEXT')
+        pdf.ln(3)
+        regen_kpi = [
+            [
+                ('Heute', f"{regen_stats['today']:.1f}", 'kWh'),
+                ('Woche', f"{regen_stats['this_week']:.1f}", 'kWh'),
+                ('Monat', f"{regen_stats['this_month']:.1f}", 'kWh'),
+                ('30 Tage', f"{regen_stats['last_30d']:.1f}", 'kWh'),
+            ],
+            [
+                ('90 Tage', f"{regen_stats['last_90d']:.1f}", 'kWh'),
+                ('Jahr', f"{regen_stats['this_year']:.1f}", 'kWh'),
+                ('Gesamt', f"{regen_stats['lifetime']:,.0f}", 'kWh'),
+                ('~ km aequivalent', f"{regen_stats['lifetime_km_equiv']:,}", 'km'),
+            ],
+        ]
+        pdf.kpi_table(regen_kpi)
 
     # === Highlights page ===
     highlights = get_highlights()
@@ -470,24 +498,28 @@ def generate_report():
         pdf.section_title('Fahrtenbuch')
         pdf.set_font('Helvetica', 'I', 8)
         pdf.set_text_color(120, 120, 120)
-        pdf.cell(0, 5, pdf._clean(
+        info_line = (
             f"{trip_summary['count']} Fahrten - {trip_summary['total_km']:,.0f} km - "
             f"Home<->Work: {trip_summary['home_work_km']:,.0f} km"
-        ), align='C', new_x='LMARGIN', new_y='NEXT')
+        )
+        if trip_summary.get('total_regen_kwh'):
+            info_line += f" - Rekup: {trip_summary['total_regen_kwh']:,.1f} kWh"
+        pdf.cell(0, 5, pdf._clean(info_line), align='C', new_x='LMARGIN', new_y='NEXT')
         pdf.ln(2)
 
-        headers = ['Datum', 'Von', 'Nach', 'km', 'SoC']
-        cw = [22, 76, 76, 14, 14]
+        headers = ['Datum', 'Von', 'Nach', 'km', 'SoC', 'Rekup']
+        cw = [22, 72, 72, 14, 14, 16]
         rows = []
         for tr in trips[:80]:
             d = (tr['from'].get('departed_at') or '')[:10]
             from_ = (tr['from'].get('address') or tr['from'].get('name')
-                     or tr['from'].get('label') or '-')[:40]
+                     or tr['from'].get('label') or '-')[:38]
             to_ = (tr['to'].get('address') or tr['to'].get('name')
-                   or tr['to'].get('label') or '-')[:40]
+                   or tr['to'].get('label') or '-')[:38]
             soc = f"-{tr['soc_used']}%" if tr.get('soc_used') else '-'
+            regen = f"+{tr['regen_kwh']:.1f}" if tr.get('regen_kwh') else '-'
             rows.append([d, from_, to_,
-                         str(tr['km']) if tr['km'] else '-', soc])
+                         str(tr['km']) if tr['km'] else '-', soc, regen])
         pdf.add_table(headers, rows, cw)
 
     # === Maintenance log ===

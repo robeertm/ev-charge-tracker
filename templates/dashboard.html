@@ -84,7 +84,7 @@
                 <div class="fw-bold" id="vSoH">—</div>
             </div>
             <div class="col-4 col-md-2">
-                <div class="small text-muted">{{ t('dash.regenerated') }}</div>
+                <div class="small text-muted">{{ t('dash.regenerated') }} <small>(3 Mon.)</small></div>
                 <div class="fw-bold" id="vRegen">—</div>
             </div>
         </div>
@@ -169,7 +169,7 @@
             const soh = (consumedKwh / 1000 / battKwh * 100).toFixed(1);
             document.getElementById('vSoH').textContent = soh + ' %';
         }
-        document.getElementById('vRegen').textContent = d.total_regenerated_kwh != null ? (d.total_regenerated_kwh / 10).toFixed(0) + ' kWh' : '—';
+        document.getElementById('vRegen').textContent = d.total_regenerated_kwh != null ? d.total_regenerated_kwh.toFixed(1) + ' kWh' : '—';
         if (d.doors) {
             const dr = d.doors;
             const anyOpen = dr.fl || dr.fr || dr.bl || dr.br || dr.trunk || dr.hood;
@@ -269,7 +269,7 @@
                 <div style="position:relative; height:140px;"><canvas id="vhSoh"></canvas></div>
             </div>
             <div class="col-lg-4 col-md-6">
-                <div class="small text-muted">{{ t('dash.regenerated') }} (kWh)</div>
+                <div class="small text-muted">{{ t('dash.regenerated') }} <small>({{ t('dash.regen_measured') }})</small></div>
                 <div style="position:relative; height:140px;"><canvas id="vhRegen"></canvas></div>
             </div>
             <div class="col-lg-4 col-md-6">
@@ -514,9 +514,9 @@
     <div class="col-6 col-lg-3">
         <div class="card kpi-card border-success">
             <div class="card-body text-center p-2">
-                <div class="kpi-label">{{ t('dash.recuperation') }}</div>
+                <div class="kpi-label">{{ t('dash.recuperation') }}{% if stats.recup_rate_source == 'measured' %} <i class="bi bi-broadcast text-success" title="{{ t('dash.regen_auto') }}"></i>{% endif %}</div>
                 <div class="kpi-value text-success">{{ "{:,.0f}".format(stats.total_recuperation).replace(",", ".") }} kWh</div>
-                <div class="kpi-label mt-1" style="text-transform:none; letter-spacing:0">{{ stats.recup_cycles }} {{ t('dash.cycles') }} · {{ "%.3f"|format(stats.total_recuperation / stats.total_km) }} kWh/km</div>
+                <div class="kpi-label mt-1" style="text-transform:none; letter-spacing:0">{{ stats.recup_cycles }} {{ t('dash.cycles') }} · {{ "%.3f"|format(stats.recup_rate_kwh_per_km) }} kWh/km</div>
             </div>
         </div>
     </div>
@@ -526,6 +526,45 @@
                 <div class="kpi-label">{{ t('dash.km_by_recup') }}</div>
                 <div class="kpi-value text-secondary">{{ "{:,.0f}".format(stats.recup_extra_km).replace(",", ".") }} km</div>
                 <div class="kpi-label mt-1" style="text-transform:none; letter-spacing:0">{{ "%.1f"|format(stats.recup_extra_km / stats.total_km * 100) }}% {{ t('dash.of_total') }}</div>
+            </div>
+        </div>
+    </div>
+</div>
+{% endif %}
+
+{% if stats.regen_stats %}
+<!-- Measured Recuperation by period -->
+<div class="card mb-3 border-success">
+    <div class="card-header bg-white fw-bold d-flex justify-content-between align-items-center">
+        <span><i class="bi bi-lightning-charge-fill text-success"></i> {{ t('dash.regen_by_period') }}</span>
+        <span class="text-muted small">{{ t('dash.regen_since') }} {{ stats.regen_stats.first_sync[:10] }}</span>
+    </div>
+    <div class="card-body py-2">
+        <div class="row g-2 text-center">
+            <div class="col-6 col-md-2">
+                <div class="small text-muted">{{ t('dash.regen_today') }}</div>
+                <div class="fw-bold text-success">{{ "%.1f"|format(stats.regen_stats.today) }} kWh</div>
+            </div>
+            <div class="col-6 col-md-2">
+                <div class="small text-muted">{{ t('dash.regen_week') }}</div>
+                <div class="fw-bold text-success">{{ "%.1f"|format(stats.regen_stats.this_week) }} kWh</div>
+            </div>
+            <div class="col-6 col-md-2">
+                <div class="small text-muted">{{ t('dash.regen_month') }}</div>
+                <div class="fw-bold text-success">{{ "%.1f"|format(stats.regen_stats.this_month) }} kWh</div>
+            </div>
+            <div class="col-6 col-md-2">
+                <div class="small text-muted">{{ t('dash.regen_30d') }}</div>
+                <div class="fw-bold text-success">{{ "%.1f"|format(stats.regen_stats.last_30d) }} kWh</div>
+            </div>
+            <div class="col-6 col-md-2">
+                <div class="small text-muted">{{ t('dash.regen_year') }}</div>
+                <div class="fw-bold text-success">{{ "%.1f"|format(stats.regen_stats.this_year) }} kWh</div>
+            </div>
+            <div class="col-6 col-md-2">
+                <div class="small text-muted">{{ t('dash.regen_total') }}</div>
+                <div class="fw-bold text-success">{{ "{:,.0f}".format(stats.regen_stats.lifetime).replace(",", ".") }} kWh</div>
+                <div class="small text-muted">≈ {{ "{:,.0f}".format(stats.regen_stats.lifetime_km_equiv).replace(",", ".") }} km</div>
             </div>
         </div>
     </div>

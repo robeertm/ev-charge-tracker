@@ -63,11 +63,21 @@
                             <div class="form-text">{{ t('set.co2_wtw_hint') }}</div>
                         </div>
                         <div class="col-sm-6">
-                            <label for="recuperation_kwh_per_km" class="form-label">{{ t('set.recup_rate') }}</label>
+                            <label for="recuperation_kwh_per_km" class="form-label">
+                                {{ t('set.recup_rate') }}
+                                {% if measured_recup_source == 'measured' %}
+                                <span class="badge bg-success ms-1"><i class="bi bi-broadcast"></i> {{ t('set.recup_auto') }}</span>
+                                {% endif %}
+                            </label>
                             <input type="number" class="form-control" id="recuperation_kwh_per_km" name="recuperation_kwh_per_km"
                                    value="{{ recuperation_kwh_per_km }}" step="0.001" min="0"
                                    placeholder="0.086">
-                            <div class="form-text">{{ t('set.recup_hint') }}</div>
+                            <div class="form-text">
+                                {{ t('set.recup_hint') }}
+                                {% if measured_recup_source == 'measured' %}
+                                <br><span class="text-success"><i class="bi bi-check-circle"></i> {{ t('set.recup_measured') }}: <strong>{{ "%.3f"|format(measured_recup_rate) }} kWh/km</strong></span>
+                                {% endif %}
+                            </div>
                         </div>
                     </div>
                     <button type="submit" name="action" value="save_car" class="btn btn-primary">

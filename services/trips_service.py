@@ -20,6 +20,7 @@ we report.
 """
 from __future__ import annotations
 
+import bisect
 import json
 import math
 from datetime import datetime, timedelta
@@ -171,6 +172,29 @@ def get_parking_events(limit: Optional[int] = None,
     return q.all()
 
 
+def _load_regen_lookup():
+    """Return a list of (timestamp, cumulative_kwh) for all vehicle syncs
+    that have a cumulative regen value, sorted ascending. Used for O(log n)
+    per-trip lookups via bisect."""
+    from models.database import VehicleSync
+    rows = (VehicleSync.query
+            .filter(VehicleSync.regen_cumulative_kwh.isnot(None))
+            .order_by(VehicleSync.timestamp.asc())
+            .all())
+    return [(r.timestamp, r.regen_cumulative_kwh) for r in rows]
+
+
+def _cum_regen_at(lookup, ts):
+    """Return cumulative regen at or before ts; None if no data before ts."""
+    if not lookup or ts is None:
+        return None
+    keys = [r[0] for r in lookup]
+    idx = bisect.bisect_right(keys, ts) - 1
+    if idx < 0:
+        return None
+    return lookup[idx][1]
+
+
 def get_trips(limit: Optional[int] = None,
               since: Optional[datetime] = None):
     """Derive trips from consecutive parking events.
@@ -182,6 +206,8 @@ def get_trips(limit: Optional[int] = None,
     if since:
         q = q.filter(ParkingEvent.arrived_at >= since)
     events = q.all()
+
+    regen_lookup = _load_regen_lookup()
 
     trips = []
     for prev, curr in zip(events, events[1:]):
@@ -197,6 +223,12 @@ def get_trips(limit: Optional[int] = None,
         soc_used = None
         if prev.soc_arrived is not None and curr.soc_arrived is not None:
             soc_used = max(prev.soc_arrived - curr.soc_arrived, 0)
+        # Per-trip recuperation from cumulative regen delta
+        regen_kwh = None
+        cum_dep = _cum_regen_at(regen_lookup, prev.departed_at)
+        cum_arr = _cum_regen_at(regen_lookup, curr.arrived_at)
+        if cum_dep is not None and cum_arr is not None:
+            regen_kwh = round(max(cum_arr - cum_dep, 0), 2)
         trips.append({
             'from': {
                 'lat': prev.lat, 'lon': prev.lon,
@@ -212,6 +244,7 @@ def get_trips(limit: Optional[int] = None,
             },
             'km': km,
             'soc_used': soc_used,
+            'regen_kwh': regen_kwh,
         })
 
     trips.reverse()  # newest first
@@ -221,18 +254,22 @@ def get_trips(limit: Optional[int] = None,
 
 
 def get_trip_summary(since: Optional[datetime] = None):
-    """Aggregate trip statistics: total km, count, home<->work split."""
+    """Aggregate trip statistics: total km, count, home<->work split, regen."""
     trips = get_trips(since=since)
     total_km = sum(t['km'] for t in trips if t['km'])
     home_work_km = sum(
         t['km'] for t in trips
         if t['km'] and {t['from']['label'], t['to']['label']} == {'home', 'work'}
     )
+    total_regen = sum(t['regen_kwh'] for t in trips if t.get('regen_kwh'))
+    regen_km = sum(t['km'] for t in trips if t.get('regen_kwh') and t.get('km'))
     return {
         'count': len(trips),
         'total_km': round(total_km, 1) if total_km else 0,
         'home_work_km': round(home_work_km, 1) if home_work_km else 0,
         'avg_km': round(total_km / len(trips), 1) if trips and total_km else 0,
+        'total_regen_kwh': round(total_regen, 2) if total_regen else 0,
+        'regen_per_km': round(total_regen / regen_km, 4) if regen_km else 0,
     }
 
 
