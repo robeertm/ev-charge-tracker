@@ -184,12 +184,13 @@ def _load_regen_lookup():
     return [(r.timestamp, r.regen_cumulative_kwh) for r in rows]
 
 
-def _cum_regen_at(lookup, ts):
-    """Return cumulative regen at or before ts; None if no data before ts."""
+def _cum_regen_at(lookup, ts, strict=False):
+    """Return cumulative regen at (or strictly before, if strict=True) ts.
+    None if no data before ts."""
     if not lookup or ts is None:
         return None
     keys = [r[0] for r in lookup]
-    idx = bisect.bisect_right(keys, ts) - 1
+    idx = (bisect.bisect_left(keys, ts) if strict else bisect.bisect_right(keys, ts)) - 1
     if idx < 0:
         return None
     return lookup[idx][1]
@@ -223,9 +224,13 @@ def get_trips(limit: Optional[int] = None,
         soc_used = None
         if prev.soc_arrived is not None and curr.soc_arrived is not None:
             soc_used = max(prev.soc_arrived - curr.soc_arrived, 0)
-        # Per-trip recuperation from cumulative regen delta
+        # Per-trip recuperation from cumulative regen delta.
+        # prev.departed_at == curr.arrived_at (both = the sync timestamp where
+        # movement was detected), so we anchor departure on the last confirmed
+        # sync at the previous spot — last_seen_at, or strictly before depart.
         regen_kwh = None
-        cum_dep = _cum_regen_at(regen_lookup, prev.departed_at)
+        dep_ts = prev.last_seen_at or prev.departed_at
+        cum_dep = _cum_regen_at(regen_lookup, dep_ts, strict=(prev.last_seen_at is None))
         cum_arr = _cum_regen_at(regen_lookup, curr.arrived_at)
         if cum_dep is not None and cum_arr is not None:
             regen_kwh = round(max(cum_arr - cum_dep, 0), 2)

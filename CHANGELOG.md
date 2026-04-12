@@ -1,5 +1,9 @@
 # Changelog
 
+## v2.5.8 (2026-04-12)
+
+- **Fahrtenbuch: Rekup-Spalte war immer leer** — Bei jeder Bewegungserkennung sind `prev.departed_at` und `curr.arrived_at` derselbe Sync-Zeitstempel (der Moment, in dem die Bewegung erkannt wurde), wodurch das kumulative Regen-Delta immer 0 war. Die Abfahrt ankert jetzt auf `prev.last_seen_at` (letzter bestätigter Sync am alten Spot vor Abfahrt), die Ankunft bleibt `curr.arrived_at` — damit liegt die Delta-Berechnung über zwei verschiedene Syncs.
+
 ## v2.5.7 (2026-04-11)
 
 - **Lade- und Rekup-Zyklen als ganze Zahlen** — `charge_cycles` und `recup_cycles` in `get_summary_stats` runden jetzt auf ganze Zyklen statt eine Nachkommastelle. Fraktions-Zyklen ergeben keinen intuitiven Sinn; ein ganzer Zyklus ist die Maßeinheit.
