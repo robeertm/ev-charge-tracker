@@ -70,34 +70,41 @@ def _do_fetch(brand_key):
     token_url = f"{cfg['base_url']}token"
 
     try:
-        # Auto-install selenium if missing
+        # Auto-install/upgrade selenium if missing or too old (need 4.11+ for Selenium Manager)
         try:
+            import selenium
+            from packaging.version import Version
+            if Version(selenium.__version__) < Version('4.11.0'):
+                raise ImportError('selenium too old')
             from selenium import webdriver
         except ImportError:
             _fetch_state['status'] = 'Selenium wird installiert...'
             import subprocess, sys
-            subprocess.run([sys.executable, '-m', 'pip', 'install', 'selenium', 'webdriver-manager'],
-                           capture_output=True, timeout=120)
+            subprocess.run([sys.executable, '-m', 'pip', 'install', '--upgrade',
+                            'selenium>=4.11', 'packaging'],
+                           capture_output=True, timeout=180)
             from selenium import webdriver
 
-        from selenium.webdriver.chrome.service import Service
         from selenium.webdriver.common.by import By
         from selenium.webdriver.support.ui import WebDriverWait
         from selenium.webdriver.support import expected_conditions as EC
 
-        try:
-            from webdriver_manager.chrome import ChromeDriverManager
-            _fetch_state['status'] = 'ChromeDriver wird vorbereitet...'
-            service = Service(ChromeDriverManager().install())
-        except ImportError:
-            service = None
-
         options = webdriver.ChromeOptions()
         options.add_argument(f'user-agent={MOBILE_USER_AGENT}')
         options.add_argument('--window-size=420,750')
+        options.add_argument('--no-sandbox')
+        options.add_argument('--disable-dev-shm-usage')
+        options.add_argument('--disable-gpu')
+        # Debian ships the binary as /usr/bin/chromium, not /usr/bin/chrome
+        import os as _os
+        for _cand in ('/usr/bin/chromium', '/usr/bin/chromium-browser', '/usr/bin/google-chrome'):
+            if _os.path.exists(_cand):
+                options.binary_location = _cand
+                break
 
         _fetch_state['status'] = 'Browser wird gestartet...'
-        driver = webdriver.Chrome(service=service, options=options) if service else webdriver.Chrome(options=options)
+        # Selenium 4.11+ auto-downloads the matching chromedriver via Selenium Manager
+        driver = webdriver.Chrome(options=options)
 
         try:
             _fetch_state['status'] = 'Bitte im Browser einloggen (reCAPTCHA lösen)...'

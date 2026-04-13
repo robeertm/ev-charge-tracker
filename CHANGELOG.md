@@ -1,5 +1,10 @@
 # Changelog
 
+## v2.5.9 (2026-04-13)
+
+- **Kia/Hyundai Token-Fetch: Selenium-Flow für headless Linux-Umgebungen fit gemacht** — Auf VMs ohne DBus-Session (z.B. Server-Installationen mit Xvfb+noVNC für den Login-Flow) hat der Selenium-basierte Token-Fetch gleich mehrfach gestolpert: (1) Chromium crashte mit „DevToolsActivePort file doesn't exist" wegen fehlender `--no-sandbox` / `--disable-dev-shm-usage` Flags, (2) `webdriver-manager` holte eine veraltete ChromeDriver-Version (max 114) die zu modernem Chromium 147 nicht passte, (3) Debian's Chromium liegt unter `/usr/bin/chromium` statt `/usr/bin/chrome`, was Selenium nicht automatisch fand.
+- Fix: `webdriver-manager` komplett rausgeworfen zugunsten des eingebauten **Selenium Manager** (ab Selenium 4.11), der den passenden ChromeDriver automatisch zieht. Chromium-Binary-Pfad wird jetzt aus `/usr/bin/chromium|chromium-browser|google-chrome` automatisch erkannt. Sandbox- und Shared-Memory-Flags werden immer gesetzt. Requirement wird bei Bedarf auf `selenium>=4.11` hochgeschoben.
+
 ## v2.5.8 (2026-04-12)
 
 - **Fahrtenbuch: Rekup-Spalte war immer leer** — Bei jeder Bewegungserkennung sind `prev.departed_at` und `curr.arrived_at` derselbe Sync-Zeitstempel (der Moment, in dem die Bewegung erkannt wurde), wodurch das kumulative Regen-Delta immer 0 war. Die Abfahrt ankert jetzt auf `prev.last_seen_at` (letzter bestätigter Sync am alten Spot vor Abfahrt), die Ankunft bleibt `curr.arrived_at` — damit liegt die Delta-Berechnung über zwei verschiedene Syncs.
