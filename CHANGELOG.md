@@ -1,5 +1,15 @@
 # Changelog
 
+## v2.6.0 (2026-04-14)
+
+### In-App Updater unter systemd reparieren
+
+Auf Linux-Installationen mit `ev-tracker` als systemd-Service hatte der Update-Button über die App-UI faktisch nichts getan: Klick → kurze Anzeige „Update wird installiert" → nach Refresh immer noch alte Version. Root cause: Der Updater spawnt einen detached `updater_helper.py`-Prozess, der nach dem Exit des Flask-Prozesses den File-Swap erledigen soll. Unter systemd landet der Helper aber **im gleichen cgroup** wie der Service — und wenn systemd den Service zum Neustart kill't, wird der Helper mitgerissen, **bevor er die Dateien getauscht hat**. Ergebnis: Service startet neu, nichts hat sich geändert.
+
+Fix: systemd wird jetzt erkannt (via `INVOCATION_ID` oder `/run/systemd/system`), und in dem Fall läuft der File-Swap **inline im Flask-Prozess**, bevor dieser sich beendet. Python-Bytecode liegt schon im RAM, das Überschreiben der `.py`-Dateien auf der Disk ist sicher. `pip install -r requirements.txt` wird synchron durchgeführt, dann `os._exit(0)` — und `Restart=always` in der systemd-Unit sorgt dafür, dass der Service mit dem neuen Code wieder hochkommt.
+
+Für Standalone-Installationen (macOS, Windows, oder Linux ohne systemd) bleibt der bestehende Helper-Pfad unverändert.
+
 ## v2.5.9 (2026-04-13)
 
 - **Kia/Hyundai Token-Fetch: Selenium-Flow für headless Linux-Umgebungen fit gemacht** — Auf VMs ohne DBus-Session (z.B. Server-Installationen mit Xvfb+noVNC für den Login-Flow) hat der Selenium-basierte Token-Fetch gleich mehrfach gestolpert: (1) Chromium crashte mit „DevToolsActivePort file doesn't exist" wegen fehlender `--no-sandbox` / `--disable-dev-shm-usage` Flags, (2) `webdriver-manager` holte eine veraltete ChromeDriver-Version (max 114) die zu modernem Chromium 147 nicht passte, (3) Debian's Chromium liegt unter `/usr/bin/chromium` statt `/usr/bin/chrome`, was Selenium nicht automatisch fand.

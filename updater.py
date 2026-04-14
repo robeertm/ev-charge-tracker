@@ -113,6 +113,97 @@ def _extract_and_unwrap(zip_path: Path, staging: Path) -> Path:
     return staging
 
 
+def _running_under_systemd() -> bool:
+    """True if the current process was launched by systemd (Linux service).
+
+    Under systemd the spawn-helper approach breaks: the helper ends up in
+    the same cgroup as the service, so when the service exits to allow the
+    file-swap, systemd kills the helper along with it. On systemd we do the
+    swap inline instead and rely on `Restart=always` to bring the app back.
+    """
+    if os.name == 'nt':
+        return False
+    if os.environ.get('INVOCATION_ID'):
+        return True
+    try:
+        return Path('/run/systemd/system').is_dir()
+    except Exception:
+        return False
+
+
+# Files/dirs never overwritten by an inline swap.
+_EXCLUDE_NAMES = {
+    'venv', '.venv', 'data', 'logs', '.git', '.github',
+    '__pycache__', 'updates',
+}
+
+
+def _is_excluded(name: str) -> bool:
+    if name in _EXCLUDE_NAMES:
+        return True
+    if name.startswith('backup_'):
+        return True
+    if name.endswith('.pyc') or name == '.DS_Store':
+        return True
+    return False
+
+
+def _inline_swap(staging_root: Path) -> bool:
+    """Swap files from staging into the app dir in the current process.
+
+    Safe because Python already holds the source as bytecode in memory —
+    overwriting the .py files on disk doesn't affect the running interpreter.
+    The running process is expected to exit shortly after so a supervisor
+    (systemd) restarts it with the new code.
+    """
+    app_dir = _app_dir()
+    try:
+        for item in staging_root.iterdir():
+            name = item.name
+            if _is_excluded(name):
+                continue
+            dst = app_dir / name
+            if item.is_dir():
+                if dst.exists():
+                    shutil.rmtree(dst)
+                shutil.copytree(item, dst)
+            else:
+                dst.parent.mkdir(parents=True, exist_ok=True)
+                shutil.copy2(item, dst)
+    except Exception as e:
+        logger.error(f"Inline file swap failed: {e}")
+        return False
+
+    # Refresh venv dependencies synchronously. We have to block here because
+    # the caller will exit() right after — if pip runs in a background thread
+    # it gets killed along with the process.
+    req = app_dir / 'requirements.txt'
+    venv_py = None
+    for vname in ('venv', '.venv'):
+        cand = app_dir / vname / 'bin' / 'python'
+        if cand.exists():
+            venv_py = cand
+            break
+    if venv_py and req.exists():
+        logger.info("Running pip install -r requirements.txt (inline)…")
+        try:
+            subprocess.run(
+                [str(venv_py), '-m', 'pip', 'install', '-r', str(req)],
+                check=False,
+                timeout=300,
+            )
+        except Exception as e:
+            logger.warning(f"pip install failed (continuing): {e}")
+
+    # Clean up staging
+    try:
+        shutil.rmtree(staging_root)
+    except Exception:
+        pass
+
+    return True
+
+
 def _spawn_helper(staging_root: Path) -> None:
     """Launch updater_helper.py fully detached from this process.
 
@@ -188,6 +279,12 @@ def apply_update(zip_url: str, new_version: str) -> bool:
         if not (staging_root / 'app.py').exists():
             logger.error("Staging root missing app.py — aborting update")
             return False
+
+        if _running_under_systemd():
+            logger.info("Detected systemd — applying update inline, will exit for restart")
+            if not _inline_swap(staging_root):
+                return False
+            return True
 
         logger.info("Spawning updater_helper")
         _spawn_helper(staging_root)
