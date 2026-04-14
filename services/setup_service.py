@@ -2,10 +2,14 @@
 
 When the app is provisioned on a fresh VM (via /usr/local/bin/ev-provision),
 the provisioning script drops a marker file at `SETUP_MARKER` to tell the app
-that the end user still needs to change the temporary LUKS passphrase. On the
-next visit, a `before_request` hook redirects to the /setup wizard, which
-handles the passphrase change through the browser instead of making the user
-SSH in and run `cryptsetup luksChangeKey` by hand.
+that the end user still needs to change the temporary LUKS passphrase AND the
+temporary `ev-tracker` login password. On the next visit, a `before_request`
+hook redirects to the /setup wizard, which handles both changes through the
+browser instead of making the user SSH in and run `cryptsetup` / `passwd` by
+hand.
+
+Progress across multiple steps is tracked in a small JSON state file next to
+the marker, so a mid-wizard reload doesn't reset the user to the first step.
 
 This module is deliberately Linux- and systemd-specific. On any non-VM host
 (e.g. a developer laptop running the app directly), the marker file will never
@@ -13,6 +17,7 @@ exist and the module stays out of the way.
 """
 from __future__ import annotations
 
+import json
 import logging
 import os
 import subprocess
@@ -26,8 +31,15 @@ logger = logging.getLogger(__name__)
 # "this VM is still in first-run state after a fresh provision".
 SETUP_MARKER = Path('/srv/ev-data/.setup_pending')
 
+# Tracks which wizard steps have been completed, so a reload after a partial
+# run skips already-finished steps.
+SETUP_STATE_FILE = Path('/srv/ev-data/.setup_state.json')
+
 # Name of the LUKS mapping created by ev-provision.
 LUKS_MAPPING = 'evdata'
+
+# Target user for the login-password change step (matches ev-provision).
+TARGET_USER = 'ev-tracker'
 
 
 def is_setup_pending() -> bool:
@@ -106,11 +118,85 @@ def change_luks_passphrase(old_passphrase: str, new_passphrase: str) -> tuple[bo
     return False, f'Fehler beim Ändern: {err[:200]}'
 
 
+def change_user_password(new_password: str) -> tuple[bool, str]:
+    """Change the login password of the `ev-tracker` user via sudo chpasswd.
+
+    `ev-provision` installs a sudoers NOPASSWD entry for
+    `/usr/sbin/chpasswd` so the app can call it without interactive auth.
+    Note: chpasswd accepts "user:password" on stdin, which means we *can*
+    set an arbitrary password without knowing the current one — which is
+    exactly what we want since the end user doesn't know the temporary
+    one the admin set during provisioning.
+
+    Returns (ok, message).
+    """
+    if not new_password:
+        return False, 'Passwort darf nicht leer sein.'
+    if len(new_password) < 6:
+        return False, 'Passwort muss mindestens 6 Zeichen haben.'
+
+    stdin_data = f"{TARGET_USER}:{new_password}\n".encode()
+    try:
+        result = subprocess.run(
+            ['sudo', '-n', '/usr/sbin/chpasswd'],
+            input=stdin_data,
+            capture_output=True,
+            timeout=10,
+        )
+    except subprocess.TimeoutExpired:
+        return False, 'chpasswd hat nicht rechtzeitig geantwortet.'
+    except FileNotFoundError:
+        return False, 'chpasswd nicht installiert.'
+
+    if result.returncode == 0:
+        logger.info(f"Login password changed for {TARGET_USER}")
+        return True, 'Login-Passwort geändert.'
+
+    err = (result.stderr or b'').decode(errors='replace').strip()
+    logger.error(f"chpasswd failed: {err}")
+    return False, f'Fehler beim Ändern: {err[:200]}'
+
+
+# ── Wizard state tracking ────────────────────────────────────────────
+
+def _default_state() -> dict:
+    return {'luks_done': False, 'password_done': False}
+
+
+def load_state() -> dict:
+    """Return the wizard progress state, with all keys always present."""
+    state = _default_state()
+    try:
+        if SETUP_STATE_FILE.is_file():
+            loaded = json.loads(SETUP_STATE_FILE.read_text())
+            if isinstance(loaded, dict):
+                state.update({k: bool(v) for k, v in loaded.items() if k in state})
+    except Exception as e:
+        logger.warning(f"load_state failed, using defaults: {e}")
+    return state
+
+
+def save_state(state: dict) -> None:
+    try:
+        SETUP_STATE_FILE.write_text(json.dumps(state))
+    except Exception as e:
+        logger.error(f"save_state failed: {e}")
+
+
+def mark_step_done(step: str) -> None:
+    state = load_state()
+    if step in state:
+        state[step] = True
+        save_state(state)
+
+
 def complete_setup() -> bool:
-    """Remove the setup marker so future visits skip the wizard."""
+    """Remove the setup marker and state file so future visits skip the wizard."""
     try:
         if SETUP_MARKER.is_file():
             SETUP_MARKER.unlink()
+        if SETUP_STATE_FILE.is_file():
+            SETUP_STATE_FILE.unlink()
         return True
     except Exception as e:
         logger.error(f"Failed to remove setup marker: {e}")

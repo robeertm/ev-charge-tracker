@@ -333,18 +333,19 @@ def register_routes(app):
 
     @app.route('/setup', methods=['GET'])
     def setup_wizard():
-        from services.setup_service import is_setup_pending, get_luks_device
+        from services.setup_service import is_setup_pending, get_luks_device, load_state
         if not is_setup_pending():
             return redirect(url_for('dashboard'))
         return render_template(
             'setup.html',
             luks_device=get_luks_device() or '(unknown)',
+            setup_state=load_state(),
         )
 
     @app.route('/api/setup/change_luks', methods=['POST'])
     def api_setup_change_luks():
         from services.setup_service import (
-            is_setup_pending, change_luks_passphrase, complete_setup,
+            is_setup_pending, change_luks_passphrase, mark_step_done,
         )
         if not is_setup_pending():
             return jsonify({'error': 'setup_not_pending'}), 400
@@ -361,7 +362,36 @@ def register_routes(app):
         if not ok:
             return jsonify({'error': msg}), 400
 
-        complete_setup()
+        mark_step_done('luks_done')
+        return jsonify({'ok': True, 'message': msg})
+
+    @app.route('/api/setup/change_password', methods=['POST'])
+    def api_setup_change_password():
+        from services.setup_service import (
+            is_setup_pending, change_user_password, mark_step_done,
+            load_state, complete_setup,
+        )
+        if not is_setup_pending():
+            return jsonify({'error': 'setup_not_pending'}), 400
+
+        data = request.get_json(silent=True) or {}
+        new_pass = (data.get('new_password') or '').strip()
+        new_pass_confirm = (data.get('new_password_confirm') or '').strip()
+
+        if new_pass != new_pass_confirm:
+            return jsonify({'error': 'Neues Passwort und Bestätigung stimmen nicht überein.'}), 400
+
+        ok, msg = change_user_password(new_pass)
+        if not ok:
+            return jsonify({'error': msg}), 400
+
+        mark_step_done('password_done')
+
+        # If both steps are done, clear the marker and the state file.
+        state = load_state()
+        if state.get('luks_done') and state.get('password_done'):
+            complete_setup()
+
         return jsonify({'ok': True, 'message': msg, 'redirect': '/'})
 
     @app.route('/api/health', methods=['GET'])

@@ -27,6 +27,24 @@
             font-size: 3rem;
             color: #0f2a47;
         }
+        .progress-pills {
+            display: flex;
+            gap: 0.5rem;
+            justify-content: center;
+            margin-bottom: 1rem;
+        }
+        .progress-pills .pill {
+            flex: 1;
+            height: 6px;
+            background: #dee2e6;
+            border-radius: 3px;
+        }
+        .progress-pills .pill.active {
+            background: #0d6efd;
+        }
+        .progress-pills .pill.done {
+            background: #198754;
+        }
     </style>
 </head>
 <body>
@@ -43,23 +61,31 @@
             </div>
             <div class="card-body p-4">
 
-                <!-- Step 1: Welcome -->
-                <div id="step-welcome">
+                <div class="progress-pills">
+                    <div class="pill" id="pill-luks"></div>
+                    <div class="pill" id="pill-password"></div>
+                </div>
+
+                <!-- Step 0: Welcome -->
+                <div id="step-welcome" style="display:none;">
                     <div class="text-center mb-3">
                         <i class="bi bi-shield-lock wizard-icon"></i>
                     </div>
                     <h4 class="text-center mb-3">Willkommen!</h4>
                     <p>
                         Deine eigene EV-Tracker-Instanz wurde für dich eingerichtet.
-                        Bevor du loslegst, musst du <strong>einmal</strong> die temporäre
-                        Passphrase für die Festplatten-Verschlüsselung durch deine
-                        eigene ersetzen.
+                        Bevor du loslegst, sind zwei kurze Schritte nötig, damit
+                        die VM komplett dir gehört:
                     </p>
+                    <ol>
+                        <li>LUKS-Festplatten-Passphrase setzen (die, die die Verschlüsselung schützt)</li>
+                        <li>Login-Passwort für SSH-Zugang setzen</li>
+                    </ol>
                     <div class="alert alert-info small mb-3">
                         <i class="bi bi-info-circle"></i>
-                        Nach diesem Schritt kann <strong>niemand anderes</strong> —
-                        auch nicht der Admin, der dir die Instanz eingerichtet hat —
-                        auf deine Daten zugreifen. Die Passphrase kennst <em>nur du</em>.
+                        Nach beiden Schritten kann <strong>niemand anderes</strong> —
+                        auch nicht der Admin, der dir die VM eingerichtet hat —
+                        auf deine Daten zugreifen oder sich einloggen.
                     </div>
                     <div class="d-grid">
                         <button class="btn btn-primary btn-lg" onclick="showStep('luks')">
@@ -68,12 +94,13 @@
                     </div>
                 </div>
 
-                <!-- Step 2: LUKS change -->
+                <!-- Step 1: LUKS change -->
                 <div id="step-luks" style="display:none;">
                     <div class="text-center mb-3">
                         <i class="bi bi-key wizard-icon"></i>
                     </div>
-                    <h4 class="text-center mb-3">Passphrase setzen</h4>
+                    <h4 class="text-center mb-2">Schritt 1 von 2</h4>
+                    <h5 class="text-center mb-3 text-muted">LUKS-Passphrase setzen</h5>
 
                     <form id="luks-form">
                         <div class="mb-3">
@@ -81,30 +108,66 @@
                                 Temporäre Passphrase
                                 <small class="text-muted">(vom Admin bekommen)</small>
                             </label>
-                            <input type="password" class="form-control" id="old-pass" required autocomplete="current-password">
+                            <input type="password" class="form-control" id="luks-old" required autocomplete="current-password">
                         </div>
                         <div class="mb-3">
-                            <label class="form-label">Neue Passphrase</label>
-                            <input type="password" class="form-control" id="new-pass" minlength="6" required autocomplete="new-password">
-                            <div class="form-text">Mindestens 6 Zeichen. Wähle etwas, das du dir merken kannst — es gibt keine Wiederherstellung.</div>
+                            <label class="form-label">Neue LUKS-Passphrase</label>
+                            <input type="password" class="form-control" id="luks-new" minlength="6" required autocomplete="new-password">
+                            <div class="form-text">Mindestens 6 Zeichen. Keine Wiederherstellung möglich — gut notieren!</div>
                         </div>
                         <div class="mb-3">
-                            <label class="form-label">Neue Passphrase wiederholen</label>
-                            <input type="password" class="form-control" id="new-pass-confirm" minlength="6" required autocomplete="new-password">
+                            <label class="form-label">Neue LUKS-Passphrase wiederholen</label>
+                            <input type="password" class="form-control" id="luks-new-confirm" minlength="6" required autocomplete="new-password">
                         </div>
 
                         <div class="alert alert-warning small mb-3">
                             <i class="bi bi-exclamation-triangle"></i>
-                            <strong>Wichtig:</strong> Schreib dir deine neue Passphrase irgendwo
-                            sicher auf (Passwortmanager, Zettel im Safe). Wenn du sie vergisst,
+                            Die LUKS-Passphrase schützt deine Festplatte. Wenn du sie vergisst,
                             sind deine Daten unwiederbringlich weg — das ist der Sinn der Verschlüsselung.
+                            Schreib sie <strong>jetzt</strong> in deinen Passwortmanager.
                         </div>
 
-                        <div id="error-msg" class="alert alert-danger d-none"></div>
+                        <div id="luks-error" class="alert alert-danger d-none"></div>
 
-                        <div class="d-grid gap-2">
-                            <button type="submit" class="btn btn-primary btn-lg" id="submit-btn">
-                                <i class="bi bi-check-circle"></i> Passphrase ändern
+                        <div class="d-grid">
+                            <button type="submit" class="btn btn-primary btn-lg" id="luks-submit">
+                                <i class="bi bi-check-circle"></i> LUKS-Passphrase ändern
+                            </button>
+                        </div>
+                    </form>
+                </div>
+
+                <!-- Step 2: Login password change -->
+                <div id="step-password" style="display:none;">
+                    <div class="text-center mb-3">
+                        <i class="bi bi-person-lock wizard-icon"></i>
+                    </div>
+                    <h4 class="text-center mb-2">Schritt 2 von 2</h4>
+                    <h5 class="text-center mb-3 text-muted">SSH-Login-Passwort setzen</h5>
+
+                    <p class="small text-muted">
+                        Normalerweise brauchst du SSH nicht — die App läuft komplett im Browser.
+                        Trotzdem setzt du hier dein eigenes Passwort für den Fall, dass du es
+                        später mal für Wartung oder Fehlersuche brauchst. Damit hat auch niemand
+                        außer dir Zugriff auf deine VM per Terminal.
+                    </p>
+
+                    <form id="password-form">
+                        <div class="mb-3">
+                            <label class="form-label">Neues Login-Passwort</label>
+                            <input type="password" class="form-control" id="pass-new" minlength="6" required autocomplete="new-password">
+                            <div class="form-text">Mindestens 6 Zeichen. Wird für den User <code>ev-tracker</code> gesetzt.</div>
+                        </div>
+                        <div class="mb-3">
+                            <label class="form-label">Neues Passwort wiederholen</label>
+                            <input type="password" class="form-control" id="pass-new-confirm" minlength="6" required autocomplete="new-password">
+                        </div>
+
+                        <div id="password-error" class="alert alert-danger d-none"></div>
+
+                        <div class="d-grid">
+                            <button type="submit" class="btn btn-primary btn-lg" id="password-submit">
+                                <i class="bi bi-check-circle"></i> Login-Passwort setzen
                             </button>
                         </div>
                     </form>
@@ -117,7 +180,8 @@
                     </div>
                     <h4 class="text-center mb-3">Fertig!</h4>
                     <p class="text-center">
-                        Deine Passphrase ist gesetzt. Ab jetzt gehört deine EV-Tracker-Instanz ganz dir.
+                        Deine Passphrase und dein Passwort sind gesetzt.
+                        Ab jetzt gehört deine EV-Tracker-Instanz ganz dir.
                     </p>
                     <div class="d-grid">
                         <a href="/" class="btn btn-success btn-lg">
@@ -134,35 +198,59 @@
     </div>
 
     <script>
+        const SETUP_STATE = {{ setup_state | tojson }};
+
+        function updateProgressPills() {
+            const pLuks = document.getElementById('pill-luks');
+            const pPass = document.getElementById('pill-password');
+            pLuks.className = 'pill ' + (SETUP_STATE.luks_done ? 'done' : 'active');
+            pPass.className = 'pill ' + (SETUP_STATE.password_done ? 'done' : (SETUP_STATE.luks_done ? 'active' : ''));
+        }
+
         function showStep(name) {
-            document.getElementById('step-welcome').style.display = 'none';
-            document.getElementById('step-luks').style.display = 'none';
-            document.getElementById('step-done').style.display = 'none';
+            ['welcome', 'luks', 'password', 'done'].forEach(n => {
+                document.getElementById('step-' + n).style.display = 'none';
+            });
             document.getElementById('step-' + name).style.display = 'block';
         }
 
-        function showError(msg) {
-            const el = document.getElementById('error-msg');
+        function startWizard() {
+            updateProgressPills();
+            // Resume at first incomplete step
+            if (!SETUP_STATE.luks_done) {
+                showStep('welcome');
+            } else if (!SETUP_STATE.password_done) {
+                showStep('password');
+            } else {
+                showStep('done');
+            }
+        }
+
+        function showError(elId, msg) {
+            const el = document.getElementById(elId);
             el.textContent = msg;
             el.classList.remove('d-none');
         }
+        function hideError(elId) {
+            document.getElementById(elId).classList.add('d-none');
+        }
 
+        // LUKS form
         document.getElementById('luks-form').addEventListener('submit', async (e) => {
             e.preventDefault();
-            const btn = document.getElementById('submit-btn');
-            const errEl = document.getElementById('error-msg');
-            errEl.classList.add('d-none');
+            hideError('luks-error');
+            const btn = document.getElementById('luks-submit');
 
-            const oldPass = document.getElementById('old-pass').value;
-            const newPass = document.getElementById('new-pass').value;
-            const newPassConfirm = document.getElementById('new-pass-confirm').value;
+            const oldPass = document.getElementById('luks-old').value;
+            const newPass = document.getElementById('luks-new').value;
+            const newPassConfirm = document.getElementById('luks-new-confirm').value;
 
             if (newPass !== newPassConfirm) {
-                showError('Neue Passphrase und Bestätigung stimmen nicht überein.');
+                showError('luks-error', 'Neue Passphrase und Bestätigung stimmen nicht überein.');
                 return;
             }
             if (newPass.length < 6) {
-                showError('Neue Passphrase muss mindestens 6 Zeichen haben.');
+                showError('luks-error', 'Passphrase muss mindestens 6 Zeichen haben.');
                 return;
             }
 
@@ -181,18 +269,69 @@
                 });
                 const data = await r.json();
                 if (r.ok && data.ok) {
-                    showStep('done');
+                    SETUP_STATE.luks_done = true;
+                    updateProgressPills();
+                    showStep('password');
                 } else {
-                    showError(data.error || 'Unbekannter Fehler');
+                    showError('luks-error', data.error || 'Unbekannter Fehler');
                     btn.disabled = false;
-                    btn.innerHTML = '<i class="bi bi-check-circle"></i> Passphrase ändern';
+                    btn.innerHTML = '<i class="bi bi-check-circle"></i> LUKS-Passphrase ändern';
                 }
             } catch (err) {
-                showError('Verbindungsfehler: ' + err.message);
+                showError('luks-error', 'Verbindungsfehler: ' + err.message);
                 btn.disabled = false;
-                btn.innerHTML = '<i class="bi bi-check-circle"></i> Passphrase ändern';
+                btn.innerHTML = '<i class="bi bi-check-circle"></i> LUKS-Passphrase ändern';
             }
         });
+
+        // Password form
+        document.getElementById('password-form').addEventListener('submit', async (e) => {
+            e.preventDefault();
+            hideError('password-error');
+            const btn = document.getElementById('password-submit');
+
+            const newPass = document.getElementById('pass-new').value;
+            const newPassConfirm = document.getElementById('pass-new-confirm').value;
+
+            if (newPass !== newPassConfirm) {
+                showError('password-error', 'Neues Passwort und Bestätigung stimmen nicht überein.');
+                return;
+            }
+            if (newPass.length < 6) {
+                showError('password-error', 'Passwort muss mindestens 6 Zeichen haben.');
+                return;
+            }
+
+            btn.disabled = true;
+            btn.innerHTML = '<span class="spinner-border spinner-border-sm"></span> Setze...';
+
+            try {
+                const r = await fetch('/api/setup/change_password', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({
+                        new_password: newPass,
+                        new_password_confirm: newPassConfirm,
+                    }),
+                });
+                const data = await r.json();
+                if (r.ok && data.ok) {
+                    SETUP_STATE.password_done = true;
+                    updateProgressPills();
+                    showStep('done');
+                } else {
+                    showError('password-error', data.error || 'Unbekannter Fehler');
+                    btn.disabled = false;
+                    btn.innerHTML = '<i class="bi bi-check-circle"></i> Login-Passwort setzen';
+                }
+            } catch (err) {
+                showError('password-error', 'Verbindungsfehler: ' + err.message);
+                btn.disabled = false;
+                btn.innerHTML = '<i class="bi bi-check-circle"></i> Login-Passwort setzen';
+            }
+        });
+
+        startWizard();
     </script>
 </body>
 </html>
