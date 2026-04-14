@@ -1,5 +1,21 @@
 # Changelog
 
+## v2.8.0 (2026-04-14)
+
+### Optional: Web-UI Login als Vorschaltseite
+
+Tailscale schützt den Netzwerkzugriff — aber wer den Share-Link kennt und im Tailnet ist, landet ohne weitere Hürde im Dashboard. Dieses Release bringt eine eingebaute Passwort-Vorschaltseite als Defense-in-Depth:
+
+- **Optional**: Standardmäßig aus. Wer sie will, schaltet sie in Settings → „Zugangsschutz" ein. Bestehende Installs sind nach dem Update unverändert, niemand wird aus seiner eigenen App gesperrt.
+- **Integriert**: Teil der App, nicht vor die App geschoben. Updates vom GitHub-Repo rollen normal durch und brechen die Auth nicht.
+- **Session-Cookies**: Flask-Sessions mit einem pro-Install generierten, in AppConfig persistierten 32-Byte-Secret (siehe `services/auth_service.py:get_or_create_session_secret`). 30 Tage Lifetime.
+- **Password-Hashing**: Werkzeug `generate_password_hash` / `check_password_hash` (bcrypt-kompatibel). Klartext landet nie auf Disk.
+- **Einfache UX**: Simpler Username+Password-Login, keine E-Mail, kein Account-Management. Einziger Flow für den Ein-Personen-Fall.
+
+Neue Endpunkte: `/login`, `/logout`, `/api/auth/enable`, `/api/auth/disable`, `/api/auth/change_password`. Guard läuft als `before_request`-Hook parallel zum Setup-Wizard-Guard — Setup hat Vorrang, damit ein frisch provisionierter Nutzer erstmal durch den Wizard kann ohne schon auth-konfiguriert zu sein.
+
+Voraussetzung für echte Sicherheit ist nach wie vor, dass die VM nur über Tailscale erreichbar ist (UFW nur auf `tailscale0`). Der App-Login ist die zweite Schicht nach dem VPN.
+
 ## v2.7.4 (2026-04-14)
 
 - **Setup-Wizard: LUKS-Device-Detection ohne Root-Privilegien** — `get_luks_device()` rief vorher `cryptsetup status evdata` auf, das aber `/dev/mapper/evdata` öffnen muss, und das gehört auf Debian `root:disk 660`. Der App-User `ev-tracker` ist nicht in der `disk`-Gruppe, deshalb schlug der Aufruf mit Permission denied fehl. Folge: Das Wizard-Footer zeigte „LUKS-Device: (unknown)" und — viel gravierender — der tatsächliche Passphrase-Change brach mit „LUKS-Device nicht gefunden" ab. Jetzt wird der Pfad per **Sysfs** aufgelöst: `/dev/mapper/evdata` → `dm-N` → `/sys/block/dm-N/slaves/` → Parent-Block-Device. Sysfs ist world-readable, also braucht's dafür kein sudo und keine Gruppenmitgliedschaft.

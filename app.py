@@ -36,6 +36,9 @@ def create_app(config_class=Config):
     app = Flask(__name__)
     app.config.from_object(config_class)
     db.init_app(app)
+    # Permanent sessions: cookie survives browser restarts; stays valid 30 days.
+    from datetime import timedelta as _td
+    app.permanent_session_lifetime = _td(days=30)
 
     with app.app_context():
         db.create_all()
@@ -137,6 +140,17 @@ def create_app(config_class=Config):
                     logger.info(f"Auto-backfilled parking events: {summary}")
         except Exception as e:
             logger.warning(f"Auto-backfill failed: {e}")
+
+    # Set stable per-install session secret (for Flask signed session cookies).
+    # Generated lazily on first call and persisted in AppConfig so sessions
+    # survive restarts and updates.
+    try:
+        with app.app_context():
+            from services.auth_service import get_or_create_session_secret
+            app.secret_key = get_or_create_session_secret()
+    except Exception as e:
+        logger.warning(f"Session secret init failed, using Config.SECRET_KEY: {e}")
+        app.secret_key = Config.SECRET_KEY
 
     # Auto-start vehicle sync if configured
     try:
@@ -398,6 +412,108 @@ def register_routes(app):
     @app.route('/api/health', methods=['GET'])
     def api_health():
         return jsonify({'ok': True, 'version': Config.APP_VERSION})
+
+    # ── AUTH GUARD (optional web-UI login) ────────────────────
+    # Opt-in password gate in front of the app. Owner enables it in
+    # Settings → Zugangsschutz; credentials live in AppConfig (hashed).
+    _AUTH_ALLOWED_PREFIXES = ('/login', '/logout', '/static/', '/api/health',
+                              '/setup', '/api/setup/')
+
+    @app.before_request
+    def _auth_guard():
+        from services.auth_service import is_auth_enabled, is_logged_in
+        if not is_auth_enabled():
+            return None
+        if is_logged_in():
+            return None
+        path = request.path or '/'
+        if any(path.startswith(p) for p in _AUTH_ALLOWED_PREFIXES):
+            return None
+        if request.method == 'GET':
+            return redirect(url_for('login_page', next=path))
+        return jsonify({'error': 'auth_required'}), 401
+
+    @app.route('/login', methods=['GET', 'POST'])
+    def login_page():
+        from services.auth_service import (
+            is_auth_enabled, verify_credentials, login_user,
+        )
+        if not is_auth_enabled():
+            return redirect(url_for('dashboard'))
+
+        error = None
+        if request.method == 'POST':
+            username = (request.form.get('username') or '').strip()
+            password = request.form.get('password') or ''
+            if verify_credentials(username, password):
+                login_user(username)
+                nxt = request.args.get('next') or request.form.get('next') or '/'
+                # Prevent open-redirect: only allow relative paths
+                if not nxt.startswith('/') or nxt.startswith('//'):
+                    nxt = '/'
+                return redirect(nxt)
+            error = 'Benutzername oder Passwort falsch.'
+        return render_template(
+            'login.html',
+            error=error,
+            next_url=request.args.get('next', '/'),
+        )
+
+    @app.route('/logout', methods=['GET', 'POST'])
+    def logout_page():
+        from services.auth_service import logout_user
+        logout_user()
+        return redirect(url_for('login_page'))
+
+    # ── AUTH ADMIN API (called from Settings page) ────────────
+    @app.route('/api/auth/enable', methods=['POST'])
+    def api_auth_enable():
+        from services.auth_service import set_credentials, login_user
+        data = request.get_json(silent=True) or request.form
+        username = (data.get('username') or '').strip()
+        password = data.get('password') or ''
+        confirm = data.get('password_confirm') or ''
+        if password != confirm:
+            return jsonify({'error': 'Passwörter stimmen nicht überein.'}), 400
+        try:
+            set_credentials(username, password)
+        except ValueError as e:
+            return jsonify({'error': str(e)}), 400
+        # Log the owner in immediately so they don't lock themselves out.
+        login_user(username)
+        return jsonify({'ok': True, 'message': 'Zugangsschutz aktiviert.'})
+
+    @app.route('/api/auth/disable', methods=['POST'])
+    def api_auth_disable():
+        from services.auth_service import is_logged_in, disable_auth
+        # Only an authenticated session may disable auth — this prevents a
+        # drive-by POST on an exposed instance from turning the gate off.
+        if not is_logged_in():
+            return jsonify({'error': 'nicht eingeloggt'}), 401
+        disable_auth()
+        return jsonify({'ok': True, 'message': 'Zugangsschutz deaktiviert.'})
+
+    @app.route('/api/auth/change_password', methods=['POST'])
+    def api_auth_change_password():
+        from services.auth_service import (
+            is_logged_in, verify_credentials, get_username, set_credentials,
+        )
+        if not is_logged_in():
+            return jsonify({'error': 'nicht eingeloggt'}), 401
+        data = request.get_json(silent=True) or request.form
+        current = data.get('current_password') or ''
+        new_pw = data.get('new_password') or ''
+        confirm = data.get('new_password_confirm') or ''
+        if new_pw != confirm:
+            return jsonify({'error': 'Neue Passwörter stimmen nicht überein.'}), 400
+        username = get_username()
+        if not verify_credentials(username, current):
+            return jsonify({'error': 'Aktuelles Passwort falsch.'}), 400
+        try:
+            set_credentials(username, new_pw)
+        except ValueError as e:
+            return jsonify({'error': str(e)}), 400
+        return jsonify({'ok': True, 'message': 'Passwort geändert.'})
 
     @app.context_processor
     def inject_globals():
@@ -828,6 +944,8 @@ def register_routes(app):
                                thg_quotas=ThgQuota.query.order_by(ThgQuota.year_from).all(),
                                total_charges=Charge.query.count(),
                                co2_missing=Charge.query.filter(Charge.co2_g_per_kwh.is_(None), Charge.charge_type != 'PV').count(),
+                               auth_enabled=(AppConfig.get('auth_enabled', 'false') == 'true'),
+                               auth_username=AppConfig.get('auth_username', ''),
                                app_version=Config.APP_VERSION)
 
     # ── REPORT ─────────────────────────────────────────────────

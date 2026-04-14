@@ -877,6 +877,84 @@
             </div>
         </div>
 
+        <!-- Zugangsschutz (optionales Web-UI-Login) -->
+        <div class="card mb-4">
+            <div class="card-header bg-white fw-bold">
+                <i class="bi bi-shield-lock"></i> Zugangsschutz
+                {% if auth_enabled %}
+                    <span class="badge bg-success ms-2">aktiv</span>
+                {% else %}
+                    <span class="badge bg-secondary ms-2">inaktiv</span>
+                {% endif %}
+            </div>
+            <div class="card-body">
+                <p class="small text-muted mb-3">
+                    Eine Vorschaltseite mit Benutzername und Passwort, bevor jemand das Dashboard
+                    sieht. Tailscale schützt den Netzwerkzugriff — hier kommt der eigentliche
+                    App-Login für alle, die über den Tailnet-Share hereinkämen.
+                </p>
+
+                {% if not auth_enabled %}
+                <form id="auth-enable-form">
+                    <div class="row g-2">
+                        <div class="col-md-4">
+                            <label class="form-label small">Benutzername</label>
+                            <input type="text" class="form-control" id="auth-new-user" autocomplete="username" required>
+                        </div>
+                        <div class="col-md-4">
+                            <label class="form-label small">Passwort</label>
+                            <input type="password" class="form-control" id="auth-new-pw" minlength="6" autocomplete="new-password" required>
+                        </div>
+                        <div class="col-md-4">
+                            <label class="form-label small">Passwort wiederholen</label>
+                            <input type="password" class="form-control" id="auth-new-pw-confirm" minlength="6" autocomplete="new-password" required>
+                        </div>
+                    </div>
+                    <div class="mt-3 d-flex gap-2 align-items-center">
+                        <button type="submit" class="btn btn-primary">
+                            <i class="bi bi-shield-check"></i> Zugangsschutz aktivieren
+                        </button>
+                        <span id="auth-enable-result" class="small"></span>
+                    </div>
+                </form>
+                {% else %}
+                <div class="mb-3">
+                    <strong>Aktiv</strong> für Benutzer: <code>{{ auth_username }}</code>
+                </div>
+
+                <h6 class="mt-4">Passwort ändern</h6>
+                <form id="auth-change-form">
+                    <div class="row g-2">
+                        <div class="col-md-4">
+                            <label class="form-label small">Aktuelles Passwort</label>
+                            <input type="password" class="form-control" id="auth-current-pw" autocomplete="current-password" required>
+                        </div>
+                        <div class="col-md-4">
+                            <label class="form-label small">Neues Passwort</label>
+                            <input type="password" class="form-control" id="auth-change-new" minlength="6" autocomplete="new-password" required>
+                        </div>
+                        <div class="col-md-4">
+                            <label class="form-label small">Neues Passwort wiederholen</label>
+                            <input type="password" class="form-control" id="auth-change-confirm" minlength="6" autocomplete="new-password" required>
+                        </div>
+                    </div>
+                    <div class="mt-3 d-flex gap-2 align-items-center flex-wrap">
+                        <button type="submit" class="btn btn-primary">
+                            <i class="bi bi-key"></i> Passwort ändern
+                        </button>
+                        <button type="button" class="btn btn-outline-danger" id="btn-auth-disable">
+                            <i class="bi bi-shield-slash"></i> Deaktivieren
+                        </button>
+                        <a href="/logout" class="btn btn-outline-secondary">
+                            <i class="bi bi-box-arrow-right"></i> Abmelden
+                        </a>
+                        <span id="auth-change-result" class="small"></span>
+                    </div>
+                </form>
+                {% endif %}
+            </div>
+        </div>
+
         <!-- App Info -->
         <div class="card mb-4">
             <div class="card-header bg-white fw-bold">
@@ -1394,6 +1472,92 @@
         if (e.key === 'Enter') { e.preventDefault(); startAddFavorite(); }
     });
     loadFavs();
+})();
+
+// ── Zugangsschutz Formulare ──────────────────────────────
+(function() {
+    const enableForm = document.getElementById('auth-enable-form');
+    if (enableForm) {
+        enableForm.addEventListener('submit', async (e) => {
+            e.preventDefault();
+            const result = document.getElementById('auth-enable-result');
+            result.textContent = '';
+            const u = document.getElementById('auth-new-user').value.trim();
+            const p = document.getElementById('auth-new-pw').value;
+            const pc = document.getElementById('auth-new-pw-confirm').value;
+            if (p !== pc) { result.textContent = 'Passwörter stimmen nicht überein'; result.className = 'small text-danger'; return; }
+            try {
+                const r = await fetch('/api/auth/enable', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({ username: u, password: p, password_confirm: pc }),
+                });
+                const data = await r.json();
+                if (r.ok && data.ok) {
+                    result.textContent = data.message + ' — wird neu geladen …';
+                    result.className = 'small text-success';
+                    setTimeout(() => location.reload(), 800);
+                } else {
+                    result.textContent = data.error || 'Fehler';
+                    result.className = 'small text-danger';
+                }
+            } catch (err) {
+                result.textContent = 'Netzwerkfehler: ' + err.message;
+                result.className = 'small text-danger';
+            }
+        });
+    }
+
+    const changeForm = document.getElementById('auth-change-form');
+    if (changeForm) {
+        changeForm.addEventListener('submit', async (e) => {
+            e.preventDefault();
+            const result = document.getElementById('auth-change-result');
+            result.textContent = '';
+            const cp = document.getElementById('auth-current-pw').value;
+            const np = document.getElementById('auth-change-new').value;
+            const nc = document.getElementById('auth-change-confirm').value;
+            if (np !== nc) { result.textContent = 'Neue Passwörter stimmen nicht überein'; result.className = 'small text-danger'; return; }
+            try {
+                const r = await fetch('/api/auth/change_password', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({
+                        current_password: cp,
+                        new_password: np,
+                        new_password_confirm: nc,
+                    }),
+                });
+                const data = await r.json();
+                if (r.ok && data.ok) {
+                    result.textContent = data.message;
+                    result.className = 'small text-success';
+                    changeForm.reset();
+                } else {
+                    result.textContent = data.error || 'Fehler';
+                    result.className = 'small text-danger';
+                }
+            } catch (err) {
+                result.textContent = 'Netzwerkfehler: ' + err.message;
+                result.className = 'small text-danger';
+            }
+        });
+
+        document.getElementById('btn-auth-disable').addEventListener('click', async () => {
+            if (!confirm('Zugangsschutz wirklich deaktivieren? Jeder mit Netzwerkzugriff kann dann ohne Passwort auf deine Daten zugreifen.')) return;
+            try {
+                const r = await fetch('/api/auth/disable', { method: 'POST' });
+                const data = await r.json();
+                if (r.ok && data.ok) {
+                    location.reload();
+                } else {
+                    alert(data.error || 'Fehler');
+                }
+            } catch (err) {
+                alert('Netzwerkfehler: ' + err.message);
+            }
+        });
+    }
 })();
 </script>
 {% endblock %}
