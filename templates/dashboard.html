@@ -323,9 +323,40 @@
         }
     });
 
-    function makeChart(id, values, color, fmt) {
+    function makeChart(id, values, color, fmt, opts) {
+        opts = opts || {};
         const cfg = baseOpts(color, fmt);
-        cfg.data.datasets[0].data = pairs(values);
+        const data = pairs(values);
+        cfg.data.datasets[0].data = data;
+
+        if (opts.withAvg && data.length >= 3) {
+            const avg = data.reduce((s, p) => s + p.y, 0) / data.length;
+            cfg.data.datasets.push({
+                label: 'Ø ' + (fmt ? fmt(avg.toFixed(1)) : avg.toFixed(1)),
+                data: [
+                    { x: data[0].x, y: avg },
+                    { x: data[data.length - 1].x, y: avg },
+                ],
+                borderColor: 'rgba(120, 120, 120, 0.9)',
+                borderWidth: 1.5,
+                borderDash: [6, 4],
+                pointRadius: 0,
+                fill: false,
+                tension: 0,
+            });
+            // Show the avg dataset's label in the legend only for this chart
+            cfg.options.plugins.legend = {
+                display: true,
+                position: 'bottom',
+                labels: {
+                    filter: item => item.datasetIndex === 1,
+                    font: { size: 9 },
+                    boxWidth: 18,
+                    padding: 2,
+                },
+            };
+        }
+
         new Chart(document.getElementById(id), cfg);
     }
 
@@ -333,7 +364,7 @@
     makeChart('vhRange', VH.range_km,        'rgba(33, 150, 243, 1)', v => v + ' km');
     makeChart('vhOdo',   VH.odometer_km,     'rgba(96, 125, 139, 1)', v => v.toLocaleString('de'));
     makeChart('vh12v',   VH.battery_12v,     'rgba(255, 193, 7, 1)',  v => v + '%');
-    makeChart('vhSoh',   VH.soh,             'rgba(244, 67, 54, 1)',  v => v + '%');
+    makeChart('vhSoh',   VH.soh,             'rgba(244, 67, 54, 1)',  v => v + '%', { withAvg: true });
     makeChart('vhRegen', VH.regen_kwh,       'rgba(0, 188, 212, 1)',  v => v.toFixed(0));
     makeChart('vhCons',  VH.consumption_30d, 'rgba(255, 152, 0, 1)',  v => v.toFixed(1));
 

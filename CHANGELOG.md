@@ -1,5 +1,9 @@
 # Changelog
 
+## v2.8.1 (2026-04-14)
+
+- **Dashboard: Durchschnittslinie im SOH-Plot** — Der SOH-Chart in der Vehicle-History bekommt eine horizontale graue gestrichelte Linie mit dem Mittelwert aller angezeigten Messpunkte. Macht Drift/Trends auf einen Blick erkennbar. Der Mittelwert wird in der Legende unter dem Chart als `Ø xx.x%` angezeigt. Nur aktiv wenn ≥3 Datenpunkte vorhanden sind. Andere Charts bleiben unverändert.
+
 ## v2.8.0 (2026-04-14)
 
 ### Optional: Web-UI Login als Vorschaltseite
