@@ -1,5 +1,9 @@
 # Changelog
 
+## v2.7.4 (2026-04-14)
+
+- **Setup-Wizard: LUKS-Device-Detection ohne Root-Privilegien** — `get_luks_device()` rief vorher `cryptsetup status evdata` auf, das aber `/dev/mapper/evdata` öffnen muss, und das gehört auf Debian `root:disk 660`. Der App-User `ev-tracker` ist nicht in der `disk`-Gruppe, deshalb schlug der Aufruf mit Permission denied fehl. Folge: Das Wizard-Footer zeigte „LUKS-Device: (unknown)" und — viel gravierender — der tatsächliche Passphrase-Change brach mit „LUKS-Device nicht gefunden" ab. Jetzt wird der Pfad per **Sysfs** aufgelöst: `/dev/mapper/evdata` → `dm-N` → `/sys/block/dm-N/slaves/` → Parent-Block-Device. Sysfs ist world-readable, also braucht's dafür kein sudo und keine Gruppenmitgliedschaft.
+
 ## v2.7.3 (2026-04-14)
 
 - **Setup-Wizard: Browser-Redirect zuverlässig machen** — Der `before_request`-Hook prüfte den `Accept`-Header, um Browser-Zugriffe von API-Calls zu unterscheiden. Das war zu zerbrechlich: je nach Browser/Accept-Header landete der Nutzer auf der JSON-Antwort `{"error":"setup_pending",...}` statt auf dem Wizard. Jetzt einfach: alle GET-Requests werden während des Setups auf `/setup` umgeleitet, nur Nicht-GET (POST/PUT/DELETE) bekommen weiter die JSON-503-Antwort für API-Clients.

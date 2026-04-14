@@ -65,24 +65,27 @@ def is_setup_pending() -> bool:
 def get_luks_device() -> Optional[str]:
     """Return the underlying block device for the `evdata` LUKS mapping.
 
-    Parses the output of `cryptsetup status evdata` to find the `device:` line.
-    Returns something like `/dev/sdb` or `None` if the mapping isn't open.
+    Resolves `/dev/mapper/evdata` to its kernel dm-N name, then reads the
+    parent device from `/sys/block/dm-N/slaves/`. This works for any user
+    because /sys is world-readable — `cryptsetup status` would need to open
+    /dev/mapper/evdata directly, which is root:disk 660 on Debian and denies
+    the unprivileged `ev-tracker` app user.
     """
     try:
-        result = subprocess.run(
-            ['cryptsetup', 'status', LUKS_MAPPING],
-            capture_output=True,
-            text=True,
-            timeout=5,
-        )
-        if result.returncode != 0:
+        dm_path = Path(f'/dev/mapper/{LUKS_MAPPING}')
+        if not dm_path.exists():
             return None
-        for line in result.stdout.splitlines():
-            line = line.strip()
-            if line.startswith('device:'):
-                return line.split(':', 1)[1].strip()
+        dm_kernel_name = os.path.basename(os.path.realpath(dm_path))
+        slaves_dir = Path(f'/sys/block/{dm_kernel_name}/slaves')
+        if not slaves_dir.is_dir():
+            return None
+        slaves = sorted(
+            p.name for p in slaves_dir.iterdir() if not p.name.startswith('.')
+        )
+        if slaves:
+            return f'/dev/{slaves[0]}'
     except Exception as e:
-        logger.warning(f"cryptsetup status failed: {e}")
+        logger.warning(f"get_luks_device via sysfs failed: {e}")
     return None
 
 
