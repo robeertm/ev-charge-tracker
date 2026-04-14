@@ -1,0 +1,198 @@
+<!DOCTYPE html>
+<html lang="de" data-bs-theme="light">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Einrichtung — EV Charge Tracker</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css" rel="stylesheet">
+    <style>
+        body {
+            min-height: 100vh;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            background: linear-gradient(135deg, #0f2a47 0%, #1e4976 100%);
+            padding: 1rem;
+        }
+        .setup-card {
+            max-width: 560px;
+            width: 100%;
+        }
+        .setup-card .card-header {
+            background: #0f2a47;
+            color: white;
+        }
+        .wizard-icon {
+            font-size: 3rem;
+            color: #0f2a47;
+        }
+    </style>
+</head>
+<body>
+    <div class="setup-card">
+        <div class="card shadow-lg">
+            <div class="card-header py-3">
+                <div class="d-flex align-items-center">
+                    <i class="bi bi-ev-front fs-3 me-2"></i>
+                    <div>
+                        <div class="fw-bold">EV Charge Tracker</div>
+                        <div class="small opacity-75">Einmalige Einrichtung</div>
+                    </div>
+                </div>
+            </div>
+            <div class="card-body p-4">
+
+                <!-- Step 1: Welcome -->
+                <div id="step-welcome">
+                    <div class="text-center mb-3">
+                        <i class="bi bi-shield-lock wizard-icon"></i>
+                    </div>
+                    <h4 class="text-center mb-3">Willkommen!</h4>
+                    <p>
+                        Deine eigene EV-Tracker-Instanz wurde für dich eingerichtet.
+                        Bevor du loslegst, musst du <strong>einmal</strong> die temporäre
+                        Passphrase für die Festplatten-Verschlüsselung durch deine
+                        eigene ersetzen.
+                    </p>
+                    <div class="alert alert-info small mb-3">
+                        <i class="bi bi-info-circle"></i>
+                        Nach diesem Schritt kann <strong>niemand anderes</strong> —
+                        auch nicht der Admin, der dir die Instanz eingerichtet hat —
+                        auf deine Daten zugreifen. Die Passphrase kennst <em>nur du</em>.
+                    </div>
+                    <div class="d-grid">
+                        <button class="btn btn-primary btn-lg" onclick="showStep('luks')">
+                            Los geht's <i class="bi bi-arrow-right"></i>
+                        </button>
+                    </div>
+                </div>
+
+                <!-- Step 2: LUKS change -->
+                <div id="step-luks" style="display:none;">
+                    <div class="text-center mb-3">
+                        <i class="bi bi-key wizard-icon"></i>
+                    </div>
+                    <h4 class="text-center mb-3">Passphrase setzen</h4>
+
+                    <form id="luks-form">
+                        <div class="mb-3">
+                            <label class="form-label">
+                                Temporäre Passphrase
+                                <small class="text-muted">(vom Admin bekommen)</small>
+                            </label>
+                            <input type="password" class="form-control" id="old-pass" required autocomplete="current-password">
+                        </div>
+                        <div class="mb-3">
+                            <label class="form-label">Neue Passphrase</label>
+                            <input type="password" class="form-control" id="new-pass" minlength="6" required autocomplete="new-password">
+                            <div class="form-text">Mindestens 6 Zeichen. Wähle etwas, das du dir merken kannst — es gibt keine Wiederherstellung.</div>
+                        </div>
+                        <div class="mb-3">
+                            <label class="form-label">Neue Passphrase wiederholen</label>
+                            <input type="password" class="form-control" id="new-pass-confirm" minlength="6" required autocomplete="new-password">
+                        </div>
+
+                        <div class="alert alert-warning small mb-3">
+                            <i class="bi bi-exclamation-triangle"></i>
+                            <strong>Wichtig:</strong> Schreib dir deine neue Passphrase irgendwo
+                            sicher auf (Passwortmanager, Zettel im Safe). Wenn du sie vergisst,
+                            sind deine Daten unwiederbringlich weg — das ist der Sinn der Verschlüsselung.
+                        </div>
+
+                        <div id="error-msg" class="alert alert-danger d-none"></div>
+
+                        <div class="d-grid gap-2">
+                            <button type="submit" class="btn btn-primary btn-lg" id="submit-btn">
+                                <i class="bi bi-check-circle"></i> Passphrase ändern
+                            </button>
+                        </div>
+                    </form>
+                </div>
+
+                <!-- Step 3: Success -->
+                <div id="step-done" style="display:none;">
+                    <div class="text-center mb-3">
+                        <i class="bi bi-check-circle-fill wizard-icon text-success"></i>
+                    </div>
+                    <h4 class="text-center mb-3">Fertig!</h4>
+                    <p class="text-center">
+                        Deine Passphrase ist gesetzt. Ab jetzt gehört deine EV-Tracker-Instanz ganz dir.
+                    </p>
+                    <div class="d-grid">
+                        <a href="/" class="btn btn-success btn-lg">
+                            Zum EV Tracker <i class="bi bi-arrow-right"></i>
+                        </a>
+                    </div>
+                </div>
+
+            </div>
+            <div class="card-footer text-center text-muted small py-2">
+                LUKS-Device: <code>{{ luks_device }}</code>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        function showStep(name) {
+            document.getElementById('step-welcome').style.display = 'none';
+            document.getElementById('step-luks').style.display = 'none';
+            document.getElementById('step-done').style.display = 'none';
+            document.getElementById('step-' + name).style.display = 'block';
+        }
+
+        function showError(msg) {
+            const el = document.getElementById('error-msg');
+            el.textContent = msg;
+            el.classList.remove('d-none');
+        }
+
+        document.getElementById('luks-form').addEventListener('submit', async (e) => {
+            e.preventDefault();
+            const btn = document.getElementById('submit-btn');
+            const errEl = document.getElementById('error-msg');
+            errEl.classList.add('d-none');
+
+            const oldPass = document.getElementById('old-pass').value;
+            const newPass = document.getElementById('new-pass').value;
+            const newPassConfirm = document.getElementById('new-pass-confirm').value;
+
+            if (newPass !== newPassConfirm) {
+                showError('Neue Passphrase und Bestätigung stimmen nicht überein.');
+                return;
+            }
+            if (newPass.length < 6) {
+                showError('Neue Passphrase muss mindestens 6 Zeichen haben.');
+                return;
+            }
+
+            btn.disabled = true;
+            btn.innerHTML = '<span class="spinner-border spinner-border-sm"></span> Ändere...';
+
+            try {
+                const r = await fetch('/api/setup/change_luks', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({
+                        old_passphrase: oldPass,
+                        new_passphrase: newPass,
+                        new_passphrase_confirm: newPassConfirm,
+                    }),
+                });
+                const data = await r.json();
+                if (r.ok && data.ok) {
+                    showStep('done');
+                } else {
+                    showError(data.error || 'Unbekannter Fehler');
+                    btn.disabled = false;
+                    btn.innerHTML = '<i class="bi bi-check-circle"></i> Passphrase ändern';
+                }
+            } catch (err) {
+                showError('Verbindungsfehler: ' + err.message);
+                btn.disabled = false;
+                btn.innerHTML = '<i class="bi bi-check-circle"></i> Passphrase ändern';
+            }
+        });
+    </script>
+</body>
+</html>

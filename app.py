@@ -311,6 +311,63 @@ def _save_vehicle_sync(status, battery_kwh, raw_json=''):
 
 def register_routes(app):
 
+    # ── FIRST-RUN SETUP WIZARD (VM deployments) ───────────────
+    # When ev-provision finishes on a fresh VM it drops /srv/ev-data/.setup_pending.
+    # The hook below redirects non-setup requests to the /setup wizard until
+    # the end user has changed the temporary LUKS passphrase — so they never
+    # have to SSH in and run cryptsetup manually.
+    _SETUP_ALLOWED_PREFIXES = ('/setup', '/api/setup/', '/static/', '/api/health')
+
+    @app.before_request
+    def _setup_guard():
+        from services.setup_service import is_setup_pending
+        if not is_setup_pending():
+            return None
+        path = request.path or '/'
+        if any(path.startswith(p) for p in _SETUP_ALLOWED_PREFIXES):
+            return None
+        # Redirect browser GETs to /setup, give APIs a clean 503.
+        if request.method == 'GET' and 'text/html' in (request.accept_mimetypes.best or ''):
+            return redirect(url_for('setup_wizard'))
+        return jsonify({'error': 'setup_pending', 'redirect': '/setup'}), 503
+
+    @app.route('/setup', methods=['GET'])
+    def setup_wizard():
+        from services.setup_service import is_setup_pending, get_luks_device
+        if not is_setup_pending():
+            return redirect(url_for('dashboard'))
+        return render_template(
+            'setup.html',
+            luks_device=get_luks_device() or '(unknown)',
+        )
+
+    @app.route('/api/setup/change_luks', methods=['POST'])
+    def api_setup_change_luks():
+        from services.setup_service import (
+            is_setup_pending, change_luks_passphrase, complete_setup,
+        )
+        if not is_setup_pending():
+            return jsonify({'error': 'setup_not_pending'}), 400
+
+        data = request.get_json(silent=True) or {}
+        old_pass = (data.get('old_passphrase') or '').strip()
+        new_pass = (data.get('new_passphrase') or '').strip()
+        new_pass_confirm = (data.get('new_passphrase_confirm') or '').strip()
+
+        if new_pass != new_pass_confirm:
+            return jsonify({'error': 'Neue Passphrase und Bestätigung stimmen nicht überein.'}), 400
+
+        ok, msg = change_luks_passphrase(old_pass, new_pass)
+        if not ok:
+            return jsonify({'error': msg}), 400
+
+        complete_setup()
+        return jsonify({'ok': True, 'message': msg, 'redirect': '/'})
+
+    @app.route('/api/health', methods=['GET'])
+    def api_health():
+        return jsonify({'ok': True, 'version': Config.APP_VERSION})
+
     @app.context_processor
     def inject_globals():
         # THG reminder: between Jan 1 and Mar 31, warn if previous year has no quota

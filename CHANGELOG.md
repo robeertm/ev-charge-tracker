@@ -1,5 +1,20 @@
 # Changelog
 
+## v2.7.0 (2026-04-14)
+
+### First-Run Setup-Wizard für VM-Deployments
+
+Bisher musste der End-Nutzer einer frisch provisionierten VM per SSH reinloggen und `sudo cryptsetup luksChangeKey /dev/sdb` manuell ausführen, um die temporäre LUKS-Passphrase zu ersetzen. Das war für nicht-technische Nutzer eine dicke Hürde. Jetzt erscheint beim ersten Browser-Zugriff automatisch ein Setup-Wizard:
+
+1. Die Provisioning-Pipeline (`ev-provision`) legt am Ende einen Marker `/srv/ev-data/.setup_pending` an.
+2. Ein `before_request`-Hook leitet alle Nicht-Setup-Requests auf `/setup` um, solange der Marker existiert.
+3. Der Wizard (eine einseitige HTML-Wizard-UI in `templates/setup.html`) fragt die temporäre und die neue Passphrase ab, ruft per `sudo cryptsetup luksChangeKey` das Device aus dem laufenden `cryptsetup status evdata` auf, und entfernt bei Erfolg den Marker.
+4. Nach erfolgreichem Change ist der Nutzer „angekommen" — ab diesem Moment kennt niemand ausser ihm selbst die Passphrase, auch der Admin nicht.
+
+Der Wizard ist Deutschland-only getextet (Setup ist ein einmaliger Flow und das Zielpublikum sind deutsche Nutzer), der Rest der App bleibt übersetzt wie gehabt. Nicht-VM-Hosts (z.B. Entwickler-Laptops) sind nicht betroffen, weil der Marker nie existiert.
+
+**Voraussetzung für den Live-Betrieb**: `ev-provision` muss am Ende den Marker anlegen und die sudoers-Regel für `cryptsetup luksChangeKey` setzen. Beides ist in der Admin-Anleitung dokumentiert; für bestehende VMs einmalig nachziehen.
+
 ## v2.6.0 (2026-04-14)
 
 ### In-App Updater unter systemd reparieren
