@@ -1,9 +1,9 @@
 <!DOCTYPE html>
-<html lang="de" data-bs-theme="light">
+<html lang="{{ current_lang() }}" data-bs-theme="light">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Einrichtung — EV Charge Tracker</title>
+    <title>{{ t('wiz.page_title') }} — EV Charge Tracker</title>
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
     <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css" rel="stylesheet">
     <style>
@@ -15,18 +15,9 @@
             background: linear-gradient(135deg, #0f2a47 0%, #1e4976 100%);
             padding: 1rem;
         }
-        .setup-card {
-            max-width: 560px;
-            width: 100%;
-        }
-        .setup-card .card-header {
-            background: #0f2a47;
-            color: white;
-        }
-        .wizard-icon {
-            font-size: 3rem;
-            color: #0f2a47;
-        }
+        .setup-card { max-width: 560px; width: 100%; }
+        .setup-card .card-header { background: #0f2a47; color: white; }
+        .wizard-icon { font-size: 3rem; color: #0f2a47; }
         .progress-pills {
             display: flex;
             gap: 0.5rem;
@@ -39,12 +30,8 @@
             background: #dee2e6;
             border-radius: 3px;
         }
-        .progress-pills .pill.active {
-            background: #0d6efd;
-        }
-        .progress-pills .pill.done {
-            background: #198754;
-        }
+        .progress-pills .pill.active { background: #0d6efd; }
+        .progress-pills .pill.done { background: #198754; }
     </style>
 </head>
 <body>
@@ -55,7 +42,7 @@
                     <i class="bi bi-ev-front fs-3 me-2"></i>
                     <div>
                         <div class="fw-bold">EV Charge Tracker</div>
-                        <div class="small opacity-75">Einmalige Einrichtung</div>
+                        <div class="small opacity-75">{{ t('wiz.header_sub') }}</div>
                     </div>
                 </div>
             </div>
@@ -71,25 +58,19 @@
                     <div class="text-center mb-3">
                         <i class="bi bi-shield-lock wizard-icon"></i>
                     </div>
-                    <h4 class="text-center mb-3">Willkommen!</h4>
-                    <p>
-                        Deine eigene EV-Tracker-Instanz wurde für dich eingerichtet.
-                        Bevor du loslegst, sind zwei kurze Schritte nötig, damit
-                        die VM komplett dir gehört:
-                    </p>
+                    <h4 class="text-center mb-3">{{ t('wiz.welcome') }}</h4>
+                    <p>{{ t('wiz.welcome_desc') }}</p>
                     <ol>
-                        <li>LUKS-Festplatten-Passphrase setzen (die, die die Verschlüsselung schützt)</li>
-                        <li>Login-Passwort für SSH-Zugang setzen</li>
+                        <li>{{ t('wiz.welcome_step1') }}</li>
+                        <li>{{ t('wiz.welcome_step2') }}</li>
                     </ol>
                     <div class="alert alert-info small mb-3">
                         <i class="bi bi-info-circle"></i>
-                        Nach beiden Schritten kann <strong>niemand anderes</strong> —
-                        auch nicht der Admin, der dir die VM eingerichtet hat —
-                        auf deine Daten zugreifen oder sich einloggen.
+                        {{ t('wiz.welcome_info') }}
                     </div>
                     <div class="d-grid">
                         <button class="btn btn-primary btn-lg" onclick="showStep('luks')">
-                            Los geht's <i class="bi bi-arrow-right"></i>
+                            {{ t('wiz.welcome_start') }} <i class="bi bi-arrow-right"></i>
                         </button>
                     </div>
                 </div>
@@ -99,39 +80,37 @@
                     <div class="text-center mb-3">
                         <i class="bi bi-key wizard-icon"></i>
                     </div>
-                    <h4 class="text-center mb-2">Schritt 1 von 2</h4>
-                    <h5 class="text-center mb-3 text-muted">LUKS-Passphrase setzen</h5>
+                    <h4 class="text-center mb-2">{{ t('wiz.step_1_of_2') }}</h4>
+                    <h5 class="text-center mb-3 text-muted">{{ t('wiz.luks_title') }}</h5>
 
                     <form id="luks-form">
                         <div class="mb-3">
                             <label class="form-label">
-                                Temporäre Passphrase
-                                <small class="text-muted">(vom Admin bekommen)</small>
+                                {{ t('wiz.luks_temp') }}
+                                <small class="text-muted">{{ t('wiz.luks_temp_hint') }}</small>
                             </label>
                             <input type="password" class="form-control" id="luks-old" required autocomplete="current-password">
                         </div>
                         <div class="mb-3">
-                            <label class="form-label">Neue LUKS-Passphrase</label>
+                            <label class="form-label">{{ t('wiz.luks_new') }}</label>
                             <input type="password" class="form-control" id="luks-new" minlength="6" required autocomplete="new-password">
-                            <div class="form-text">Mindestens 6 Zeichen. Keine Wiederherstellung möglich — gut notieren!</div>
+                            <div class="form-text">{{ t('wiz.luks_hint') }}</div>
                         </div>
                         <div class="mb-3">
-                            <label class="form-label">Neue LUKS-Passphrase wiederholen</label>
+                            <label class="form-label">{{ t('wiz.luks_new_confirm') }}</label>
                             <input type="password" class="form-control" id="luks-new-confirm" minlength="6" required autocomplete="new-password">
                         </div>
 
                         <div class="alert alert-warning small mb-3">
                             <i class="bi bi-exclamation-triangle"></i>
-                            Die LUKS-Passphrase schützt deine Festplatte. Wenn du sie vergisst,
-                            sind deine Daten unwiederbringlich weg — das ist der Sinn der Verschlüsselung.
-                            Schreib sie <strong>jetzt</strong> in deinen Passwortmanager.
+                            {{ t('wiz.luks_warning') }}
                         </div>
 
                         <div id="luks-error" class="alert alert-danger d-none"></div>
 
                         <div class="d-grid">
                             <button type="submit" class="btn btn-primary btn-lg" id="luks-submit">
-                                <i class="bi bi-check-circle"></i> LUKS-Passphrase ändern
+                                <i class="bi bi-check-circle"></i> {{ t('wiz.luks_submit') }}
                             </button>
                         </div>
                     </form>
@@ -142,24 +121,19 @@
                     <div class="text-center mb-3">
                         <i class="bi bi-person-lock wizard-icon"></i>
                     </div>
-                    <h4 class="text-center mb-2">Schritt 2 von 2</h4>
-                    <h5 class="text-center mb-3 text-muted">SSH-Login-Passwort setzen</h5>
+                    <h4 class="text-center mb-2">{{ t('wiz.step_2_of_2') }}</h4>
+                    <h5 class="text-center mb-3 text-muted">{{ t('wiz.password_title') }}</h5>
 
-                    <p class="small text-muted">
-                        Normalerweise brauchst du SSH nicht — die App läuft komplett im Browser.
-                        Trotzdem setzt du hier dein eigenes Passwort für den Fall, dass du es
-                        später mal für Wartung oder Fehlersuche brauchst. Damit hat auch niemand
-                        außer dir Zugriff auf deine VM per Terminal.
-                    </p>
+                    <p class="small text-muted">{{ t('wiz.password_desc') }}</p>
 
                     <form id="password-form">
                         <div class="mb-3">
-                            <label class="form-label">Neues Login-Passwort</label>
+                            <label class="form-label">{{ t('wiz.password_new') }}</label>
                             <input type="password" class="form-control" id="pass-new" minlength="6" required autocomplete="new-password">
-                            <div class="form-text">Mindestens 6 Zeichen. Wird für den User <code>ev-tracker</code> gesetzt.</div>
+                            <div class="form-text">{{ t('wiz.password_hint') }}</div>
                         </div>
                         <div class="mb-3">
-                            <label class="form-label">Neues Passwort wiederholen</label>
+                            <label class="form-label">{{ t('wiz.password_confirm') }}</label>
                             <input type="password" class="form-control" id="pass-new-confirm" minlength="6" required autocomplete="new-password">
                         </div>
 
@@ -167,7 +141,7 @@
 
                         <div class="d-grid">
                             <button type="submit" class="btn btn-primary btn-lg" id="password-submit">
-                                <i class="bi bi-check-circle"></i> Login-Passwort setzen
+                                <i class="bi bi-check-circle"></i> {{ t('wiz.password_submit') }}
                             </button>
                         </div>
                     </form>
@@ -178,27 +152,36 @@
                     <div class="text-center mb-3">
                         <i class="bi bi-check-circle-fill wizard-icon text-success"></i>
                     </div>
-                    <h4 class="text-center mb-3">Fertig!</h4>
-                    <p class="text-center">
-                        Deine Passphrase und dein Passwort sind gesetzt.
-                        Ab jetzt gehört deine EV-Tracker-Instanz ganz dir.
-                    </p>
+                    <h4 class="text-center mb-3">{{ t('wiz.done') }}</h4>
+                    <p class="text-center">{{ t('wiz.done_desc') }}</p>
                     <div class="d-grid">
                         <a href="/" class="btn btn-success btn-lg">
-                            Zum EV Tracker <i class="bi bi-arrow-right"></i>
+                            {{ t('wiz.done_goto') }} <i class="bi bi-arrow-right"></i>
                         </a>
                     </div>
                 </div>
 
             </div>
             <div class="card-footer text-center text-muted small py-2">
-                LUKS-Device: <code>{{ luks_device }}</code>
+                {{ t('wiz.luks_device_label') }}: <code>{{ luks_device }}</code>
             </div>
         </div>
     </div>
 
     <script>
         const SETUP_STATE = {{ setup_state | tojson }};
+        const T = {
+            errMismatch: {{ t('wiz.err_mismatch') | tojson }},
+            errPwMismatch: {{ t('wiz.err_pw_mismatch') | tojson }},
+            errMinLen: {{ t('wiz.err_min_length') | tojson }},
+            errPwMinLen: {{ t('wiz.err_pw_min_length') | tojson }},
+            errConn: {{ t('wiz.err_connection') | tojson }},
+            errUnknown: {{ t('wiz.err_unknown') | tojson }},
+            changing: {{ t('wiz.status_changing') | tojson }},
+            setting: {{ t('wiz.status_setting') | tojson }},
+            luksBtn: {{ t('wiz.luks_submit') | tojson }},
+            pwBtn: {{ t('wiz.password_submit') | tojson }},
+        };
 
         function updateProgressPills() {
             const pLuks = document.getElementById('pill-luks');
@@ -216,7 +199,6 @@
 
         function startWizard() {
             updateProgressPills();
-            // Resume at first incomplete step
             if (!SETUP_STATE.luks_done) {
                 showStep('welcome');
             } else if (!SETUP_STATE.password_done) {
@@ -235,27 +217,19 @@
             document.getElementById(elId).classList.add('d-none');
         }
 
-        // LUKS form
         document.getElementById('luks-form').addEventListener('submit', async (e) => {
             e.preventDefault();
             hideError('luks-error');
             const btn = document.getElementById('luks-submit');
-
             const oldPass = document.getElementById('luks-old').value;
             const newPass = document.getElementById('luks-new').value;
             const newPassConfirm = document.getElementById('luks-new-confirm').value;
 
-            if (newPass !== newPassConfirm) {
-                showError('luks-error', 'Neue Passphrase und Bestätigung stimmen nicht überein.');
-                return;
-            }
-            if (newPass.length < 6) {
-                showError('luks-error', 'Passphrase muss mindestens 6 Zeichen haben.');
-                return;
-            }
+            if (newPass !== newPassConfirm) { showError('luks-error', T.errMismatch); return; }
+            if (newPass.length < 6) { showError('luks-error', T.errMinLen); return; }
 
             btn.disabled = true;
-            btn.innerHTML = '<span class="spinner-border spinner-border-sm"></span> Ändere...';
+            btn.innerHTML = '<span class="spinner-border spinner-border-sm"></span> ' + T.changing;
 
             try {
                 const r = await fetch('/api/setup/change_luks', {
@@ -273,37 +247,29 @@
                     updateProgressPills();
                     showStep('password');
                 } else {
-                    showError('luks-error', data.error || 'Unbekannter Fehler');
+                    showError('luks-error', data.error || T.errUnknown);
                     btn.disabled = false;
-                    btn.innerHTML = '<i class="bi bi-check-circle"></i> LUKS-Passphrase ändern';
+                    btn.innerHTML = '<i class="bi bi-check-circle"></i> ' + T.luksBtn;
                 }
             } catch (err) {
-                showError('luks-error', 'Verbindungsfehler: ' + err.message);
+                showError('luks-error', T.errConn + ': ' + err.message);
                 btn.disabled = false;
-                btn.innerHTML = '<i class="bi bi-check-circle"></i> LUKS-Passphrase ändern';
+                btn.innerHTML = '<i class="bi bi-check-circle"></i> ' + T.luksBtn;
             }
         });
 
-        // Password form
         document.getElementById('password-form').addEventListener('submit', async (e) => {
             e.preventDefault();
             hideError('password-error');
             const btn = document.getElementById('password-submit');
-
             const newPass = document.getElementById('pass-new').value;
             const newPassConfirm = document.getElementById('pass-new-confirm').value;
 
-            if (newPass !== newPassConfirm) {
-                showError('password-error', 'Neues Passwort und Bestätigung stimmen nicht überein.');
-                return;
-            }
-            if (newPass.length < 6) {
-                showError('password-error', 'Passwort muss mindestens 6 Zeichen haben.');
-                return;
-            }
+            if (newPass !== newPassConfirm) { showError('password-error', T.errPwMismatch); return; }
+            if (newPass.length < 6) { showError('password-error', T.errPwMinLen); return; }
 
             btn.disabled = true;
-            btn.innerHTML = '<span class="spinner-border spinner-border-sm"></span> Setze...';
+            btn.innerHTML = '<span class="spinner-border spinner-border-sm"></span> ' + T.setting;
 
             try {
                 const r = await fetch('/api/setup/change_password', {
@@ -320,14 +286,14 @@
                     updateProgressPills();
                     showStep('done');
                 } else {
-                    showError('password-error', data.error || 'Unbekannter Fehler');
+                    showError('password-error', data.error || T.errUnknown);
                     btn.disabled = false;
-                    btn.innerHTML = '<i class="bi bi-check-circle"></i> Login-Passwort setzen';
+                    btn.innerHTML = '<i class="bi bi-check-circle"></i> ' + T.pwBtn;
                 }
             } catch (err) {
-                showError('password-error', 'Verbindungsfehler: ' + err.message);
+                showError('password-error', T.errConn + ': ' + err.message);
                 btn.disabled = false;
-                btn.innerHTML = '<i class="bi bi-check-circle"></i> Login-Passwort setzen';
+                btn.innerHTML = '<i class="bi bi-check-circle"></i> ' + T.pwBtn;
             }
         });
 

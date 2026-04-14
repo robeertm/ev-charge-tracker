@@ -452,7 +452,7 @@ def register_routes(app):
                 if not nxt.startswith('/') or nxt.startswith('//'):
                     nxt = '/'
                 return redirect(nxt)
-            error = 'Benutzername oder Passwort falsch.'
+            error = t('login.error')
         return render_template(
             'login.html',
             error=error,
@@ -905,6 +905,20 @@ def register_routes(app):
         from services.stats_service import get_recup_rate_kwh_per_km
         measured_recup, measured_recup_source = get_recup_rate_kwh_per_km()
 
+        # Hide the HTTPS card when the client is reaching us via Tailscale.
+        # Tailscale CGNAT range is 100.64.0.0/10 — seeing a remote_addr in there
+        # means the request came over WireGuard and already has transport
+        # encryption; a self-signed HTTPS layer on top is just noise.
+        hide_ssl_card = False
+        try:
+            from ipaddress import ip_address, ip_network
+            ts_net = ip_network('100.64.0.0/10')
+            client_ip = (request.headers.get('X-Forwarded-For') or request.remote_addr or '').split(',')[0].strip()
+            if client_ip and ip_address(client_ip) in ts_net:
+                hide_ssl_card = True
+        except (ValueError, TypeError):
+            pass
+
         return render_template('settings.html',
                                entsoe_key=AppConfig.get('entsoe_api_key', ''),
                                car_model_val=AppConfig.get('car_model', Config.CAR_MODEL),
@@ -946,6 +960,7 @@ def register_routes(app):
                                co2_missing=Charge.query.filter(Charge.co2_g_per_kwh.is_(None), Charge.charge_type != 'PV').count(),
                                auth_enabled=(AppConfig.get('auth_enabled', 'false') == 'true'),
                                auth_username=AppConfig.get('auth_username', ''),
+                               hide_ssl_card=hide_ssl_card,
                                app_version=Config.APP_VERSION)
 
     # ── REPORT ─────────────────────────────────────────────────

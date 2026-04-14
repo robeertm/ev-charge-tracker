@@ -1,5 +1,16 @@
 # Changelog
 
+## v2.9.0 (2026-04-14)
+
+### Übersetzungen für alle v2.7.x/v2.8.x Features + HTTPS-Autohide + README
+
+- **60 neue Übersetzungskeys** in allen 6 Sprachen (de/en/fr/es/it/nl) — deckt den Setup-Wizard (`wiz.*`), die Login-Seite (`login.*`) und den Zugangsschutz-Block in den Settings (`set.auth_*`) ab. Damit sind alle neuen Features aus v2.7.0–v2.8.1 vollständig lokalisiert.
+- **Setup-Wizard (`templates/setup.html`)** nutzt jetzt `t()` statt hardkodiertem Deutsch — Title, Welcome, beide Wizard-Schritte, Done-Screen, Fehlermeldungen und Button-Texte.
+- **Login-Seite (`templates/login.html`)** ist vollständig übersetzt inkl. Footer-Text.
+- **Zugangsschutz-Block in Settings** übersetzt inkl. Fehlermeldungen und Disable-Confirm-Dialog.
+- **HTTPS-Autohide**: Wenn der Request aus dem Tailscale-CGNAT-Bereich (`100.64.0.0/10`) kommt, blendet `/settings` die komplette HTTPS-Card aus. Tailscale verschlüsselt den Transport schon — ein self-signed-Zertifikat obendrauf ist dann nur Rauschen. Direkter LAN- oder Localhost-Zugriff sieht die Card weiterhin wie gehabt.
+- **README aktualisiert** mit Abschnitten zu Web-UI-Login, First-Run-Setup-Wizard, VM-Deployment-Flow und der systemd-Awareness des In-App-Updaters. String-Count auf ~540 pro Locale aktualisiert.
+
 ## v2.8.1 (2026-04-14)
 
 - **Dashboard: Durchschnittslinie im SOH-Plot** — Der SOH-Chart in der Vehicle-History bekommt eine horizontale graue gestrichelte Linie mit dem Mittelwert aller angezeigten Messpunkte. Macht Drift/Trends auf einen Blick erkennbar. Der Mittelwert wird in der Legende unter dem Chart als `Ø xx.x%` angezeigt. Nur aktiv wenn ≥3 Datenpunkte vorhanden sind. Andere Charts bleiben unverändert.

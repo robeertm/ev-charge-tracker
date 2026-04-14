@@ -110,15 +110,35 @@ Built for EV owners who want **full control over their charging data** — runs 
 - **Three modes** in Settings: `off` (HTTP), `auto` (self-signed), `custom` (paths to your own Let's Encrypt cert)
 - **Cert metadata viewer** + downloadable `.crt` to install on your phone via Profile (kills browser warnings permanently)
 - HTTPS is required for the Geolocation API on smartphones — the auto mode gets you there in two clicks
+- **Auto-hide** of the HTTPS card in Settings when the request comes from a Tailscale peer (100.64.0.0/10), since the VPN already provides transport encryption — less clutter for VM deployments
+
+### Web-UI login (optional password gate)
+- **Opt-in** front gate with username/password, shown before any route when enabled in Settings → Zugangsschutz
+- **Werkzeug password hashing** (bcrypt-compatible), credentials in `AppConfig`
+- **Flask signed session cookie** with a per-install random 32-byte secret that's generated on first boot and persisted — sessions survive restarts and updates
+- **Use case**: when the Tailscale share link is known to other devices but you still want a password in front of your charge data
+
+### First-run Setup Wizard (VM deployments)
+- **Browser-based wizard** that appears on first access to a freshly provisioned VM (triggered by a `/srv/ev-data/.setup_pending` marker)
+- **Two steps**: LUKS passphrase change (`sudo cryptsetup luksChangeKey` under the hood) and SSH login password change (`sudo chpasswd`)
+- **Resume-safe**: progress is tracked in a state file so a mid-wizard reload doesn't reset the user
+- **Result**: an end user can take ownership of a VM without touching a terminal — no SSH, no `cryptsetup`, no manpages
 
 ### Self-hosting / updates
 - **In-app updater** — "Update verfuegbar" button in Settings actually rolls out the new release on your machine (download zip, stage, detached helper swaps files, pip install, restart). No `git pull`, no terminal.
+- **systemd-aware**: under systemd the file swap is done inline in the running process and the supervisor restarts the service; outside systemd the legacy detached-helper flow is used
 - **Restart button** in Settings for applying HTTPS changes or new certs
 - **API rate limiter** — tracks daily API calls (Kia EU: 190/200 limit), counter on dashboard
 
+### VM deployment (multi-user rollout)
+- **Templated VM image** for DS1621+ / Synology VMM and other hypervisors: Debian base with Xvfb + x11vnc + noVNC for the Kia token capture flow, XRDP for occasional maintenance, UFW restricted to the `tailscale0` interface, systemd unit with `Restart=always` and `ConditionPathExists=/srv/ev-data/app/venv/bin/python` so it skips cleanly while the LUKS volume is locked
+- **`ev-provision` script** on each clone — auto-detects the data disk, formats LUKS with a temporary passphrase, registers with Tailscale via a pre-auth key, sets up sudoers entries for the wizard, enables UFW, prints handover info
+- **`ev-unlock` helper** — one command after VM boot, opens the LUKS volume, mounts it, starts the app
+- **End-to-end flow**: admin clones the template → runs `ev-provision` once → shares the VM via Tailscale device sharing → user runs through the browser wizard → done
+
 ### UX
 - **Dark/Light mode** — toggle in navbar, synced across all tabs via localStorage
-- **6 languages** — German, English, French, Spanish, Italian, Dutch (~447 translated strings per locale)
+- **6 languages** — German, English, French, Spanish, Italian, Dutch (~540 translated strings per locale)
 
 ---
 

@@ -828,7 +828,10 @@
             </div>
         </div>
 
-        <!-- HTTPS / Sicherheit -->
+        <!-- HTTPS / Sicherheit — hidden when the client is reaching us via Tailscale,
+             since the VPN already provides transport encryption and HTTPS with a
+             self-signed cert is just an extra trust prompt for no benefit. -->
+        {% if not hide_ssl_card %}
         <div class="card mb-4" id="sslCard">
             <div class="card-header bg-white fw-bold">
                 <i class="bi bi-shield-lock"></i> {{ t('set.ssl_title') }}
@@ -876,77 +879,75 @@
                 </div>
             </div>
         </div>
+        {% endif %}
 
         <!-- Zugangsschutz (optionales Web-UI-Login) -->
         <div class="card mb-4">
             <div class="card-header bg-white fw-bold">
-                <i class="bi bi-shield-lock"></i> Zugangsschutz
+                <i class="bi bi-shield-lock"></i> {{ t('set.auth_title') }}
                 {% if auth_enabled %}
-                    <span class="badge bg-success ms-2">aktiv</span>
+                    <span class="badge bg-success ms-2">{{ t('set.auth_active') }}</span>
                 {% else %}
-                    <span class="badge bg-secondary ms-2">inaktiv</span>
+                    <span class="badge bg-secondary ms-2">{{ t('set.auth_inactive') }}</span>
                 {% endif %}
             </div>
             <div class="card-body">
-                <p class="small text-muted mb-3">
-                    Eine Vorschaltseite mit Benutzername und Passwort, bevor jemand das Dashboard
-                    sieht. Tailscale schützt den Netzwerkzugriff — hier kommt der eigentliche
-                    App-Login für alle, die über den Tailnet-Share hereinkämen.
-                </p>
+                <p class="small text-muted mb-3">{{ t('set.auth_desc') }}</p>
 
                 {% if not auth_enabled %}
                 <form id="auth-enable-form">
                     <div class="row g-2">
                         <div class="col-md-4">
-                            <label class="form-label small">Benutzername</label>
+                            <label class="form-label small">{{ t('set.auth_username') }}</label>
                             <input type="text" class="form-control" id="auth-new-user" autocomplete="username" required>
                         </div>
                         <div class="col-md-4">
-                            <label class="form-label small">Passwort</label>
+                            <label class="form-label small">{{ t('set.auth_password') }}</label>
                             <input type="password" class="form-control" id="auth-new-pw" minlength="6" autocomplete="new-password" required>
                         </div>
                         <div class="col-md-4">
-                            <label class="form-label small">Passwort wiederholen</label>
+                            <label class="form-label small">{{ t('set.auth_password_confirm') }}</label>
                             <input type="password" class="form-control" id="auth-new-pw-confirm" minlength="6" autocomplete="new-password" required>
                         </div>
                     </div>
                     <div class="mt-3 d-flex gap-2 align-items-center">
                         <button type="submit" class="btn btn-primary">
-                            <i class="bi bi-shield-check"></i> Zugangsschutz aktivieren
+                            <i class="bi bi-shield-check"></i> {{ t('set.auth_enable_btn') }}
                         </button>
                         <span id="auth-enable-result" class="small"></span>
                     </div>
                 </form>
                 {% else %}
                 <div class="mb-3">
-                    <strong>Aktiv</strong> für Benutzer: <code>{{ auth_username }}</code>
+                    <strong>{{ t('set.auth_active') }}</strong> — {{ t('set.auth_active_for') }}: <code>{{ auth_username }}</code>
                 </div>
 
-                <h6 class="mt-4">Passwort ändern</h6>
+                <h6 class="mt-4">{{ t('set.auth_change_title') }}</h6>
                 <form id="auth-change-form">
                     <div class="row g-2">
                         <div class="col-md-4">
-                            <label class="form-label small">Aktuelles Passwort</label>
+                            <label class="form-label small">{{ t('set.auth_current_pw') }}</label>
                             <input type="password" class="form-control" id="auth-current-pw" autocomplete="current-password" required>
                         </div>
                         <div class="col-md-4">
-                            <label class="form-label small">Neues Passwort</label>
+                            <label class="form-label small">{{ t('set.auth_new_pw') }}</label>
                             <input type="password" class="form-control" id="auth-change-new" minlength="6" autocomplete="new-password" required>
                         </div>
                         <div class="col-md-4">
-                            <label class="form-label small">Neues Passwort wiederholen</label>
+                            <label class="form-label small">{{ t('set.auth_new_pw_confirm') }}</label>
                             <input type="password" class="form-control" id="auth-change-confirm" minlength="6" autocomplete="new-password" required>
                         </div>
                     </div>
                     <div class="mt-3 d-flex gap-2 align-items-center flex-wrap">
                         <button type="submit" class="btn btn-primary">
-                            <i class="bi bi-key"></i> Passwort ändern
+                            <i class="bi bi-key"></i> {{ t('set.auth_change_title') }}
                         </button>
-                        <button type="button" class="btn btn-outline-danger" id="btn-auth-disable">
-                            <i class="bi bi-shield-slash"></i> Deaktivieren
+                        <button type="button" class="btn btn-outline-danger" id="btn-auth-disable"
+                                data-confirm-msg="{{ t('set.auth_disable_confirm') }}">
+                            <i class="bi bi-shield-slash"></i> {{ t('set.auth_disable_btn') }}
                         </button>
                         <a href="/logout" class="btn btn-outline-secondary">
-                            <i class="bi bi-box-arrow-right"></i> Abmelden
+                            <i class="bi bi-box-arrow-right"></i> {{ t('set.auth_logout_btn') }}
                         </a>
                         <span id="auth-change-result" class="small"></span>
                     </div>
@@ -1476,6 +1477,10 @@
 
 // ── Zugangsschutz Formulare ──────────────────────────────
 (function() {
+    const T_AUTH = {
+        mismatch:    {{ t('set.auth_err_mismatch') | tojson }},
+        network:     {{ t('set.auth_err_network') | tojson }},
+    };
     const enableForm = document.getElementById('auth-enable-form');
     if (enableForm) {
         enableForm.addEventListener('submit', async (e) => {
@@ -1485,7 +1490,7 @@
             const u = document.getElementById('auth-new-user').value.trim();
             const p = document.getElementById('auth-new-pw').value;
             const pc = document.getElementById('auth-new-pw-confirm').value;
-            if (p !== pc) { result.textContent = 'Passwörter stimmen nicht überein'; result.className = 'small text-danger'; return; }
+            if (p !== pc) { result.textContent = T_AUTH.mismatch; result.className = 'small text-danger'; return; }
             try {
                 const r = await fetch('/api/auth/enable', {
                     method: 'POST',
@@ -1502,7 +1507,7 @@
                     result.className = 'small text-danger';
                 }
             } catch (err) {
-                result.textContent = 'Netzwerkfehler: ' + err.message;
+                result.textContent = T_AUTH.network + ': ' + err.message;
                 result.className = 'small text-danger';
             }
         });
@@ -1517,7 +1522,7 @@
             const cp = document.getElementById('auth-current-pw').value;
             const np = document.getElementById('auth-change-new').value;
             const nc = document.getElementById('auth-change-confirm').value;
-            if (np !== nc) { result.textContent = 'Neue Passwörter stimmen nicht überein'; result.className = 'small text-danger'; return; }
+            if (np !== nc) { result.textContent = T_AUTH.mismatch; result.className = 'small text-danger'; return; }
             try {
                 const r = await fetch('/api/auth/change_password', {
                     method: 'POST',
@@ -1538,13 +1543,14 @@
                     result.className = 'small text-danger';
                 }
             } catch (err) {
-                result.textContent = 'Netzwerkfehler: ' + err.message;
+                result.textContent = T_AUTH.network + ': ' + err.message;
                 result.className = 'small text-danger';
             }
         });
 
-        document.getElementById('btn-auth-disable').addEventListener('click', async () => {
-            if (!confirm('Zugangsschutz wirklich deaktivieren? Jeder mit Netzwerkzugriff kann dann ohne Passwort auf deine Daten zugreifen.')) return;
+        const btnDisable = document.getElementById('btn-auth-disable');
+        btnDisable.addEventListener('click', async () => {
+            if (!confirm(btnDisable.dataset.confirmMsg)) return;
             try {
                 const r = await fetch('/api/auth/disable', { method: 'POST' });
                 const data = await r.json();
@@ -1554,7 +1560,7 @@
                     alert(data.error || 'Fehler');
                 }
             } catch (err) {
-                alert('Netzwerkfehler: ' + err.message);
+                alert(T_AUTH.network + ': ' + err.message);
             }
         });
     }
