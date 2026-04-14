@@ -21,6 +21,7 @@ import json
 import logging
 import os
 import subprocess
+import sys
 from pathlib import Path
 from typing import Optional
 
@@ -43,7 +44,18 @@ TARGET_USER = 'ev-tracker'
 
 
 def is_setup_pending() -> bool:
-    """Cheap check: does the first-run marker file exist?"""
+    """True only on a freshly-provisioned Linux VM that still needs first-run setup.
+
+    Guarded twice:
+    1. Platform must be Linux — the wizard shells out to `cryptsetup` and
+       `chpasswd`, which don't exist on macOS/Windows. Running on those
+       platforms (e.g. developer laptop) should never trigger the wizard.
+    2. `/srv/ev-data/.setup_pending` must exist — the marker is dropped by
+       `ev-provision` at the end of VM provisioning and cleared by
+       `complete_setup()` after the user finishes the wizard.
+    """
+    if not sys.platform.startswith('linux'):
+        return False
     try:
         return SETUP_MARKER.is_file()
     except Exception:

@@ -1,5 +1,9 @@
 # Changelog
 
+## v2.7.2 (2026-04-14)
+
+- **Setup-Wizard explizit auf Linux beschränken** — `is_setup_pending()` gibt auf macOS und Windows jetzt hart `False` zurück, ohne überhaupt den Marker-Pfad zu prüfen. Praktisch war das schon vorher der Fall (der Pfad `/srv/ev-data/.setup_pending` existiert auf Nicht-Linux-Hosts sowieso nicht), aber jetzt ist's auch im Code klar dokumentiert, dass der Wizard VM-spezifisch ist. Schützt zusätzlich vor dem Randfall, dass jemand versehentlich eine Datei unter dem Pfad anlegt und damit den Wizard triggert, obwohl die nötigen `sudo cryptsetup`/`chpasswd`-Kommandos gar nicht existieren.
+
 ## v2.7.1 (2026-04-14)
 
 - **Setup-Wizard: zweiter Schritt für das SSH-Login-Passwort** — Der First-Run-Wizard nimmt jetzt neben der LUKS-Passphrase auch ein neues Login-Passwort für den `ev-tracker`-User entgegen. Ruft unter der Haube `sudo chpasswd` auf (braucht einen zusätzlichen NOPASSWD-sudoers-Eintrag für `/usr/sbin/chpasswd`). Wizard-Fortschritt wird in `/srv/ev-data/.setup_state.json` getrackt, sodass ein Mid-Wizard-Reload den Nutzer nahtlos an den nächsten offenen Schritt stellt statt LUKS nochmal abzufragen. Erst wenn beide Schritte durch sind, wird der Marker gelöscht und das Dashboard freigegeben. Damit kann der Admin nach Provisioning beide Temp-Credentials vergessen — der Nutzer ist vollständig autark.
