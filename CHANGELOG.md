@@ -1,5 +1,9 @@
 # Changelog
 
+## v2.7.3 (2026-04-14)
+
+- **Setup-Wizard: Browser-Redirect zuverlässig machen** — Der `before_request`-Hook prüfte den `Accept`-Header, um Browser-Zugriffe von API-Calls zu unterscheiden. Das war zu zerbrechlich: je nach Browser/Accept-Header landete der Nutzer auf der JSON-Antwort `{"error":"setup_pending",...}` statt auf dem Wizard. Jetzt einfach: alle GET-Requests werden während des Setups auf `/setup` umgeleitet, nur Nicht-GET (POST/PUT/DELETE) bekommen weiter die JSON-503-Antwort für API-Clients.
+
 ## v2.7.2 (2026-04-14)
 
 - **Setup-Wizard explizit auf Linux beschränken** — `is_setup_pending()` gibt auf macOS und Windows jetzt hart `False` zurück, ohne überhaupt den Marker-Pfad zu prüfen. Praktisch war das schon vorher der Fall (der Pfad `/srv/ev-data/.setup_pending` existiert auf Nicht-Linux-Hosts sowieso nicht), aber jetzt ist's auch im Code klar dokumentiert, dass der Wizard VM-spezifisch ist. Schützt zusätzlich vor dem Randfall, dass jemand versehentlich eine Datei unter dem Pfad anlegt und damit den Wizard triggert, obwohl die nötigen `sudo cryptsetup`/`chpasswd`-Kommandos gar nicht existieren.

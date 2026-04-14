@@ -326,8 +326,9 @@ def register_routes(app):
         path = request.path or '/'
         if any(path.startswith(p) for p in _SETUP_ALLOWED_PREFIXES):
             return None
-        # Redirect browser GETs to /setup, give APIs a clean 503.
-        if request.method == 'GET' and 'text/html' in (request.accept_mimetypes.best or ''):
+        # Browser navigation → redirect to wizard. Non-GET (API calls etc)
+        # get a clean 503 JSON so they can handle it programmatically.
+        if request.method == 'GET':
             return redirect(url_for('setup_wizard'))
         return jsonify({'error': 'setup_pending', 'redirect': '/setup'}), 503
 
