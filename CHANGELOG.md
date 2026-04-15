@@ -1,5 +1,36 @@
 # Changelog
 
+## v2.17.0 (2026-04-15)
+
+### Hyundai Refresh-Token: richtige OAuth-URLs (CTB-Flow)
+
+Der „Token holen"-Button funktioniert jetzt auch für Hyundai EU. Hintergrund: in v2.16.0 und davor hatte `services/vehicle/token_fetch.py` für Hyundai einfach die Kia-Konfiguration kopiert und nur die Domain getauscht — das konnte nie funktionieren, weil Kia und Hyundai EU **komplett unterschiedliche OAuth-Flows** verwenden, obwohl sie beide zur selben Mutterfirma gehören und auf derselben `hyundai_kia_connect_api`-Library aufsetzen.
+
+**Die Unterschiede:**
+
+| Feld | Kia EU (oneid) | Hyundai EU (CTB) |
+|---|---|---|
+| Flow | oneid/online-sales auf kia.com | CTB (Connected Car Telematics Business) auf ctbapi.hyundai-europe.com |
+| `login_client_id` | `peukiaidm-online-sales` | `peuhyundaiidm-ctb` |
+| `login_redirect` | `www.kia.com/api/bin/oneid/login` | `ctbapi.hyundai-europe.com/api/auth` |
+| `state` | Base64-URL + `_default`-Suffix | Kurzer Country-Code + `_` (z.B. `EN_`) |
+| `redirect_final` | `.../oauth2/redirect` | `.../oauth2/token` |
+| `client_secret` | Literal-String `"secret"` | Echter 48-Zeichen-Key `KUy49Xx...` |
+| User-Agent | Mobile Android | Desktop Chrome |
+| Extra authorize-Params | keine | `connector_client_id`, `captcha=1`, `ui_locales`, `nonce` |
+
+Die alte Config hat sechs von sieben Feldern falsch gehabt — nur `client_id` war korrekt. Der Token-Austausch scheiterte außerdem immer an der hart kodierten `client_secret: 'secret'`, weil Hyundai's Endpoint bei falschem Secret 401 zurückgibt.
+
+**Fix:**
+
+- `services/vehicle/token_fetch.py` — `BRAND_CONFIG['hyundai']` komplett ersetzt, `BRAND_CONFIG['kia']` explizit `client_secret: 'secret'` hinzugefügt (früher hart kodiert, jetzt konsistent). Neues Feld `user_agent` pro Marke (Mobile für Kia, Desktop für Hyundai, beide behalten das `_CCS_APP_AOS`-Suffix das den „use the app"-Block umgeht). Neues Feld `flow` pro Marke als Discriminator. Neue Helper-Funktion `_build_login_url(cfg)` baut die Login-URL per Flow — CTB braucht `connector_client_id`, `captcha=1`, `ui_locales` etc., die der Kia-oneid-Flow gar nicht kennt. Der Token-Exchange-POST zieht jetzt `cfg.get('client_secret', 'secret')` statt der Hardcoding.
+- `services/vehicle/connector_hyundai_kia.py` — Docstring aktualisiert, beide Connectors (Kia + Hyundai) teilen sich wieder den Refresh-Token-Flow, haben aber weiterhin eigene `credential_fields()`-Overrides für saubere Labels.
+- `templates/settings.html` — `updateVehicleFields()` zurück auf `isKiaHyundai` für Token-Hint-Section und Refresh-Token-Label. Hyundai-User sehen den „Token holen"-Button wieder (war in v2.16.2 fälschlich ausgeblendet, weil ich damals dachte, Hyundai ginge mit Passwort-Login).
+
+**Quellen**: zwei unabhängige Working-Scripts aus der hyundai_kia_connect_api-Community (Hyundai Token Solution Subfolder im upstream repo + RustyDust/bluelink_refresh_token) bestätigen alle Werte identisch. Dazu die Library-Source selbst (`KiaUvoApiEU.py`) mit `CCSP_SERVICE_ID` und `CCS_SERVICE_SECRET` als Runtime-Konstanten — die werden bei jedem späteren API-Call validiert, sind also garantiert aktuell.
+
+Kia-Flow bleibt **1:1 unverändert** bis auf das Auslagern von `client_secret` in die Config — der funktionierende Pfad wird nicht angefasst.
+
 ## v2.16.2 (2026-04-15)
 
 ### Hyundai: Login mit Passwort + PIN statt Refresh-Token

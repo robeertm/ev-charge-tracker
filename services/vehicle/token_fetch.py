@@ -1,11 +1,25 @@
-"""Fetch Kia/Hyundai refresh token via Selenium with mobile user-agent.
+"""Fetch Kia/Hyundai refresh token via Selenium.
 
-Based on: https://github.com/Hyundai-Kia-Connect/hyundai_kia_connect_api/wiki/Kia-Europe-Login-Flow
-Key insight: Kia requires a MOBILE user-agent string, otherwise login is blocked.
+Kia and Hyundai EU use *different* OAuth flows despite looking similar:
+
+- **Kia EU** uses the "oneid / online-sales" flow on the public kia.com
+  marketing site. Client secret is literally the string "secret". Mobile
+  user-agent required (desktop UA gets blocked by "use the app" page).
+  See: https://github.com/Hyundai-Kia-Connect/hyundai_kia_connect_api/wiki/Kia-Europe-Login-Flow
+
+- **Hyundai EU** uses the "ctb" (Connected Car Telematics Business) flow
+  on ctbapi.hyundai-europe.com with a real 48-char client_secret and
+  different authorize query params (needs connector_client_id, captcha=1,
+  ui_locales, etc). Desktop UA preferred.
+  See: https://github.com/Hyundai-Kia-Connect/hyundai_kia_connect_api/tree/master/Hyundai%20Token%20Solution
+
+Both UAs must keep the `_CCS_APP_AOS` suffix — it's the token that bypasses
+the "you must use the app" block.
 """
 import logging
 import re
 import threading
+import urllib.parse
 
 logger = logging.getLogger(__name__)
 
@@ -15,26 +29,62 @@ MOBILE_USER_AGENT = (
     "Mobile Safari/535.19_CCS_APP_AOS"
 )
 
+DESKTOP_USER_AGENT = (
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+    "(KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36_CCS_APP_AOS"
+)
+
 BRAND_CONFIG = {
     'kia': {
         'client_id': 'fdc85c00-0a2f-4c64-bcb4-2cfb1500730a',
+        'client_secret': 'secret',  # Kia really does use the literal string
         'base_url': 'https://idpconnect-eu.kia.com/auth/api/v2/user/oauth2/',
         'login_client_id': 'peukiaidm-online-sales',
         'login_redirect': 'https://www.kia.com/api/bin/oneid/login',
         'login_state': 'aHR0cHM6Ly93d3cua2lhLmNvbS9kZS8=_default',
         'redirect_final': 'https://prd.eu-ccapi.kia.com:8080/api/v1/user/oauth2/redirect',
         'success_selector': "a[class='logout user']",
+        'user_agent': MOBILE_USER_AGENT,
+        'flow': 'oneid',
     },
     'hyundai': {
         'client_id': '6d477c38-3ca4-4cf3-9557-2a1929a94654',
+        'client_secret': 'KUy49XxPzLpLuoK0xhBC77W6VXhmtQR9iQhmIFjjoY4IpxsV',
         'base_url': 'https://idpconnect-eu.hyundai.com/auth/api/v2/user/oauth2/',
-        'login_client_id': 'peuhyundaiidm-online-sales',
-        'login_redirect': 'https://www.hyundai.com/api/bin/oneid/login',
-        'login_state': 'aHR0cHM6Ly93d3cuaHl1bmRhaS5jb20vZGUv_default',
-        'redirect_final': 'https://prd.eu-ccapi.hyundai.com:8080/api/v1/user/oauth2/redirect',
-        'success_selector': "a[class='logout user'], .logged-in, [data-logged-in]",
+        'login_client_id': 'peuhyundaiidm-ctb',
+        'login_redirect': 'https://ctbapi.hyundai-europe.com/api/auth',
+        'login_state': 'EN_',
+        'redirect_final': 'https://prd.eu-ccapi.hyundai.com:8080/api/v1/user/oauth2/token',
+        'success_selector': "button.mail_check, button.ctb_button",
+        'user_agent': DESKTOP_USER_AGENT,
+        'flow': 'ctb',
     },
 }
+
+
+def _build_login_url(cfg):
+    """Build the per-brand authorize URL for the initial browser login."""
+    if cfg['flow'] == 'ctb':
+        # Hyundai CTB flow — needs connector_client_id, captcha=1, etc.
+        return (
+            f"{cfg['base_url']}authorize?"
+            f"client_id={cfg['login_client_id']}"
+            f"&redirect_uri={urllib.parse.quote(cfg['login_redirect'], safe='')}"
+            f"&nonce=&state={cfg['login_state']}"
+            f"&scope=openid+profile+email+phone"
+            f"&response_type=code"
+            f"&connector_client_id={cfg['login_client_id']}"
+            f"&connector_scope=&connector_session_key=&country="
+            f"&captcha=1&ui_locales=en-US&lang=en"
+        )
+    # Kia oneid flow — unchanged, proven working
+    return (
+        f"{cfg['base_url']}authorize?ui_locales=de"
+        f"&scope=openid%20profile%20email%20phone"
+        f"&response_type=code&client_id={cfg['login_client_id']}"
+        f"&redirect_uri={cfg['login_redirect']}"
+        f"&state={cfg['login_state']}"
+    )
 
 _fetch_state = {
     'running': False,
@@ -57,12 +107,7 @@ def _do_fetch(brand_key):
         _fetch_state.update(running=False, error=f'Unbekannte Marke: {brand_key}')
         return
 
-    login_url = (
-        f"{cfg['base_url']}authorize?ui_locales=de&scope=openid%20profile%20email%20phone"
-        f"&response_type=code&client_id={cfg['login_client_id']}"
-        f"&redirect_uri={cfg['login_redirect']}"
-        f"&state={cfg['login_state']}"
-    )
+    login_url = _build_login_url(cfg)
     redirect_url = (
         f"{cfg['base_url']}authorize?response_type=code&client_id={cfg['client_id']}"
         f"&redirect_uri={cfg['redirect_final']}&lang=de&state=ccsp"
@@ -90,7 +135,7 @@ def _do_fetch(brand_key):
         from selenium.webdriver.support import expected_conditions as EC
 
         options = webdriver.ChromeOptions()
-        options.add_argument(f'user-agent={MOBILE_USER_AGENT}')
+        options.add_argument(f"user-agent={cfg['user_agent']}")
         options.add_argument('--window-size=420,750')
         options.add_argument('--no-sandbox')
         options.add_argument('--disable-dev-shm-usage')
@@ -129,14 +174,16 @@ def _do_fetch(brand_key):
 
             code = match.group(1)
 
-            # Exchange code for tokens
+            # Exchange code for tokens. Kia's client_secret is literally
+            # "secret", Hyundai's is a real 48-char string — both come from
+            # the brand config dict so we never hard-code the wrong one.
             import requests as req
             resp = req.post(token_url, data={
                 'grant_type': 'authorization_code',
                 'code': code,
                 'redirect_uri': cfg['redirect_final'],
                 'client_id': cfg['client_id'],
-                'client_secret': 'secret',
+                'client_secret': cfg.get('client_secret', 'secret'),
             })
 
             if resp.status_code == 200:

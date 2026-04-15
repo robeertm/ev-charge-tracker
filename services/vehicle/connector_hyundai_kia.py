@@ -1,18 +1,17 @@
 """Kia UVO / Hyundai Bluelink connector via hyundai-kia-connect-api.
 
-The two brands handle auth differently now:
+Since 2025/2026, **both** Kia EU and Hyundai EU require a refresh_token
+instead of a password — reCAPTCHA blocks direct automated login. The
+user obtains the token once via a browser-based OAuth flow
+(`token_fetch.py`) and stores it in the password field.
 
-- **Kia (EU)** requires a refresh_token since 2025 — direct password
-  login is blocked by reCAPTCHA. User obtains the token once via the
-  browser-based OAuth flow (token_fetch.py) and stores it in the
-  password field. See KIA_CREDENTIAL_FIELDS.
-
-- **Hyundai (EU)** still accepts direct username + password + pin
-  login at the time of writing. See HYUNDAI_CREDENTIAL_FIELDS.
-
-Both are passed to `hyundai_kia_connect_api.VehicleManager` via the
-same `password=` parameter — the library just treats whatever is in
-there as the credential blob. The label in the UI differs.
+The two brands use *different* OAuth flows under the hood (Kia uses the
+oneid flow on kia.com, Hyundai uses the CTB flow on
+ctbapi.hyundai-europe.com with a real client_secret and different
+authorize query params). See `token_fetch.py` for the per-brand config.
+At the API-call level though, both end up calling
+`hyundai_kia_connect_api.VehicleManager` with the refresh_token in the
+password parameter.
 """
 import logging
 
@@ -51,11 +50,12 @@ KIA_CREDENTIAL_FIELDS = [
     _REGION_FIELD,
 ]
 
-# Hyundai: direct username + password + pin (still works in EU)
+# Hyundai: same refresh-token flow as Kia (different OAuth URLs under
+# the hood — see token_fetch.py BRAND_CONFIG['hyundai']).
 HYUNDAI_CREDENTIAL_FIELDS = [
     {"key": "username", "label": "E-Mail (Bluelink Account)", "type": "text"},
-    {"key": "password", "label": "Passwort", "type": "password",
-     "help": "Dein normales Bluelink-Passwort."},
+    {"key": "password", "label": "Refresh-Token", "type": "password",
+     "help": "Kein Passwort! Token über Browser-Login holen (siehe Anleitung unten)."},
     {"key": "pin", "label": "PIN (4-stellig aus Bluelink App)", "type": "password"},
     _REGION_FIELD,
 ]
