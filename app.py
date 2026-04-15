@@ -663,6 +663,45 @@ def register_routes(app):
                 pass
             return jsonify({'error': f'Import fehlgeschlagen: {e}'}), 500
 
+    # ── Notify settings (ntfy.sh reboot alerts) ──────────────────
+    # Config lives outside the encrypted volume at /var/lib/ev-tracker/notify.json
+    # so the unlock-web helper can read it before LUKS is opened.
+    @app.route('/api/settings/notify', methods=['GET', 'POST'])
+    def api_settings_notify():
+        from services import notify_service
+        if request.method == 'GET':
+            cfg = notify_service.load()
+            return jsonify({'ok': True, **cfg})
+        data = request.get_json(silent=True) or {}
+        try:
+            path = notify_service.save(
+                enabled=data.get('enabled', False),
+                topic=data.get('topic', ''),
+                server=data.get('server', ''),
+            )
+            return jsonify({'ok': True, 'path': str(path)})
+        except Exception as e:
+            logger.error(f"Notify save failed: {e}")
+            return jsonify({'error': str(e)}), 500
+
+    @app.route('/api/settings/notify/test', methods=['POST'])
+    def api_settings_notify_test():
+        from services import notify_service
+        data = request.get_json(silent=True) or {}
+        topic = (data.get('topic') or '').strip()
+        server = (data.get('server') or '').strip() or 'https://ntfy.sh'
+        if not topic:
+            return jsonify({'error': 'Topic fehlt'}), 400
+        ok, info = notify_service.send(
+            topic=topic,
+            server=server,
+            message='Test: EV Charge Tracker Benachrichtigung funktioniert.',
+            title='EV Charge Tracker',
+        )
+        if ok:
+            return jsonify({'ok': True})
+        return jsonify({'error': info}), 502
+
     @app.context_processor
     def inject_globals():
         # THG reminder: between Jan 1 and Mar 31, warn if previous year has no quota

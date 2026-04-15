@@ -1,5 +1,21 @@
 # Changelog
 
+## v2.15.0 (2026-04-15)
+
+### Push-Benachrichtigung bei VM-Neustart (ntfy.sh)
+
+Die VMs auf dem NAS kommen nach einem Reboot (Stromausfall, NAS-Update, manueller Neustart) automatisch wieder hoch, aber das LUKS-Volume ist dann versiegelt — der Nutzer muss manuell im Browser auf die Unlock-Seite und die Passphrase eintippen. Das Problem: ohne Rückkanal merkt der Nutzer das erst, wenn er das nächste Mal die App aufruft. Diese Version baut einen leichten Push-Kanal über **ntfy.sh**:
+
+- Neue Settings-Card **„Benachrichtigungen"** (zwischen Zugangsschutz und Backup). Checkbox zum Aktivieren, Feld für den ntfy-Topic-Namen, optional eigener ntfy-Server, Speichern- und Test-Button. Der Topic-Name ist frei wählbar; er ist das einzige „Geheimnis" des Push-Kanals — die UI weist explizit darauf hin, einen schwer zu erratenden Namen zu wählen.
+- Der Nutzer installiert die kostenlose **ntfy-App** (iOS/Android), abonniert dort den gleichen Topic-Namen — fertig. Kein Account, kein Server, keine Gebühren.
+- **Config lebt außerhalb des LUKS-Volumes** unter `/var/lib/ev-tracker/notify.json`. Das ist wichtig, weil der Unlock-Helper (`ev-unlock-web`) genau dann läuft, wenn LUKS versiegelt ist — er könnte keine Config aus der App-DB lesen. Der Ordner gehört `ev-tracker:ev-tracker` mit Mode 0750, so dass weder sudo noch root nötig sind. Der Trade-off: der Topic-Name liegt im Klartext außerhalb der Verschlüsselung. Wer Root auf der VM hat, kann ihn lesen — wer Root hat, hat aber ohnehin gewonnen, insofern ist das akzeptabel.
+- Technik: `services/notify_service.py` kapselt Lesen/Schreiben der JSON-Datei (mit Fallback auf `data/notify.json` für lokale Entwicklung) und den tatsächlichen HTTP-POST via `urllib.request` — kein curl, keine zusätzliche Dependency. Neue Routen `GET/POST /api/settings/notify` (Config laden/speichern) und `POST /api/settings/notify/test` (Testnachricht).
+- **15 neue Übersetzungskeys** pro Sprache in allen 6 Sprachen (`set.notify_*`).
+
+**Eingriff auf den VMs (per Paste-Block als root):**
+
+Da der eigentliche Push aus dem Boot-Pfad feuern muss (bevor LUKS entsperrt ist, also außerhalb des App-Updates), kommt dazu eine kleine neue systemd-Unit `ev-notify-boot.service` plus das Helper-Script `/usr/local/bin/ev-notify-boot`. Die Unit läuft als Oneshot vor `ev-unlock-web.service`, aber nur wenn LUKS noch versiegelt ist (`ConditionPathExists=!/srv/ev-data/app/venv/bin/python`). Sie liest `/var/lib/ev-tracker/notify.json`, und wenn `enabled:true` und ein Topic gesetzt ist, schickt sie einen einzigen POST an `<server>/<topic>` mit Hostname + Uhrzeit in der Message. Schlägt der POST fehl → exit 0, damit ein ausgefallener ntfy-Server niemals den Boot blockiert.
+
 ## v2.14.0 (2026-04-15)
 
 ### Wizard-Schritt 2 wird „Web-Login anlegen" + Backup/Restore-Feature

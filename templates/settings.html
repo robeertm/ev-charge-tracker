@@ -956,6 +956,49 @@
             </div>
         </div>
 
+        <!-- Benachrichtigungen (ntfy.sh Reboot-Alerts) -->
+        <div class="card mb-4">
+            <div class="card-header bg-white fw-bold">
+                <i class="bi bi-bell"></i> {{ t('set.notify_title') }}
+            </div>
+            <div class="card-body">
+                <p class="small text-muted mb-3">{{ t('set.notify_desc') }}</p>
+                <div class="alert alert-info small mb-3">
+                    <i class="bi bi-info-circle"></i>
+                    {{ t('set.notify_howto') }}
+                </div>
+                <form id="notify-form">
+                    <div class="form-check form-switch mb-3">
+                        <input class="form-check-input" type="checkbox" id="notify-enabled">
+                        <label class="form-check-label" for="notify-enabled">
+                            {{ t('set.notify_enabled_label') }}
+                        </label>
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label small">{{ t('set.notify_topic_label') }}</label>
+                        <input type="text" class="form-control" id="notify-topic"
+                               placeholder="ev-meine-vm-k3x9p2" autocomplete="off">
+                        <div class="form-text">{{ t('set.notify_topic_hint') }}</div>
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label small">{{ t('set.notify_server_label') }}</label>
+                        <input type="text" class="form-control" id="notify-server"
+                               placeholder="https://ntfy.sh" autocomplete="off">
+                        <div class="form-text">{{ t('set.notify_server_hint') }}</div>
+                    </div>
+                    <div class="d-flex gap-2 align-items-center flex-wrap">
+                        <button type="submit" class="btn btn-primary">
+                            <i class="bi bi-save"></i> {{ t('set.notify_save_btn') }}
+                        </button>
+                        <button type="button" class="btn btn-outline-secondary" id="notify-test-btn">
+                            <i class="bi bi-send"></i> {{ t('set.notify_test_btn') }}
+                        </button>
+                        <span id="notify-result" class="small"></span>
+                    </div>
+                </form>
+            </div>
+        </div>
+
         <!-- Backup & Wiederherstellung -->
         <div class="card mb-4">
             <div class="card-header bg-white fw-bold">
@@ -1603,6 +1646,77 @@
             }
         });
     }
+})();
+
+// ── Notify (ntfy.sh) Form ──────────────────────────────────
+(function() {
+    const form = document.getElementById('notify-form');
+    if (!form) return;
+    const T_NT = {
+        saved:      {{ t('set.notify_saved') | tojson }},
+        test_ok:    {{ t('set.notify_test_ok') | tojson }},
+        test_fail:  {{ t('set.notify_test_fail') | tojson }},
+        network:    {{ t('set.notify_err_network') | tojson }},
+        no_topic:   {{ t('set.notify_err_no_topic') | tojson }},
+    };
+    const cbEnabled = document.getElementById('notify-enabled');
+    const inTopic   = document.getElementById('notify-topic');
+    const inServer  = document.getElementById('notify-server');
+    const result    = document.getElementById('notify-result');
+    const btnTest   = document.getElementById('notify-test-btn');
+
+    function showMsg(msg, cls) { result.textContent = msg; result.className = 'small ' + cls; }
+
+    // Load current config
+    fetch('/api/settings/notify').then(r => r.json()).then(data => {
+        if (data && data.ok) {
+            cbEnabled.checked = !!data.enabled;
+            inTopic.value = data.topic || '';
+            inServer.value = data.server || 'https://ntfy.sh';
+        }
+    }).catch(() => {});
+
+    form.addEventListener('submit', async (e) => {
+        e.preventDefault();
+        showMsg('', '');
+        try {
+            const r = await fetch('/api/settings/notify', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({
+                    enabled: cbEnabled.checked,
+                    topic:   inTopic.value,
+                    server:  inServer.value,
+                }),
+            });
+            const data = await r.json();
+            if (r.ok && data.ok) showMsg(T_NT.saved, 'text-success');
+            else showMsg(data.error || 'Fehler', 'text-danger');
+        } catch (err) {
+            showMsg(T_NT.network + ': ' + err.message, 'text-danger');
+        }
+    });
+
+    btnTest.addEventListener('click', async () => {
+        showMsg('', '');
+        const topic = inTopic.value.trim();
+        if (!topic) { showMsg(T_NT.no_topic, 'text-danger'); return; }
+        btnTest.disabled = true;
+        try {
+            const r = await fetch('/api/settings/notify/test', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({topic, server: inServer.value}),
+            });
+            const data = await r.json();
+            if (r.ok && data.ok) showMsg(T_NT.test_ok, 'text-success');
+            else showMsg(T_NT.test_fail + ': ' + (data.error || ''), 'text-danger');
+        } catch (err) {
+            showMsg(T_NT.network + ': ' + err.message, 'text-danger');
+        } finally {
+            btnTest.disabled = false;
+        }
+    });
 })();
 
 // ── Backup / Restore Form ──────────────────────────────────
