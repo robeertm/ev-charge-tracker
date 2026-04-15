@@ -1,5 +1,13 @@
 # Changelog
 
+## v2.15.1 (2026-04-15)
+
+### Fix: Benachrichtigungen-Card speicherte nicht
+
+In v2.15.0 war die Benachrichtigungen-Card als echtes `<form>`-Element mit einem `<button type="submit">` gebaut. Aus noch unverstandenen Gründen hat der JS-Submit-Handler in Safari nicht gegriffen (vermutlich ein Reihenfolge-Problem mit einer vorangehenden IIFE im gleichen `<script>`-Block, die in bestimmten Fällen den weiteren Parse abbricht). Effekt: beim Klick auf „Speichern" machte der Browser ein natives Form-Submit (GET ohne Body), die Seite lud neu, die Felder waren wieder leer — obwohl der Backend-Code und die Routen einwandfrei funktionierten (per fetch aus der Devtools-Konsole direkt bestätigt: POST und GET liefern `{ok:true, ...}`).
+
+Fix ist pragmatisch statt chirurgisch: `<form>` → `<div>`, `<button type="submit">` → `<button type="button">` mit direktem Click-Handler. Kein Form-Submit-Event mehr = kein möglicher Reload, egal was sonst im Script passiert. Funktional identisch, nur ohne die versteckte Reload-Falle.
+
 ## v2.15.0 (2026-04-15)
 
 ### Push-Benachrichtigung bei VM-Neustart (ntfy.sh)
