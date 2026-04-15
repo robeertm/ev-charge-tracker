@@ -561,10 +561,14 @@
                 function updateVehicleFields() {
                     const brand = document.getElementById('vehicle_api_brand').value;
                     const hasBrand = brand !== '';
-                    const isKiaHyundai = ['kia', 'hyundai'].includes(brand);
+                    const isKia = brand === 'kia';
+                    const isHyundai = brand === 'hyundai';
+                    const isKiaHyundai = isKia || isHyundai;
                     const isVAG = ['vw', 'skoda', 'seat', 'cupra', 'audi'].includes(brand);
                     const isTesla = brand === 'tesla';
-                    const needsToken = isKiaHyundai || isTesla;
+                    // Only Kia + Tesla use a token/secret instead of a password.
+                    // Hyundai EU still accepts direct username + password + pin.
+                    const needsToken = isKia || isTesla;
                     const hasVin = isVAG || isKiaHyundai || ['polestar', 'mg', 'porsche'].includes(brand);
                     const hasRegion = isKiaHyundai || brand === 'mg' || brand === 'renault' || brand === 'dacia';
 
@@ -576,9 +580,9 @@
                     document.querySelectorAll('.vehicle-field-pin').forEach(el => el.style.display = isKiaHyundai ? '' : 'none');
                     document.querySelectorAll('.vehicle-field-region').forEach(el => el.style.display = hasRegion ? '' : 'none');
                     document.querySelectorAll('.vehicle-field-vin').forEach(el => el.style.display = hasVin ? '' : 'none');
-                    document.querySelectorAll('.vehicle-field-token-hint').forEach(el => el.style.display = isKiaHyundai ? '' : 'none');
+                    document.querySelectorAll('.vehicle-field-token-hint').forEach(el => el.style.display = isKia ? '' : 'none');
                     document.getElementById('labelPassword').textContent = needsToken ? T.api_refresh_token : T.api_password;
-                    document.getElementById('tokenHintSection').style.display = isKiaHyundai ? '' : 'none';
+                    document.getElementById('tokenHintSection').style.display = isKia ? '' : 'none';
 
                     // Load feature matrix for this brand
                     if (hasBrand) loadBrandFeatures(brand);

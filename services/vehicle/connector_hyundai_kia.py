@@ -1,8 +1,18 @@
 """Kia UVO / Hyundai Bluelink connector via hyundai-kia-connect-api.
 
-Since 2025, Kia/Hyundai EU requires a refresh_token instead of a password
-(reCAPTCHA blocks automated login). The token is obtained once via a
-browser-based OAuth flow and then passed as the 'password' parameter.
+The two brands handle auth differently now:
+
+- **Kia (EU)** requires a refresh_token since 2025 — direct password
+  login is blocked by reCAPTCHA. User obtains the token once via the
+  browser-based OAuth flow (token_fetch.py) and stores it in the
+  password field. See KIA_CREDENTIAL_FIELDS.
+
+- **Hyundai (EU)** still accepts direct username + password + pin
+  login at the time of writing. See HYUNDAI_CREDENTIAL_FIELDS.
+
+Both are passed to `hyundai_kia_connect_api.VehicleManager` via the
+same `password=` parameter — the library just treats whatever is in
+there as the credential blob. The label in the UI differs.
 """
 import logging
 
@@ -24,16 +34,30 @@ REGIONS = {
     'KR': 4,   # Korea
 }
 
-CREDENTIAL_FIELDS = [
-    {"key": "username", "label": "E-Mail (Kia Connect / Bluelink Account)", "type": "text"},
+_REGION_FIELD = {
+    "key": "region", "label": "Region", "type": "select",
+    "options": [{"value": "EU", "label": "Europa"},
+                {"value": "US", "label": "USA"},
+                {"value": "CA", "label": "Kanada"},
+                {"value": "KR", "label": "Korea"}],
+}
+
+# Kia: refresh-token flow (password login blocked by reCAPTCHA since 2025)
+KIA_CREDENTIAL_FIELDS = [
+    {"key": "username", "label": "E-Mail (Kia Connect Account)", "type": "text"},
     {"key": "password", "label": "Refresh-Token", "type": "password",
      "help": "Kein Passwort! Token über Browser-Login holen (siehe Anleitung unten)."},
     {"key": "pin", "label": "PIN (4-stellig aus Kia Connect App)", "type": "password"},
-    {"key": "region", "label": "Region", "type": "select",
-     "options": [{"value": "EU", "label": "Europa"},
-                 {"value": "US", "label": "USA"},
-                 {"value": "CA", "label": "Kanada"},
-                 {"value": "KR", "label": "Korea"}]},
+    _REGION_FIELD,
+]
+
+# Hyundai: direct username + password + pin (still works in EU)
+HYUNDAI_CREDENTIAL_FIELDS = [
+    {"key": "username", "label": "E-Mail (Bluelink Account)", "type": "text"},
+    {"key": "password", "label": "Passwort", "type": "password",
+     "help": "Dein normales Bluelink-Passwort."},
+    {"key": "pin", "label": "PIN (4-stellig aus Bluelink App)", "type": "password"},
+    _REGION_FIELD,
 ]
 
 
@@ -165,17 +189,16 @@ class _HyundaiKiaBase(VehicleConnector):
             raw_data={'vin': vehicle.VIN, 'name': vehicle.name, 'model': vehicle.model},
         )
 
-    @staticmethod
-    def credential_fields() -> list:
-        return CREDENTIAL_FIELDS
-
-
 class KiaConnector(_HyundaiKiaBase):
     BRAND_ID = 1
 
     @staticmethod
     def brand_name() -> str:
         return "Kia (UVO)"
+
+    @staticmethod
+    def credential_fields() -> list:
+        return KIA_CREDENTIAL_FIELDS
 
 
 class HyundaiConnector(_HyundaiKiaBase):
@@ -184,6 +207,10 @@ class HyundaiConnector(_HyundaiKiaBase):
     @staticmethod
     def brand_name() -> str:
         return "Hyundai (Bluelink)"
+
+    @staticmethod
+    def credential_fields() -> list:
+        return HYUNDAI_CREDENTIAL_FIELDS
 
 
 # Register if dependency is installed

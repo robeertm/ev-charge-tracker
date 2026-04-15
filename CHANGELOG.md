@@ -1,5 +1,19 @@
 # Changelog
 
+## v2.16.2 (2026-04-15)
+
+### Hyundai: Login mit Passwort + PIN statt Refresh-Token
+
+Bis jetzt hat die App sowohl für Kia als auch für Hyundai ein Refresh-Token verlangt (beides lief über `CREDENTIAL_FIELDS` mit Label „Refresh-Token"). Für **Kia EU** ist das seit 2025 Pflicht weil reCAPTCHA den direkten Passwort-Login blockt, für **Hyundai EU** funktioniert aber weiterhin der klassische Flow mit E-Mail + Passwort + 4-stelliger PIN.
+
+Fix: credential_fields pro Marke trennen.
+
+- `services/vehicle/connector_hyundai_kia.py` — zwei separate Listen: `KIA_CREDENTIAL_FIELDS` (Refresh-Token, Help-Text verweist auf den Token-Fetch-Button) und `HYUNDAI_CREDENTIAL_FIELDS` (normales Passwort-Feld). Beide Connector-Klassen überschreiben `credential_fields()` mit ihrer eigenen Liste.
+- `templates/settings.html` — Frontend-Logik in `updateVehicleFields()` splittet `isKiaHyundai` in `isKia` und `isHyundai`. Token-Hint-Section und „Refresh-Token"-Label jetzt nur noch für Kia (und Tesla) — Hyundai zeigt normales „Passwort"-Feld, kein „Token holen"-Button.
+- Kia-Flow bleibt **exakt** wie er ist (unangetastet, funktioniert).
+
+Falls Hyundai EU irgendwann auch reCAPTCHA aktiviert, fliegt das hier beim Auth-Versuch mit einem Fehler auf und wir müssen Hyundai in den Token-Flow schieben. Aktuell reicht aber User + Passwort.
+
 ## v2.16.1 (2026-04-15)
 
 ### Fix: /api/system/updates/status crasht bei Permission-Denied auf UU-Log
