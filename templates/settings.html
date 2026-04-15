@@ -1648,79 +1648,8 @@
     }
 })();
 
-// ── Notify (ntfy.sh) Form ──────────────────────────────────
-(function() {
-    const container = document.getElementById('notify-form');
-    if (!container) return;
-    const T_NT = {
-        saved:      {{ t('set.notify_saved') | tojson }},
-        test_ok:    {{ t('set.notify_test_ok') | tojson }},
-        test_fail:  {{ t('set.notify_test_fail') | tojson }},
-        network:    {{ t('set.notify_err_network') | tojson }},
-        no_topic:   {{ t('set.notify_err_no_topic') | tojson }},
-    };
-    const cbEnabled = document.getElementById('notify-enabled');
-    const inTopic   = document.getElementById('notify-topic');
-    const inServer  = document.getElementById('notify-server');
-    const result    = document.getElementById('notify-result');
-    const btnSave   = document.getElementById('notify-save-btn');
-    const btnTest   = document.getElementById('notify-test-btn');
-
-    function showMsg(msg, cls) { result.textContent = msg; result.className = 'small ' + cls; }
-
-    // Load current config
-    fetch('/api/settings/notify').then(r => r.json()).then(data => {
-        if (data && data.ok) {
-            cbEnabled.checked = !!data.enabled;
-            inTopic.value = data.topic || '';
-            inServer.value = data.server || 'https://ntfy.sh';
-        }
-    }).catch(() => {});
-
-    btnSave.addEventListener('click', async () => {
-        showMsg('', '');
-        btnSave.disabled = true;
-        try {
-            const r = await fetch('/api/settings/notify', {
-                method: 'POST',
-                headers: {'Content-Type': 'application/json'},
-                body: JSON.stringify({
-                    enabled: cbEnabled.checked,
-                    topic:   inTopic.value,
-                    server:  inServer.value,
-                }),
-            });
-            const data = await r.json();
-            if (r.ok && data.ok) showMsg(T_NT.saved, 'text-success');
-            else showMsg(data.error || 'Fehler', 'text-danger');
-        } catch (err) {
-            showMsg(T_NT.network + ': ' + err.message, 'text-danger');
-        } finally {
-            btnSave.disabled = false;
-        }
-    });
-
-    btnTest.addEventListener('click', async () => {
-        showMsg('', '');
-        const topic = inTopic.value.trim();
-        if (!topic) { showMsg(T_NT.no_topic, 'text-danger'); return; }
-        btnTest.disabled = true;
-        try {
-            const r = await fetch('/api/settings/notify/test', {
-                method: 'POST',
-                headers: {'Content-Type': 'application/json'},
-                body: JSON.stringify({topic, server: inServer.value}),
-            });
-            const data = await r.json();
-            if (r.ok && data.ok) showMsg(T_NT.test_ok, 'text-success');
-            else showMsg(T_NT.test_fail + ': ' + (data.error || ''), 'text-danger');
-        } catch (err) {
-            showMsg(T_NT.network + ': ' + err.message, 'text-danger');
-        } finally {
-            btnTest.disabled = false;
-        }
-    });
-})();
+// Notify IIFE moved to its own <script> block at the end of the template
+// (isolated so any earlier JS error can't break it).
 
 // ── Backup / Restore Form ──────────────────────────────────
 (function() {
@@ -1762,6 +1691,100 @@
             btn.disabled = false;
         }
     });
+})();
+</script>
+
+<!-- Notify (ntfy.sh) — isolated script block so earlier JS errors
+     in the main block cannot break it. Simple inline handlers,
+     no IIFE, no form element. -->
+<script>
+(function initNotifyCard() {
+    console.log('[notify] init start');
+    var container = document.getElementById('notify-form');
+    if (!container) { console.log('[notify] no container'); return; }
+    var cbEnabled = document.getElementById('notify-enabled');
+    var inTopic   = document.getElementById('notify-topic');
+    var inServer  = document.getElementById('notify-server');
+    var result    = document.getElementById('notify-result');
+    var btnSave   = document.getElementById('notify-save-btn');
+    var btnTest   = document.getElementById('notify-test-btn');
+    if (!btnSave || !btnTest) { console.log('[notify] buttons missing'); return; }
+
+    var T = {
+        saved:     {{ t('set.notify_saved') | tojson }},
+        test_ok:   {{ t('set.notify_test_ok') | tojson }},
+        test_fail: {{ t('set.notify_test_fail') | tojson }},
+        network:   {{ t('set.notify_err_network') | tojson }},
+        no_topic:  {{ t('set.notify_err_no_topic') | tojson }}
+    };
+
+    function showMsg(msg, cls) {
+        result.textContent = msg;
+        result.className = 'small ' + (cls || '');
+    }
+
+    // Load current config
+    fetch('/api/settings/notify', {credentials: 'same-origin'})
+        .then(function(r) { return r.json(); })
+        .then(function(data) {
+            if (data && data.ok) {
+                cbEnabled.checked = !!data.enabled;
+                inTopic.value = data.topic || '';
+                inServer.value = data.server || 'https://ntfy.sh';
+                console.log('[notify] loaded', data);
+            }
+        })
+        .catch(function(err) { console.log('[notify] load err', err); });
+
+    btnSave.addEventListener('click', function() {
+        console.log('[notify] save click');
+        showMsg('', '');
+        btnSave.disabled = true;
+        fetch('/api/settings/notify', {
+            method: 'POST',
+            credentials: 'same-origin',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({
+                enabled: cbEnabled.checked,
+                topic:   inTopic.value,
+                server:  inServer.value
+            })
+        })
+        .then(function(r) { return r.json().then(function(d) { return {ok: r.ok, data: d}; }); })
+        .then(function(res) {
+            if (res.ok && res.data.ok) showMsg(T.saved, 'text-success');
+            else showMsg((res.data && res.data.error) || 'Fehler', 'text-danger');
+        })
+        .catch(function(err) {
+            showMsg(T.network + ': ' + err.message, 'text-danger');
+        })
+        .then(function() { btnSave.disabled = false; });
+    });
+
+    btnTest.addEventListener('click', function() {
+        console.log('[notify] test click');
+        showMsg('', '');
+        var topic = inTopic.value.trim();
+        if (!topic) { showMsg(T.no_topic, 'text-danger'); return; }
+        btnTest.disabled = true;
+        fetch('/api/settings/notify/test', {
+            method: 'POST',
+            credentials: 'same-origin',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({topic: topic, server: inServer.value})
+        })
+        .then(function(r) { return r.json().then(function(d) { return {ok: r.ok, data: d}; }); })
+        .then(function(res) {
+            if (res.ok && res.data.ok) showMsg(T.test_ok, 'text-success');
+            else showMsg(T.test_fail + ': ' + ((res.data && res.data.error) || ''), 'text-danger');
+        })
+        .catch(function(err) {
+            showMsg(T.network + ': ' + err.message, 'text-danger');
+        })
+        .then(function() { btnTest.disabled = false; });
+    });
+
+    console.log('[notify] handlers attached');
 })();
 </script>
 {% endblock %}

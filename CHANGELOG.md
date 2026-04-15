@@ -1,5 +1,15 @@
 # Changelog
 
+## v2.15.2 (2026-04-15)
+
+### Fix: Notify-Card Handler liefen gar nicht mehr
+
+v2.15.1 hat die `<form>` entfernt und den Save-Button auf `type="button"` umgestellt. Das hat den Reload verhindert, aber jetzt passierte **gar nichts** beim Klick — Button reagierte nicht. Safari-Konsole bestätigte: Button-Element existiert, aber der Click-Handler war nicht angehängt. Das heißt: die IIFE hat nicht bis zum `addEventListener` durchlaufen.
+
+Ursache vermutlich: im großen `<script>`-Block von `settings.html` läuft weiter oben Code mit Leaflet, Location-Map und diversen Formularen. Ein Fehler irgendwo früher hat den Parse der Notify-IIFE in Safari blockiert. Backup-Form war zufällig noch OK (vielleicht anderer Codepfad), Notify nicht.
+
+Fix: Notify-Handler wurde komplett aus dem großen Script rausgezogen und läuft jetzt in einem **eigenen `<script>`-Block am Ende der Seite**. Kein IIFE-Pyramiding, kein Promise-basiertes `.then()` statt `async/await` (falls Safari da irgendeinen Edge-Case hat), explizite `credentials: 'same-origin'` in den fetch-Calls, plus console.log an strategischen Stellen (`[notify] init start`, `[notify] handlers attached`, `[notify] save click`) damit man beim nächsten Problem sofort in der Konsole sieht, was passiert.
+
 ## v2.15.1 (2026-04-15)
 
 ### Fix: Benachrichtigungen-Card speicherte nicht
