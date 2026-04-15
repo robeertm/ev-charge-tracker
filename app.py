@@ -684,6 +684,34 @@ def register_routes(app):
             logger.error(f"Notify save failed: {e}")
             return jsonify({'error': str(e)}), 500
 
+    # ── System updates (unattended-upgrades security only) ─────
+    @app.route('/api/system/updates/status', methods=['GET'])
+    def api_system_updates_status():
+        from services import system_update_service
+        try:
+            return jsonify({'ok': True, **system_update_service.get_status()})
+        except Exception as e:
+            logger.error(f"System update status failed: {e}")
+            return jsonify({'error': str(e)}), 500
+
+    @app.route('/api/system/updates/apply', methods=['POST'])
+    def api_system_updates_apply():
+        from services import system_update_service
+        if not system_update_service.unattended_upgrades_available():
+            return jsonify({'error': 'unattended-upgrades ist auf diesem System nicht installiert.'}), 400
+        started = system_update_service.start_apply()
+        if not started:
+            return jsonify({'error': 'Ein Update-Job läuft bereits.'}), 409
+        return jsonify({'ok': True, 'message': 'Security-Updates werden im Hintergrund installiert …'})
+
+    @app.route('/api/system/reboot', methods=['POST'])
+    def api_system_reboot():
+        from services import system_update_service
+        ok, msg = system_update_service.schedule_reboot(delay_seconds=5)
+        if not ok:
+            return jsonify({'error': msg}), 500
+        return jsonify({'ok': True, 'message': msg})
+
     @app.route('/api/settings/notify/test', methods=['POST'])
     def api_settings_notify_test():
         from services import notify_service

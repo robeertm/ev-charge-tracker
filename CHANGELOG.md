@@ -1,5 +1,34 @@
 # Changelog
 
+## v2.16.0 (2026-04-15)
+
+### System-Updates (Debian Security-Only) im Settings-Menü
+
+Neue Settings-Card „System-Updates (Sicherheit)" zwischen Benachrichtigungen und Backup. Debian-Sicherheitsupdates lassen sich jetzt aus dem Browser heraus manuell prüfen, installieren und ein eventuell erforderlicher Neustart auslösen — bei gleichzeitig minimaler Angriffsfläche.
+
+**Design-Entscheidung: strikt security-only.** Kein voller apt-Zugriff aus der Web-UI. Grund: wer das Web-Login knackt, bekäme sonst effektiv Root-Rechte aufs OS (apt kann beliebige Pakete installieren + Post-Install-Scripts als root laufen lassen). Stattdessen wird auf der VM das Debian-Standard-Tool `unattended-upgrades` eingerichtet, das ausschließlich aus `${distro_id}:${distro_codename}-security` zieht. Die Sudoers-Regel erlaubt dem ev-tracker-User exakt **einen** Befehl: `/usr/bin/unattended-upgrade -v`. Ein Angreifer mit Web-Login kann bestenfalls einen Security-Patch-Lauf auslösen — kein Paket seiner Wahl installieren.
+
+**Neue Features:**
+
+- Card zeigt: Anzahl verfügbarer Security-Patches, Datum des letzten automatischen Laufs, „Reboot erforderlich"-Warnbanner wenn `/var/run/reboot-required` vorhanden ist
+- „Security-Updates jetzt installieren"-Button startet `unattended-upgrade -v` in einem Background-Thread. Die UI pollt alle 2,5 s den Status und zeigt das Log live an.
+- „Jetzt neu starten"-Button erscheint nur wenn ein Reboot nötig ist, mit doppelter Bestätigung (User muss ja die LUKS-Passphrase nach dem Boot neu eingeben)
+- Unattended-upgrades läuft auch ganz normal weiter automatisch via Debian's `apt-daily.timer` und `apt-daily-upgrade.timer` — die UI ist nur der manuelle Override plus Statusanzeige
+
+**Technik:**
+
+- `services/system_update_service.py` — kapselt das Lesen des UU-Logs (`/var/log/unattended-upgrades/unattended-upgrades.log`), das Zählen der pending Updates (via `unattended-upgrade --dry-run -v`), den Background-Thread-Runner für Apply, und den Reboot-Scheduler. State liegt in einem thread-safe Modul-Dict, kein DB-Eintrag nötig.
+- `app.py` — neue Routen: `GET /api/system/updates/status`, `POST /api/system/updates/apply`, `POST /api/system/reboot`. Alle drei hinter dem Auth-Guard.
+- `templates/settings.html` — neue Card plus separater `<script>`-Block (nach dem gleichen Pattern wie die Notify-Card in v2.15.2, damit ein JS-Error weiter oben die Sysupd-Handler nicht killt)
+- **19 neue Übersetzungs-Keys** (`set.sysupd_*`) in allen 6 Sprachen
+
+**Eingriff auf den VMs (Paste-Block als root):**
+
+- `apt install -y unattended-upgrades` falls fehlt
+- `/etc/apt/apt.conf.d/20auto-upgrades` aktivieren (`APT::Periodic::Update-Package-Lists "1"; APT::Periodic::Unattended-Upgrade "1";`)
+- `/etc/apt/apt.conf.d/50unattended-upgrades` checken: `${distro_id}:${distro_codename}-security` muss aktiv sein, andere Origins müssen kommentiert bleiben
+- Sudoers-Zeilen hinzufügen: `/usr/bin/unattended-upgrade -v`, `/usr/bin/unattended-upgrade --dry-run *`, `/sbin/shutdown -r now`
+
 ## v2.15.2 (2026-04-15)
 
 ### Fix: Notify-Card Handler liefen gar nicht mehr
