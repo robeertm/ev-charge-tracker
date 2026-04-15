@@ -2,17 +2,26 @@
 
 When the app is provisioned on a fresh VM (via /usr/local/bin/ev-provision),
 the provisioning script drops a marker file at `SETUP_MARKER` to tell the app
-that the end user still needs to change the temporary LUKS passphrase AND the
-temporary `ev-tracker` login password. On the next visit, a `before_request`
-hook redirects to the /setup wizard, which handles both changes through the
-browser instead of making the user SSH in and run `cryptsetup` / `passwd` by
-hand.
+that the end user still needs to go through the two-step first-run wizard:
 
-Progress across multiple steps is tracked in a small JSON state file next to
-the marker, so a mid-wizard reload doesn't reset the user to the first step.
+    1. Change the temporary LUKS passphrase to something only the end user
+       knows. The admin's ev-provision temp passphrase becomes invalid.
+    2. Create a Web-UI login (username + password). This is mandatory; the
+       wizard cannot complete without it, and the new credentials are wired
+       straight into `services/auth_service.set_credentials()`, which enables
+       the auth guard for every subsequent request.
 
-This module is deliberately Linux- and systemd-specific. On any non-VM host
-(e.g. a developer laptop running the app directly), the marker file will never
+Progress across steps is tracked in a small JSON state file next to the
+marker, so a mid-wizard reload doesn't reset the user to the first step.
+
+Note: the wizard does NOT change the ev-tracker Unix login password (the
+thing an SSH client would use). That password stays at whatever
+`ev-provision` set, so the admin retains SSH access to the VM for
+maintenance. The end user has no terminal path into the box and therefore
+does not need a shell password at all.
+
+This module is deliberately Linux-specific. On any non-VM host (e.g. a
+developer laptop running the app directly), the marker file will never
 exist and the module stays out of the way.
 """
 from __future__ import annotations
@@ -38,9 +47,6 @@ SETUP_STATE_FILE = Path('/srv/ev-data/.setup_state.json')
 
 # Name of the LUKS mapping created by ev-provision.
 LUKS_MAPPING = 'evdata'
-
-# Target user for the login-password change step (matches ev-provision).
-TARGET_USER = 'ev-tracker'
 
 
 def is_setup_pending() -> bool:
@@ -133,49 +139,10 @@ def change_luks_passphrase(old_passphrase: str, new_passphrase: str) -> tuple[bo
     return False, f'Fehler beim Ändern: {err[:200]}'
 
 
-def change_user_password(new_password: str) -> tuple[bool, str]:
-    """Change the login password of the `ev-tracker` user via sudo chpasswd.
-
-    `ev-provision` installs a sudoers NOPASSWD entry for
-    `/usr/sbin/chpasswd` so the app can call it without interactive auth.
-    Note: chpasswd accepts "user:password" on stdin, which means we *can*
-    set an arbitrary password without knowing the current one — which is
-    exactly what we want since the end user doesn't know the temporary
-    one the admin set during provisioning.
-
-    Returns (ok, message).
-    """
-    if not new_password:
-        return False, 'Passwort darf nicht leer sein.'
-    if len(new_password) < 6:
-        return False, 'Passwort muss mindestens 6 Zeichen haben.'
-
-    stdin_data = f"{TARGET_USER}:{new_password}\n".encode()
-    try:
-        result = subprocess.run(
-            ['sudo', '-n', '/usr/sbin/chpasswd'],
-            input=stdin_data,
-            capture_output=True,
-            timeout=10,
-        )
-    except subprocess.TimeoutExpired:
-        return False, 'chpasswd hat nicht rechtzeitig geantwortet.'
-    except FileNotFoundError:
-        return False, 'chpasswd nicht installiert.'
-
-    if result.returncode == 0:
-        logger.info(f"Login password changed for {TARGET_USER}")
-        return True, 'Login-Passwort geändert.'
-
-    err = (result.stderr or b'').decode(errors='replace').strip()
-    logger.error(f"chpasswd failed: {err}")
-    return False, f'Fehler beim Ändern: {err[:200]}'
-
-
 # ── Wizard state tracking ────────────────────────────────────────────
 
 def _default_state() -> dict:
-    return {'luks_done': False, 'password_done': False}
+    return {'luks_done': False, 'weblogin_done': False}
 
 
 def load_state() -> dict:

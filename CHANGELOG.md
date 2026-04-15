@@ -1,5 +1,43 @@
 # Changelog
 
+## v2.14.0 (2026-04-15)
+
+### Wizard-Schritt 2 wird „Web-Login anlegen" + Backup/Restore-Feature
+
+**Wizard-Umbau**
+
+Der Setup-Wizard auf frisch provisionierten VMs hat jetzt einen anderen zweiten Schritt. Bisher wollte er das `ev-tracker`-Unix-SSH-Passwort ändern, was aber genau die Admin-SSH-Verbindung gekappt und die Wartung unnötig erschwert hat. Stattdessen:
+
+- **Schritt 1** bleibt: LUKS-Passphrase ändern. Muss der Nutzer durchführen.
+- **Schritt 2 NEU**: der Nutzer legt einen **Web-UI-Benutzer + Web-UI-Passwort** an. Die Auswahl zum Ändern des Shell-Passworts ist komplett entfernt — der Shell-User bleibt unangetastet, damit der Admin mit dem ev-provision-Temp-Passwort weiterhin per SSH für Wartung auf die VM kann. Der Web-Login ist ab sofort der einzige Weg ins Dashboard.
+
+Technische Details:
+
+- `templates/setup.html` — Schritt 2 komplett umgebaut: Eingabefelder für Username + Passwort + Confirm, Submit ruft jetzt `POST /api/setup/create_web_login`. Progress-Pills und die Stepwelcome-Liste nennen den neuen Schritt namentlich. Der Wizard-Header zeigt jetzt auch die App-Version als Badge.
+- `services/setup_service.py` — `change_user_password()` und die sudoers-Abhängigkeit auf `chpasswd` sind weg. Wizard-State-Key heißt jetzt `weblogin_done` statt `password_done`. Der Modul-Docstring ist aktualisiert und erklärt explizit, dass der Wizard den Unix-Login **nicht** anfasst.
+- `app.py` — neuer Endpoint `POST /api/setup/create_web_login` ersetzt `POST /api/setup/change_password`. Er ruft `auth_service.set_credentials()` auf (das den Guard automatisch scharfschaltet), loggt den Nutzer direkt ein und räumt bei abgeschlossener Wizard-State-Kombination den Setup-Marker auf. Die `app_version` wird jetzt auch an das Wizard-Template durchgereicht.
+
+Settings → Zugangsschutz bleibt unverändert und erlaubt dem Nutzer jederzeit, seinen Web-User/Pw zu ändern, hinzuzufügen oder zu deaktivieren.
+
+**Backup & Wiederherstellung der Datenbank**
+
+Neues Feature für VM-Umzüge, Backups und Wiederherstellung nach Fehler:
+
+- Neue Settings-Card „Backup & Wiederherstellung" (platziert zwischen Zugangsschutz und App-Info).
+- **Export**: `GET /api/backup/export` flushed die SQLite-WAL via `PRAGMA wal_checkpoint(TRUNCATE)` und schickt die komplette `data/ev_tracker.db` als Download mit Zeitstempel im Dateinamen (`ev-tracker-backup-YYYYMMDD-HHMMSS.db`). Enthält absolut alles: Ladungen, Fahrtenlog, Wartungslogbuch, AppConfig (inkl. Vehicle-API-Credentials, Home/Work-Koordinaten, ENTSO-E-Key, ThgQuoten, Zugangsschutz-Hash, Session-Secret), Geocode- und Weather-Cache, VehicleSync-Historie. Ein einziger File.
+- **Import**: `POST /api/backup/import` als Multipart-Upload. Validiert die Datei als echte SQLite-DB und prüft, dass die Pflichttabellen `charges`, `app_config`, `vehicle_syncs` drin sind. Legt vor der Überschreibung eine Sicherheitskopie der aktuellen DB in `data/backups/ev_tracker-pre-import-<ts>.db` an, schließt dann das SQLAlchemy-Engine (wichtig auf POSIX, sonst hält die alte Inode die DB am Leben) und kopiert die neue DB drüber. Anschließend Background-Thread mit 500ms Verzögerung → `sudo systemctl restart ev-tracker.service`. Der Browser lädt nach 4.5 Sekunden automatisch neu.
+- **Warnung im UI** ist bewusst drastisch: der Import überschreibt Zugangsschutz-Credentials und Vehicle-API-Keys. Nach einem Import gilt der Web-Login aus dem Backup, nicht der bisherige.
+
+Neu in `config.py`: `DATA_DIR` ist jetzt exportiert, damit `app.py` den DB-Pfad sauber für Export/Import-Routen auflösen kann.
+
+**Übersetzungen**
+
+25 neue Keys in allen 6 Sprachen (de/en/fr/es/it/nl): `wiz.welcome_step1_luks`, `wiz.welcome_step2_weblogin`, `wiz.weblogin_title`, `wiz.weblogin_desc`, `wiz.weblogin_username`, `wiz.weblogin_password`, `wiz.weblogin_password_hint`, `wiz.weblogin_password_confirm`, `wiz.weblogin_info`, `wiz.weblogin_submit`, `wiz.status_creating`, `wiz.err_user_empty`, und 13 `set.backup_*`-Keys.
+
+**Upgrade auf laufenden VMs**
+
+Die alten Tags v2.11.x / v2.12.0 / v2.13.0 wurden gelöscht und `main` auf den v2.9.0-Commit zurückgesetzt. Laufende VMs, die vorher eine dieser Versionen hatten, können mit `git pull` nicht mehr auf den aktuellen main kommen (die History wurde umgeschrieben). Stattdessen `git fetch origin && git reset --hard origin/main` — siehe Upgrade-Paste-Block in den Release Notes.
+
 ## v2.9.0 (2026-04-14)
 
 ### Übersetzungen für alle v2.7.x/v2.8.x Features + HTTPS-Autohide + README

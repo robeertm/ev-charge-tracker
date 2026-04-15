@@ -1,9 +1,12 @@
 """EV Charge Tracker - Main Flask Application."""
 import io
 import os
+import shutil
+import subprocess
 import sys
 import logging
 from datetime import datetime, date
+from pathlib import Path
 from flask import Flask, render_template, request, redirect, url_for, flash, jsonify, send_file
 
 # Make stdout/stderr tolerant of Unicode (Windows cmd with legacy code pages
@@ -19,7 +22,7 @@ from models.database import (
     db, Charge, AppConfig, ThgQuota, VehicleSync,
     ParkingEvent, MaintenanceEntry,
 )
-from config import Config
+from config import Config, DATA_DIR
 from services.i18n import t
 
 logging.basicConfig(level=logging.INFO)
@@ -355,6 +358,7 @@ def register_routes(app):
             'setup.html',
             luks_device=get_luks_device() or '(unknown)',
             setup_state=load_state(),
+            app_version=Config.APP_VERSION,
         )
 
     @app.route('/api/setup/change_luks', methods=['POST'])
@@ -380,34 +384,51 @@ def register_routes(app):
         mark_step_done('luks_done')
         return jsonify({'ok': True, 'message': msg})
 
-    @app.route('/api/setup/change_password', methods=['POST'])
-    def api_setup_change_password():
+    @app.route('/api/setup/create_web_login', methods=['POST'])
+    def api_setup_create_web_login():
+        """Wizard step 2: create the web-UI login and enable the auth guard.
+
+        Replaces the pre-v2.14 step that shelled out to `chpasswd` to change
+        the `ev-tracker` Unix password. That was the wrong shape of secret —
+        end users never SSH into the VM anyway, and changing the Unix
+        password locked the admin out of maintenance access. The web login
+        is the credential the end user actually needs, and it lives in the
+        app's own DB (hashed via Werkzeug).
+        """
         from services.setup_service import (
-            is_setup_pending, change_user_password, mark_step_done,
-            load_state, complete_setup,
+            is_setup_pending, mark_step_done, load_state, complete_setup,
         )
+        from services.auth_service import set_credentials, login_user
         if not is_setup_pending():
             return jsonify({'error': 'setup_not_pending'}), 400
 
         data = request.get_json(silent=True) or {}
-        new_pass = (data.get('new_password') or '').strip()
-        new_pass_confirm = (data.get('new_password_confirm') or '').strip()
+        username = (data.get('username') or '').strip()
+        password = data.get('password') or ''
+        confirm = data.get('password_confirm') or ''
 
-        if new_pass != new_pass_confirm:
+        if not username:
+            return jsonify({'error': 'Benutzername darf nicht leer sein.'}), 400
+        if password != confirm:
             return jsonify({'error': 'Neues Passwort und Bestätigung stimmen nicht überein.'}), 400
 
-        ok, msg = change_user_password(new_pass)
-        if not ok:
-            return jsonify({'error': msg}), 400
+        try:
+            set_credentials(username, password)
+        except ValueError as e:
+            return jsonify({'error': str(e)}), 400
 
-        mark_step_done('password_done')
+        # Log the user in immediately so they don't land on the login page
+        # right after finishing setup.
+        login_user(username)
 
-        # If both steps are done, clear the marker and the state file.
+        mark_step_done('weblogin_done')
+
+        # If both wizard steps are done, clear the marker and state file.
         state = load_state()
-        if state.get('luks_done') and state.get('password_done'):
+        if state.get('luks_done') and state.get('weblogin_done'):
             complete_setup()
 
-        return jsonify({'ok': True, 'message': msg, 'redirect': '/'})
+        return jsonify({'ok': True, 'message': 'Web-Login angelegt.', 'redirect': '/'})
 
     @app.route('/api/health', methods=['GET'])
     def api_health():
@@ -514,6 +535,133 @@ def register_routes(app):
         except ValueError as e:
             return jsonify({'error': str(e)}), 400
         return jsonify({'ok': True, 'message': 'Passwort geändert.'})
+
+    # ── BACKUP & RESTORE (DB export / import) ────────────────
+    # Exports and imports the SQLite DB at data/ev_tracker.db. Contains
+    # everything: charges, syncs, settings, auth credentials, THG quotas,
+    # maintenance entries, cached data — the full app state in one file.
+    # Importing REPLACES the current DB and restarts the service so the
+    # SQLAlchemy engine picks up the new file cleanly.
+    @app.route('/api/backup/export', methods=['GET'])
+    def api_backup_export():
+        from datetime import datetime as _dt
+        from sqlalchemy import text as _text
+        db_path = Path(DATA_DIR) / 'ev_tracker.db'
+        if not db_path.is_file():
+            return jsonify({'error': 'Datenbank-Datei nicht gefunden.'}), 404
+        # Force SQLite to flush any pending writes so the export file is
+        # consistent. checkpoint is cheap for an idle DB.
+        try:
+            db.session.execute(_text('PRAGMA wal_checkpoint(TRUNCATE)'))
+            db.session.commit()
+        except Exception:
+            pass
+        ts = _dt.now().strftime('%Y%m%d-%H%M%S')
+        return send_file(
+            str(db_path),
+            mimetype='application/x-sqlite3',
+            as_attachment=True,
+            download_name=f'ev-tracker-backup-{ts}.db',
+        )
+
+    @app.route('/api/backup/import', methods=['POST'])
+    def api_backup_import():
+        """Replace data/ev_tracker.db with an uploaded backup.
+
+        Validates the upload as a real SQLite DB with the tables the app
+        expects before touching anything live. On success, schedules a
+        systemd-driven restart so SQLAlchemy picks up the new file from
+        scratch — simpler than trying to dispose the engine at runtime.
+        """
+        import sqlite3 as _sqlite3
+        import tempfile as _tempfile
+        from datetime import datetime as _dt
+
+        up = request.files.get('backup')
+        if not up or not up.filename:
+            return jsonify({'error': 'Keine Datei hochgeladen.'}), 400
+
+        tmp = _tempfile.NamedTemporaryFile(
+            prefix='ev-tracker-import-', suffix='.db', delete=False
+        )
+        try:
+            up.save(tmp.name)
+            tmp.close()
+
+            # Validate: must be a SQLite DB with our core tables.
+            try:
+                conn = _sqlite3.connect(tmp.name)
+                cur = conn.cursor()
+                cur.execute(
+                    "SELECT name FROM sqlite_master WHERE type='table'"
+                )
+                tables = {row[0] for row in cur.fetchall()}
+                conn.close()
+            except _sqlite3.DatabaseError:
+                os.unlink(tmp.name)
+                return jsonify({
+                    'error': 'Datei ist keine gültige SQLite-Datenbank.'
+                }), 400
+
+            required = {'charges', 'app_config', 'vehicle_syncs'}
+            missing = required - tables
+            if missing:
+                os.unlink(tmp.name)
+                return jsonify({
+                    'error': (
+                        'Datenbank-Struktur passt nicht zu ev-charge-tracker. '
+                        f'Fehlende Tabellen: {", ".join(sorted(missing))}'
+                    )
+                }), 400
+
+            # Safety backup of the current DB before overwriting, so a bad
+            # import can be manually reverted from the file system.
+            db_path = Path(DATA_DIR) / 'ev_tracker.db'
+            backup_dir = Path(DATA_DIR) / 'backups'
+            backup_dir.mkdir(parents=True, exist_ok=True)
+            if db_path.is_file():
+                backup_name = f'ev_tracker-pre-import-{_dt.now().strftime("%Y%m%d-%H%M%S")}.db'
+                shutil.copy2(db_path, backup_dir / backup_name)
+
+            # Close any open DB handles from SQLAlchemy before replacing
+            # the file — on POSIX an open fd keeps the old inode alive so
+            # the running process would still read from the old DB.
+            try:
+                db.session.close()
+                db.engine.dispose()
+            except Exception:
+                pass
+
+            shutil.copy2(tmp.name, db_path)
+            os.unlink(tmp.name)
+
+            # Schedule a systemd restart a few hundred ms into the future
+            # so the HTTP response has time to flush.
+            def _delayed_restart():
+                import time as _t
+                _t.sleep(0.5)
+                try:
+                    subprocess.run(
+                        ['sudo', '-n', '/bin/systemctl', 'restart', 'ev-tracker.service'],
+                        timeout=10,
+                    )
+                except Exception:
+                    pass
+            import threading as _th
+            _th.Thread(target=_delayed_restart, daemon=True).start()
+
+            return jsonify({
+                'ok': True,
+                'message': 'Backup erfolgreich importiert. App startet neu …',
+            })
+        except Exception as e:
+            logger.error(f"Backup import failed: {e}")
+            try:
+                if Path(tmp.name).exists():
+                    os.unlink(tmp.name)
+            except Exception:
+                pass
+            return jsonify({'error': f'Import fehlgeschlagen: {e}'}), 500
 
     @app.context_processor
     def inject_globals():

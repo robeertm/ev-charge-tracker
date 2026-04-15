@@ -40,8 +40,11 @@
             <div class="card-header py-3">
                 <div class="d-flex align-items-center">
                     <i class="bi bi-ev-front fs-3 me-2"></i>
-                    <div>
-                        <div class="fw-bold">EV Charge Tracker</div>
+                    <div class="flex-grow-1">
+                        <div class="fw-bold">
+                            EV Charge Tracker
+                            <span class="badge bg-light text-dark ms-1" style="font-weight: 500;">v{{ app_version }}</span>
+                        </div>
                         <div class="small opacity-75">{{ t('wiz.header_sub') }}</div>
                     </div>
                 </div>
@@ -50,7 +53,7 @@
 
                 <div class="progress-pills">
                     <div class="pill" id="pill-luks"></div>
-                    <div class="pill" id="pill-password"></div>
+                    <div class="pill" id="pill-weblogin"></div>
                 </div>
 
                 <!-- Step 0: Welcome -->
@@ -61,8 +64,8 @@
                     <h4 class="text-center mb-3">{{ t('wiz.welcome') }}</h4>
                     <p>{{ t('wiz.welcome_desc') }}</p>
                     <ol>
-                        <li>{{ t('wiz.welcome_step1') }}</li>
-                        <li>{{ t('wiz.welcome_step2') }}</li>
+                        <li>{{ t('wiz.welcome_step1_luks') }}</li>
+                        <li>{{ t('wiz.welcome_step2_weblogin') }}</li>
                     </ol>
                     <div class="alert alert-info small mb-3">
                         <i class="bi bi-info-circle"></i>
@@ -116,32 +119,41 @@
                     </form>
                 </div>
 
-                <!-- Step 2: Login password change -->
-                <div id="step-password" style="display:none;">
+                <!-- Step 2: Create web login -->
+                <div id="step-weblogin" style="display:none;">
                     <div class="text-center mb-3">
-                        <i class="bi bi-person-lock wizard-icon"></i>
+                        <i class="bi bi-person-badge wizard-icon"></i>
                     </div>
                     <h4 class="text-center mb-2">{{ t('wiz.step_2_of_2') }}</h4>
-                    <h5 class="text-center mb-3 text-muted">{{ t('wiz.password_title') }}</h5>
+                    <h5 class="text-center mb-3 text-muted">{{ t('wiz.weblogin_title') }}</h5>
 
-                    <p class="small text-muted">{{ t('wiz.password_desc') }}</p>
+                    <p class="small text-muted">{{ t('wiz.weblogin_desc') }}</p>
 
-                    <form id="password-form">
+                    <form id="weblogin-form">
                         <div class="mb-3">
-                            <label class="form-label">{{ t('wiz.password_new') }}</label>
-                            <input type="password" class="form-control" id="pass-new" minlength="6" required autocomplete="new-password">
-                            <div class="form-text">{{ t('wiz.password_hint') }}</div>
+                            <label class="form-label">{{ t('wiz.weblogin_username') }}</label>
+                            <input type="text" class="form-control" id="wl-user" required autocomplete="username">
                         </div>
                         <div class="mb-3">
-                            <label class="form-label">{{ t('wiz.password_confirm') }}</label>
-                            <input type="password" class="form-control" id="pass-new-confirm" minlength="6" required autocomplete="new-password">
+                            <label class="form-label">{{ t('wiz.weblogin_password') }}</label>
+                            <input type="password" class="form-control" id="wl-pw" minlength="6" required autocomplete="new-password">
+                            <div class="form-text">{{ t('wiz.weblogin_password_hint') }}</div>
+                        </div>
+                        <div class="mb-3">
+                            <label class="form-label">{{ t('wiz.weblogin_password_confirm') }}</label>
+                            <input type="password" class="form-control" id="wl-pw-confirm" minlength="6" required autocomplete="new-password">
                         </div>
 
-                        <div id="password-error" class="alert alert-danger d-none"></div>
+                        <div class="alert alert-info small mb-3">
+                            <i class="bi bi-info-circle"></i>
+                            {{ t('wiz.weblogin_info') }}
+                        </div>
+
+                        <div id="weblogin-error" class="alert alert-danger d-none"></div>
 
                         <div class="d-grid">
-                            <button type="submit" class="btn btn-primary btn-lg" id="password-submit">
-                                <i class="bi bi-check-circle"></i> {{ t('wiz.password_submit') }}
+                            <button type="submit" class="btn btn-primary btn-lg" id="weblogin-submit">
+                                <i class="bi bi-check-circle"></i> {{ t('wiz.weblogin_submit') }}
                             </button>
                         </div>
                     </form>
@@ -171,27 +183,28 @@
     <script>
         const SETUP_STATE = {{ setup_state | tojson }};
         const T = {
-            errMismatch: {{ t('wiz.err_mismatch') | tojson }},
-            errPwMismatch: {{ t('wiz.err_pw_mismatch') | tojson }},
-            errMinLen: {{ t('wiz.err_min_length') | tojson }},
-            errPwMinLen: {{ t('wiz.err_pw_min_length') | tojson }},
-            errConn: {{ t('wiz.err_connection') | tojson }},
-            errUnknown: {{ t('wiz.err_unknown') | tojson }},
-            changing: {{ t('wiz.status_changing') | tojson }},
-            setting: {{ t('wiz.status_setting') | tojson }},
-            luksBtn: {{ t('wiz.luks_submit') | tojson }},
-            pwBtn: {{ t('wiz.password_submit') | tojson }},
+            errMismatch:     {{ t('wiz.err_mismatch') | tojson }},
+            errPwMismatch:   {{ t('wiz.err_pw_mismatch') | tojson }},
+            errMinLen:       {{ t('wiz.err_min_length') | tojson }},
+            errPwMinLen:     {{ t('wiz.err_pw_min_length') | tojson }},
+            errConn:         {{ t('wiz.err_connection') | tojson }},
+            errUnknown:      {{ t('wiz.err_unknown') | tojson }},
+            errUserEmpty:    {{ t('wiz.err_user_empty') | tojson }},
+            changing:        {{ t('wiz.status_changing') | tojson }},
+            creating:        {{ t('wiz.status_creating') | tojson }},
+            luksBtn:         {{ t('wiz.luks_submit') | tojson }},
+            wlBtn:           {{ t('wiz.weblogin_submit') | tojson }},
         };
 
         function updateProgressPills() {
             const pLuks = document.getElementById('pill-luks');
-            const pPass = document.getElementById('pill-password');
+            const pWL = document.getElementById('pill-weblogin');
             pLuks.className = 'pill ' + (SETUP_STATE.luks_done ? 'done' : 'active');
-            pPass.className = 'pill ' + (SETUP_STATE.password_done ? 'done' : (SETUP_STATE.luks_done ? 'active' : ''));
+            pWL.className = 'pill ' + (SETUP_STATE.weblogin_done ? 'done' : (SETUP_STATE.luks_done ? 'active' : ''));
         }
 
         function showStep(name) {
-            ['welcome', 'luks', 'password', 'done'].forEach(n => {
+            ['welcome', 'luks', 'weblogin', 'done'].forEach(n => {
                 document.getElementById('step-' + n).style.display = 'none';
             });
             document.getElementById('step-' + name).style.display = 'block';
@@ -201,8 +214,8 @@
             updateProgressPills();
             if (!SETUP_STATE.luks_done) {
                 showStep('welcome');
-            } else if (!SETUP_STATE.password_done) {
-                showStep('password');
+            } else if (!SETUP_STATE.weblogin_done) {
+                showStep('weblogin');
             } else {
                 showStep('done');
             }
@@ -245,7 +258,7 @@
                 if (r.ok && data.ok) {
                     SETUP_STATE.luks_done = true;
                     updateProgressPills();
-                    showStep('password');
+                    showStep('weblogin');
                 } else {
                     showError('luks-error', data.error || T.errUnknown);
                     btn.disabled = false;
@@ -258,42 +271,45 @@
             }
         });
 
-        document.getElementById('password-form').addEventListener('submit', async (e) => {
+        document.getElementById('weblogin-form').addEventListener('submit', async (e) => {
             e.preventDefault();
-            hideError('password-error');
-            const btn = document.getElementById('password-submit');
-            const newPass = document.getElementById('pass-new').value;
-            const newPassConfirm = document.getElementById('pass-new-confirm').value;
+            hideError('weblogin-error');
+            const btn = document.getElementById('weblogin-submit');
+            const user = document.getElementById('wl-user').value.trim();
+            const pw = document.getElementById('wl-pw').value;
+            const pwConfirm = document.getElementById('wl-pw-confirm').value;
 
-            if (newPass !== newPassConfirm) { showError('password-error', T.errPwMismatch); return; }
-            if (newPass.length < 6) { showError('password-error', T.errPwMinLen); return; }
+            if (!user) { showError('weblogin-error', T.errUserEmpty); return; }
+            if (pw !== pwConfirm) { showError('weblogin-error', T.errPwMismatch); return; }
+            if (pw.length < 6) { showError('weblogin-error', T.errPwMinLen); return; }
 
             btn.disabled = true;
-            btn.innerHTML = '<span class="spinner-border spinner-border-sm"></span> ' + T.setting;
+            btn.innerHTML = '<span class="spinner-border spinner-border-sm"></span> ' + T.creating;
 
             try {
-                const r = await fetch('/api/setup/change_password', {
+                const r = await fetch('/api/setup/create_web_login', {
                     method: 'POST',
                     headers: {'Content-Type': 'application/json'},
                     body: JSON.stringify({
-                        new_password: newPass,
-                        new_password_confirm: newPassConfirm,
+                        username: user,
+                        password: pw,
+                        password_confirm: pwConfirm,
                     }),
                 });
                 const data = await r.json();
                 if (r.ok && data.ok) {
-                    SETUP_STATE.password_done = true;
+                    SETUP_STATE.weblogin_done = true;
                     updateProgressPills();
                     showStep('done');
                 } else {
-                    showError('password-error', data.error || T.errUnknown);
+                    showError('weblogin-error', data.error || T.errUnknown);
                     btn.disabled = false;
-                    btn.innerHTML = '<i class="bi bi-check-circle"></i> ' + T.pwBtn;
+                    btn.innerHTML = '<i class="bi bi-check-circle"></i> ' + T.wlBtn;
                 }
             } catch (err) {
-                showError('password-error', T.errConn + ': ' + err.message);
+                showError('weblogin-error', T.errConn + ': ' + err.message);
                 btn.disabled = false;
-                btn.innerHTML = '<i class="bi bi-check-circle"></i> ' + T.pwBtn;
+                btn.innerHTML = '<i class="bi bi-check-circle"></i> ' + T.wlBtn;
             }
         });
 
