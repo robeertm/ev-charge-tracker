@@ -58,17 +58,20 @@ def unattended_upgrades_available() -> bool:
 def read_last_run() -> dict:
     """Parse the tail of /var/log/unattended-upgrades/unattended-upgrades.log
     to find when the last automatic run happened and how many packages it
-    upgraded. This is best-effort — if the log is missing or the format
-    changes, we just return empty fields.
+    upgraded. This is best-effort — if the log is missing, unreadable, or
+    the format changes, we just return empty fields.
+
+    The log lives at a root:adm-owned path with mode 640, so the ev-tracker
+    user usually cannot read it directly. That is NOT a failure — we fall
+    back to "never" gracefully and rely on the `pending_count` field from
+    the dry-run instead.
     """
     result = {'last_run': None, 'last_upgraded': 0}
-    if not UU_LOG.is_file():
-        return result
     try:
         # Tail the last ~200 lines — plenty for the most recent run
         with open(UU_LOG, 'r', encoding='utf-8', errors='replace') as f:
             lines = f.readlines()[-200:]
-    except PermissionError:
+    except (FileNotFoundError, PermissionError, OSError):
         return result
 
     ts_re = re.compile(r'^(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2})')

@@ -1,5 +1,13 @@
 # Changelog
 
+## v2.16.1 (2026-04-15)
+
+### Fix: /api/system/updates/status crasht bei Permission-Denied auf UU-Log
+
+`/var/log/unattended-upgrades/unattended-upgrades.log` ist standardmäßig `root:adm` mit Mode 640 — der ev-tracker-User kann es nicht lesen. In v2.16.0 fing mein Code `PermissionError` nur beim `open()` ab, nicht aber beim vorangehenden `.is_file()` auf dem Path-Objekt (das auf einem 640-Verzeichnis ebenfalls knallt). Ergebnis: 500 auf der Status-Route, Card blieb bei „Status wird geladen …" hängen.
+
+Fix: `.is_file()` komplett entfernt, stattdessen direkt `open()` mit einem umfassenden `except (FileNotFoundError, PermissionError, OSError)`. Wenn das Log unlesbar ist, zeigt die Card halt „nie" als letzten Lauf — das ist kein Fehler, weil die `pending_count` aus dem Dry-Run eh die aktuellen Infos liefert.
+
 ## v2.16.0 (2026-04-15)
 
 ### System-Updates (Debian Security-Only) im Settings-Menü
