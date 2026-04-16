@@ -155,49 +155,51 @@ def _do_fetch(brand_key):
             _fetch_state['status'] = 'Bitte im Browser einloggen (reCAPTCHA lösen)...'
             driver.get(login_url)
 
-            wait = WebDriverWait(driver, 300)  # 5 min max
+            import time
 
-            if cfg['flow'] == 'ctb':
-                # Hyundai CTB flow has TWO codes in the redirect chain:
-                #   1. ctbapi.hyundai-europe.com/api/auth?code=X — that's
-                #      the code issued for login_client_id (peuhyundaiidm-ctb).
-                #      We must NOT grab this one — the token POST uses a
-                #      different client_id and would reject X.
-                #   2. ctbapi then server-redirects to
-                #      prd.eu-ccapi.hyundai.com:8080/.../oauth2/token?code=Y —
-                #      Y is the CCSP code for client_id 6d477c38-..., which
-                #      is what the token POST expects.
-                # So: wait until the URL hits prd.eu-ccapi.hyundai.com AND
-                # has code= in it. The response body at that URL will show
-                # {"result":"E","message":"url is not defined"} — that's the
-                # server's pseudo-error for rendering a codeless URL, not a
-                # real failure. We only care about the URL bar.
-                _fetch_state['status'] = 'Warte auf Final-Redirect zu prd.eu-ccapi.hyundai.com...'
-                try:
-                    wait.until(lambda d: (
-                        'prd.eu-ccapi.hyundai.com' in d.current_url
-                        and 'code=' in d.current_url
-                    ))
-                except Exception as wait_exc:
-                    last_url = driver.current_url if driver else '(browser down)'
-                    raise RuntimeError(
-                        f'Timeout beim Warten auf Final-Redirect zu '
-                        f'prd.eu-ccapi.hyundai.com. Letzte URL: {last_url[:300]}. '
-                        f'Original: {type(wait_exc).__name__}: {str(wait_exc)[:200]}'
-                    )
-                current_url = driver.current_url
-                _fetch_state['status'] = 'CCSP-Code extrahiert, tausche gegen Token...'
-            else:
-                # Kia oneid: login lands on kia.com marketing site with a
-                # logout link in the DOM; then we manually navigate to the
-                # CCSP authorize endpoint to pick up the auth code.
+            # ── STEP 1: wait for login success ────────────────────────
+            # Both flows wait for a CSS selector on the post-login landing
+            # page (Kia: logout link on kia.com; Hyundai: button.mail_check
+            # or button.ctb_button on the CTB portal). The browser will NOT
+            # auto-navigate to the CCSP redirect on its own — we drive it
+            # there manually in step 2.
+            wait = WebDriverWait(driver, 300)  # 5 min max for user + reCAPTCHA
+            try:
                 wait.until(EC.presence_of_element_located(
                     (By.CSS_SELECTOR, cfg['success_selector'])))
-                _fetch_state['status'] = 'Login erkannt! Token wird abgerufen...'
-                driver.get(redirect_url)
-                import time
-                time.sleep(3)
+            except Exception as wait_exc:
+                last_url = driver.current_url if driver else '(browser down)'
+                raise RuntimeError(
+                    f'Timeout beim Warten auf Login-Success (Selector '
+                    f'"{cfg["success_selector"]}"). Letzte URL: {last_url[:300]}. '
+                    f'Original: {type(wait_exc).__name__}: {str(wait_exc)[:200]}'
+                )
+            _fetch_state['status'] = 'Login erkannt, hole Auth-Code...'
+
+            # ── STEP 2: drive the browser to the CCSP authorize URL ────
+            # Uses the real API client_id (6d477c38-... for Hyundai). Because
+            # the user now has an IdP session cookie from step 1, this second
+            # authorize silently 302-redirects to redirect_final with code=Y.
+            # For Hyundai the final URL renders a JSON body
+            # {"result":"E","message":"url is not defined"} — that is the
+            # server's pseudo-error for a codeless landing page, NOT a real
+            # failure. We only care about what's in the URL bar.
+            driver.get(redirect_url)
+
+            # ── STEP 3: poll current_url for the code ─────────────────
+            # The redirect chain can take a moment — poll up to 15s like
+            # the upstream RustyDust script instead of a single sleep.
+            current_url = ''
+            for _ in range(15):
                 current_url = driver.current_url
+                if 'code=' in current_url and cfg['redirect_final'].split('?')[0] in current_url:
+                    break
+                time.sleep(1)
+            else:
+                raise RuntimeError(
+                    f'Kein Redirect zur CCSP-URL nach Login. '
+                    f'Letzte URL: {current_url[:300]}'
+                )
 
             match = re.search(r'code=([^&]+)', current_url)
             if not match:
@@ -206,7 +208,7 @@ def _do_fetch(brand_key):
                 return
 
             code = match.group(1)
-            _fetch_state['status'] = f'Code extrahiert, tausche gegen Token...'
+            _fetch_state['status'] = 'Code extrahiert, tausche gegen Token...'
 
             # Both flows use redirect_final as the OAuth redirect_uri at
             # token-exchange time: for Kia it's the 2nd authorize target

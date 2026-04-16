@@ -1,5 +1,18 @@
 # Changelog
 
+## v2.17.7 (2026-04-16)
+
+### Hyundai Token-Fetch: fehlender 2. Authorize-Schritt (endgültiger Fix)
+
+Nach verbatim-Vergleich mit zwei funktionierenden Upstream-Scripts (`Hyundai%20Token%20Solution/hyundai_token.py` von den Library-Authoren und `RustyDust/bluelinktoken.py`) war klar: der CTB-Flow hat **zwei Authorize-Schritte**, genau wie Kia. Mein Code hat den zweiten Schritt nie gemacht.
+
+**Der tatsächliche Flow:**
+1. User loggt sich ein via `login_client_id=peuhyundaiidm-ctb` → Browser landet auf `ctbapi.hyundai-europe.com/api/auth?code=X`. `button.mail_check` / `button.ctb_button` erscheint — dort bleibt der Browser stehen.
+2. Das Script muss **programmatisch** auf eine zweite Authorize-URL navigieren: `idpconnect-eu.hyundai.com/.../authorize?response_type=code&client_id=6d477c38-...&redirect_uri=prd.eu-ccapi.hyundai.com:8080/.../oauth2/token&state=ccsp`. Dank der IdP-Session-Cookie aus Schritt 1 302-redirected die URL sofort auf die Final-URL mit dem CCSP-Code Y.
+3. Code Y extrahieren, gegen Token tauschen.
+
+In v2.17.2 hatte ich fälschlich den CSS-Selector-Wait durch einen URL-Wait auf prd.eu-ccapi ersetzt — der Browser navigiert aber NIE von selbst dorthin, deshalb das „dauerhaft hängen bleiben". Jetzt: CSS-Wait → driver.get(redirect_url) → 15-Sekunden-Poll auf URL-Match. Der ganze CTB-Special-Case fliegt raus, Kia und Hyundai laufen jetzt durch denselben Code-Pfad.
+
 ## v2.17.6 (2026-04-16)
 
 ### Fix: Hyundai Token-Fetch — warten auf CCSP-Code, nicht auf ctbapi-Code
