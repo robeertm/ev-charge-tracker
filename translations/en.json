@@ -51,6 +51,7 @@
   "dash.live": "Live",
   "dash.live_title": "Wake vehicle - fresh data (uses 12V)",
   "dash.location": "Location",
+  "dash.location_last_known": "last known position",
   "dash.locked": "Locked",
   "dash.map": "Map",
   "dash.monthly_co2": "Monthly CO₂ Emissions",

@@ -852,12 +852,37 @@ def register_routes(app):
         except (ValueError, TypeError):
             default_days = 30
         vehicle_history = get_vehicle_history(days=default_days or None) if vehicle_configured else None
+        # The map card only makes sense with GPS. Under Kia/Hyundai
+        # "cached" mode the most recent sync often has no lat/lon — but
+        # earlier syncs in the same window may. Pick the last row that
+        # actually carries coords so the map appears for those users too.
+        last_gps = None
+        if vehicle_history:
+            series = vehicle_history.get('series') or {}
+            lats = series.get('lat') or []
+            lons = series.get('lon') or []
+            stamps = series.get('timestamps') or []
+            last_idx = -1
+            for i in range(len(lats) - 1, -1, -1):
+                if lats[i] is not None and lons[i] is not None:
+                    last_idx = i
+                    break
+            if last_idx >= 0:
+                last_gps = {
+                    'lat': lats[last_idx],
+                    'lon': lons[last_idx],
+                    # "stale" = GPS is not on the most recent sync, so
+                    # the template can annotate the card with "last known"
+                    'stale': last_idx < len(lats) - 1,
+                    'at': stamps[last_idx] if last_idx < len(stamps) else None,
+                }
         return render_template('dashboard.html',
                                stats=stats, chart_data=chart_data,
                                acdc=acdc, yearly=yearly,
                                vehicle_configured=vehicle_configured,
                                vehicle_history=vehicle_history,
                                vehicle_history_days=default_days,
+                               vehicle_history_last_gps=last_gps,
                                battery_kwh=_get_battery_kwh())
 
     # ── EINGABE ────────────────────────────────────────────────

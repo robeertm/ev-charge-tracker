@@ -1,5 +1,49 @@
 # Changelog
 
+## v2.20.3 (2026-04-16)
+
+### Fahrzeughistorie: echte Frames pro Plot, Vollbild funktioniert, Karte erscheint auch bei Cached-Sync
+
+Drei Folge-Bugs aus v2.20.1/.2 aufgearbeitet nachdem der User meldete „alle plots müssen einen eigenen frame bekommen, standort wird auch noch nicht angezeigt und zoomen geht nicht".
+
+#### 1. Klick → Vollbild geht jetzt wirklich
+
+Ursache (tiefer als die ID-Kollision von v2.20.2): `bootstrap.bundle.min.js` wird in [templates/base.html:106](templates/base.html) **nach** `{% block content %}` geladen. Mein Inline-Script in der Fahrzeughistorie-Card lief aber **während** des Content-Parsings und rief `new bootstrap.Modal(modalEl)` sofort — zu diesem Zeitpunkt ist `bootstrap` noch nicht definiert. ReferenceError → restliche IIFE abgebrochen → kein Klick-Handler, keine Map.
+
+Fix: Modal wird jetzt **lazy** beim ersten Klick erzeugt via `getModal()`-Helper. Bis dahin ist `bootstrap` längst verfügbar. Der `hidden.bs.modal`-Listener wird bei derselben Gelegenheit einmalig angehängt.
+
+#### 2. Jeder Plot hat jetzt seinen eigenen Frame
+
+Die 7 Charts waren vorher nackte `<div>` mit Label + Canvas, in einem gemeinsamen `.row`. Keine visuelle Trennung. Jetzt in einer Jinja-Loop über eine `vh_plots`-Tupel-Liste wrappt jeden Plot in ein eigenes `<div class="card h-100 vh-chart-tile shadow-sm">` mit:
+- **Card-Header** (weiß, schmal) mit Titel + Fullscreen-Icon rechts
+- **Card-Body** mit dem Chart-Canvas
+- `shadow-sm` und `h-100` damit die Höhen im Row einheitlich sind
+- Komplette Card ist Click-Target (`role="button"`, `tabindex="0"`, `cursor:pointer`)
+
+Die Standort-Karte bekommt dasselbe Card-Styling + das Geo-Icon im Header.
+
+#### 3. Karte erscheint auch unter Kia/Hyundai „Cached"-Modus
+
+Vorher war die Karten-Card auf `vehicle_history.summary.last.lat` gated — also: nur wenn der **aller letzte Sync** GPS mitgeliefert hat. Unter Kia/Hyundai Cached-Modus liefert die API meistens kein GPS, wodurch die Karte dauerhaft fehlte.
+
+Jetzt: neue Server-Helper in [app.py](app.py) `dashboard`-Route scannt die `series.lat/lon`-Arrays rückwärts und nimmt den **zuletzt bekannten** GPS-Punkt. Ergebnis landet als `vehicle_history_last_gps` dict im Template mit `{lat, lon, stale, at}`. `stale=True` wenn der Punkt nicht die aktuellste Sync-Zeile war → UI blendet dann „zuletzt bekannte Position" hinter dem Standort-Label ein.
+
+Der Leaflet-Asset-Include im `<head>` ist jetzt auch auf diese neue Variable gated statt auf `summary.last.lat`, damit die Assets für Cached-Modus-Nutzer geladen werden.
+
+#### Nebensache: Jinja-Template-Fall
+
+Ein Kommentar im JS enthielt literales `{% block content %}` als Erklärung, was Jinja fälschlicherweise als Block-Open interpretiert hat → `TemplateSyntaxError`. Habe den Text neu formuliert damit der Parser ihn in Ruhe lässt. Typische „das hab ich nicht kommen sehen"-Falle bei Template-Engines.
+
+#### Verifikation
+
+- `py_compile` clean auf app.py
+- Dashboard rendert mit Status 200, 63k char
+- Genau 7 `card h-100 vh-chart-tile`-Frames im HTML
+- `function getModal()` im Bundle, **kein** eager `new bootstrap.Modal` mehr
+- Szenario A (aktuellste Sync hat GPS): map rendert normal, kein „stale"-Badge
+- Szenario B (nur frühere Sync hat GPS, aktuellste nicht): map rendert mit zuletzt-bekannten Koordinaten, „zuletzt bekannte Position"-Label im Header
+- Szenario C (kein GPS überhaupt): map-Block einfach weg, Rest der Seite rendert weiter ohne Crash
+
 ## v2.20.2 (2026-04-16)
 
 ### Hotfix: Fahrzeughistorie — ID-Kollision zerstörte mehrere Plots gleichzeitig

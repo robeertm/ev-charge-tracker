@@ -3,7 +3,7 @@
 {% block head %}
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.6/dist/chart.umd.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/chartjs-adapter-date-fns@3.0.0/dist/chartjs-adapter-date-fns.bundle.min.js"></script>
-{% if vehicle_history and vehicle_history.summary.last.lat %}
+{% if vehicle_history_last_gps %}
 <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 {% endif %}
@@ -276,60 +276,54 @@
         <div id="vhLoadingOverlay" class="position-absolute top-0 start-0 w-100 h-100 d-none justify-content-center align-items-center" style="background:rgba(255,255,255,0.7);z-index:10;">
             <div class="spinner-border text-secondary" role="status"></div>
         </div>
+        {#
+          Each plot lives in its own Bootstrap card for visual
+          separation (user wanted "einen eigenen Frame" per plot).
+          The whole card is the click target (`vh-chart-tile` class),
+          so tapping anywhere on it opens the fullscreen modal.
+        #}
         <div class="row g-3" id="vhChartsRow">
-            <div class="col-lg-4 col-md-6 vh-chart-tile" data-chart="vhSoc" role="button" tabindex="0" title="{{ t('dash.vh_click_fullscreen') }}">
-                <div class="small text-muted d-flex justify-content-between align-items-center">
-                    <span>{{ t('dash.battery') }} (SoC %)</span>
-                    <i class="bi bi-arrows-fullscreen text-muted small"></i>
+            {% set vh_plots = [
+                ('vhSoc',   t('dash.battery')      ~ ' (SoC %)'),
+                ('vhRange', t('dash.range')        ~ ' (km)'),
+                ('vhOdo',   t('dash.odometer')     ~ ' (km)'),
+                ('vh12v',   t('dash.v12')          ~ ' (%)'),
+                ('vhSoh',   t('dash.soh')          ~ ' (%)'),
+                ('vhRegen', t('dash.regenerated')  ~ ' (' ~ t('dash.regen_measured') ~ ')'),
+                ('vhCons',  t('dash.avg_30d')      ~ ' (kWh/100km)'),
+            ] %}
+            {% for chart_id, title in vh_plots %}
+            <div class="col-lg-4 col-md-6">
+                <div class="card h-100 vh-chart-tile shadow-sm" data-chart="{{ chart_id }}"
+                     role="button" tabindex="0"
+                     title="{{ t('dash.vh_click_fullscreen') }}"
+                     style="cursor:pointer;">
+                    <div class="card-header py-1 px-2 bg-white d-flex justify-content-between align-items-center small">
+                        <span class="fw-semibold">{{ title }}</span>
+                        <i class="bi bi-arrows-fullscreen text-muted"></i>
+                    </div>
+                    <div class="card-body p-2">
+                        <div style="position:relative; height:140px;"><canvas id="{{ chart_id }}"></canvas></div>
+                    </div>
                 </div>
-                <div style="position:relative; height:140px;"><canvas id="vhSoc"></canvas></div>
             </div>
-            <div class="col-lg-4 col-md-6 vh-chart-tile" data-chart="vhRange" role="button" tabindex="0" title="{{ t('dash.vh_click_fullscreen') }}">
-                <div class="small text-muted d-flex justify-content-between align-items-center">
-                    <span>{{ t('dash.range') }} (km)</span>
-                    <i class="bi bi-arrows-fullscreen text-muted small"></i>
-                </div>
-                <div style="position:relative; height:140px;"><canvas id="vhRange"></canvas></div>
-            </div>
-            <div class="col-lg-4 col-md-6 vh-chart-tile" data-chart="vhOdo" role="button" tabindex="0" title="{{ t('dash.vh_click_fullscreen') }}">
-                <div class="small text-muted d-flex justify-content-between align-items-center">
-                    <span>{{ t('dash.odometer') }} (km)</span>
-                    <i class="bi bi-arrows-fullscreen text-muted small"></i>
-                </div>
-                <div style="position:relative; height:140px;"><canvas id="vhOdo"></canvas></div>
-            </div>
-            <div class="col-lg-4 col-md-6 vh-chart-tile" data-chart="vh12v" role="button" tabindex="0" title="{{ t('dash.vh_click_fullscreen') }}">
-                <div class="small text-muted d-flex justify-content-between align-items-center">
-                    <span>{{ t('dash.v12') }} (%)</span>
-                    <i class="bi bi-arrows-fullscreen text-muted small"></i>
-                </div>
-                <div style="position:relative; height:140px;"><canvas id="vh12v"></canvas></div>
-            </div>
-            <div class="col-lg-4 col-md-6 vh-chart-tile" data-chart="vhSoh" role="button" tabindex="0" title="{{ t('dash.vh_click_fullscreen') }}">
-                <div class="small text-muted d-flex justify-content-between align-items-center">
-                    <span>{{ t('dash.soh') }} (%)</span>
-                    <i class="bi bi-arrows-fullscreen text-muted small"></i>
-                </div>
-                <div style="position:relative; height:140px;"><canvas id="vhSoh"></canvas></div>
-            </div>
-            <div class="col-lg-4 col-md-6 vh-chart-tile" data-chart="vhRegen" role="button" tabindex="0" title="{{ t('dash.vh_click_fullscreen') }}">
-                <div class="small text-muted d-flex justify-content-between align-items-center">
-                    <span>{{ t('dash.regenerated') }} <small>({{ t('dash.regen_measured') }})</small></span>
-                    <i class="bi bi-arrows-fullscreen text-muted small"></i>
-                </div>
-                <div style="position:relative; height:140px;"><canvas id="vhRegen"></canvas></div>
-            </div>
-            <div class="col-lg-4 col-md-6 vh-chart-tile" data-chart="vhCons" role="button" tabindex="0" title="{{ t('dash.vh_click_fullscreen') }}">
-                <div class="small text-muted d-flex justify-content-between align-items-center">
-                    <span>{{ t('dash.avg_30d') }} (kWh/100km)</span>
-                    <i class="bi bi-arrows-fullscreen text-muted small"></i>
-                </div>
-                <div style="position:relative; height:140px;"><canvas id="vhCons"></canvas></div>
-            </div>
-            {% if vehicle_history.summary.last.lat %}
+            {% endfor %}
+            {# Location card. We compute last-known GPS server-side so the
+               map appears even if the *most recent* sync itself had no
+               GPS (common under Kia/Hyundai "cached" mode). #}
+            {% if vehicle_history_last_gps %}
             <div class="col-lg-8 col-md-12">
-                <div class="small text-muted">{{ t('dash.location') }}</div>
-                <div id="vhMap" style="height:200px; border-radius:4px; z-index:0;"></div>
+                <div class="card h-100 shadow-sm">
+                    <div class="card-header py-1 px-2 bg-white small">
+                        <span class="fw-semibold"><i class="bi bi-geo-alt"></i> {{ t('dash.location') }}</span>
+                        {% if vehicle_history_last_gps.stale %}
+                        <span class="text-muted small">· {{ t('dash.location_last_known') }}</span>
+                        {% endif %}
+                    </div>
+                    <div class="card-body p-2">
+                        <div id="vhMap" style="height:200px; border-radius:4px; z-index:0;"></div>
+                    </div>
+                </div>
             </div>
             {% endif %}
         </div>
@@ -498,12 +492,37 @@
     // The modal has its own canvas (#vhFullscreenCanvas); we destroy
     // and recreate the chart instance there on every open so the size
     // matches the current viewport and we always show fresh data.
+    //
+    // IMPORTANT: bootstrap.bundle.min.js is loaded near the END of the
+    // body (base.html:106), AFTER the content block where this inline
+    // script lives. So `bootstrap` is NOT defined at script-parse time.
+    // We defer the Modal constructor to the first click — by then the
+    // whole document has parsed and Bootstrap is available.
     let modalChart = null;
+    let _modalInstance = null;
     const modalEl = document.getElementById('vhFullscreenModal');
-    const modal = modalEl ? new bootstrap.Modal(modalEl) : null;
+
+    function getModal() {
+        if (!modalEl) return null;
+        if (_modalInstance) return _modalInstance;
+        if (typeof bootstrap === 'undefined' || !bootstrap.Modal) {
+            // Shouldn't happen at click time, but don't blow up either.
+            console.warn('bootstrap not yet loaded for fullscreen modal');
+            return null;
+        }
+        _modalInstance = new bootstrap.Modal(modalEl);
+        modalEl.addEventListener('hidden.bs.modal', () => {
+            if (modalChart) {
+                try { modalChart.destroy(); } catch(e) {}
+                modalChart = null;
+            }
+        });
+        return _modalInstance;
+    }
 
     function openFullscreen(chartId) {
         const def = CHART_DEFS.find(d => d.id === chartId);
+        const modal = getModal();
         if (!def || !modal) return;
         const ts = VH.timestamps.map(s => new Date(s));
         const cfg = buildChartConfig(def, ts, VH[def.field] || [], { fullscreen: true });
@@ -517,20 +536,10 @@
         // measure the container; wait one frame after modal open.
         setTimeout(() => {
             modalChart = new Chart(document.getElementById('vhFullscreenCanvas'), cfg);
-        }, 120);
-    }
-
-    if (modalEl) {
-        modalEl.addEventListener('hidden.bs.modal', () => {
-            if (modalChart) {
-                try { modalChart.destroy(); } catch(e) {}
-                modalChart = null;
-            }
-        });
+        }, 150);
     }
 
     document.querySelectorAll('.vh-chart-tile').forEach(tile => {
-        tile.style.cursor = 'pointer';
         tile.addEventListener('click', () => openFullscreen(tile.dataset.chart));
         tile.addEventListener('keydown', e => {
             if (e.key === 'Enter' || e.key === ' ') {
@@ -540,15 +549,28 @@
         });
     });
 
-    {% if vehicle_history.summary.last.lat %}
-    const lat = {{ vehicle_history.summary.last.lat }};
-    const lon = {{ vehicle_history.summary.last.lon }};
-    const map = L.map('vhMap', { zoomControl: true, scrollWheelZoom: false }).setView([lat, lon], 14);
-    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-        attribution: '&copy; OpenStreetMap',
-        maxZoom: 19,
-    }).addTo(map);
-    L.marker([lat, lon]).addTo(map).bindPopup('{{ car_model }}').openPopup();
+    {% if vehicle_history_last_gps %}
+    // Map init is guarded by a server-side check that any sync row
+    // (not just the most recent one) has GPS — otherwise Kia/Hyundai
+    // "cached" mode suppresses the map permanently.
+    (function initMap() {
+        if (typeof L === 'undefined') {
+            console.warn('Leaflet not loaded; skipping vhMap');
+            return;
+        }
+        const lat = {{ vehicle_history_last_gps.lat }};
+        const lon = {{ vehicle_history_last_gps.lon }};
+        try {
+            const map = L.map('vhMap', { zoomControl: true, scrollWheelZoom: false }).setView([lat, lon], 14);
+            L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+                attribution: '&copy; OpenStreetMap',
+                maxZoom: 19,
+            }).addTo(map);
+            L.marker([lat, lon]).addTo(map).bindPopup('{{ car_model }}').openPopup();
+        } catch (e) {
+            console.error('vhMap init failed:', e);
+        }
+    })();
     {% endif %}
 })();
 </script>

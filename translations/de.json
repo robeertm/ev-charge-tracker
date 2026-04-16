@@ -51,6 +51,7 @@
   "dash.live": "Live",
   "dash.live_title": "Auto aufwecken - frische Daten (verbraucht 12V)",
   "dash.location": "Standort",
+  "dash.location_last_known": "zuletzt bekannte Position",
   "dash.locked": "Verriegelt",
   "dash.map": "Karte",
   "dash.monthly_co2": "Monatliche CO₂-Emissionen",
