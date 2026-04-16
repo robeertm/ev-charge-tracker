@@ -1,5 +1,15 @@
 # Changelog
 
+## v2.17.1 (2026-04-16)
+
+### Fix: VAG (VW/Skoda/Seat/Cupra/Audi) zeigt echten Fehler statt generischem „Passwort prüfen"
+
+VW-Group's Identity-Server (`identity.vwgroup.io`) fordert regelmäßig — nach Passwort-Änderungen, AGB-Updates oder neuen Datenschutzbestimmungen — ein **erneutes Akzeptieren** durch den Nutzer. Die CarConnectivity-Library wirft in dem Fall eine Exception mit der exakten URL zum Akzeptieren (`Try visiting: https://identity.vwgroup.io/...`). Bisher hat `VAGConnector.test_connection()` diese Exception aber mit `except Exception: return False` stumm verworfen und die App flashte das generische „Verbindung fehlgeschlagen. Zugangsdaten prüfen." — wodurch jeder Nutzer naheliegenderweise dachte Benutzername/Passwort wären falsch, was dann beim Testen Login-Throttling getriggert hat.
+
+Fix: `test_connection()` fängt die Exception nicht mehr, lässt sie zur App-Route durchpropagieren, die sie in der flash-Message mit `flash.error` ausgibt — inklusive der Consent-URL. `authenticate()` (das für den Background-Sync benutzt wird) bleibt defensiv und speichert jetzt zusätzlich `self._last_error` als Hinweis für Log-Auswertung.
+
+**Nutzer-seitig**: wenn das Error nochmal kommt, steht in der flash-Message jetzt die URL, die der Nutzer im Browser öffnen, sich einloggen und den Consent klicken muss. Dann geht die Skoda/VW/Audi/Seat/Cupra-Verbindung wieder.
+
 ## v2.17.0 (2026-04-15)
 
 ### Hyundai Refresh-Token: richtige OAuth-URLs (CTB-Flow)

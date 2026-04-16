@@ -74,17 +74,23 @@ class VAGConnector(VehicleConnector):
         try:
             self._get_cc()
             return True
-        except Exception:
+        except Exception as exc:
+            self._last_error = str(exc)
             self._cc = None
             return False
 
     def test_connection(self) -> bool:
-        try:
-            self._find_vehicle()
-            return True
-        except Exception:
-            self._cc = None
-            return False
+        """Raise on failure so the caller sees the real error message.
+
+        VW-Group's identity server frequently asks the user to re-accept
+        new terms/consent at https://identity.vwgroup.io after a password
+        change or T&C update. The library raises with that URL in the
+        message. Swallowing it (previous behavior) turned every failure
+        into a generic "check password" flash — unhelpful because the
+        password is almost always fine, just the consent is stale.
+        """
+        self._find_vehicle()
+        return True
 
     def get_status(self, force=False) -> VehicleStatus:
         vehicle = self._find_vehicle()
