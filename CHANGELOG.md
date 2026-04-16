@@ -1,5 +1,22 @@
 # Changelog
 
+## v2.17.6 (2026-04-16)
+
+### Fix: Hyundai Token-Fetch — warten auf CCSP-Code, nicht auf ctbapi-Code
+
+Revert von v2.17.5 plus Grund-Ursache. Der Hyundai CTB-Flow hat **zwei Codes** in der Redirect-Kette:
+1. `ctbapi.hyundai-europe.com/api/auth?code=X` — Code für `client_id=peuhyundaiidm-ctb` (der Login-Client). Dieser Code gehört NICHT zum Token-POST.
+2. Danach Server-Redirect auf `prd.eu-ccapi.hyundai.com:8080/.../oauth2/token?code=Y` — Y ist der CCSP-Code für `client_id=6d477c38-...` (der API-Client). Das ist der Code, den das Token-Endpoint erwartet.
+
+In v2.17.4 hatte ich die URL-Prüfung auf „enthält `code=`" gelockert — Selenium hat dadurch Code X von ctbapi gegriffen. Mein v2.17.5-Versuch mit `redirect_uri=ctbapi` beim Token-POST ging in die Hose, weil der API-Client ctbapi gar nicht als Redirect registriert hat (→ „Invalid redirect uri").
+
+Richtiger Fix:
+1. Wait-Bedingung zurückgenommen auf **URL enthält `prd.eu-ccapi.hyundai.com` UND `code=`**. So wartet Selenium den zweiten Redirect ab und bekommt den richtigen CCSP-Code Y.
+2. Token-POST benutzt wieder **`redirect_uri=redirect_final`** (entspricht der URL, auf der der CCSP-Code ausgestellt wurde). v2.17.5-Branching rückgängig.
+3. Error-Meldung bei Wait-Timeout zeigt jetzt explizit welche URL erreicht wurde, damit wir im Log-Fall sofort sehen ob's an einem dritten Redirect-Host hing.
+
+Kia (oneid, 2-Step-Authorize) unverändert.
+
 ## v2.17.5 (2026-04-16)
 
 ### Fix: Hyundai Token-POST benutzt falsches `redirect_uri`

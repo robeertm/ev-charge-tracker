@@ -158,26 +158,35 @@ def _do_fetch(brand_key):
             wait = WebDriverWait(driver, 300)  # 5 min max
 
             if cfg['flow'] == 'ctb':
-                # Hyundai CTB: after login the browser redirects through
-                # ctbapi.hyundai-europe.com and eventually lands somewhere
-                # with `code=` in the URL. Accept ANY URL that has a code
-                # param — the final host varies (prd.eu-ccapi.hyundai.com,
-                # or sometimes directly ctbapi.hyundai-europe.com). The
-                # response body might show `{"result":"E","message":"url
-                # is not defined"}` — that's just the server's pseudo-error
-                # for displaying a URL without a UI, not a real failure.
-                _fetch_state['status'] = 'Warte auf Login + Redirect mit code= Parameter...'
+                # Hyundai CTB flow has TWO codes in the redirect chain:
+                #   1. ctbapi.hyundai-europe.com/api/auth?code=X — that's
+                #      the code issued for login_client_id (peuhyundaiidm-ctb).
+                #      We must NOT grab this one — the token POST uses a
+                #      different client_id and would reject X.
+                #   2. ctbapi then server-redirects to
+                #      prd.eu-ccapi.hyundai.com:8080/.../oauth2/token?code=Y —
+                #      Y is the CCSP code for client_id 6d477c38-..., which
+                #      is what the token POST expects.
+                # So: wait until the URL hits prd.eu-ccapi.hyundai.com AND
+                # has code= in it. The response body at that URL will show
+                # {"result":"E","message":"url is not defined"} — that's the
+                # server's pseudo-error for rendering a codeless URL, not a
+                # real failure. We only care about the URL bar.
+                _fetch_state['status'] = 'Warte auf Final-Redirect zu prd.eu-ccapi.hyundai.com...'
                 try:
-                    wait.until(lambda d: 'code=' in d.current_url)
+                    wait.until(lambda d: (
+                        'prd.eu-ccapi.hyundai.com' in d.current_url
+                        and 'code=' in d.current_url
+                    ))
                 except Exception as wait_exc:
                     last_url = driver.current_url if driver else '(browser down)'
                     raise RuntimeError(
-                        f'Timeout beim Warten auf Login-Redirect. '
-                        f'Letzte URL: {last_url[:300]}. '
+                        f'Timeout beim Warten auf Final-Redirect zu '
+                        f'prd.eu-ccapi.hyundai.com. Letzte URL: {last_url[:300]}. '
                         f'Original: {type(wait_exc).__name__}: {str(wait_exc)[:200]}'
                     )
                 current_url = driver.current_url
-                _fetch_state['status'] = 'Login erkannt! Token wird abgerufen...'
+                _fetch_state['status'] = 'CCSP-Code extrahiert, tausche gegen Token...'
             else:
                 # Kia oneid: login lands on kia.com marketing site with a
                 # logout link in the DOM; then we manually navigate to the
@@ -199,20 +208,12 @@ def _do_fetch(brand_key):
             code = match.group(1)
             _fetch_state['status'] = f'Code extrahiert, tausche gegen Token...'
 
-            # OAuth2 requires the redirect_uri in the token POST to match
-            # EXACTLY the one used during the authorize step.
-            #   - Kia oneid: two authorize steps, the 2nd uses redirect_final
-            #     (prd.eu-ccapi.kia.com/.../oauth2/redirect) as redirect_uri
-            #     — that's what the code was issued for.
-            #   - Hyundai CTB: single authorize step with redirect_uri =
-            #     login_redirect (ctbapi.hyundai-europe.com/api/auth). The
-            #     browser eventually lands on prd.eu-ccapi.hyundai.com to
-            #     display the code, but the code was issued against ctbapi.
-            token_redirect_uri = (
-                cfg['login_redirect'] if cfg['flow'] == 'ctb'
-                else cfg['redirect_final']
-            )
-
+            # Both flows use redirect_final as the OAuth redirect_uri at
+            # token-exchange time: for Kia it's the 2nd authorize target
+            # (prd.eu-ccapi.kia.com/.../oauth2/redirect), for Hyundai CTB
+            # it's the CCSP code's landing URL on prd.eu-ccapi.hyundai.com.
+            # The login_redirect (ctbapi) is only for the intermediate hop
+            # and we explicitly wait past it before extracting the code.
             # Kia's client_secret is literally "secret", Hyundai's is a real
             # 48-char string — both come from the brand config dict.
             import requests as req
@@ -220,7 +221,7 @@ def _do_fetch(brand_key):
                 resp = req.post(token_url, data={
                     'grant_type': 'authorization_code',
                     'code': code,
-                    'redirect_uri': token_redirect_uri,
+                    'redirect_uri': cfg['redirect_final'],
                     'client_id': cfg['client_id'],
                     'client_secret': cfg.get('client_secret', 'secret'),
                 }, timeout=15)
