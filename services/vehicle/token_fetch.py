@@ -158,14 +158,24 @@ def _do_fetch(brand_key):
             wait = WebDriverWait(driver, 300)  # 5 min max
 
             if cfg['flow'] == 'ctb':
-                # Hyundai CTB: after login the browser redirects straight
-                # through ctbapi.hyundai-europe.com and eventually lands on
-                # prd.eu-ccapi.hyundai.com:8080/api/v1/user/oauth2/token?code=XXX
-                # which shows a JSON body {"result":"E","message":"url is not defined"}
-                # — that's the expected success state. We watch the URL, not the DOM.
-                _fetch_state['status'] = 'Warte auf Login + Redirect zur Token-URL...'
-                wait.until(lambda d: 'code=' in d.current_url and
-                           d.current_url.startswith('https://prd.eu-ccapi.hyundai.com'))
+                # Hyundai CTB: after login the browser redirects through
+                # ctbapi.hyundai-europe.com and eventually lands somewhere
+                # with `code=` in the URL. Accept ANY URL that has a code
+                # param — the final host varies (prd.eu-ccapi.hyundai.com,
+                # or sometimes directly ctbapi.hyundai-europe.com). The
+                # response body might show `{"result":"E","message":"url
+                # is not defined"}` — that's just the server's pseudo-error
+                # for displaying a URL without a UI, not a real failure.
+                _fetch_state['status'] = 'Warte auf Login + Redirect mit code= Parameter...'
+                try:
+                    wait.until(lambda d: 'code=' in d.current_url)
+                except Exception as wait_exc:
+                    last_url = driver.current_url if driver else '(browser down)'
+                    raise RuntimeError(
+                        f'Timeout beim Warten auf Login-Redirect. '
+                        f'Letzte URL: {last_url[:300]}. '
+                        f'Original: {type(wait_exc).__name__}: {str(wait_exc)[:200]}'
+                    )
                 current_url = driver.current_url
                 _fetch_state['status'] = 'Login erkannt! Token wird abgerufen...'
             else:
@@ -183,31 +193,43 @@ def _do_fetch(brand_key):
             match = re.search(r'code=([^&]+)', current_url)
             if not match:
                 _fetch_state.update(running=False,
-                    error=f'Kein Auth-Code in URL: {current_url[:200]}')
+                    error=f'Kein Auth-Code in URL: {current_url[:300]}')
                 return
 
             code = match.group(1)
+            _fetch_state['status'] = f'Code extrahiert, tausche gegen Token...'
 
             # Exchange code for tokens. Kia's client_secret is literally
             # "secret", Hyundai's is a real 48-char string — both come from
             # the brand config dict so we never hard-code the wrong one.
             import requests as req
-            resp = req.post(token_url, data={
-                'grant_type': 'authorization_code',
-                'code': code,
-                'redirect_uri': cfg['redirect_final'],
-                'client_id': cfg['client_id'],
-                'client_secret': cfg.get('client_secret', 'secret'),
-            })
+            try:
+                resp = req.post(token_url, data={
+                    'grant_type': 'authorization_code',
+                    'code': code,
+                    'redirect_uri': cfg['redirect_final'],
+                    'client_id': cfg['client_id'],
+                    'client_secret': cfg.get('client_secret', 'secret'),
+                }, timeout=15)
+            except Exception as post_exc:
+                _fetch_state.update(running=False,
+                    error=f'Token-POST fehlgeschlagen: {type(post_exc).__name__}: {str(post_exc)[:200]}')
+                return
 
             if resp.status_code == 200:
                 tokens = resp.json()
                 refresh_token = tokens.get('refresh_token')
                 if refresh_token:
-                    _fetch_state.update(running=False, status='Token erfolgreich!', token=refresh_token)
+                    _fetch_state.update(running=False,
+                        status='Token erfolgreich!', token=refresh_token)
                     return
+                _fetch_state.update(running=False,
+                    error=f'Token-Endpoint gab 200 aber kein refresh_token: {str(tokens)[:300]}')
+                return
 
-            _fetch_state.update(running=False, error=f'Token-Austausch fehlgeschlagen ({resp.status_code})')
+            _fetch_state.update(running=False,
+                error=f'Token-Austausch fehlgeschlagen. Status {resp.status_code}. '
+                      f'Body: {resp.text[:300]}')
 
         finally:
             try:
@@ -216,7 +238,11 @@ def _do_fetch(brand_key):
                 pass
 
     except Exception as e:
-        _fetch_state.update(running=False, error=str(e))
+        import traceback
+        tb = traceback.format_exc()
+        logger.error(f"token_fetch failed:\n{tb}")
+        msg = str(e) or type(e).__name__
+        _fetch_state.update(running=False, error=f'{type(e).__name__}: {msg}')
 
 
 def start_fetch(brand_key):

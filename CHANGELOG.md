@@ -1,5 +1,17 @@
 # Changelog
 
+## v2.17.4 (2026-04-16)
+
+### Hyundai-Token-Fetch: URL-Match robuster + bessere Fehlermeldungen
+
+Zwei Fixes in einem Release:
+
+**1. URL-Match relaxt.** In v2.17.2 hat der Wait verlangt, dass die Final-URL mit `https://prd.eu-ccapi.hyundai.com` startet **und** `code=` enthält. In der Praxis landet der Browser je nach Flow-Variante manchmal auf `ctbapi.hyundai-europe.com/api/auth?code=XXX` statt direkt auf prd.eu-ccapi — mein Match hat das nicht akzeptiert und gelaufen bis zum 5-Minuten-Timeout. Jetzt reicht: URL enthält `code=`, egal auf welchem Host.
+
+**2. Leere Fehlermeldungen aufgelöst.** User berichtete eine rote „message:"-Anzeige ohne weiteren Text neben dem Token-Button — das war entweder eine Selenium-`TimeoutException` mit leerer Message, oder ein verschluckter Exception-Body. Alle Error-Paths im Token-Fetch-Flow geben jetzt explizit `{Typ}: {Message}` zurück, plus Kontext (letzte URL bei Timeout, HTTP-Body bei Token-POST-Fehler, usw.). Bei völlig leerem `str(e)` fällt der Code auf den Exception-Typnamen zurück. Zusätzlich wird der komplette Traceback auf dem Server geloggt (`journalctl -u ev-tracker.service`) damit auch Server-seitige Diagnose möglich ist.
+
+Kia-Pfad unverändert.
+
 ## v2.17.3 (2026-04-16)
 
 ### Fix: VAG-Connector — Importpfad für CarConnectivity-Klasse
