@@ -257,39 +257,73 @@
 
 {% if vehicle_history and vehicle_history.summary.count > 1 %}
 <!-- Vehicle History (time series) -->
-<div class="card mb-3">
-    <div class="card-header bg-white fw-bold d-flex justify-content-between align-items-center">
+<div class="card mb-3" id="vehicleHistoryCard">
+    <div class="card-header bg-white fw-bold d-flex justify-content-between align-items-center flex-wrap gap-2">
         <span><i class="bi bi-clock-history"></i> {{ t('dash.vehicle_history') }}</span>
-        <span class="text-muted small">{{ vehicle_history.summary.count }} {{ t('dash.records') }}</span>
+        <div class="d-flex align-items-center gap-2">
+            <select id="vhRange" class="form-select form-select-sm" style="width:auto;" title="{{ t('dash.vh_range_title') }}">
+                <option value="1"   {% if vehicle_history_days == 1 %}selected{% endif %}>{{ t('dash.vh_range_1d') }}</option>
+                <option value="7"   {% if vehicle_history_days == 7 %}selected{% endif %}>{{ t('dash.vh_range_7d') }}</option>
+                <option value="30"  {% if vehicle_history_days == 30 %}selected{% endif %}>{{ t('dash.vh_range_30d') }}</option>
+                <option value="90"  {% if vehicle_history_days == 90 %}selected{% endif %}>{{ t('dash.vh_range_90d') }}</option>
+                <option value="365" {% if vehicle_history_days == 365 %}selected{% endif %}>{{ t('dash.vh_range_365d') }}</option>
+                <option value="0"   {% if vehicle_history_days == 0 %}selected{% endif %}>{{ t('dash.vh_range_all') }}</option>
+            </select>
+            <span class="text-muted small" id="vhCount">{{ vehicle_history.summary.count }} {{ t('dash.records') }}</span>
+        </div>
     </div>
-    <div class="card-body">
-        <div class="row g-3">
-            <div class="col-lg-4 col-md-6">
-                <div class="small text-muted">{{ t('dash.battery') }} (SoC %)</div>
+    <div class="card-body position-relative">
+        <div id="vhLoadingOverlay" class="position-absolute top-0 start-0 w-100 h-100 d-none justify-content-center align-items-center" style="background:rgba(255,255,255,0.7);z-index:10;">
+            <div class="spinner-border text-secondary" role="status"></div>
+        </div>
+        <div class="row g-3" id="vhChartsRow">
+            <div class="col-lg-4 col-md-6 vh-chart-tile" data-chart="vhSoc" role="button" tabindex="0" title="{{ t('dash.vh_click_fullscreen') }}">
+                <div class="small text-muted d-flex justify-content-between align-items-center">
+                    <span>{{ t('dash.battery') }} (SoC %)</span>
+                    <i class="bi bi-arrows-fullscreen text-muted small"></i>
+                </div>
                 <div style="position:relative; height:140px;"><canvas id="vhSoc"></canvas></div>
             </div>
-            <div class="col-lg-4 col-md-6">
-                <div class="small text-muted">{{ t('dash.range') }} (km)</div>
+            <div class="col-lg-4 col-md-6 vh-chart-tile" data-chart="vhRange" role="button" tabindex="0" title="{{ t('dash.vh_click_fullscreen') }}">
+                <div class="small text-muted d-flex justify-content-between align-items-center">
+                    <span>{{ t('dash.range') }} (km)</span>
+                    <i class="bi bi-arrows-fullscreen text-muted small"></i>
+                </div>
                 <div style="position:relative; height:140px;"><canvas id="vhRange"></canvas></div>
             </div>
-            <div class="col-lg-4 col-md-6">
-                <div class="small text-muted">{{ t('dash.odometer') }} (km)</div>
+            <div class="col-lg-4 col-md-6 vh-chart-tile" data-chart="vhOdo" role="button" tabindex="0" title="{{ t('dash.vh_click_fullscreen') }}">
+                <div class="small text-muted d-flex justify-content-between align-items-center">
+                    <span>{{ t('dash.odometer') }} (km)</span>
+                    <i class="bi bi-arrows-fullscreen text-muted small"></i>
+                </div>
                 <div style="position:relative; height:140px;"><canvas id="vhOdo"></canvas></div>
             </div>
-            <div class="col-lg-4 col-md-6">
-                <div class="small text-muted">{{ t('dash.v12') }} (%)</div>
+            <div class="col-lg-4 col-md-6 vh-chart-tile" data-chart="vh12v" role="button" tabindex="0" title="{{ t('dash.vh_click_fullscreen') }}">
+                <div class="small text-muted d-flex justify-content-between align-items-center">
+                    <span>{{ t('dash.v12') }} (%)</span>
+                    <i class="bi bi-arrows-fullscreen text-muted small"></i>
+                </div>
                 <div style="position:relative; height:140px;"><canvas id="vh12v"></canvas></div>
             </div>
-            <div class="col-lg-4 col-md-6">
-                <div class="small text-muted">{{ t('dash.soh') }} (%)</div>
+            <div class="col-lg-4 col-md-6 vh-chart-tile" data-chart="vhSoh" role="button" tabindex="0" title="{{ t('dash.vh_click_fullscreen') }}">
+                <div class="small text-muted d-flex justify-content-between align-items-center">
+                    <span>{{ t('dash.soh') }} (%)</span>
+                    <i class="bi bi-arrows-fullscreen text-muted small"></i>
+                </div>
                 <div style="position:relative; height:140px;"><canvas id="vhSoh"></canvas></div>
             </div>
-            <div class="col-lg-4 col-md-6">
-                <div class="small text-muted">{{ t('dash.regenerated') }} <small>({{ t('dash.regen_measured') }})</small></div>
+            <div class="col-lg-4 col-md-6 vh-chart-tile" data-chart="vhRegen" role="button" tabindex="0" title="{{ t('dash.vh_click_fullscreen') }}">
+                <div class="small text-muted d-flex justify-content-between align-items-center">
+                    <span>{{ t('dash.regenerated') }} <small>({{ t('dash.regen_measured') }})</small></span>
+                    <i class="bi bi-arrows-fullscreen text-muted small"></i>
+                </div>
                 <div style="position:relative; height:140px;"><canvas id="vhRegen"></canvas></div>
             </div>
-            <div class="col-lg-4 col-md-6">
-                <div class="small text-muted">{{ t('dash.avg_30d') }} (kWh/100km)</div>
+            <div class="col-lg-4 col-md-6 vh-chart-tile" data-chart="vhCons" role="button" tabindex="0" title="{{ t('dash.vh_click_fullscreen') }}">
+                <div class="small text-muted d-flex justify-content-between align-items-center">
+                    <span>{{ t('dash.avg_30d') }} (kWh/100km)</span>
+                    <i class="bi bi-arrows-fullscreen text-muted small"></i>
+                </div>
                 <div style="position:relative; height:140px;"><canvas id="vhCons"></canvas></div>
             </div>
             {% if vehicle_history.summary.last.lat %}
@@ -301,12 +335,47 @@
         </div>
     </div>
 </div>
+
+<!-- Fullscreen chart modal — shared by all vehicle-history tiles.
+     A second Chart.js instance is created inside this modal whenever a
+     tile is clicked, with the same data but larger canvas + richer
+     tooltips. Bootstrap's modal-fullscreen class handles sizing. -->
+<div class="modal fade" id="vhFullscreenModal" tabindex="-1" aria-hidden="true">
+    <div class="modal-dialog modal-fullscreen">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title" id="vhFullscreenTitle"><i class="bi bi-graph-up"></i> <span id="vhFullscreenLabel"></span></h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+            </div>
+            <div class="modal-body p-3">
+                <div class="h-100" style="position:relative;">
+                    <canvas id="vhFullscreenCanvas"></canvas>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
 <script>
 (function() {
-    const VH = {{ vehicle_history.series | tojson }};
-    const ts = VH.timestamps.map(s => new Date(s));
+    // Initial data from the server render — the AJAX reload path
+    // overwrites this when the range dropdown changes.
+    let VH = {{ vehicle_history.series | tojson }};
 
-    function pairs(values) {
+    // Chart.js instances keyed by canvas id so we can destroy + recreate
+    // on range change. We also keep the config descriptor so the
+    // fullscreen modal can clone the exact same chart with the same data.
+    const charts = {};
+    const CHART_DEFS = [
+        { id: 'vhSoc',   field: 'soc',             color: 'rgba(76, 175, 80, 1)',  fmt: v => v + '%',             label: {{ t('dash.battery')|tojson }} + ' (SoC %)' },
+        { id: 'vhRange', field: 'range_km',        color: 'rgba(33, 150, 243, 1)', fmt: v => v + ' km',           label: {{ t('dash.range')|tojson }} + ' (km)' },
+        { id: 'vhOdo',   field: 'odometer_km',     color: 'rgba(96, 125, 139, 1)', fmt: v => v.toLocaleString('de'), label: {{ t('dash.odometer')|tojson }} + ' (km)' },
+        { id: 'vh12v',   field: 'battery_12v',     color: 'rgba(255, 193, 7, 1)',  fmt: v => v + '%',             label: {{ t('dash.v12')|tojson }} + ' (%)' },
+        { id: 'vhSoh',   field: 'soh',             color: 'rgba(244, 67, 54, 1)',  fmt: v => v + '%',             label: {{ t('dash.soh')|tojson }} + ' (%)', withAvg: true },
+        { id: 'vhRegen', field: 'regen_kwh',       color: 'rgba(0, 188, 212, 1)',  fmt: v => v.toFixed(0),        label: {{ t('dash.regenerated')|tojson }} },
+        { id: 'vhCons',  field: 'consumption_30d', color: 'rgba(255, 152, 0, 1)',  fmt: v => v.toFixed(1),        label: {{ t('dash.avg_30d')|tojson }} + ' (kWh/100km)' },
+    ];
+
+    function pairs(ts, values) {
         const out = [];
         for (let i = 0; i < ts.length; i++) {
             if (values[i] !== null && values[i] !== undefined) {
@@ -316,39 +385,46 @@
         return out;
     }
 
-    const baseOpts = (color, fmt) => ({
-        type: 'line',
-        data: { datasets: [{
-            data: [],
-            borderColor: color,
-            backgroundColor: color.replace('1)', '0.15)'),
-            borderWidth: 1.5,
-            pointRadius: 0,
-            tension: 0.2,
-            fill: true,
-            spanGaps: true,
-        }] },
-        options: {
-            maintainAspectRatio: false,
-            responsive: true,
-            plugins: { legend: { display: false }, tooltip: { intersect: false, mode: 'index' } },
-            scales: {
-                x: { type: 'time', ticks: { font: { size: 9 }, maxTicksLimit: 5 }, grid: { display: false } },
-                y: { ticks: { font: { size: 9 }, callback: v => fmt ? fmt(v) : v } },
-            }
-        }
-    });
-
-    function makeChart(id, values, color, fmt, opts) {
+    function baseOpts(color, fmt, opts) {
         opts = opts || {};
-        const cfg = baseOpts(color, fmt);
-        const data = pairs(values);
-        cfg.data.datasets[0].data = data;
+        const isFull = !!opts.fullscreen;
+        return {
+            type: 'line',
+            data: { datasets: [{
+                data: [],
+                borderColor: color,
+                backgroundColor: color.replace('1)', '0.15)'),
+                borderWidth: isFull ? 2 : 1.5,
+                pointRadius: isFull ? 1.5 : 0,
+                pointHoverRadius: isFull ? 4 : 3,
+                tension: 0.2,
+                fill: true,
+                spanGaps: true,
+            }] },
+            options: {
+                maintainAspectRatio: false,
+                responsive: true,
+                plugins: {
+                    legend: { display: false },
+                    tooltip: { intersect: false, mode: 'index' },
+                },
+                scales: {
+                    x: { type: 'time', ticks: { font: { size: isFull ? 12 : 9 }, maxTicksLimit: isFull ? 12 : 5 }, grid: { display: isFull } },
+                    y: { ticks: { font: { size: isFull ? 12 : 9 }, callback: v => fmt ? fmt(v) : v }, grid: { display: true } },
+                }
+            }
+        };
+    }
 
-        if (opts.withAvg && data.length >= 3) {
+    function buildChartConfig(def, ts, values, opts) {
+        opts = opts || {};
+        const cfg = baseOpts(def.color, def.fmt, opts);
+        const data = pairs(ts, values);
+        cfg.data.datasets[0].data = data;
+        if (def.withAvg && data.length >= 3) {
             const avg = data.reduce((s, p) => s + p.y, 0) / data.length;
             cfg.data.datasets.push({
-                label: 'Ø ' + (fmt ? fmt(avg.toFixed(1)) : avg.toFixed(1)),
+                label: 'Ø ' + (def.fmt ? def.fmt(avg.toFixed(1)) : avg.toFixed(1)),
                 data: [
                     { x: data[0].x, y: avg },
                     { x: data[data.length - 1].x, y: avg },
@@ -360,29 +436,109 @@
                 fill: false,
                 tension: 0,
             });
-            // Show the avg dataset's label in the legend only for this chart
             cfg.options.plugins.legend = {
                 display: true,
                 position: 'bottom',
                 labels: {
                     filter: item => item.datasetIndex === 1,
-                    font: { size: 9 },
+                    font: { size: opts.fullscreen ? 12 : 9 },
                     boxWidth: 18,
                     padding: 2,
                 },
             };
         }
-
-        new Chart(document.getElementById(id), cfg);
+        return cfg;
     }
 
-    makeChart('vhSoc',   VH.soc,             'rgba(76, 175, 80, 1)',  v => v + '%');
-    makeChart('vhRange', VH.range_km,        'rgba(33, 150, 243, 1)', v => v + ' km');
-    makeChart('vhOdo',   VH.odometer_km,     'rgba(96, 125, 139, 1)', v => v.toLocaleString('de'));
-    makeChart('vh12v',   VH.battery_12v,     'rgba(255, 193, 7, 1)',  v => v + '%');
-    makeChart('vhSoh',   VH.soh,             'rgba(244, 67, 54, 1)',  v => v + '%', { withAvg: true });
-    makeChart('vhRegen', VH.regen_kwh,       'rgba(0, 188, 212, 1)',  v => v.toFixed(0));
-    makeChart('vhCons',  VH.consumption_30d, 'rgba(255, 152, 0, 1)',  v => v.toFixed(1));
+    function renderAll(series) {
+        const ts = series.timestamps.map(s => new Date(s));
+        for (const def of CHART_DEFS) {
+            const cfg = buildChartConfig(def, ts, series[def.field] || []);
+            const el = document.getElementById(def.id);
+            if (!el) continue;
+            if (charts[def.id]) {
+                try { charts[def.id].destroy(); } catch(e) {}
+            }
+            charts[def.id] = new Chart(el, cfg);
+        }
+    }
+
+    // Initial render
+    renderAll(VH);
+
+    // ── Range dropdown: AJAX-reload with the chosen window. ─────────
+    const rangeSel = document.getElementById('vhRange');
+    const overlay  = document.getElementById('vhLoadingOverlay');
+    const countEl  = document.getElementById('vhCount');
+    if (rangeSel) {
+        rangeSel.addEventListener('change', async () => {
+            const days = rangeSel.value;
+            overlay.classList.remove('d-none');
+            overlay.classList.add('d-flex');
+            try {
+                const r = await fetch(`/api/vehicle/history?days=${encodeURIComponent(days)}&persist=1`, { cache: 'no-store' });
+                const data = await r.json();
+                if (data && data.series) {
+                    VH = data.series;
+                    renderAll(VH);
+                    if (countEl && data.summary) {
+                        countEl.textContent = data.summary.count + ' ' + {{ t('dash.records')|tojson }};
+                    }
+                }
+            } catch(e) {
+                console.error('vehicle-history range reload failed', e);
+            } finally {
+                overlay.classList.remove('d-flex');
+                overlay.classList.add('d-none');
+            }
+        });
+    }
+
+    // ── Click / keyboard any tile → open fullscreen modal. ─────────
+    // The modal has its own canvas (#vhFullscreenCanvas); we destroy
+    // and recreate the chart instance there on every open so the size
+    // matches the current viewport and we always show fresh data.
+    let modalChart = null;
+    const modalEl = document.getElementById('vhFullscreenModal');
+    const modal = modalEl ? new bootstrap.Modal(modalEl) : null;
+
+    function openFullscreen(chartId) {
+        const def = CHART_DEFS.find(d => d.id === chartId);
+        if (!def || !modal) return;
+        const ts = VH.timestamps.map(s => new Date(s));
+        const cfg = buildChartConfig(def, ts, VH[def.field] || [], { fullscreen: true });
+        document.getElementById('vhFullscreenLabel').textContent = def.label;
+        if (modalChart) {
+            try { modalChart.destroy(); } catch(e) {}
+            modalChart = null;
+        }
+        modal.show();
+        // Chart.js needs the canvas to actually be visible so it can
+        // measure the container; wait one frame after modal open.
+        setTimeout(() => {
+            modalChart = new Chart(document.getElementById('vhFullscreenCanvas'), cfg);
+        }, 120);
+    }
+
+    if (modalEl) {
+        modalEl.addEventListener('hidden.bs.modal', () => {
+            if (modalChart) {
+                try { modalChart.destroy(); } catch(e) {}
+                modalChart = null;
+            }
+        });
+    }
+
+    document.querySelectorAll('.vh-chart-tile').forEach(tile => {
+        tile.style.cursor = 'pointer';
+        tile.addEventListener('click', () => openFullscreen(tile.dataset.chart));
+        tile.addEventListener('keydown', e => {
+            if (e.key === 'Enter' || e.key === ' ') {
+                e.preventDefault();
+                openFullscreen(tile.dataset.chart);
+            }
+        });
+    });
 
     {% if vehicle_history.summary.last.lat %}
     const lat = {{ vehicle_history.summary.last.lat }};

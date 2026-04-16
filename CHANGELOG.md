@@ -1,5 +1,34 @@
 # Changelog
 
+## v2.20.1 (2026-04-16)
+
+### Fahrzeughistorie: Klick → Vollbild + Zeitraum-Wahl
+
+Zwei gewünschte Usability-Verbesserungen an der Fahrzeughistorie-Card im Dashboard:
+
+**1. Jeder Plot ist klickbar → öffnet Vollbild-Modal.**
+Alle 7 Mini-Charts (SoC, Reichweite, Tacho, 12V, SoH, Rekuperation, Verbrauch) haben jetzt einen Fullscreen-Icon-Hinweis oben rechts und sind klick- (und Enter/Space-)aktiv. Klick öffnet ein Bootstrap `modal-fullscreen` mit einer größeren Version desselben Charts: dickere Linie, mehr Achsen-Ticks (12 statt 5), Grid sichtbar, Datenpunkte als kleine Kreise, Tooltips mit Intersect-off Mode für leichtes Hovern. ESC / Klick außerhalb schließt.
+
+**2. Zeitraum-Dropdown in der Card-Header-Zeile.**
+Neue Auswahl: **24h · 7 Tage · 30 Tage · 90 Tage · 1 Jahr · Alles**. Bei Änderung wird per AJAX `/api/vehicle/history?days=N&persist=1` aufgerufen, die Charts werden zerstört und mit den neuen Daten neu gezeichnet — Loading-Overlay mit Spinner während des Requests. Die Wahl wird in `AppConfig` unter `dash_history_days` persistiert, der nächste Pageload zeigt denselben Range direkt.
+
+**Standard-Range ist jetzt 30 Tage** (vorher war's "alles"). Bei Accounts mit vielen Monaten Daten sind die 30 Tage lesbarer; wer mehr will klickt in der Card auf "1 Jahr" oder "Alles" — das bleibt dann auch für die nächsten Besuche so.
+
+**Technisch:**
+- [app.py](app.py) neue Route `/api/vehicle/history?days=N[&persist=1]` mit Clamp auf 0..10 Jahre, ruft das bestehende `get_vehicle_history(days=...)` auf — keine Änderung am Stats-Service nötig.
+- Dashboard-Template refactored: Chart-Konfigs liegen jetzt in einer `CHART_DEFS`-Liste mit `id`, `field`, `color`, `fmt`, `label`. Die `renderAll(series)`-Funktion zerstört alte Chart-Instanzen (`charts[id].destroy()`) und baut sie neu, damit Range-Wechsel sauber sind und keine Memory-Leaks haben.
+- Fullscreen-Modal reuses `buildChartConfig` mit `{fullscreen: true}`-Flag, der größere Font-Sizes, Grid und Punkte aktiviert. Eine zweite Chart-Instanz wird auf `#vhFullscreenCanvas` gezeichnet; bei Modal-close wird sie wieder destroyed. Chart.js braucht einen sichtbaren Container zum Messen, daher `setTimeout(..., 120)` nach `modal.show()`.
+- 8 neue i18n-Keys in de + en (`dash.vh_range_title`, `dash.vh_range_{1d,7d,30d,90d,365d,all}`, `dash.vh_click_fullscreen`).
+
+**Verifiziert:**
+- py_compile clean
+- Dashboard rendert mit Dropdown + Modal + 7 klickbaren Tiles
+- `/api/vehicle/history?days={1,7,30,90,365,0}` liefert für alle Werte korrekte Shape (`days`, `series`, `summary`), `series` hat 11 erwartete Felder
+- Unknown `days=abc` clamped auf 30
+- `persist=1` aktualisiert `AppConfig['dash_history_days']`
+- Server-Render selektiert die gespeicherte Option korrekt
+- Keine Daten / leerer Range: API liefert `series=null`, JS guarded mit `if (data && data.series)`, kein Crash
+
 ## v2.20.0 (2026-04-16)
 
 ### Automatisches Rollback bei kaputtem Update + Dashboard-Update-Banner

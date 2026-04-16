@@ -844,12 +844,20 @@ def register_routes(app):
         acdc = get_ac_dc_stats()
         yearly = get_yearly_stats()
         vehicle_configured = bool(AppConfig.get('vehicle_api_brand', ''))
-        vehicle_history = get_vehicle_history() if vehicle_configured else None
+        # User's preferred default range for the vehicle-history plots
+        # (0 = all). Stored in AppConfig so the choice persists across
+        # sessions. Client-side AJAX can override for the current view.
+        try:
+            default_days = int(AppConfig.get('dash_history_days', '30') or '30')
+        except (ValueError, TypeError):
+            default_days = 30
+        vehicle_history = get_vehicle_history(days=default_days or None) if vehicle_configured else None
         return render_template('dashboard.html',
                                stats=stats, chart_data=chart_data,
                                acdc=acdc, yearly=yearly,
                                vehicle_configured=vehicle_configured,
                                vehicle_history=vehicle_history,
+                               vehicle_history_days=default_days,
                                battery_kwh=_get_battery_kwh())
 
     # ── EINGABE ────────────────────────────────────────────────
@@ -1613,6 +1621,32 @@ def register_routes(app):
             return jsonify({'success': False, 'error': 'Timeout — Installation dauert zu lange'}), 500
         except Exception as e:
             return jsonify({'success': False, 'error': str(e)}), 500
+
+    @app.route('/api/vehicle/history')
+    def api_vehicle_history():
+        """Time-series history of tracked vehicle metrics, filtered to
+        the last ``days`` days. ``days=0`` returns the full history.
+
+        Used by the dashboard when the user switches the range dropdown —
+        the initial page load is rendered server-side with the stored
+        default so the charts draw on first paint.
+        """
+        try:
+            days = int(request.args.get('days', '30') or '0')
+        except (ValueError, TypeError):
+            days = 30
+        days = max(0, min(days, 3650))  # sanity clamp: 0..10 years
+
+        # Persist the user's choice for the next page load
+        if request.args.get('persist') == '1':
+            AppConfig.set('dash_history_days', str(days))
+
+        from services.stats_service import get_vehicle_history
+        data = get_vehicle_history(days=days or None)
+        if data is None:
+            return jsonify({'series': None, 'summary': {'count': 0}, 'days': days})
+        data['days'] = days
+        return jsonify(data)
 
     @app.route('/api/vehicle/sync/status')
     def api_vehicle_sync_status():
