@@ -1,5 +1,39 @@
 # Changelog
 
+## v2.19.2 (2026-04-16)
+
+### CSV-Import Vorschau: sehen was passiert bevor es passiert
+
+Vorher war der Import ein Sprung ins Kalte: hochladen, Modus wählen, klicken — und hoffen dass die Spalten richtig erkannt wurden und nichts Wichtiges schief läuft. Jetzt gibt es einen Preview-Schritt.
+
+**Workflow:**
+1. User wählt CSV + Modus → klickt **Vorschau** (nicht mehr direkt Importieren)
+2. Browser holt per AJAX `POST /api/import/preview` — das Backend analysiert die Datei ohne sie zu importieren und gibt strukturiertes JSON zurück
+3. UI rendert:
+   - **Info-Zeile**: erkanntes Trennzeichen, ob Header erkannt wurde, wie viele Zeilen schon in der DB sind
+   - **Spalten-Tabelle**: jede CSV-Spalte mit Index, Header-Name, auto-erkannter Zuordnung (als Dropdown, **änderbar**), und einem Beispielwert
+   - **Fehlende App-Felder**: welche unserer Logical Fields (z.B. Anbieter, Ladeort) die CSV nicht enthält — bleiben leer
+   - **Zusammenfassung**: Zeilen gesamt / neu / ergänzt / Duplikate / leer / Fehler
+   - **Beispielzeilen** (erste 20) mit Aktions-Badge pro Zeile (`neu`, `ergänzen`, `Duplikat`, `leer`, `Fehler`)
+   - **Fehler-Liste** mit Zeilennummern, falls welche aufgetreten sind
+4. User kann **die Spalten-Zuordnung per Dropdown ändern** wenn die Auto-Detection eine Spalte falsch gemappt hat. Die Overrides landen in einem versteckten `column_override`-Form-Field.
+5. Zufrieden → **Importieren**-Button (der bisherige) — der POST nimmt die `column_override` mit und wendet sie beim echten Import an.
+
+**Architektur:**
+- Refactor in [import_gsheet.py](import_gsheet.py): geteilte Helper `_analyze_csv`, `_parse_one_row`, `_classify_row`. Sowohl `preview_csv_data()` (neue Funktion, DB-read-only) als auch `import_csv_data()` (commit path) gehen durch dasselbe Code-Path, so dass die Vorschau garantiert dasselbe Resultat anzeigt was der Import später macht.
+- Neuer Route-Endpunkt `/api/import/preview` (POST multipart form) → JSON mit Spalten, Samples, Zusammenfassung, Fehlern.
+- `import_csv_data(column_override=...)` akzeptiert jetzt optional ein Override-Dict `{logical_field: col_index}` das die Auto-Detection patcht. `null` unmapt ein Feld.
+- Auch der POST `action=import_csv` im Settings-Handler parst `column_override` als JSON aus dem Form und reicht es durch.
+- Settings-Template bekommt JS das AJAX den Preview holt, ein vollständiges UI rendert (Tabellen + Badges + Dropdowns), und bei Dropdown-Änderung ein korrektes `column_override`-JSON zurück ins Hidden-Field schreibt.
+- 49 neue i18n-Keys in de + en (Preview-Labels, Action-Labels, und benutzerfreundliche Feld-Labels wie „Anbieter" statt `operator`).
+
+**Verifikation:**
+- Preview-Unit-Test mit 3-Zeilen-CSV (2 gültig, 1 Bad-Date) → Summary korrekt, Samples korrekt, unmapped CSV-Columns erkannt
+- Column-Override-Unit-Test: CSV mit „Mein Spezielles Feld" Header, auto = None → override auf `operator` → korrekt geparsed als Anbieter
+- End-to-End-API-Test: `POST /api/import/preview` returned valid JSON mit allen Feldern
+- End-to-End-Import-Test: Upload mit `column_override='{"date":0,"operator":1,"kwh_loaded":2}'` durch `/settings` → Daten korrekt mit gemapptem Operator gespeichert
+- Regression: bestehender Import ohne Override funktioniert weiter (Dedup greift, Import-Counts stimmen)
+
 ## v2.19.1 (2026-04-16)
 
 ### Fix: Vehicle sync crash „Object of type DailyDrivingStats is not JSON serializable"

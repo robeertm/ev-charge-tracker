@@ -239,6 +239,13 @@ def _get_custom_operators_text():
     return '\n'.join(_get_custom_operators())
 
 
+def _json_logical_field_labels_for_ui():
+    """Return {logical_field: user-visible label} for the CSV-import
+    preview UI dropdowns. Keys come from import_gsheet's FIELD_ALIASES."""
+    from import_gsheet import ALL_LOGICAL_FIELDS
+    return {f: t(f'set.field_{f}') for f in ALL_LOGICAL_FIELDS}
+
+
 def _get_operator_list():
     """Return the deduplicated union of built-in and user-defined Anbieter
     names for the dropdown. Built-in order is preserved so the common
@@ -1048,11 +1055,28 @@ def register_routes(app):
                 file = request.files.get('csv_file')
                 if file and file.filename:
                     try:
-                        import io
-                        from import_gsheet import import_csv_data, VALID_MODES
+                        import io, json as _json
+                        from import_gsheet import import_csv_data, VALID_MODES, ALL_LOGICAL_FIELDS
                         mode = request.form.get('import_mode', 'skip')
                         if mode not in VALID_MODES:
                             mode = 'skip'
+                        # Optional column_override from the preview UI: a
+                        # JSON object {logical_field: col_index|null} that
+                        # patches the auto-detected mapping. None/empty
+                        # unmaps. Silently ignored if malformed.
+                        override_raw = request.form.get('column_override', '').strip()
+                        column_override = None
+                        if override_raw:
+                            try:
+                                parsed = _json.loads(override_raw)
+                                if isinstance(parsed, dict):
+                                    column_override = {
+                                        k: (None if v in (None, '', 'null') else int(v))
+                                        for k, v in parsed.items()
+                                        if k in ALL_LOGICAL_FIELDS
+                                    }
+                            except (ValueError, TypeError):
+                                column_override = None
                         # Replace mode requires an explicit confirmation
                         # checkbox in addition to the mode select, to
                         # prevent accidental data loss on production DBs.
@@ -1060,7 +1084,8 @@ def register_routes(app):
                             flash(t('flash.import_replace_needs_confirm'), 'warning')
                         else:
                             stream = io.StringIO(file.stream.read().decode('utf-8'))
-                            result = import_csv_data(stream, mode=mode)
+                            result = import_csv_data(stream, mode=mode,
+                                                     column_override=column_override)
                             parts = [t('flash.import_success', count=result['imported'])]
                             if result.get('updated'):
                                 parts.append(t('flash.import_updated', count=result['updated']))
@@ -1271,6 +1296,7 @@ def register_routes(app):
                                hide_ssl_card=hide_ssl_card,
                                custom_operators_text=_get_custom_operators_text(),
                                operators_builtin=DEFAULT_OPERATORS,
+                               _json_logical_field_labels=_json_logical_field_labels_for_ui(),
                                app_version=Config.APP_VERSION)
 
     # ── VEHICLE RAW-DATA VIEWER ────────────────────────────────
@@ -2280,6 +2306,60 @@ def register_routes(app):
         if not data:
             return jsonify({'error': 'no_data'}), 404
         return jsonify({'months': data})
+
+    @app.route('/api/import/preview', methods=['POST'])
+    def api_import_preview():
+        """Dry-run an import and return what would happen. The CSV is
+        parsed, columns mapped, each row classified (insert/skip-dup/
+        update/skip-empty/error) — all without touching the DB.
+        The UI calls this before the user confirms the actual import."""
+        import io, json as _json
+        from import_gsheet import preview_csv_data, VALID_MODES, ALL_LOGICAL_FIELDS
+        file = request.files.get('csv_file')
+        if not file or not file.filename:
+            return jsonify({'error': 'no_file'}), 400
+
+        mode = request.form.get('import_mode', 'skip')
+        if mode not in VALID_MODES:
+            mode = 'skip'
+
+        override_raw = request.form.get('column_override', '').strip()
+        column_override = None
+        if override_raw:
+            try:
+                parsed = _json.loads(override_raw)
+                if isinstance(parsed, dict):
+                    column_override = {
+                        k: (None if v in (None, '', 'null') else int(v))
+                        for k, v in parsed.items()
+                        if k in ALL_LOGICAL_FIELDS
+                    }
+            except (ValueError, TypeError):
+                return jsonify({'error': 'invalid_column_override'}), 400
+
+        try:
+            stream = io.StringIO(file.stream.read().decode('utf-8', errors='replace'))
+            preview = preview_csv_data(stream, mode=mode,
+                                       column_override=column_override,
+                                       max_rows=20)
+        except Exception as e:
+            logger.exception('Import preview failed')
+            return jsonify({'error': f'{type(e).__name__}: {e}'}), 500
+
+        # Translate the class labels into visible, i18n-friendly labels
+        action_labels = {
+            'insert':      t('set.import_action_insert'),
+            'update':      t('set.import_action_update'),
+            'skip_dup':    t('set.import_action_skip_dup'),
+            'skip_dup_in_file': t('set.import_action_skip_dup_in_file'),
+            'skip_empty':  t('set.import_action_skip_empty'),
+            'error':       t('set.import_action_error'),
+        }
+        preview['action_labels'] = action_labels
+        preview['logical_field_labels'] = {
+            f: t(f'set.field_{f}') for f in ALL_LOGICAL_FIELDS
+        }
+        return jsonify(preview)
 
     @app.route('/api/export/csv')
     def export_csv():

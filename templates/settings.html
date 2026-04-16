@@ -959,9 +959,16 @@
                             </label>
                         </div>
                     </div>
-                    <button type="submit" name="action" value="import_csv" class="btn btn-outline-primary btn-sm">
-                        <i class="bi bi-upload"></i> {{ t('set.db_import') }}
-                    </button>
+                    <input type="hidden" name="column_override" id="columnOverride" value="">
+                    <div class="d-flex gap-2 flex-wrap">
+                        <button type="button" class="btn btn-outline-info btn-sm" id="btnPreviewImport">
+                            <i class="bi bi-eye"></i> {{ t('set.db_import_preview') }}
+                        </button>
+                        <button type="submit" name="action" value="import_csv" class="btn btn-outline-primary btn-sm">
+                            <i class="bi bi-upload"></i> {{ t('set.db_import') }}
+                        </button>
+                    </div>
+                    <div id="importPreviewBox" class="mt-3" style="display:none"></div>
                 </form>
                 <script>
                 (function() {
@@ -980,6 +987,200 @@
                     }
                     sel.addEventListener('change', update);
                     update();
+                })();
+
+                // ── Import preview ─────────────────────────────────
+                (function() {
+                    const T_IMP = {
+                        loading: {{ t('set.db_import_previewing')|tojson }},
+                        no_file: {{ t('set.db_import_preview_no_file')|tojson }},
+                        error:   {{ t('set.db_import_preview_error')|tojson }},
+                        detected_delim: {{ t('set.db_import_preview_delim')|tojson }},
+                        detected_header: {{ t('set.db_import_preview_header_yes')|tojson }},
+                        no_header: {{ t('set.db_import_preview_header_no')|tojson }},
+                        col_index: {{ t('set.db_import_preview_col_index')|tojson }},
+                        col_header: {{ t('set.db_import_preview_col_header')|tojson }},
+                        col_mapping: {{ t('set.db_import_preview_col_mapping')|tojson }},
+                        col_sample: {{ t('set.db_import_preview_col_sample')|tojson }},
+                        ignored: {{ t('set.db_import_preview_ignored')|tojson }},
+                        not_mapped: {{ t('set.db_import_preview_not_mapped')|tojson }},
+                        missing_fields: {{ t('set.db_import_preview_missing_fields')|tojson }},
+                        summary: {{ t('set.db_import_preview_summary')|tojson }},
+                        samples: {{ t('set.db_import_preview_samples')|tojson }},
+                        sum_total:    {{ t('set.db_import_preview_sum_total')|tojson }},
+                        sum_insert:   {{ t('set.db_import_preview_sum_insert')|tojson }},
+                        sum_update:   {{ t('set.db_import_preview_sum_update')|tojson }},
+                        sum_skip_dup: {{ t('set.db_import_preview_sum_skip_dup')|tojson }},
+                        sum_skip_empty:{{ t('set.db_import_preview_sum_skip_empty')|tojson }},
+                        sum_error:    {{ t('set.db_import_preview_sum_error')|tojson }},
+                        existing_in_db: {{ t('set.db_import_preview_existing_in_db')|tojson }},
+                        errors_heading: {{ t('set.db_import_preview_errors_heading')|tojson }},
+                        fields:       {{ _json_logical_field_labels|tojson }},
+                    };
+                    const LOGICAL_FIELDS = T_IMP.fields;
+
+                    const btn    = document.getElementById('btnPreviewImport');
+                    const box    = document.getElementById('importPreviewBox');
+                    const form   = document.getElementById('csvImportForm');
+                    const hidden = document.getElementById('columnOverride');
+
+                    function actionBadge(action, label) {
+                        const colorMap = {
+                            insert: 'success', update: 'primary',
+                            skip_dup: 'secondary', skip_dup_in_file: 'secondary',
+                            skip_empty: 'secondary', error: 'danger',
+                        };
+                        const c = colorMap[action] || 'secondary';
+                        return `<span class="badge bg-${c}">${label}</span>`;
+                    }
+
+                    function fieldSelect(colIdx, currentField) {
+                        let opts = `<option value="">— ${T_IMP.not_mapped} —</option>`;
+                        for (const f of Object.keys(LOGICAL_FIELDS)) {
+                            const sel = (f === currentField) ? 'selected' : '';
+                            opts += `<option value="${f}" ${sel}>${LOGICAL_FIELDS[f]}</option>`;
+                        }
+                        return `<select class="form-select form-select-sm col-mapping-select" data-col="${colIdx}">${opts}</select>`;
+                    }
+
+                    function escapeHtml(s) {
+                        return String(s == null ? '' : s)
+                            .replace(/&/g, '&amp;').replace(/</g, '&lt;')
+                            .replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+                    }
+
+                    function render(preview) {
+                        const sum = preview.summary;
+                        const delim_label = preview.delimiter === '\t' ? 'TAB' : `'${preview.delimiter}'`;
+                        let html = `
+                            <div class="alert alert-info mb-2 py-2 small">
+                                <div><i class="bi bi-info-circle"></i>
+                                    ${T_IMP.detected_delim} <code>${delim_label}</code> ·
+                                    ${preview.header_detected ? T_IMP.detected_header : T_IMP.no_header} ·
+                                    ${T_IMP.existing_in_db}: <b>${preview.existing_in_db}</b>
+                                </div>
+                            </div>
+                            <h6>${T_IMP.col_mapping}</h6>
+                            <div class="table-responsive mb-3">
+                                <table class="table table-sm table-bordered align-middle">
+                                    <thead class="table-light">
+                                        <tr>
+                                            <th class="text-end">${T_IMP.col_index}</th>
+                                            <th>${T_IMP.col_header}</th>
+                                            <th>${T_IMP.col_mapping}</th>
+                                            <th>${T_IMP.col_sample}</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody>`;
+                        for (const c of preview.columns) {
+                            const label = c.mapped_to ? LOGICAL_FIELDS[c.mapped_to] || c.mapped_to : '';
+                            html += `<tr>
+                                <td class="text-end text-muted">${c.index}</td>
+                                <td><code>${escapeHtml(c.header || '—')}</code></td>
+                                <td>${fieldSelect(c.index, c.mapped_to)}</td>
+                                <td class="small text-muted">${escapeHtml(c.sample || '')}</td>
+                            </tr>`;
+                        }
+                        html += `</tbody></table></div>`;
+
+                        if (preview.unmapped_logical_fields && preview.unmapped_logical_fields.length) {
+                            html += `<div class="small text-muted mb-2">
+                                <i class="bi bi-dash-square"></i> ${T_IMP.missing_fields}:
+                                ${preview.unmapped_logical_fields.map(f => `<code>${LOGICAL_FIELDS[f] || f}</code>`).join(', ')}
+                            </div>`;
+                        }
+
+                        html += `<h6>${T_IMP.summary}</h6>
+                            <div class="row g-2 small mb-3">
+                                <div class="col-4 col-md-2"><div class="text-muted">${T_IMP.sum_total}</div><div class="fw-bold">${sum.total_rows}</div></div>
+                                <div class="col-4 col-md-2"><div class="text-muted">${T_IMP.sum_insert}</div><div class="fw-bold text-success">${sum.will_insert}</div></div>
+                                <div class="col-4 col-md-2"><div class="text-muted">${T_IMP.sum_update}</div><div class="fw-bold text-primary">${sum.will_update}</div></div>
+                                <div class="col-4 col-md-2"><div class="text-muted">${T_IMP.sum_skip_dup}</div><div class="fw-bold text-secondary">${sum.will_skip_dup}</div></div>
+                                <div class="col-4 col-md-2"><div class="text-muted">${T_IMP.sum_skip_empty}</div><div class="fw-bold text-secondary">${sum.will_skip_empty}</div></div>
+                                <div class="col-4 col-md-2"><div class="text-muted">${T_IMP.sum_error}</div><div class="fw-bold text-danger">${sum.will_error}</div></div>
+                            </div>`;
+
+                        html += `<h6>${T_IMP.samples}</h6>
+                            <div class="table-responsive mb-2">
+                                <table class="table table-sm table-hover align-middle">
+                                    <thead class="table-light"><tr>
+                                        <th>#</th><th></th><th>Datum</th><th>Uhrzeit</th><th>kWh</th><th>Typ</th><th>Anbieter</th><th>Ort</th>
+                                    </tr></thead><tbody>`;
+                        for (const s of preview.samples) {
+                            const p = s.parsed || {};
+                            html += `<tr>
+                                <td class="text-muted">${s.row_num}</td>
+                                <td>${actionBadge(s.action, preview.action_labels[s.action] || s.action)}</td>
+                                <td>${escapeHtml(p.date || '')}</td>
+                                <td>${p.charge_hour != null ? String(p.charge_hour).padStart(2, '0') + ':00' : ''}</td>
+                                <td class="text-end">${p.kwh_loaded != null ? p.kwh_loaded : ''}</td>
+                                <td>${escapeHtml(p.charge_type || '')}</td>
+                                <td>${escapeHtml(p.operator || '')}</td>
+                                <td>${escapeHtml(p.location_name || '')}</td>
+                            </tr>`;
+                        }
+                        html += `</tbody></table></div>`;
+
+                        if (preview.errors && preview.errors.length) {
+                            html += `<div class="alert alert-warning small py-2 mb-2">
+                                <strong>${T_IMP.errors_heading} (${preview.errors.length}):</strong>
+                                <ul class="mb-0">${preview.errors.slice(0, 10).map(e => `<li>${escapeHtml(e)}</li>`).join('')}</ul>
+                            </div>`;
+                        }
+                        box.innerHTML = html;
+                        box.style.display = '';
+
+                        // Wire up the per-column overrides → build a stable dict
+                        // and write it to the hidden field so a subsequent
+                        // form submit honors it.
+                        function recomputeOverride() {
+                            const override = {};
+                            // For each column, if its select value differs from
+                            // the auto-detected mapping, record it.
+                            const selects = box.querySelectorAll('.col-mapping-select');
+                            selects.forEach(sel => {
+                                const col = parseInt(sel.dataset.col, 10);
+                                const field = sel.value || null;
+                                // Invert: find logical_field → col assignment
+                                if (field) {
+                                    override[field] = col;
+                                }
+                            });
+                            // Also mark detected-but-now-unmapped fields as null
+                            for (const c of preview.columns) {
+                                if (c.mapped_to && override[c.mapped_to] === undefined) {
+                                    override[c.mapped_to] = null;
+                                }
+                            }
+                            hidden.value = JSON.stringify(override);
+                        }
+                        box.querySelectorAll('.col-mapping-select').forEach(sel => {
+                            sel.addEventListener('change', recomputeOverride);
+                        });
+                    }
+
+                    btn.addEventListener('click', async () => {
+                        const file = form.querySelector('input[name=csv_file]').files[0];
+                        if (!file) { alert(T_IMP.no_file); return; }
+                        const fd = new FormData();
+                        fd.append('csv_file', file);
+                        fd.append('import_mode', document.getElementById('importMode').value);
+                        if (hidden.value) fd.append('column_override', hidden.value);
+                        box.style.display = '';
+                        box.innerHTML = `<div class="text-muted small"><span class="spinner-border spinner-border-sm"></span> ${T_IMP.loading}</div>`;
+                        try {
+                            const r = await fetch('/api/import/preview', { method: 'POST', body: fd });
+                            if (!r.ok) {
+                                const data = await r.json().catch(() => ({}));
+                                box.innerHTML = `<div class="alert alert-danger small">${T_IMP.error}: ${data.error || r.status}</div>`;
+                                return;
+                            }
+                            const preview = await r.json();
+                            render(preview);
+                        } catch(e) {
+                            box.innerHTML = `<div class="alert alert-danger small">${T_IMP.error}: ${e.message}</div>`;
+                        }
+                    });
                 })();
                 </script>
             </div>

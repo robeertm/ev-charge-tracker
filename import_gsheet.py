@@ -330,57 +330,304 @@ def _backup_db_before_replace():
 # ── The import itself ─────────────────────────────────────
 VALID_MODES = ('skip', 'update', 'append', 'replace')
 
+# Logical fields the importer understands — the set the UI can map
+# CSV columns to when previewing / overriding mappings.
+ALL_LOGICAL_FIELDS = list(FIELD_ALIASES.keys())
 
-def import_csv_data(file_obj, mode='skip', replace=False):
+
+def _parse_one_row(row, col_map):
+    """Parse a single CSV row into a fields dict matching Charge columns.
+    Returns ``(fields_dict, error_str_or_None)``. ``fields_dict['date']``
+    is ``None`` when the row had no recognizable date — the caller
+    decides how to handle that (preview shows ``skip_empty`` vs. ``error``)."""
+    def _get(field):
+        idx = col_map.get(field)
+        if idx is None or idx >= len(row):
+            return None
+        val = (row[idx] or '').strip()
+        return val or None
+
+    try:
+        date_raw = _get('date')
+        charge_date = _parse_date(date_raw) if date_raw else None
+
+        ct_raw = _get('charge_type')
+        charge_type = ct_raw.upper() if ct_raw else None
+        if charge_type and charge_type not in ('AC', 'DC', 'PV'):
+            if charge_type.startswith('AC'):
+                charge_type = 'AC'
+            elif charge_type.startswith('DC'):
+                charge_type = 'DC'
+            elif charge_type.startswith('PV'):
+                charge_type = 'PV'
+            else:
+                charge_type = None
+
+        fields = {
+            'date':          charge_date,
+            'charge_hour':   _parse_hour(_get('charge_hour')),
+            'odometer':      parse_int_safe(_get('odometer')),
+            'eur_per_kwh':   parse_german_float(_get('eur_per_kwh')),
+            'kwh_loaded':    parse_german_float(_get('kwh_loaded')),
+            'total_cost':    parse_german_float(_get('total_cost')),
+            'charge_type':   charge_type,
+            'soc_from':      parse_int_safe(_get('soc_from')),
+            'soc_to':        parse_int_safe(_get('soc_to')),
+            'soc_charged':   parse_int_safe(_get('soc_charged')),
+            'loss_kwh':      parse_german_float(_get('loss_kwh')),
+            'loss_pct':      parse_german_float(_get('loss_pct')),
+            'co2_g_per_kwh': parse_int_safe(_get('co2_g_per_kwh')),
+            'co2_kg':        parse_german_float(_get('co2_kg')),
+            'notes':         _get('notes'),
+            'operator':      _get('operator'),
+            'location_name': _get('location_name'),
+            'location_lat':  parse_german_float(_get('location_lat')),
+            'location_lon':  parse_german_float(_get('location_lon')),
+        }
+        return fields, None
+    except Exception as e:
+        return None, f'{type(e).__name__}: {e}'
+
+
+def _analyze_csv(data, column_override=None):
+    """Stage 1 of the import: figure out delimiter, whether a header row
+    is present, and the column_index → logical_field map. Returns a dict
+    with all the metadata the preview and commit paths both need.
+
+    ``column_override`` is an optional ``{logical_field: col_index_or_None}``
+    dict that *patches* the auto-detected mapping. ``None`` unmaps a
+    field entirely."""
+    delim = _detect_delimiter(data[:4096])
+    reader = csv.reader(io.StringIO(data), delimiter=delim)
+    rows = [r for r in reader if any((c or '').strip() for c in r)]
+
+    header_row = None
+    data_rows = []
+    detected_header = False
+    if not rows:
+        col_map = {}
+    else:
+        first_cell = (rows[0][0] or '').strip()
+        if _is_date(first_cell):
+            col_map = _legacy_column_map()
+            data_rows = rows
+        else:
+            col_map = _build_column_map(rows[0])
+            if 'date' in col_map:
+                header_row = rows[0]
+                data_rows = rows[1:]
+                detected_header = True
+            else:
+                col_map = _legacy_column_map()
+                data_rows = rows
+
+    if column_override:
+        # Apply user-provided overrides on top of auto-detection
+        for field, idx in column_override.items():
+            if field not in ALL_LOGICAL_FIELDS:
+                continue
+            if idx is None or (isinstance(idx, str) and idx.strip() == ''):
+                col_map.pop(field, None)
+            else:
+                try:
+                    col_map[field] = int(idx)
+                except (ValueError, TypeError):
+                    pass
+
+    return {
+        'delimiter':       delim,
+        'detected_header': detected_header,
+        'header_row':      header_row,
+        'data_rows':       data_rows,
+        'col_map':         col_map,
+    }
+
+
+def _classify_row(fields, mode, existing_keys_map, seen_in_file):
+    """Decide what will happen to a parsed row: insert/skip_dup/update/
+    skip_empty/error. ``seen_in_file`` is mutated to remember keys we've
+    already seen within THIS import so duplicates inside a single CSV
+    don't race each other.
+    Returns (action, existing_key_or_None)."""
+    if fields is None or fields.get('date') is None:
+        return 'skip_empty', None
+
+    key = _dedup_key(fields['date'], fields.get('charge_hour'),
+                     fields.get('kwh_loaded'))
+    existing = existing_keys_map.get(key) if mode in ('skip', 'update') else None
+
+    if key in seen_in_file and mode != 'append':
+        return 'skip_dup_in_file', key
+    seen_in_file.add(key)
+
+    if existing is not None:
+        if mode == 'skip':
+            return 'skip_dup', key
+        if mode == 'update':
+            # Check if there are any NULL fields we'd fill in.
+            patchable = any(
+                v is not None and getattr(existing, k, None) in (None, '')
+                for k, v in fields.items() if k in _CHARGE_COLS
+            )
+            return ('update' if patchable else 'skip_dup'), key
+    return 'insert', key
+
+
+_CHARGE_COLS = {
+    'date', 'charge_hour', 'odometer', 'eur_per_kwh', 'kwh_loaded',
+    'total_cost', 'charge_type', 'soc_from', 'soc_to', 'soc_charged',
+    'loss_kwh', 'loss_pct', 'co2_g_per_kwh', 'co2_kg', 'notes',
+    'operator', 'location_name', 'location_lat', 'location_lon',
+}
+
+
+def preview_csv_data(file_obj, mode='skip', max_rows=20, column_override=None):
+    """Parse a CSV **without** touching the database and return a plan
+    of what would happen. Used by the Import-Preview UI so the user can
+    sanity-check the detected mapping and row fates before committing.
+
+    ``max_rows`` caps how many sample rows are returned with full parse
+    output — the counts in ``summary`` are always over the full file."""
+    if mode not in VALID_MODES:
+        mode = 'skip'
+    data = file_obj.read()
+    if isinstance(data, bytes):
+        data = data.decode('utf-8', errors='replace')
+
+    meta = _analyze_csv(data, column_override=column_override)
+    col_map = meta['col_map']
+    header_row = meta['header_row']
+
+    # Build a reverse map: col_index → logical_field, for the UI column list
+    idx_to_field = {idx: field for field, idx in col_map.items()}
+
+    # Describe each CSV column (detected header + mapping).
+    columns = []
+    # Base row count: header row if present, else inspect first data row
+    sample_row = header_row or (meta['data_rows'][0] if meta['data_rows'] else [])
+    col_count = len(sample_row) if sample_row else (max(idx_to_field.keys()) + 1 if idx_to_field else 0)
+    for i in range(col_count):
+        header = (header_row[i].strip() if header_row and i < len(header_row) else None)
+        columns.append({
+            'index':         i,
+            'header':        header,
+            'mapped_to':     idx_to_field.get(i),
+            'sample':        (meta['data_rows'][0][i].strip()
+                              if meta['data_rows'] and i < len(meta['data_rows'][0])
+                              else None) if meta['data_rows'] else None,
+        })
+
+    mapped_logical_fields = set(col_map.keys())
+    unmapped_logical_fields = [f for f in ALL_LOGICAL_FIELDS
+                               if f not in mapped_logical_fields]
+    unmapped_csv_columns = [c for c in columns if c['mapped_to'] is None
+                            and (c['header'] or c['sample'])]
+
+    # Fetch the dedup index once — the preview classifier needs it to
+    # tell the user which rows would be skipped as duplicates.
+    try:
+        existing = _existing_keys()
+    except Exception:
+        existing = {}
+
+    summary = {'total_rows': 0, 'will_insert': 0, 'will_update': 0,
+               'will_skip_dup': 0, 'will_skip_empty': 0, 'will_error': 0}
+    sample_results = []
+    errors = []
+    seen_in_file = set()
+    start_row = 2 if meta['detected_header'] else 1
+
+    for row_idx, row in enumerate(meta['data_rows'], start=start_row):
+        fields, parse_err = _parse_one_row(row, col_map)
+        summary['total_rows'] += 1
+
+        if parse_err:
+            action = 'error'
+            summary['will_error'] += 1
+            errors.append(f'Zeile {row_idx}: {parse_err}')
+        else:
+            action, _key = _classify_row(fields, mode, existing, seen_in_file)
+            # Replace/append modes: every valid row ends up inserted
+            if mode in ('append', 'replace') and action not in ('skip_empty', 'error'):
+                action = 'insert'
+            _action_to_summary_key = {
+                'insert':           'will_insert',
+                'update':           'will_update',
+                'skip_dup':         'will_skip_dup',
+                'skip_dup_in_file': 'will_skip_dup',
+                'skip_empty':       'will_skip_empty',
+                'error':            'will_error',
+            }
+            summary[_action_to_summary_key[action]] += 1
+
+        if len(sample_results) < max_rows:
+            # JSON-safe copy of the parsed fields
+            display = None
+            if fields is not None:
+                display = {}
+                for k, v in fields.items():
+                    if hasattr(v, 'isoformat'):
+                        display[k] = v.isoformat()
+                    else:
+                        display[k] = v
+            sample_results.append({
+                'row_num': row_idx,
+                'raw':     row[:col_count] if col_count else row,
+                'parsed':  display,
+                'action':  action,
+                'error':   parse_err,
+            })
+
+    return {
+        'mode':              mode,
+        'delimiter':         meta['delimiter'],
+        'header_detected':   meta['detected_header'],
+        'header_row':        header_row,
+        'columns':           columns,
+        'unmapped_csv_columns':    unmapped_csv_columns,
+        'unmapped_logical_fields': unmapped_logical_fields,
+        'logical_fields':    ALL_LOGICAL_FIELDS,
+        'summary':           summary,
+        'samples':           sample_results,
+        'errors':            errors[:50],  # cap
+        'existing_in_db':    Charge.query.count(),
+    }
+
+
+def import_csv_data(file_obj, mode='skip', replace=False, column_override=None):
     """Import charges from a CSV file object. Returns a dict with stats.
 
     ``mode`` is one of ``skip`` (default), ``update``, ``append``,
     ``replace``. For backwards compatibility ``replace=True`` is still
     accepted and maps to ``mode='replace'``.
+
+    ``column_override`` is an optional ``{logical_field: col_index}`` dict
+    from the preview UI that lets the user correct an auto-detected
+    mapping before committing. ``None`` values unmap a field entirely.
     """
     if replace:
         mode = 'replace'
     if mode not in VALID_MODES:
         mode = 'skip'
 
-    # Read the whole stream (we need two passes: detect delimiter + parse)
     data = file_obj.read()
     if isinstance(data, bytes):
         data = data.decode('utf-8', errors='replace')
 
-    delim = _detect_delimiter(data[:4096])
-    reader = csv.reader(io.StringIO(data), delimiter=delim)
-    rows = [r for r in reader if any((c or '').strip() for c in r)]
+    meta = _analyze_csv(data, column_override=column_override)
+    col_map = meta['col_map']
+    data_rows = meta['data_rows']
+    delim = meta['delimiter']
+    detected_header = meta['detected_header']
 
-    if not rows:
+    if not data_rows:
         return {
             'imported': 0, 'updated': 0, 'skipped_dup': 0, 'skipped': 0,
             'errors': [], 'total_db': Charge.query.count(),
             'total_kwh': 0.0, 'total_cost': 0.0, 'mode': mode,
             'delimiter': delim, 'backup': None,
+            'header_detected': detected_header,
         }
-
-    # Detect header row: first row whose first cell is NOT a date.
-    first_cell = (rows[0][0] or '').strip()
-    if _is_date(first_cell):
-        # No header → legacy Google-Sheet layout
-        col_map = _legacy_column_map()
-        data_rows = rows
-        detected_header = False
-    else:
-        col_map = _build_column_map(rows[0])
-        # A valid header must at least map 'date' to some column.
-        if 'date' in col_map:
-            data_rows = rows[1:]
-            detected_header = True
-        else:
-            # Couldn't recognize — fall back to legacy positional and
-            # treat first row as data (might still start with a date
-            # after the initial validation failed due to e.g. summary
-            # rows).
-            col_map = _legacy_column_map()
-            data_rows = rows
-            detected_header = False
 
     backup_path = None
     if mode == 'replace' and Charge.query.count() > 0:
@@ -395,100 +642,61 @@ def import_csv_data(file_obj, mode='skip', replace=False):
     skipped_dup = 0
     skipped = 0
     errors = []
+    seen_in_file = set()
+    start_row = 2 if detected_header else 1
 
-    def _get(row, field):
-        idx = col_map.get(field)
-        if idx is None or idx >= len(row):
-            return None
-        val = (row[idx] or '').strip()
-        return val or None
-
-    for row_idx, row in enumerate(data_rows, start=2 if detected_header else 1):
-        date_raw = _get(row, 'date')
-        if not date_raw:
+    for row_idx, row in enumerate(data_rows, start=start_row):
+        fields, parse_err = _parse_one_row(row, col_map)
+        if parse_err:
+            errors.append(f'Zeile {row_idx}: {parse_err}')
             skipped += 1
             continue
-        charge_date = _parse_date(date_raw)
-        if charge_date is None:
+        if fields is None or fields.get('date') is None:
             skipped += 1
             continue
 
-        try:
-            ct_raw = _get(row, 'charge_type')
-            charge_type = ct_raw.upper() if ct_raw else None
-            if charge_type and charge_type not in ('AC', 'DC', 'PV'):
-                # Accept variants like 'ac (11kw)' → 'AC'
-                if charge_type.startswith('AC'):
-                    charge_type = 'AC'
-                elif charge_type.startswith('DC'):
-                    charge_type = 'DC'
-                elif charge_type.startswith('PV'):
-                    charge_type = 'PV'
-                else:
-                    charge_type = None
+        key = _dedup_key(fields['date'], fields.get('charge_hour'),
+                         fields.get('kwh_loaded'))
+        if key in seen_in_file and mode != 'append':
+            skipped_dup += 1
+            continue
+        seen_in_file.add(key)
 
-            kwh_loaded = parse_german_float(_get(row, 'kwh_loaded'))
-            charge_hour = _parse_hour(_get(row, 'charge_hour'))
+        existing_charge = existing.get(key) if mode in ('skip', 'update') else None
 
-            # Build the candidate row
-            fields = {
-                'date':          charge_date,
-                'charge_hour':   charge_hour,
-                'odometer':      parse_int_safe(_get(row, 'odometer')),
-                'eur_per_kwh':   parse_german_float(_get(row, 'eur_per_kwh')),
-                'kwh_loaded':    kwh_loaded,
-                'total_cost':    parse_german_float(_get(row, 'total_cost')),
-                'charge_type':   charge_type,
-                'soc_from':      parse_int_safe(_get(row, 'soc_from')),
-                'soc_to':        parse_int_safe(_get(row, 'soc_to')),
-                'soc_charged':   parse_int_safe(_get(row, 'soc_charged')),
-                'loss_kwh':      parse_german_float(_get(row, 'loss_kwh')),
-                'loss_pct':      parse_german_float(_get(row, 'loss_pct')),
-                'co2_g_per_kwh': parse_int_safe(_get(row, 'co2_g_per_kwh')),
-                'co2_kg':        parse_german_float(_get(row, 'co2_kg')),
-                'notes':         _get(row, 'notes'),
-                'operator':      _get(row, 'operator'),
-                'location_name': _get(row, 'location_name'),
-                'location_lat':  parse_german_float(_get(row, 'location_lat')),
-                'location_lon':  parse_german_float(_get(row, 'location_lon')),
-            }
+        if existing_charge is not None and mode == 'skip':
+            skipped_dup += 1
+            continue
 
-            key = _dedup_key(charge_date, charge_hour, kwh_loaded)
-            existing_charge = existing.get(key) if mode in ('skip', 'update') else None
-
-            if existing_charge is not None and mode == 'skip':
+        if existing_charge is not None and mode == 'update':
+            patched = False
+            for k, v in fields.items():
+                if v is None or k not in _CHARGE_COLS:
+                    continue
+                if getattr(existing_charge, k, None) in (None, ''):
+                    setattr(existing_charge, k, v)
+                    patched = True
+            if patched:
+                updated += 1
+            else:
                 skipped_dup += 1
-                continue
+            continue
 
-            if existing_charge is not None and mode == 'update':
-                # Only overwrite existing NULL fields — manual entries
-                # keep whatever the user filled in.
-                patched = False
-                for k, v in fields.items():
-                    if v is None:
-                        continue
-                    if getattr(existing_charge, k, None) in (None, ''):
-                        setattr(existing_charge, k, v)
-                        patched = True
-                if patched:
-                    updated += 1
-                else:
-                    skipped_dup += 1
-                continue
-
-            # Insert fresh row
-            charge = Charge(**{k: v for k, v in fields.items() if v is not None})
-            if (charge.soc_from is not None and charge.soc_to is not None
-                    and charge.soc_charged is None):
-                charge.soc_charged = charge.soc_to - charge.soc_from
-            db.session.add(charge)
-            existing[key] = charge  # prevent duplicate-within-file inserts
-            imported += 1
-
+        # Insert
+        safe_fields = {k: v for k, v in fields.items()
+                       if v is not None and k in _CHARGE_COLS}
+        try:
+            charge = Charge(**safe_fields)
         except Exception as e:
-            errors.append(f"Zeile {row_idx}: {e}")
+            errors.append(f'Zeile {row_idx}: {type(e).__name__}: {e}')
             skipped += 1
             continue
+        if (charge.soc_from is not None and charge.soc_to is not None
+                and charge.soc_charged is None):
+            charge.soc_charged = charge.soc_to - charge.soc_from
+        db.session.add(charge)
+        existing[key] = charge
+        imported += 1
 
     db.session.commit()
 
