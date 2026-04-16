@@ -275,6 +275,13 @@
             </div>
             <div class="card-body">
                 <p class="text-muted small mb-3">{{ t('set.api_desc') }}</p>
+                {% if vehicle_api_brand %}
+                <div class="mb-3">
+                    <a href="/vehicle/raw" class="btn btn-sm btn-outline-info">
+                        <i class="bi bi-code-square"></i> {{ t('set.api_view_raw') }}
+                    </a>
+                </div>
+                {% endif %}
                 <form method="POST">
                     <!-- Markenauswahl -->
                     <div class="mb-3">
@@ -886,6 +893,33 @@
             </div>
         </div>
 
+        <!-- Anbieter / Ladesäulen-Betreiber -->
+        <div class="card mb-4">
+            <div class="card-header bg-white fw-bold">
+                <i class="bi bi-building"></i> {{ t('set.operators_title') }}
+            </div>
+            <div class="card-body">
+                <p class="text-muted small mb-2">{{ t('set.operators_desc') }}</p>
+                <form method="POST">
+                    <div class="mb-2">
+                        <label class="form-label small">{{ t('set.operators_custom_label') }}</label>
+                        <textarea class="form-control form-control-sm" name="custom_operators"
+                                  rows="4" placeholder="{{ t('set.operators_custom_ph') }}">{{ custom_operators_text }}</textarea>
+                        <div class="form-text small">{{ t('set.operators_custom_hint') }}</div>
+                    </div>
+                    <button type="submit" name="action" value="save_operators" class="btn btn-outline-primary btn-sm">
+                        <i class="bi bi-save"></i> {{ t('set.operators_save') }}
+                    </button>
+                </form>
+                <details class="mt-3 small">
+                    <summary class="text-muted">{{ t('set.operators_builtin_toggle') }}</summary>
+                    <ul class="mt-2 mb-0">
+                        {% for op in operators_builtin %}<li>{{ op }}</li>{% endfor %}
+                    </ul>
+                </details>
+            </div>
+        </div>
+
         <!-- Database Info -->
         <div class="card mb-4">
             <div class="card-header bg-white fw-bold">
@@ -900,23 +934,54 @@
                 </div>
                 <hr>
                 <h6><i class="bi bi-upload"></i> {{ t('set.db_import_title') }}</h6>
-                <p class="text-muted small">
-                    {{ t('set.db_import_desc') }}
-                </p>
-                <form method="POST" enctype="multipart/form-data">
+                <p class="text-muted small">{{ t('set.db_import_desc') }}</p>
+                <form method="POST" enctype="multipart/form-data" id="csvImportForm">
                     <div class="mb-2">
                         <input type="file" class="form-control form-control-sm" name="csv_file" accept=".csv" required>
                     </div>
-                    <div class="form-check mb-2">
-                        <input class="form-check-input" type="checkbox" name="replace_data" id="replaceData">
-                        <label class="form-check-label small text-danger" for="replaceData">
-                            {{ t('set.db_delete_first') }}
-                        </label>
+                    <div class="mb-2">
+                        <label class="form-label small mb-1 fw-bold">{{ t('set.db_import_mode') }}</label>
+                        <select name="import_mode" id="importMode" class="form-select form-select-sm">
+                            <option value="skip" selected>{{ t('set.db_import_mode_skip') }}</option>
+                            <option value="update">{{ t('set.db_import_mode_update') }}</option>
+                            <option value="append">{{ t('set.db_import_mode_append') }}</option>
+                            <option value="replace">{{ t('set.db_import_mode_replace') }}</option>
+                        </select>
+                        <div class="form-text small" id="importModeHint">{{ t('set.db_import_mode_skip_desc') }}</div>
+                    </div>
+                    <div class="alert alert-danger small py-2 mb-2" id="replaceConfirmBox" style="display:none">
+                        <div class="fw-bold mb-1"><i class="bi bi-exclamation-triangle-fill"></i> {{ t('set.db_import_replace_warning_title') }}</div>
+                        <div class="mb-2">{{ t('set.db_import_replace_warning_body') }}</div>
+                        <div class="form-check">
+                            <input class="form-check-input" type="checkbox" name="replace_confirm" id="replaceConfirm">
+                            <label class="form-check-label small" for="replaceConfirm">
+                                {{ t('set.db_import_replace_confirm') }}
+                            </label>
+                        </div>
                     </div>
                     <button type="submit" name="action" value="import_csv" class="btn btn-outline-primary btn-sm">
                         <i class="bi bi-upload"></i> {{ t('set.db_import') }}
                     </button>
                 </form>
+                <script>
+                (function() {
+                    const hints = {
+                        skip:    {{ t('set.db_import_mode_skip_desc')|tojson }},
+                        update:  {{ t('set.db_import_mode_update_desc')|tojson }},
+                        append:  {{ t('set.db_import_mode_append_desc')|tojson }},
+                        replace: {{ t('set.db_import_mode_replace_desc')|tojson }},
+                    };
+                    const sel = document.getElementById('importMode');
+                    const hint = document.getElementById('importModeHint');
+                    const box = document.getElementById('replaceConfirmBox');
+                    function update() {
+                        hint.textContent = hints[sel.value] || '';
+                        box.style.display = (sel.value === 'replace') ? '' : 'none';
+                    }
+                    sel.addEventListener('change', update);
+                    update();
+                })();
+                </script>
             </div>
         </div>
 

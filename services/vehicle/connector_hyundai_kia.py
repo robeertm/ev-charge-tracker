@@ -14,6 +14,7 @@ At the API-call level though, both end up calling
 password parameter.
 """
 import logging
+from datetime import datetime, date as _date
 
 try:
     from hyundai_kia_connect_api import VehicleManager, Vehicle
@@ -62,6 +63,43 @@ HYUNDAI_CREDENTIAL_FIELDS = [
 
 
 _managers = {}  # Cache VehicleManager instances across requests
+
+
+def _dump_vehicle(vehicle):
+    """Introspect a Vehicle object and return a dict of all JSON-safe
+    public attributes. Used to populate VehicleStatus.raw_data so the
+    /vehicle/raw viewer can surface every field the SDK exposes — not
+    just the subset our normalized VehicleStatus cherry-picks.
+
+    Safety: we only emit primitive types (plus datetime → ISO string).
+    Anything else is stringified with a length cap to prevent runaway
+    memory use from deeply nested objects.
+    """
+    out = {}
+    for key in sorted(dir(vehicle)):
+        if key.startswith('_'):
+            continue
+        try:
+            val = getattr(vehicle, key)
+        except Exception as e:
+            out[key] = f'<error: {type(e).__name__}: {e}>'
+            continue
+        if callable(val):
+            continue
+        if val is None or isinstance(val, (str, int, float, bool)):
+            out[key] = val
+        elif isinstance(val, (datetime, _date)):
+            out[key] = val.isoformat()
+        elif isinstance(val, (list, tuple, dict)):
+            try:
+                import json as _j
+                _j.dumps(val, default=str)
+                out[key] = val if not isinstance(val, tuple) else list(val)
+            except (TypeError, ValueError):
+                out[key] = str(val)[:500]
+        else:
+            out[key] = str(val)[:500]
+    return out
 
 
 class _HyundaiKiaBase(VehicleConnector):
@@ -186,7 +224,7 @@ class _HyundaiKiaBase(VehicleConnector):
             consumption_30d_wh_per_km=vehicle.power_consumption_30d,
             est_portable_charge_min=vehicle.ev_estimated_portable_charge_duration,
             registration_date=str(vehicle.registration_date) if vehicle.registration_date else None,
-            raw_data={'vin': vehicle.VIN, 'name': vehicle.name, 'model': vehicle.model},
+            raw_data=_dump_vehicle(vehicle),
         )
 
 class KiaConnector(_HyundaiKiaBase):

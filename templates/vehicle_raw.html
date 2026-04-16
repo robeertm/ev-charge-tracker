@@ -1,0 +1,149 @@
+{% extends "base.html" %}
+{% block title %}{{ t('raw.title') }} — EV Charge Tracker{% endblock %}
+
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-3">
+    <h4 class="mb-0"><i class="bi bi-code-square"></i> {{ t('raw.title') }}</h4>
+    {% if detail %}
+    <a href="/vehicle/raw" class="btn btn-sm btn-outline-secondary">
+        <i class="bi bi-arrow-left"></i> {{ t('raw.back') }}
+    </a>
+    {% endif %}
+</div>
+
+{% if not detail %}
+    {# ── LIST VIEW ─────────────────────────────────────────── #}
+    {% if not syncs %}
+    <div class="alert alert-info">{{ t('raw.no_syncs') }}</div>
+    {% else %}
+    <p class="text-muted small mb-2">
+        {{ t('raw.list_desc') }}
+        {% if brand_key in ['kia', 'hyundai'] %}
+        <br><i class="bi bi-info-circle"></i> {{ t('raw.kia_soh_hint') }}
+        {% endif %}
+    </p>
+    <div class="table-responsive">
+        <table class="table table-sm table-hover align-middle">
+            <thead class="table-dark">
+                <tr>
+                    <th>{{ t('raw.col_time') }}</th>
+                    <th class="text-end">{{ t('raw.col_soc') }}</th>
+                    <th class="text-end d-none d-md-table-cell">{{ t('raw.col_km') }}</th>
+                    <th class="text-end d-none d-md-table-cell">{{ t('raw.col_soh') }}</th>
+                    <th class="text-end d-none d-lg-table-cell">{{ t('raw.col_12v') }}</th>
+                    <th class="text-center">{{ t('raw.col_charging') }}</th>
+                    <th></th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for s in syncs %}
+                <tr>
+                    <td>{{ s.timestamp.strftime('%d.%m.%Y %H:%M') }}</td>
+                    <td class="text-end">{% if s.soc_percent is not none %}{{ s.soc_percent }}%{% else %}—{% endif %}</td>
+                    <td class="text-end d-none d-md-table-cell">{% if s.odometer_km %}{{ "{:,}".format(s.odometer_km).replace(",", ".") }}{% else %}—{% endif %}</td>
+                    <td class="text-end d-none d-md-table-cell">
+                        {% if s.battery_soh_percent is not none %}
+                            {{ "%.1f"|format(s.battery_soh_percent) }}%
+                            {% if s.battery_soh_percent > 100 and brand_key in ['kia', 'hyundai'] %}
+                            <i class="bi bi-info-circle text-info" title="{{ t('raw.kia_soh_hint') }}"></i>
+                            {% endif %}
+                        {% else %}—{% endif %}
+                    </td>
+                    <td class="text-end d-none d-lg-table-cell">{% if s.battery_12v_percent is not none %}{{ s.battery_12v_percent }}%{% else %}—{% endif %}</td>
+                    <td class="text-center">
+                        {% if s.is_charging %}<i class="bi bi-lightning-charge-fill text-success"></i>{% endif %}
+                    </td>
+                    <td class="text-end">
+                        <a href="/vehicle/raw/{{ s.id }}" class="btn btn-sm btn-outline-primary">
+                            <i class="bi bi-eye"></i> {{ t('raw.view') }}
+                        </a>
+                    </td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+    <div class="text-muted text-center small">
+        {{ t('raw.showing', count=syncs|length) }}
+        {% if syncs|length == limit %}
+        <a href="?limit={{ limit * 2 }}">{{ t('raw.show_more') }}</a>
+        {% endif %}
+    </div>
+    {% endif %}
+{% else %}
+    {# ── DETAIL VIEW ────────────────────────────────────────── #}
+    {% set sync = detail.sync %}
+    {% set normalized = detail.normalized %}
+    <div class="card mb-3">
+        <div class="card-header bg-white fw-bold d-flex justify-content-between align-items-center">
+            <div>
+                <i class="bi bi-clock"></i> {{ sync.timestamp.strftime('%d.%m.%Y %H:%M:%S') }}
+            </div>
+            <div class="small text-muted">
+                ID: {{ sync.id }}{% if brand_key %} · {{ brand_key }}{% endif %}
+            </div>
+        </div>
+        <div class="card-body">
+            <h6 class="mb-3">{{ t('raw.normalized_title') }}</h6>
+            <div class="row g-2 small">
+                {% for key, val in normalized.items() %}
+                <div class="col-md-4 col-sm-6">
+                    <div class="text-muted">{{ key }}</div>
+                    <div class="fw-bold">
+                        {% if val is none %}<span class="text-muted">—</span>
+                        {% elif val is sameas true %}<span class="text-success">true</span>
+                        {% elif val is sameas false %}<span class="text-muted">false</span>
+                        {% else %}{{ val }}{% endif %}
+                    </div>
+                </div>
+                {% endfor %}
+            </div>
+
+            {% if detail.soh_note == 'kia_soh_over_100' %}
+            <div class="alert alert-info mt-3 mb-0 small">
+                <i class="bi bi-info-circle"></i> <strong>{{ t('raw.soh_banner_title') }}</strong><br>
+                {{ t('raw.soh_banner_body') }}
+            </div>
+            {% endif %}
+        </div>
+    </div>
+
+    <div class="card">
+        <div class="card-header bg-white fw-bold d-flex justify-content-between align-items-center">
+            <div><i class="bi bi-braces"></i> {{ t('raw.raw_title') }}</div>
+            <div>
+                <button type="button" class="btn btn-sm btn-outline-secondary" id="btnCopyRaw" title="{{ t('raw.copy') }}">
+                    <i class="bi bi-clipboard"></i>
+                </button>
+            </div>
+        </div>
+        <div class="card-body p-0">
+            {% if detail.raw_error %}
+            <div class="alert alert-warning m-3 mb-0 small">
+                <i class="bi bi-exclamation-triangle"></i> {{ t('raw.raw_parse_error') }}: {{ detail.raw_error }}
+            </div>
+            {% endif %}
+            <pre id="rawJson" style="margin:0; padding:1rem; max-height: 70vh; overflow:auto; font-size: 0.8rem; background: #f8f9fa;">{{ detail.raw_pretty }}</pre>
+        </div>
+    </div>
+{% endif %}
+{% endblock %}
+
+{% block scripts %}
+{% if detail %}
+<script>
+document.getElementById('btnCopyRaw').addEventListener('click', async () => {
+    const text = document.getElementById('rawJson').textContent;
+    try {
+        await navigator.clipboard.writeText(text);
+        const b = document.getElementById('btnCopyRaw');
+        const orig = b.innerHTML;
+        b.innerHTML = '<i class="bi bi-check2"></i>';
+        setTimeout(() => { b.innerHTML = orig; }, 1500);
+    } catch(e) {
+        alert('Kopieren fehlgeschlagen: ' + e.message);
+    }
+});
+</script>
+{% endif %}
+{% endblock %}

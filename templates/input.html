@@ -146,6 +146,22 @@
                         </div>
                     </div>
 
+                    <!-- Anbieter -->
+                    <div class="mb-3">
+                        <label for="operator" class="form-label">
+                            <i class="bi bi-building"></i> {{ t('input.operator') }}
+                            <small class="text-muted">{{ t('input.optional') }}</small>
+                        </label>
+                        <input type="text" class="form-control" id="operator" name="operator"
+                               list="operatorsList"
+                               placeholder="{{ t('input.operator_ph') }}">
+                        <datalist id="operatorsList">
+                            {% for op in operators %}
+                            <option value="{{ op }}">
+                            {% endfor %}
+                        </datalist>
+                    </div>
+
                     <!-- Standort der Ladung -->
                     <div class="mb-3">
                         <label class="form-label">

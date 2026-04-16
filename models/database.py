@@ -26,6 +26,7 @@ class Charge(db.Model):
     location_lat = db.Column(db.Float)
     location_lon = db.Column(db.Float)
     location_name = db.Column(db.String(200))
+    operator = db.Column(db.String(64))  # Anbieter/CPO of the charging station
     created_at = db.Column(db.DateTime, default=datetime.now)
 
     def calculate_fields(self, battery_kwh=None):
@@ -65,6 +66,7 @@ class Charge(db.Model):
             'location_lat': self.location_lat,
             'location_lon': self.location_lon,
             'location_name': self.location_name,
+            'operator': self.operator,
         }
 
 

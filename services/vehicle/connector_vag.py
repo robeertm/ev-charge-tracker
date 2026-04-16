@@ -8,6 +8,7 @@ downgrades don't break.
 import json
 import os
 import tempfile
+from datetime import datetime, date as _date
 
 try:
     try:
@@ -21,6 +22,50 @@ except ImportError:
 
 from .base import VehicleConnector, VehicleStatus
 from .registry import register
+
+
+def _dump_vag_vehicle(vehicle, max_depth=2):
+    """Best-effort JSON-safe dump of a CarConnectivity Vehicle object.
+
+    The object graph is deeply nested (drives[0].level.value, etc), so we
+    walk two levels and capture ``value``/``unit`` pairs from any child
+    that has them. Anything non-primitive gets stringified with a cap to
+    keep the blob size bounded.
+    """
+    def _serialize(v, depth):
+        if v is None or isinstance(v, (str, int, float, bool)):
+            return v
+        if isinstance(v, (datetime, _date)):
+            return v.isoformat()
+        if depth <= 0:
+            return str(v)[:200]
+        if isinstance(v, (list, tuple)):
+            return [_serialize(x, depth - 1) for x in v[:20]]
+        if isinstance(v, dict):
+            return {str(k): _serialize(val, depth - 1) for k, val in list(v.items())[:50]}
+        # Object-like: dump public attributes
+        out = {}
+        for key in sorted(dir(v)):
+            if key.startswith('_'):
+                continue
+            try:
+                child = getattr(v, key)
+            except Exception as e:
+                out[key] = f'<error: {type(e).__name__}>'
+                continue
+            if callable(child):
+                continue
+            out[key] = _serialize(child, depth - 1)
+            # Cap attribute count to keep blobs sane
+            if len(out) >= 50:
+                break
+        return out
+
+    try:
+        return _serialize(vehicle, max_depth)
+    except Exception as e:
+        return {'_error': f'{type(e).__name__}: {e}',
+                'vin': getattr(vehicle, 'vin', None)}
 
 CREDENTIAL_FIELDS = [
     {"key": "username", "label": "E-Mail / Benutzername", "type": "text"},
@@ -138,7 +183,7 @@ class VAGConnector(VehicleConnector):
             is_charging=is_charging,
             charge_power_kw=charge_power,
             estimated_range_km=estimated_range,
-            raw_data={'vin': getattr(vehicle, 'vin', None)},
+            raw_data=_dump_vag_vehicle(vehicle),
         )
 
     def shutdown(self):

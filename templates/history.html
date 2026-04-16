@@ -64,7 +64,16 @@
             {% for c in charges.items %}
             <tr class="{{ 'table-success' if c.charge_type == 'AC' else ('table-info' if c.charge_type == 'PV' else 'table-warning') }}"
                 style="--bs-table-bg-factor: 0.15;">
-                <td>{{ c.date.strftime('%d.%m.%Y') }}</td>
+                <td>
+                    {{ c.date.strftime('%d.%m.%Y') }}
+                    {% if c.operator or c.location_name %}
+                    <div class="small text-muted text-truncate" style="max-width: 180px;"
+                         title="{{ c.operator }}{% if c.operator and c.location_name %} · {% endif %}{{ c.location_name }}">
+                        {% if c.operator %}<i class="bi bi-building"></i> {{ c.operator }}{% endif %}
+                        {% if c.location_name %}{% if c.operator %} · {% endif %}{{ c.location_name }}{% endif %}
+                    </div>
+                    {% endif %}
+                </td>
                 <td><span class="badge bg-{{ 'success' if c.charge_type == 'AC' else ('info' if c.charge_type == 'PV' else 'warning') }}">{{ c.charge_type }}</span></td>
                 <td class="text-end">{{ "%.1f"|format(c.kwh_loaded or 0) }}</td>
                 <td class="text-end">{{ "%.2f"|format(c.eur_per_kwh or 0) }}</td>

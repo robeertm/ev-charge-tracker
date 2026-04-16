@@ -87,6 +87,60 @@
                         </div>
                     </div>
 
+                    <!-- Anbieter -->
+                    <div class="mb-3">
+                        <label for="operator" class="form-label">
+                            <i class="bi bi-building"></i> {{ t('edit.operator') }}
+                            <small class="text-muted">{{ t('edit.optional') }}</small>
+                        </label>
+                        <input type="text" class="form-control" id="operator" name="operator"
+                               value="{{ charge.operator or '' }}"
+                               list="operatorsList"
+                               placeholder="{{ t('edit.operator_ph') }}">
+                        <datalist id="operatorsList">
+                            {% for op in operators %}
+                            <option value="{{ op }}">
+                            {% endfor %}
+                        </datalist>
+                    </div>
+
+                    <!-- Ladeort -->
+                    <div class="mb-3">
+                        <label class="form-label">
+                            <i class="bi bi-geo-alt"></i> {{ t('edit.location') }}
+                            <small class="text-muted">{{ t('edit.optional') }}</small>
+                        </label>
+                        <input type="text" class="form-control mb-1" id="location_name"
+                               name="location_name" value="{{ charge.location_name or '' }}"
+                               placeholder="{{ t('edit.location_name_ph') }}">
+                        <div class="input-group input-group-sm mb-1">
+                            <span class="input-group-text">Lat</span>
+                            <input type="number" step="0.000001" id="location_lat" name="location_lat"
+                                   class="form-control"
+                                   value="{{ '%.6f'|format(charge.location_lat) if charge.location_lat is not none else '' }}">
+                            <span class="input-group-text">Lon</span>
+                            <input type="number" step="0.000001" id="location_lon" name="location_lon"
+                                   class="form-control"
+                                   value="{{ '%.6f'|format(charge.location_lon) if charge.location_lon is not none else '' }}">
+                        </div>
+                        <div class="d-flex gap-1 flex-wrap mb-2">
+                            <button type="button" class="btn btn-sm btn-outline-primary" id="btnToggleMap">
+                                <i class="bi bi-map"></i> {{ t('edit.location_pick_map') }}
+                            </button>
+                            <button type="button" class="btn btn-sm btn-outline-success" id="btnHomeLocation">
+                                <i class="bi bi-house-fill"></i> {{ t('edit.location_home') }}
+                            </button>
+                            <button type="button" class="btn btn-sm btn-outline-warning" id="btnWorkLocation">
+                                <i class="bi bi-briefcase-fill"></i> {{ t('edit.location_work') }}
+                            </button>
+                            <button type="button" class="btn btn-sm btn-outline-secondary" id="btnClearLocation">
+                                <i class="bi bi-x"></i>
+                            </button>
+                        </div>
+                        <div id="editMap" style="height: 300px; display: none; border-radius: 6px; border: 1px solid #dee2e6;"></div>
+                        <div class="small text-muted mt-1" id="locationStatus"></div>
+                    </div>
+
                     <div class="mb-3">
                         <label class="form-label">{{ t('edit.notes') }}</label>
                         <input type="text" class="form-control" name="notes"
@@ -104,4 +158,113 @@
         </div>
     </div>
 </div>
+{% endblock %}
+
+{% block scripts %}
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script>
+(function() {
+    const T = {
+        home_set:   {{ t('edit.loc_home_set')|tojson }},
+        work_set:   {{ t('edit.loc_work_set')|tojson }},
+        no_home:    {{ t('edit.loc_no_home')|tojson }},
+        no_work:    {{ t('edit.loc_no_work')|tojson }},
+        cleared:    {{ t('edit.loc_cleared')|tojson }},
+        click_map:  {{ t('edit.loc_click_map')|tojson }},
+        picked:     {{ t('edit.loc_picked')|tojson }},
+    };
+    const homeLat = {{ home_lat or 'null' }};
+    const homeLon = {{ home_lon or 'null' }};
+    const homeLabel = {{ home_label|tojson }};
+    const workLat = {{ work_lat or 'null' }};
+    const workLon = {{ work_lon or 'null' }};
+    const workLabel = {{ work_label|tojson }};
+
+    const latIn   = document.getElementById('location_lat');
+    const lonIn   = document.getElementById('location_lon');
+    const nameIn  = document.getElementById('location_name');
+    const status  = document.getElementById('locationStatus');
+    const mapEl   = document.getElementById('editMap');
+    const btnMap  = document.getElementById('btnToggleMap');
+
+    function setStatus(msg) { status.textContent = msg; }
+    function setCoords(lat, lon, name) {
+        latIn.value = parseFloat(lat).toFixed(6);
+        lonIn.value = parseFloat(lon).toFixed(6);
+        if (name) nameIn.value = name;
+        if (map && marker) {
+            const ll = [parseFloat(lat), parseFloat(lon)];
+            marker.setLatLng(ll);
+            map.setView(ll, Math.max(map.getZoom(), 14));
+        } else if (map) {
+            placeMarker(parseFloat(lat), parseFloat(lon));
+        }
+    }
+
+    let map = null, marker = null;
+    function placeMarker(lat, lon) {
+        if (marker) { map.removeLayer(marker); marker = null; }
+        marker = L.marker([lat, lon], { draggable: true }).addTo(map);
+        marker.on('dragend', e => {
+            const ll = e.target.getLatLng();
+            latIn.value = ll.lat.toFixed(6);
+            lonIn.value = ll.lng.toFixed(6);
+        });
+    }
+
+    function initMap() {
+        const lat0 = parseFloat(latIn.value);
+        const lon0 = parseFloat(lonIn.value);
+        const center = (!isNaN(lat0) && !isNaN(lon0)) ? [lat0, lon0]
+            : (homeLat != null && homeLon != null) ? [homeLat, homeLon]
+            : [52.52, 13.405];
+        const zoom = (!isNaN(lat0) && !isNaN(lon0)) ? 15 : 11;
+        map = L.map('editMap').setView(center, zoom);
+        L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+            attribution: '&copy; OpenStreetMap', maxZoom: 19,
+        }).addTo(map);
+        if (!isNaN(lat0) && !isNaN(lon0)) {
+            placeMarker(lat0, lon0);
+        }
+        map.on('click', e => {
+            const lat = e.latlng.lat.toFixed(6);
+            const lon = e.latlng.lng.toFixed(6);
+            latIn.value = lat;
+            lonIn.value = lon;
+            placeMarker(parseFloat(lat), parseFloat(lon));
+            setStatus(T.picked + ' ' + lat + ', ' + lon);
+        });
+    }
+
+    btnMap.addEventListener('click', () => {
+        if (mapEl.style.display === 'none') {
+            mapEl.style.display = '';
+            if (!map) initMap();
+            // Leaflet needs a resize nudge after becoming visible
+            setTimeout(() => { if (map) map.invalidateSize(); }, 100);
+            setStatus(T.click_map);
+        } else {
+            mapEl.style.display = 'none';
+            setStatus('');
+        }
+    });
+
+    document.getElementById('btnHomeLocation').addEventListener('click', () => {
+        if (homeLat == null || homeLon == null) { setStatus(T.no_home); return; }
+        setCoords(homeLat, homeLon, homeLabel || 'Home');
+        setStatus(T.home_set);
+    });
+    document.getElementById('btnWorkLocation').addEventListener('click', () => {
+        if (workLat == null || workLon == null) { setStatus(T.no_work); return; }
+        setCoords(workLat, workLon, workLabel || 'Work');
+        setStatus(T.work_set);
+    });
+    document.getElementById('btnClearLocation').addEventListener('click', () => {
+        latIn.value = ''; lonIn.value = ''; nameIn.value = '';
+        if (marker && map) { map.removeLayer(marker); marker = null; }
+        setStatus(T.cleared);
+    });
+})();
+</script>
 {% endblock %}

@@ -1,5 +1,70 @@
 # Changelog
 
+## v2.19.0 (2026-04-16)
+
+### Großes Update: Datensicherheit beim CSV-Import, Rohdatenviewer, Bearbeiten-Seite komplett, Anbieter-Dropdown
+
+Produktiv eingesetztes Release — jedes Feature wurde mit Python-Syntax-Check, Migrations-Test, Template-Smoke-Test und End-to-End-Unit-Tests für die Import-Logik verifiziert bevor getaggt wurde.
+
+#### 1. CSV-Import ist jetzt sicher und tolerant
+
+Der alte Importer [import_gsheet.py](import_gsheet.py) war **positions-basiert** und hatte nur einen Modus (`replace=True` → `DELETE FROM charges`, dann neu einfügen). Das bedeutete: **manuell nachträglich hinzugefügte Ladungen wurden beim Re-Import einfach gelöscht**. Für ein Produktiv-Tool das Nutzer aktiv einsetzen, ist das ein Datenverlust-Risiko.
+
+Neu:
+
+- **Spalten werden per Header erkannt**, nicht per Position. Fuzzy-Matching (case-insensitive, Typos via `SequenceMatcher`-Ratio ≥ 0.82) gegen eine Alias-Tabelle: `Datum` / `date` / `tag` / `day` treffen alle auf dieselbe Logik, ebenso `EUR/kWh` / `€/kWh` / `preis`, `Uhrzeit` / `zeit` / `hour`, `Anbieter` / `provider` / `cpo` / `betreiber`, usw.
+- **Delimiter wird autodetektiert**: Semikolon (unser eigener Export), Komma (Google Sheet), Tab, Pipe. Gewählt wird das Zeichen mit der höchsten Medianspaltenzahl auf den ersten 5 Zeilen.
+- **Datumsformat wird autodetektiert**: `YYYY-MM-DD`, `DD.MM.YYYY`, `MM/DD/YYYY` (Google Sheet US), und als Fallback `DD/MM/YYYY`.
+- **Legacy-Fallback**: wenn kein Header-Zeile gefunden wird (Google-Sheet-Export startet direkt mit Datumszeilen), läuft die alte positions-basierte Zuordnung.
+- **Vier Import-Modi** statt eines Boolean:
+  - `skip` (Default) — Zeilen mit gleichem `(date, charge_hour, kwh_loaded)` wie vorhandene Einträge werden übersprungen. **Manuelle Daten werden nie überschrieben.**
+  - `update` — kein Duplikat wird erzeugt, aber wenn die CSV Felder hat die im bestehenden Eintrag leer sind (z.B. Anbieter oder Ladeort), werden sie ergänzt. Vorhandene Werte bleiben unangetastet.
+  - `append` — alles wird eingefügt, auch exakte Duplikate. Für fortgeschrittene User.
+  - `replace` — das alte nukleare Verhalten. Zeigt jetzt einen roten Warnkasten mit Pflicht-Checkbox (`replace_confirm`). Vor dem Delete wird **automatisch ein DB-Backup** nach `data/backups/pre_import_YYYYMMDD_HHMMSS.db` geschrieben; die letzten 5 Backups bleiben erhalten.
+- **Export ist wieder verlustfrei**: der eigene CSV-Export (`/api/export/csv`) enthält jetzt alle Felder inkl. Uhrzeit, km-Stand, Anbieter, Ladeort, Lat/Lon. Ein Round-Trip (Export → Re-Import im Skip-Modus) führt zu 0 neuen Einträgen und 0 Fehlern — getestet mit der Live-DB (474 Einträge).
+
+#### 2. „Eintrag bearbeiten" zeigt endlich alle Felder
+
+Die alte [edit.html](templates/edit.html) war unvollständig — weder Ladeort noch Anbieter wurden angezeigt, und der Backend-POST-Handler in [app.py:edit_charge](app.py) ignorierte die Felder auch wenn man sie vorher im Input-Formular gesetzt hatte (Daten gingen bei jedem Edit verloren).
+
+- Alle Location-Felder (Name, Lat, Lon) sind jetzt auf der Edit-Seite
+- **Leaflet-Kartenpicker inline** (wie in Einstellungen): Button „Karte" klappt eine OSM-Karte auf, Klick setzt die Marker-Position, Marker ist ziehbar, Koordinaten werden live in die Lat/Lon-Felder geschrieben
+- Schnellbuttons „Zuhause"/„Arbeit" übernehmen die Koordinaten aus den Settings
+- Backend speichert `location_name`, `location_lat`, `location_lon`, `operator`
+
+#### 3. Anbieter-Feld (CPO) auf jeder Ladung
+
+Neue Spalte `operator` (VARCHAR(64), nullable) im `charges`-Tabelle — Migration läuft beim ersten Start nach Update automatisch via `ALTER TABLE`, idempotent.
+
+- Eingabe-Formular und Edit-Seite haben ein `<datalist>`-Feld mit 19 eingebauten Anbietern (IONITY, EnBW mobility+, Aral pulse, Tesla Supercharger, Shell Recharge, Allego, Fastned, Elli (VW), EWE Go, Maingau, Lidl, Kaufland, Aldi Süd, REWE, Mer, Stadtwerke, Zuhause / privat, Arbeit, Sonstiges). Der User kann frei tippen oder aus der Liste wählen.
+- Neue Settings-Card **„Ladesäulen-Anbieter"** mit Textarea für eigene Einträge (newline- oder komma-separiert). Eigene Einträge werden zusätzlich zur Built-in-Liste angezeigt. Stored als JSON unter AppConfig-Key `custom_operators`.
+- History-Tabelle zeigt Anbieter + Ort als kleine Zweit-Zeile unter dem Datum (`…` wenn zu lang, Full-Text im Tooltip).
+
+#### 4. Rohdatenviewer für alle Fahrzeug-Marken
+
+Neue Routen `/vehicle/raw` (Liste aller Syncs) und `/vehicle/raw/<id>` (Details einer Sync-Zeile). Erreichbar via Button „Rohdaten ansehen" in der Fahrzeug-API-Card, sobald eine Marke konfiguriert ist.
+
+- Detail-Seite zeigt **alle normalisierten Felder** (wie in der DB gespeichert) oberhalb und **den kompletten Raw-API-Dump** als pretty-printed JSON mit Scroll-Container + Copy-to-Clipboard-Button.
+- `raw_data` der Kia/Hyundai- und VAG-Connectoren wurde von `{'vin': …}` auf **vollständige Introspection** erweitert: alle öffentlichen, JSON-serialisierbaren Attribute des Vehicle-Objekts landen im Dump (primitive Typen direkt, `datetime` → ISO-String, nested objects gestringified mit Längen-Cap). Das macht den Viewer erst nützlich.
+- **SoH-Banner für Kia/Hyundai**: wenn `battery_soh_percent > 100` in einem Snapshot steht, erscheint eine blaue Info-Box die erklärt warum — die API misst gegen die werksseitig freigegebene Nutzkapazität, während die Batterie physikalisch noch Reserve hat. Neuwertige Batterien zeigen typisch 110–125 %, der Wert fällt mit Alterung Richtung 100 %.
+
+#### 5. Migrations & Rückwärts-Kompatibilität
+
+- `charges.operator` wird per `ALTER TABLE ADD COLUMN operator VARCHAR(64)` idempotent nachgezogen beim ersten Start mit v2.19.0. Bestehende Zeilen haben `operator = NULL`, was überall konsistent behandelt wird (History zeigt nichts an, CSV-Export schreibt leer, Edit-Seite rendert als leeres Feld).
+- Der alte `replace=True` Parameter an `import_csv_data()` funktioniert weiterhin (mapped auf `mode='replace'`), damit bestehende Aufrufer nicht brechen.
+- i18n: 62 neue Keys in `de.json` und `en.json` — beide Dateien haben identische Key-Sets.
+
+#### Verifikation
+
+Vor dem Commit durchlaufen:
+
+- `python -m py_compile` auf allen geänderten Python-Dateien — clean
+- CSV-Import Unit-Tests mit 6 Format-Varianten (Semikolon+Header, Re-Import dedup, Update-Modus manuelle-Schutz, Legacy-Komma-no-Header, ISO-Date+Tab, Replace-mit-Backup) — alle grün
+- App boot-test: Migration läuft, `charges.operator` existiert, alle Kern-Routen liefern 200
+- Edit-POST Round-Trip: operator + location werden persistiert
+- Raw-Viewer: handled invalid/null raw_json graceful
+- CSV Round-Trip: eigener Export (474 Zeilen) → Re-Import im Skip-Modus → 0 neu, 0 Fehler
+
 ## v2.18.3 (2026-04-16)
 
 ### Fix: Hyundai-Selenium wartete auf nicht existierenden Button, obwohl Login-Chain schon durch war

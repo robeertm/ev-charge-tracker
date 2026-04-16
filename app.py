@@ -78,6 +78,9 @@ def create_app(config_class=Config):
             db.session.execute(text('ALTER TABLE charges ADD COLUMN location_lon REAL'))
         if 'location_name' not in columns:
             db.session.execute(text('ALTER TABLE charges ADD COLUMN location_name VARCHAR(200)'))
+        # Migrate: add operator column to charges (Anbieter/CPO, v2.19.0)
+        if 'operator' not in columns:
+            db.session.execute(text('ALTER TABLE charges ADD COLUMN operator VARCHAR(64)'))
 
         # Migrate: add last_seen_at to parking_events
         try:
@@ -203,6 +206,52 @@ def _get_battery_kwh():
         return float(val) if val else Config.BATTERY_CAPACITY_KWH
     except (ValueError, TypeError):
         return Config.BATTERY_CAPACITY_KWH
+
+
+# Built-in Anbieter/CPO list — the common German + European operators.
+# Users can add custom entries via /api/providers/custom which are stored
+# in AppConfig as a JSON list and merged in.
+DEFAULT_OPERATORS = [
+    'IONITY', 'EnBW mobility+', 'Aral pulse', 'Tesla Supercharger',
+    'Shell Recharge', 'Allego', 'Fastned', 'Elli (VW)', 'EWE Go',
+    'Maingau EinfachStromLaden', 'Lidl', 'Kaufland', 'Aldi Süd',
+    'REWE', 'Mer', 'Stadtwerke', 'Zuhause / privat', 'Arbeit', 'Sonstiges',
+]
+
+
+def _get_custom_operators():
+    """Parse the stored custom-operators JSON into a Python list. Returns
+    an empty list on any kind of corruption so we never brick the UI."""
+    import json as _json
+    try:
+        raw = AppConfig.get('custom_operators', '[]') or '[]'
+        custom = _json.loads(raw)
+        if not isinstance(custom, list):
+            return []
+        return [str(n).strip() for n in custom if str(n).strip()]
+    except (ValueError, TypeError):
+        return []
+
+
+def _get_custom_operators_text():
+    """Render the stored custom-operators list as newline-separated text
+    for the settings textarea."""
+    return '\n'.join(_get_custom_operators())
+
+
+def _get_operator_list():
+    """Return the deduplicated union of built-in and user-defined Anbieter
+    names for the dropdown. Built-in order is preserved so the common
+    names show first."""
+    seen = set()
+    out = []
+    for name in list(DEFAULT_OPERATORS) + _get_custom_operators():
+        key = name.lower()
+        if key in seen:
+            continue
+        seen.add(key)
+        out.append(name)
+    return out
 
 
 def _calc_soh_percent(status, battery_kwh):
@@ -790,6 +839,7 @@ def register_routes(app):
                     location_lat=_float(request.form.get('location_lat')),
                     location_lon=_float(request.form.get('location_lon')),
                     location_name=request.form.get('location_name', '').strip() or None,
+                    operator=request.form.get('operator', '').strip() or None,
                 )
                 charge.calculate_fields(_get_battery_kwh())
 
@@ -836,7 +886,8 @@ def register_routes(app):
                                home_label=AppConfig.get('home_label', ''),
                                work_lat=AppConfig.get('work_lat', ''),
                                work_lon=AppConfig.get('work_lon', ''),
-                               work_label=AppConfig.get('work_label', ''))
+                               work_label=AppConfig.get('work_label', ''),
+                               operators=_get_operator_list())
 
     # ── HISTORY ────────────────────────────────────────────────
     @app.route('/history')
@@ -882,6 +933,13 @@ def register_routes(app):
                 charge.loss_kwh = _float(request.form.get('loss_kwh'))
                 charge.co2_g_per_kwh = _int(request.form.get('co2_g_per_kwh'))
                 charge.notes = request.form.get('notes', '').strip() or None
+                # Location + operator — previously missing from the edit
+                # route, so users couldn't correct a Ladeort typo after
+                # the fact. Same nullability semantics as /input.
+                charge.location_name = request.form.get('location_name', '').strip() or None
+                charge.location_lat = _float(request.form.get('location_lat'))
+                charge.location_lon = _float(request.form.get('location_lon'))
+                charge.operator = request.form.get('operator', '').strip() or None
                 charge.calculate_fields(_get_battery_kwh())
                 db.session.commit()
                 flash(t('flash.entry_updated'), 'success')
@@ -889,7 +947,14 @@ def register_routes(app):
             except Exception as e:
                 flash(t('flash.error', error=e), 'danger')
 
-        return render_template('edit.html', charge=charge)
+        return render_template('edit.html', charge=charge,
+                               operators=_get_operator_list(),
+                               home_lat=AppConfig.get('home_lat', ''),
+                               home_lon=AppConfig.get('home_lon', ''),
+                               home_label=AppConfig.get('home_label', ''),
+                               work_lat=AppConfig.get('work_lat', ''),
+                               work_lon=AppConfig.get('work_lon', ''),
+                               work_label=AppConfig.get('work_label', ''))
 
     @app.route('/delete/<int:charge_id>', methods=['POST'])
     def delete_charge(charge_id):
@@ -937,6 +1002,20 @@ def register_routes(app):
                 AppConfig.set('recuperation_kwh_per_km', request.form.get('recuperation_kwh_per_km', ''))
                 flash(t('flash.vehicle_saved'), 'success')
 
+            elif action == 'save_operators':
+                import json as _json
+                raw = request.form.get('custom_operators', '') or ''
+                # Accept both newline- and comma-separated input and
+                # normalize to a JSON list — easier to edit in either
+                # style from the textarea.
+                items = []
+                for chunk in raw.replace(',', '\n').splitlines():
+                    s = chunk.strip()
+                    if s and s not in items:
+                        items.append(s)
+                AppConfig.set('custom_operators', _json.dumps(items))
+                flash(t('flash.operators_saved'), 'success')
+
             elif action == 'save_pv':
                 AppConfig.set('pv_kwp', request.form.get('pv_kwp', ''))
                 AppConfig.set('pv_yield_per_kwp', request.form.get('pv_yield_per_kwp', ''))
@@ -970,18 +1049,32 @@ def register_routes(app):
                 if file and file.filename:
                     try:
                         import io
-                        from import_gsheet import import_csv_data
-                        replace = 'replace_data' in request.form
-                        stream = io.StringIO(file.stream.read().decode('utf-8'))
-                        result = import_csv_data(stream, replace=replace)
-                        msg = t('flash.import_success', count=result['imported'])
-                        if result['errors']:
-                            msg += ' ' + t('flash.import_errors', count=len(result['errors']))
-                        flash(msg, 'success')
-                        # Auto-start CO2 backfill
-                        from services.co2_backfill import start_backfill
-                        if start_backfill(app):
-                            flash(t('flash.co2_backfill_started'), 'info')
+                        from import_gsheet import import_csv_data, VALID_MODES
+                        mode = request.form.get('import_mode', 'skip')
+                        if mode not in VALID_MODES:
+                            mode = 'skip'
+                        # Replace mode requires an explicit confirmation
+                        # checkbox in addition to the mode select, to
+                        # prevent accidental data loss on production DBs.
+                        if mode == 'replace' and 'replace_confirm' not in request.form:
+                            flash(t('flash.import_replace_needs_confirm'), 'warning')
+                        else:
+                            stream = io.StringIO(file.stream.read().decode('utf-8'))
+                            result = import_csv_data(stream, mode=mode)
+                            parts = [t('flash.import_success', count=result['imported'])]
+                            if result.get('updated'):
+                                parts.append(t('flash.import_updated', count=result['updated']))
+                            if result.get('skipped_dup'):
+                                parts.append(t('flash.import_skipped_dup', count=result['skipped_dup']))
+                            if result['errors']:
+                                parts.append(t('flash.import_errors', count=len(result['errors'])))
+                            if result.get('backup'):
+                                parts.append(t('flash.import_backup_made'))
+                            flash(' '.join(parts), 'success')
+                            # Auto-start CO2 backfill
+                            from services.co2_backfill import start_backfill
+                            if start_backfill(app):
+                                flash(t('flash.co2_backfill_started'), 'info')
                     except Exception as e:
                         flash(t('flash.import_error', error=e), 'danger')
                 else:
@@ -1176,7 +1269,75 @@ def register_routes(app):
                                auth_enabled=(AppConfig.get('auth_enabled', 'false') == 'true'),
                                auth_username=AppConfig.get('auth_username', ''),
                                hide_ssl_card=hide_ssl_card,
+                               custom_operators_text=_get_custom_operators_text(),
+                               operators_builtin=DEFAULT_OPERATORS,
                                app_version=Config.APP_VERSION)
+
+    # ── VEHICLE RAW-DATA VIEWER ────────────────────────────────
+    @app.route('/vehicle/raw')
+    def vehicle_raw_list():
+        """List the most recent vehicle syncs. Each row links to the
+        detail view where the full raw API dump is pretty-printed."""
+        limit = request.args.get('limit', 50, type=int)
+        limit = max(1, min(limit, 500))
+        syncs = (VehicleSync.query
+                 .order_by(VehicleSync.timestamp.desc())
+                 .limit(limit).all())
+        brand_key = AppConfig.get('vehicle_api_brand', '')
+        return render_template('vehicle_raw.html',
+                               syncs=syncs,
+                               brand_key=brand_key,
+                               limit=limit,
+                               detail=None)
+
+    @app.route('/vehicle/raw/<int:sync_id>')
+    def vehicle_raw_detail(sync_id):
+        """Show the full raw API payload and normalized fields for one
+        VehicleSync row. Kia/Hyundai SoH >100% is annotated with a short
+        explanation of the manufacturer's reserve-capacity quirk."""
+        import json as _json
+        sync = VehicleSync.query.get_or_404(sync_id)
+        raw_parsed = None
+        raw_error = None
+        if sync.raw_json:
+            try:
+                raw_parsed = _json.loads(sync.raw_json)
+            except (ValueError, TypeError) as e:
+                raw_error = str(e)
+        pretty = _json.dumps(raw_parsed, indent=2, ensure_ascii=False, default=str) \
+            if raw_parsed is not None else (sync.raw_json or '')
+        brand_key = AppConfig.get('vehicle_api_brand', '')
+        # Normalized fields we already store in VehicleSync (for the
+        # info box above the JSON dump).
+        normalized = {
+            'timestamp': sync.timestamp.isoformat(),
+            'soc_percent': sync.soc_percent,
+            'odometer_km': sync.odometer_km,
+            'is_charging': sync.is_charging,
+            'charge_power_kw': sync.charge_power_kw,
+            'estimated_range_km': sync.estimated_range_km,
+            'battery_12v_percent': sync.battery_12v_percent,
+            'battery_soh_percent': sync.battery_soh_percent,
+            'total_regenerated_kwh': sync.total_regenerated_kwh,
+            'regen_cumulative_kwh': sync.regen_cumulative_kwh,
+            'consumption_30d_kwh_per_100km': sync.consumption_30d_kwh_per_100km,
+            'location_lat': sync.location_lat,
+            'location_lon': sync.location_lon,
+        }
+        soh_note = None
+        if (sync.battery_soh_percent is not None and sync.battery_soh_percent > 100
+                and brand_key in ('kia', 'hyundai')):
+            soh_note = 'kia_soh_over_100'
+        return render_template('vehicle_raw.html',
+                               syncs=None,
+                               brand_key=brand_key,
+                               detail={
+                                   'sync': sync,
+                                   'normalized': normalized,
+                                   'raw_pretty': pretty,
+                                   'raw_error': raw_error,
+                                   'soh_note': soh_note,
+                               })
 
     # ── REPORT ─────────────────────────────────────────────────
     @app.route('/report')
@@ -2128,11 +2289,19 @@ def register_routes(app):
         charges = Charge.query.order_by(Charge.date).all()
         output = io.StringIO()
         writer = csv.writer(output, delimiter=';')
-        writer.writerow(['Datum', 'EUR/kWh', 'kWh', 'Kosten', 'Typ', 'Von%', 'Bis%', 'Geladen%',
-                         'Verlust_kWh', 'Verlust%', 'CO2_g/kWh', 'CO2_kg', 'Notizen'])
+        # Header names must match the FIELD_ALIASES in import_gsheet.py so
+        # that exporting and re-importing is a lossless round-trip.
+        writer.writerow([
+            'Datum', 'Uhrzeit', 'km-Stand', 'EUR/kWh', 'kWh', 'Kosten',
+            'Typ', 'Von%', 'Bis%', 'Geladen%',
+            'Verlust_kWh', 'Verlust%', 'CO2_g/kWh', 'CO2_kg',
+            'Anbieter', 'Ort', 'Lat', 'Lon', 'Notizen',
+        ])
         for c in charges:
             writer.writerow([
                 c.date.strftime('%d.%m.%Y') if c.date else '',
+                f"{c.charge_hour:02d}:00" if c.charge_hour is not None else '',
+                c.odometer if c.odometer is not None else '',
                 f"{c.eur_per_kwh:.2f}" if c.eur_per_kwh is not None else '',
                 f"{c.kwh_loaded:.3f}" if c.kwh_loaded is not None else '',
                 f"{c.total_cost:.2f}" if c.total_cost is not None else '',
@@ -2144,6 +2313,10 @@ def register_routes(app):
                 f"{c.loss_pct:.2f}" if c.loss_pct is not None else '',
                 c.co2_g_per_kwh if c.co2_g_per_kwh is not None else '',
                 f"{c.co2_kg:.2f}" if c.co2_kg is not None else '',
+                c.operator or '',
+                c.location_name or '',
+                f"{c.location_lat:.6f}" if c.location_lat is not None else '',
+                f"{c.location_lon:.6f}" if c.location_lon is not None else '',
                 c.notes or '',
             ])
         from flask import Response
