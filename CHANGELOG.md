@@ -1,5 +1,13 @@
 # Changelog
 
+## v2.17.2 (2026-04-16)
+
+### Fix: Hyundai Token-Fetch hängt im Selenium-Wait
+
+v2.17.0 hat für Hyundai als „Login erkannt"-Kondition auf `button.mail_check` oder `button.ctb_button` gewartet — Selektoren aus dem RustyDust-Script, die aber auf einer Zwischen-Confirmation-Seite sitzen, die Hyundai offenbar in manchen Flows **überspringt**. Der Browser landet direkt auf `prd.eu-ccapi.hyundai.com:8080/api/v1/user/oauth2/token?code=XXX` und zeigt den JSON-Body `{"result":"E","data":null,"message":"url is not defined"}` — was übrigens **kein Fehler** ist, sondern der erwartete End-Zustand (der Server strippt den `code`-Query-Param beim Rendern). Selenium hat aber weiter auf Buttons gewartet, die nie kommen, und ist nach 5 min in den Timeout gerannt.
+
+Fix: Per-Flow-Logik in `_do_fetch()`. Für den CTB-Flow (Hyundai) warte nicht auf DOM-Elemente sondern auf die URL-Änderung — sobald `driver.current_url` auf `prd.eu-ccapi.hyundai.com` startet und `code=` enthält, ist der Login durch. Selenium extrahiert direkt aus der URL und überspringt den separaten `driver.get(redirect_url)`-Schritt (den Hyundai im CTB-Flow eh schon selbst macht). Der Kia-oneid-Flow bleibt 1:1 wie vorher: CSS-Wait auf `a.logout.user`, dann manuelle Navigation zum CCSP-Authorize-Endpoint.
+
 ## v2.17.1 (2026-04-16)
 
 ### Fix: VAG (VW/Skoda/Seat/Cupra/Audi) zeigt echten Fehler statt generischem „Passwort prüfen"

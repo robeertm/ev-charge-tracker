@@ -155,21 +155,35 @@ def _do_fetch(brand_key):
             _fetch_state['status'] = 'Bitte im Browser einloggen (reCAPTCHA lösen)...'
             driver.get(login_url)
 
-            # Wait for successful login (max 5 min)
-            wait = WebDriverWait(driver, 300)
-            wait.until(EC.presence_of_element_located((By.CSS_SELECTOR, cfg['success_selector'])))
+            wait = WebDriverWait(driver, 300)  # 5 min max
 
-            _fetch_state['status'] = 'Login erkannt! Token wird abgerufen...'
+            if cfg['flow'] == 'ctb':
+                # Hyundai CTB: after login the browser redirects straight
+                # through ctbapi.hyundai-europe.com and eventually lands on
+                # prd.eu-ccapi.hyundai.com:8080/api/v1/user/oauth2/token?code=XXX
+                # which shows a JSON body {"result":"E","message":"url is not defined"}
+                # — that's the expected success state. We watch the URL, not the DOM.
+                _fetch_state['status'] = 'Warte auf Login + Redirect zur Token-URL...'
+                wait.until(lambda d: 'code=' in d.current_url and
+                           d.current_url.startswith('https://prd.eu-ccapi.hyundai.com'))
+                current_url = driver.current_url
+                _fetch_state['status'] = 'Login erkannt! Token wird abgerufen...'
+            else:
+                # Kia oneid: login lands on kia.com marketing site with a
+                # logout link in the DOM; then we manually navigate to the
+                # CCSP authorize endpoint to pick up the auth code.
+                wait.until(EC.presence_of_element_located(
+                    (By.CSS_SELECTOR, cfg['success_selector'])))
+                _fetch_state['status'] = 'Login erkannt! Token wird abgerufen...'
+                driver.get(redirect_url)
+                import time
+                time.sleep(3)
+                current_url = driver.current_url
 
-            # Navigate to CCSP authorize to get the auth code
-            driver.get(redirect_url)
-            import time
-            time.sleep(3)
-
-            current_url = driver.current_url
             match = re.search(r'code=([^&]+)', current_url)
             if not match:
-                _fetch_state.update(running=False, error='Kein Auth-Code in Redirect gefunden.')
+                _fetch_state.update(running=False,
+                    error=f'Kein Auth-Code in URL: {current_url[:200]}')
                 return
 
             code = match.group(1)
