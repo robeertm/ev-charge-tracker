@@ -1,5 +1,22 @@
 # Changelog
 
+## v2.18.1 (2026-04-16)
+
+### Manueller Token-Flow: 3-Schritt-Anleitung mit klickbaren Step-Links
+
+User hat beim manuellen Paste-Flow die **ctbapi-URL** eingefügt (Stage 1, das Login-Ergebnis mit `?code=...&login_success=y`). Der Code dort ist für `peuhyundaiidm-ctb` ausgestellt — das Token-Endpoint sagt zurecht „code is not exist in redis", weil er für den API-Client `6d477c38-...` nicht bekannt ist. Die Meldung hilft dem User aber null weiter.
+
+Zwei Verbesserungen:
+
+**1. ctbapi-URL wird explizit abgefangen.** `exchange_manual_url()` checkt jetzt `'ctbapi.hyundai-europe.com' in url` oder `'login_success=y' in url` und gibt eine klare Meldung zurück: „Das ist die Login-URL (Stufe 1), nicht die finale Token-URL (Stufe 2). Nächster Schritt: öffne diese URL im gleichen Browser ...".
+
+**2. UI zeigt 3-Schritt-Anleitung mit klickbaren Links.** Wenn der User das „Manuell"-Details aufklappt, lädt die Seite per `GET /api/vehicle/token/manual/step_urls?brand=...` die zwei Schritt-URLs:
+- **Schritt 1**: Login-URL → User öffnet im eigenen Browser, loggt sich ein
+- **Schritt 2**: CCSP-Authorize-URL → User öffnet *im gleichen Browser*. Wegen IdP-Session-Cookie aus Schritt 1 redirected diese URL automatisch per 302 zur finalen URL mit `?code=Y` (dem richtigen CCSP-Code)
+- **Schritt 3**: User kopiert die finale URL aus der Adressleiste und fügt sie ein
+
+Beide Links sind direkt klickbar (`target="_blank"`), der Placeholder im Paste-Feld wird dynamisch auf `prd.eu-ccapi.hyundai.com:8080/.../token?code=...` (Hyundai) bzw. `.../redirect?code=...` (Kia) gesetzt.
+
 ## v2.18.0 (2026-04-16)
 
 ### Manuelle URL-Paste als Fallback für Kia/Hyundai-Token + bessere InvalidSessionId-Meldung

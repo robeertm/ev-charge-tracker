@@ -279,6 +279,24 @@ def start_fetch(brand_key):
     return True
 
 
+def get_manual_step2_url(brand_key: str) -> str | None:
+    """Return the second-authorize URL the user visits in their browser
+    to produce the final prd.eu-ccapi URL (which contains the CCSP code).
+
+    The user's browser session from step 1 still has the IdP cookie, so
+    this URL silently 302-redirects to the correct landing page without
+    asking for login again. Works identically for Kia and Hyundai."""
+    cfg = BRAND_CONFIG.get(brand_key)
+    if not cfg:
+        return None
+    return (
+        f"{cfg['base_url']}authorize?response_type=code"
+        f"&client_id={cfg['client_id']}"
+        f"&redirect_uri={cfg['redirect_final']}"
+        f"&lang=en&state=ccsp"
+    )
+
+
 def exchange_manual_url(brand_key: str, url: str) -> tuple[bool, str, str | None]:
     """Manual fallback when Selenium can't complete the flow.
 
@@ -292,7 +310,24 @@ def exchange_manual_url(brand_key: str, url: str) -> tuple[bool, str, str | None
     if not cfg:
         return False, f'Unbekannte Marke: {brand_key}', None
 
-    match = re.search(r'code=([^&\s]+)', url or '')
+    url = (url or '').strip()
+
+    # Reject the ctbapi URL explicitly — that's the first-stage code which
+    # belongs to the login_client_id and isn't valid at our token endpoint.
+    # Users frequently paste it because it's the URL they see right after
+    # login, and the error from the IdP ("code not exist in redis") isn't
+    # obvious.
+    if 'ctbapi.hyundai-europe.com' in url or 'login_success=y' in url:
+        step2 = get_manual_step2_url(brand_key) or ''
+        return False, (
+            'Falsche URL. Das ist die Login-URL (Stufe 1), nicht die finale '
+            'Token-URL (Stufe 2). Nächster Schritt: öffne diese URL im '
+            'gleichen Browser (du bist noch eingeloggt, sie redirected '
+            'automatisch): ' + step2 + ' — dann die Adressleiste von der '
+            'Ziel-Seite kopieren und hier einfügen.'
+        ), None
+
+    match = re.search(r'code=([^&\s]+)', url)
     if not match:
         return False, 'Keine `code=` Query-Parameter in der URL gefunden.', None
     code = match.group(1)

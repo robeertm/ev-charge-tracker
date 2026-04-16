@@ -1314,6 +1314,26 @@ def register_routes(app):
             return jsonify({'success': True, 'message': msg})
         return jsonify({'error': msg}), 400
 
+    @app.route('/api/vehicle/token/manual/step_urls')
+    def api_vehicle_token_manual_step_urls():
+        """Returns the two URLs the user needs to complete the manual flow
+        (step 1 = login URL, step 2 = CCSP authorize that produces the final
+        ?code=... URL). Frontend uses these as clickable links."""
+        brand = request.args.get('brand', '')
+        if brand not in ('kia', 'hyundai'):
+            return jsonify({'error': 'Nur für Kia/Hyundai verfügbar'}), 400
+        from services.vehicle.token_fetch import (
+            BRAND_CONFIG, _build_login_url, get_manual_step2_url,
+        )
+        cfg = BRAND_CONFIG.get(brand)
+        if not cfg:
+            return jsonify({'error': 'Marke nicht gefunden'}), 404
+        return jsonify({
+            'step1_login_url': _build_login_url(cfg),
+            'step2_ccsp_url': get_manual_step2_url(brand),
+            'expected_prefix': cfg['redirect_final'].split('?')[0],
+        })
+
     @app.route('/api/vehicle/install', methods=['POST'])
     def api_vehicle_install():
         """Install vehicle API packages via pip."""

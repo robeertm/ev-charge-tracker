@@ -379,9 +379,23 @@
                                     {{ t('set.api_token_manual') }}
                                 </div>
                                 <hr class="my-2">
-                                <details>
+                                <details id="tokenManualDetails">
                                     <summary class="small fw-bold" style="cursor:pointer;">{{ t('set.api_token_paste_title') }}</summary>
-                                    <div class="mt-2 small text-muted">{{ t('set.api_token_paste_desc') }}</div>
+                                    <div class="mt-2 small">
+                                        <ol class="mb-2 ps-3">
+                                            <li class="mb-2">
+                                                <strong>Schritt 1:</strong> Login-URL in <u>deinem eigenen Browser</u> öffnen (nicht noVNC), einloggen, reCAPTCHA lösen:<br>
+                                                <a href="#" id="tokenStep1Link" target="_blank" rel="noopener" class="small text-break"></a>
+                                            </li>
+                                            <li class="mb-2">
+                                                <strong>Schritt 2:</strong> <em>Im gleichen Browser</em> diese zweite URL öffnen. Sie redirected per 302 automatisch, weil du schon eingeloggt bist. Die Ziel-URL enthält <code>?code=...</code>:<br>
+                                                <a href="#" id="tokenStep2Link" target="_blank" rel="noopener" class="small text-break"></a>
+                                            </li>
+                                            <li>
+                                                <strong>Schritt 3:</strong> Komplette URL aus deiner Adressleiste (die mit <code>prd.eu-ccapi</code>) kopieren und hier einfügen:
+                                            </li>
+                                        </ol>
+                                    </div>
                                     <div class="mt-2 d-flex gap-2 align-items-center flex-wrap">
                                         <input type="text" class="form-control form-control-sm" id="tokenPasteUrl"
                                                placeholder="https://prd.eu-ccapi.hyundai.com:8080/api/v1/user/oauth2/token?code=..."
@@ -699,6 +713,35 @@
                     const btnPaste = document.getElementById('btnPasteToken');
                     const inPaste = document.getElementById('tokenPasteUrl');
                     const pasteStatus = document.getElementById('tokenPasteStatus');
+                    const detailsEl = document.getElementById('tokenManualDetails');
+                    const step1Link = document.getElementById('tokenStep1Link');
+                    const step2Link = document.getElementById('tokenStep2Link');
+
+                    // Populate the step links when the user opens the manual section
+                    async function loadManualSteps() {
+                        const brand = document.getElementById('vehicle_api_brand').value;
+                        if (!brand || !['kia','hyundai'].includes(brand)) return;
+                        try {
+                            const r = await fetch('/api/vehicle/token/manual/step_urls?brand=' + encodeURIComponent(brand));
+                            if (!r.ok) return;
+                            const d = await r.json();
+                            if (step1Link && d.step1_login_url) {
+                                step1Link.href = d.step1_login_url;
+                                step1Link.textContent = d.step1_login_url;
+                            }
+                            if (step2Link && d.step2_ccsp_url) {
+                                step2Link.href = d.step2_ccsp_url;
+                                step2Link.textContent = d.step2_ccsp_url;
+                            }
+                            if (inPaste && d.expected_prefix) {
+                                inPaste.placeholder = d.expected_prefix + '?code=...';
+                            }
+                        } catch(e) { /* noop */ }
+                    }
+                    if (detailsEl) {
+                        detailsEl.addEventListener('toggle', () => { if (detailsEl.open) loadManualSteps(); });
+                    }
+
                     if (btnPaste && inPaste) {
                         btnPaste.addEventListener('click', async () => {
                             const url = inPaste.value.trim();
