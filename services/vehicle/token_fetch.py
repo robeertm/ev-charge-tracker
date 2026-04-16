@@ -257,8 +257,18 @@ def _do_fetch(brand_key):
         import traceback
         tb = traceback.format_exc()
         logger.error(f"token_fetch failed:\n{tb}")
-        msg = str(e) or type(e).__name__
-        _fetch_state.update(running=False, error=f'{type(e).__name__}: {msg}')
+        exc_name = type(e).__name__
+        msg = str(e) or exc_name
+        if exc_name == 'InvalidSessionIdException' or 'invalid session id' in msg.lower():
+            friendly = (
+                'Browser-Session beendet. Bitte das Browserfenster in noVNC '
+                'NICHT schließen während der Token geholt wird — Selenium '
+                'braucht es für den kompletten Flow. Erneut versuchen. '
+                'Alternativ: "Token manuell eingeben" unten benutzen.'
+            )
+            _fetch_state.update(running=False, error=friendly)
+        else:
+            _fetch_state.update(running=False, error=f'{exc_name}: {msg}')
 
 
 def start_fetch(brand_key):
@@ -267,6 +277,55 @@ def start_fetch(brand_key):
     t = threading.Thread(target=_do_fetch, args=(brand_key,), daemon=True)
     t.start()
     return True
+
+
+def exchange_manual_url(brand_key: str, url: str) -> tuple[bool, str, str | None]:
+    """Manual fallback when Selenium can't complete the flow.
+
+    The user logs in in their own browser, copies the final URL (the one
+    containing ?code=...) from the address bar, pastes it here. We extract
+    the code and POST to the token endpoint — no Selenium needed.
+
+    Returns (ok, message, refresh_token_or_None).
+    """
+    cfg = BRAND_CONFIG.get(brand_key)
+    if not cfg:
+        return False, f'Unbekannte Marke: {brand_key}', None
+
+    match = re.search(r'code=([^&\s]+)', url or '')
+    if not match:
+        return False, 'Keine `code=` Query-Parameter in der URL gefunden.', None
+    code = match.group(1)
+
+    token_url = f"{cfg['base_url']}token"
+    try:
+        import requests as req
+        resp = req.post(token_url, data={
+            'grant_type': 'authorization_code',
+            'code': code,
+            'redirect_uri': cfg['redirect_final'],
+            'client_id': cfg['client_id'],
+            'client_secret': cfg.get('client_secret', 'secret'),
+        }, timeout=15)
+    except Exception as e:
+        return False, f'Token-POST fehlgeschlagen: {type(e).__name__}: {str(e)[:200]}', None
+
+    if resp.status_code == 200:
+        tokens = resp.json()
+        rt = tokens.get('refresh_token')
+        if rt:
+            # Also store it in the shared state so the UI picks it up via
+            # the same polling endpoint as the Selenium path.
+            _fetch_state.update(
+                running=False, status='Token erfolgreich (manuell)!',
+                token=rt, error=None,
+            )
+            return True, 'Token erfolgreich', rt
+        return False, f'Token-Endpoint gab 200 aber kein refresh_token: {str(tokens)[:300]}', None
+    return False, (
+        f'Token-Austausch fehlgeschlagen. Status {resp.status_code}. '
+        f'Body: {resp.text[:300]}'
+    ), None
 
 
 def cancel_fetch():

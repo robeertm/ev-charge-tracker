@@ -1,5 +1,22 @@
 # Changelog
 
+## v2.18.0 (2026-04-16)
+
+### Manuelle URL-Paste als Fallback für Kia/Hyundai-Token + bessere InvalidSessionId-Meldung
+
+Zwei Themen:
+
+**1. InvalidSessionIdException-Handling.** Wenn der Nutzer während des Selenium-Flows das Browserfenster im noVNC schließt (oder Chromium abstürzt), wirft Selenium `InvalidSessionIdException` mit längerem Stacktrace. Bisher landete der Raw-Stacktrace im UI. Jetzt: spezifische Erkennung des Fehlers plus freundliche Meldung „Browser-Session beendet. Bitte das Browserfenster nicht schließen während der Token geholt wird."
+
+**2. Manueller Paste-Fallback.** Wenn Selenium aus irgendeinem Grund crasht, hängt oder vom Nutzer gekillt wird, musste bisher der komplette Prozess neu gestartet werden. Neu: unter dem „Token holen"-Button gibt's ein aufklappbares `<details>`-Element „Manueller Fallback: URL mit Code einfügen". Workflow:
+1. Nutzer öffnet Kia/Hyundai-Login in seinem eigenen Browser (Mac/iPhone, egal wo)
+2. Loggt sich ein, lässt den Flow durchlaufen, landet auf der URL mit `?code=...` (bei Hyundai: `prd.eu-ccapi.hyundai.com:8080/.../oauth2/token?code=...`)
+3. Kopiert die URL aus der Adressleiste
+4. Fügt sie in das neue Textfeld in der App ein, klickt „Token aus URL holen"
+5. App extrahiert den Code per Regex, POSTet an den Token-Endpoint, speichert den Refresh-Token im Passwort-Feld
+
+Völlig unabhängig vom Selenium-Pfad, funktioniert auch wenn Chromium/noVNC down sind, ARM-Hosts wo ChromeDriver Probleme macht, etc. Neue Route `POST /api/vehicle/token/manual`, neue Funktion `exchange_manual_url()` in `token_fetch.py`. 3 Übersetzungs-Keys pro Sprache.
+
 ## v2.17.7 (2026-04-16)
 
 ### Hyundai Token-Fetch: fehlender 2. Authorize-Schritt (endgültiger Fix)

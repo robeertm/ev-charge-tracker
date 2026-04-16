@@ -378,6 +378,20 @@
                                 <div class="mt-2 text-muted" style="font-size:0.75rem">
                                     {{ t('set.api_token_manual') }}
                                 </div>
+                                <hr class="my-2">
+                                <details>
+                                    <summary class="small fw-bold" style="cursor:pointer;">{{ t('set.api_token_paste_title') }}</summary>
+                                    <div class="mt-2 small text-muted">{{ t('set.api_token_paste_desc') }}</div>
+                                    <div class="mt-2 d-flex gap-2 align-items-center flex-wrap">
+                                        <input type="text" class="form-control form-control-sm" id="tokenPasteUrl"
+                                               placeholder="https://prd.eu-ccapi.hyundai.com:8080/api/v1/user/oauth2/token?code=..."
+                                               style="min-width:300px; flex:1;">
+                                        <button type="button" class="btn btn-outline-success btn-sm" id="btnPasteToken">
+                                            <i class="bi bi-clipboard-check"></i> {{ t('set.api_token_paste_btn') }}
+                                        </button>
+                                    </div>
+                                    <div id="tokenPasteStatus" class="small mt-1"></div>
+                                </details>
                             </div>
                         </div>
 
@@ -679,6 +693,39 @@
                         statusEl.textContent = '';
                         stopPolling();
                     });
+
+                    // Manual paste fallback: user copies the ?code=... URL
+                    // from their browser and submits it here.
+                    const btnPaste = document.getElementById('btnPasteToken');
+                    const inPaste = document.getElementById('tokenPasteUrl');
+                    const pasteStatus = document.getElementById('tokenPasteStatus');
+                    if (btnPaste && inPaste) {
+                        btnPaste.addEventListener('click', async () => {
+                            const url = inPaste.value.trim();
+                            if (!url) { pasteStatus.innerHTML = '<span class="text-danger">URL leer</span>'; return; }
+                            pasteStatus.innerHTML = '<span class="text-primary"><span class="spinner-border spinner-border-sm me-1"></span>Tausche Code gegen Token...</span>';
+                            btnPaste.disabled = true;
+                            try {
+                                const brand = document.getElementById('vehicle_api_brand').value;
+                                const r = await fetch('/api/vehicle/token/manual', {
+                                    method: 'POST',
+                                    headers: {'Content-Type': 'application/json'},
+                                    body: JSON.stringify({brand, url}),
+                                });
+                                const d = await r.json();
+                                if (r.ok && d.success) {
+                                    pasteStatus.innerHTML = '<span class="text-success fw-bold"><i class="bi bi-check-circle"></i> Token gespeichert. Seite wird neu geladen...</span>';
+                                    setTimeout(() => location.reload(), 1500);
+                                } else {
+                                    pasteStatus.innerHTML = '<span class="text-danger">' + (d.error || 'Fehler') + '</span>';
+                                    btnPaste.disabled = false;
+                                }
+                            } catch(e) {
+                                pasteStatus.innerHTML = '<span class="text-danger">' + e.message + '</span>';
+                                btnPaste.disabled = false;
+                            }
+                        });
+                    }
                 })();
 
                 // Sync status polling

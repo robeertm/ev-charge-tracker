@@ -1297,6 +1297,23 @@ def register_routes(app):
         cancel_fetch()
         return jsonify({'success': True})
 
+    @app.route('/api/vehicle/token/manual', methods=['POST'])
+    def api_vehicle_token_manual():
+        """Manual fallback: user pastes the URL with ?code=... from their own
+        browser, we extract the code and exchange for a refresh_token."""
+        data = request.get_json() or {}
+        brand = data.get('brand') or AppConfig.get('vehicle_api_brand', '')
+        url = data.get('url') or ''
+        if brand not in ('kia', 'hyundai'):
+            return jsonify({'error': 'Nur für Kia/Hyundai verfügbar'}), 400
+        from services.vehicle.token_fetch import exchange_manual_url
+        ok, msg, token = exchange_manual_url(brand, url)
+        if ok and token:
+            AppConfig.set('vehicle_api_brand', brand)
+            AppConfig.set('vehicle_api_password', token)
+            return jsonify({'success': True, 'message': msg})
+        return jsonify({'error': msg}), 400
+
     @app.route('/api/vehicle/install', methods=['POST'])
     def api_vehicle_install():
         """Install vehicle API packages via pip."""
