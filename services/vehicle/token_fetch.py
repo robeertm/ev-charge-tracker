@@ -157,49 +157,67 @@ def _do_fetch(brand_key):
 
             import time
 
-            # ── STEP 1: wait for login success ────────────────────────
-            # Both flows wait for a CSS selector on the post-login landing
-            # page (Kia: logout link on kia.com; Hyundai: button.mail_check
-            # or button.ctb_button on the CTB portal). The browser will NOT
-            # auto-navigate to the CCSP redirect on its own — we drive it
-            # there manually in step 2.
+            # ── STEP 1: wait for the login chain to land somewhere ─────
+            # Three possible landing URLs we accept as "login done":
+            #   (a) redirect_final host + code=  → chain auto-completed
+            #       (observed on Hyundai CTB: IdP session + CCSP cookies
+            #       let the browser redirect all the way through in one
+            #       shot to prd.eu-ccapi.hyundai.com with code=...)
+            #   (b) login_redirect host (ctbapi... or kia oneid callback)
+            #       → intermediate landing, we need step 2 to get the code
+            #   (c) Kia: logout-link selector on the kia.com landing page
+            #       → same as (b), need step 2
+            # We do NOT wait for the old button.mail_check/ctb_button
+            # selectors — those are not present on upstream's post-login
+            # JSON blob and were the root cause of past 5-min timeouts.
+            final_host = cfg['redirect_final'].split('://', 1)[1].split('/', 1)[0]
+            login_redirect_host = cfg['login_redirect'].split('://', 1)[1].split('/', 1)[0]
+
+            def _login_landed(drv):
+                url = drv.current_url or ''
+                if final_host in url and 'code=' in url:
+                    return 'final'
+                if login_redirect_host in url and ('code=' in url or 'login_success=y' in url):
+                    return 'landing'
+                if cfg['flow'] == 'oneid':
+                    try:
+                        if drv.find_elements(By.CSS_SELECTOR, cfg['success_selector']):
+                            return 'landing'
+                    except Exception:
+                        pass
+                return False
+
             wait = WebDriverWait(driver, 300)  # 5 min max for user + reCAPTCHA
             try:
-                wait.until(EC.presence_of_element_located(
-                    (By.CSS_SELECTOR, cfg['success_selector'])))
+                landing = wait.until(_login_landed)
             except Exception as wait_exc:
                 last_url = driver.current_url if driver else '(browser down)'
                 raise RuntimeError(
-                    f'Timeout beim Warten auf Login-Success (Selector '
-                    f'"{cfg["success_selector"]}"). Letzte URL: {last_url[:300]}. '
+                    f'Timeout beim Warten auf Login-Redirect. '
+                    f'Letzte URL: {last_url[:300]}. '
                     f'Original: {type(wait_exc).__name__}: {str(wait_exc)[:200]}'
                 )
-            _fetch_state['status'] = 'Login erkannt, hole Auth-Code...'
 
-            # ── STEP 2: drive the browser to the CCSP authorize URL ────
-            # Uses the real API client_id (6d477c38-... for Hyundai). Because
-            # the user now has an IdP session cookie from step 1, this second
-            # authorize silently 302-redirects to redirect_final with code=Y.
-            # For Hyundai the final URL renders a JSON body
-            # {"result":"E","message":"url is not defined"} — that is the
-            # server's pseudo-error for a codeless landing page, NOT a real
-            # failure. We only care about what's in the URL bar.
-            driver.get(redirect_url)
-
-            # ── STEP 3: poll current_url for the code ─────────────────
-            # The redirect chain can take a moment — poll up to 15s like
-            # the upstream RustyDust script instead of a single sleep.
-            current_url = ''
-            for _ in range(15):
-                current_url = driver.current_url
-                if 'code=' in current_url and cfg['redirect_final'].split('?')[0] in current_url:
-                    break
-                time.sleep(1)
+            # ── STEP 2: if we're on the intermediate landing page, drive
+            # to the CCSP authorize URL so the IdP session cookie gets
+            # exchanged for a real CCSP code. Skip this when the chain
+            # already auto-completed.
+            current_url = driver.current_url or ''
+            if landing != 'final':
+                _fetch_state['status'] = 'Login erkannt, hole Auth-Code...'
+                driver.get(redirect_url)
+                for _ in range(15):
+                    current_url = driver.current_url or ''
+                    if 'code=' in current_url and final_host in current_url:
+                        break
+                    time.sleep(1)
+                else:
+                    raise RuntimeError(
+                        f'Kein Redirect zur CCSP-URL nach Login. '
+                        f'Letzte URL: {current_url[:300]}'
+                    )
             else:
-                raise RuntimeError(
-                    f'Kein Redirect zur CCSP-URL nach Login. '
-                    f'Letzte URL: {current_url[:300]}'
-                )
+                _fetch_state['status'] = 'Auto-Chain erkannt, extrahiere Code...'
 
             match = re.search(r'code=([^&]+)', current_url)
             if not match:
@@ -321,10 +339,11 @@ def exchange_manual_url(brand_key: str, url: str) -> tuple[bool, str, str | None
 
     # Reject the ctbapi URL explicitly — that's the first-stage code which
     # belongs to the login_client_id and isn't valid at our token endpoint.
-    # Users frequently paste it because it's the URL they see right after
-    # login, and the error from the IdP ("code not exist in redis") isn't
-    # obvious.
-    if 'ctbapi.hyundai-europe.com' in url or 'login_success=y' in url:
+    # We detect it by the host, NOT by `login_success=y` — that flag is
+    # also present on the valid final URL (prd.eu-ccapi.hyundai.com).
+    final_host = cfg['redirect_final'].split('://', 1)[1].split('/', 1)[0]
+    login_redirect_host = cfg['login_redirect'].split('://', 1)[1].split('/', 1)[0]
+    if login_redirect_host in url and final_host not in url:
         step2 = get_manual_step2_url(brand_key) or ''
         return False, (
             'Falsche URL. Das ist die Login-URL (Stufe 1), nicht die finale '

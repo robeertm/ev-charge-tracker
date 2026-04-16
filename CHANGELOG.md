@@ -1,5 +1,17 @@
 # Changelog
 
+## v2.18.3 (2026-04-16)
+
+### Fix: Hyundai-Selenium wartete auf nicht existierenden Button, obwohl Login-Chain schon durch war
+
+Screenshots vom User zeigten die Ursache des 5-Min-Timeouts: **Der Browser landet bei Hyundai direkt auf der finalen URL** `prd.eu-ccapi.hyundai.com:8080/api/v1/user/oauth2/token?code=...&state=ccsp&login_success=y` — also mit gültigem CCSP-Code in der Adressleiste. Aber Selenium wartete auf den CSS-Selector `button.mail_check, button.ctb_button`, der auf dieser JSON-Response-Seite überhaupt nicht existiert. Ergebnis: 300 Sekunden Leerlauf trotz erfolgreich erhaltenem Code.
+
+Research-Agent hat verbatim im Upstream-Script [`hyundai_kia_connect_api/Hyundai Token Solution/hyundai_token.py`](https://github.com/Hyundai-Kia-Connect/hyundai_kia_connect_api/tree/master/Hyundai%20Token%20Solution) nachgesehen: die Selektoren `button.mail_check`/`button.ctb_button` **stehen nicht im Upstream-Code**. Upstream benutzt einen Terminal-`input("Press ENTER after login is complete...")`-Gate, kein Selenium-Wait. Die Selektoren waren also eine Eigenkonstruktion, die auf einer Seite suchte, die der Browser schon längst verlassen hatte.
+
+Fix: Statt auf einen CSS-Selector wird jetzt auf das **URL-Muster** gewartet — entweder landet der Browser direkt auf dem `redirect_final`-Host (Hyundai: Auto-Chain durch Session-Cookies) oder auf dem `login_redirect`-Host (Kia: Zwischenlandung auf kia.com, danach ist Schritt 2 nötig). Die Logik unterscheidet beide Fälle und springt direkt zur Code-Extraktion wenn die Chain schon durch ist, oder macht den zweiten `driver.get()` sonst. Kia's `a[class='logout user']`-Selector bleibt als zusätzlicher Trigger für den oneid-Flow erhalten.
+
+Zweiter Fix im gleichen Zug: die manuelle Paste-URL-Validierung lehnte URLs mit `login_success=y` als „Stufe 1" ab — aber `login_success=y` steht auch in der finalen `prd.eu-ccapi`-URL. Jetzt wird nur noch am **Host** unterschieden (`ctbapi.hyundai-europe.com` = Stufe 1, sonst akzeptiert).
+
 ## v2.18.2 (2026-04-16)
 
 ### Fix: Step-2-URL mit unencoded redirect_uri löst 400 Bad Request aus
