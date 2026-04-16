@@ -1,12 +1,22 @@
-"""VW Group connectors (VW, Skoda, Seat, Cupra, Audi) via CarConnectivity."""
+"""VW Group connectors (VW, Skoda, Seat, Cupra, Audi) via CarConnectivity.
+
+Newer carconnectivity releases (>= 0.11) don't re-export `CarConnectivity`
+at the top of the package, it lives in the `carconnectivity.carconnectivity`
+submodule. Old releases had it on the top level. Try both so upgrades and
+downgrades don't break.
+"""
 import json
 import os
 import tempfile
 
 try:
-    import carconnectivity
+    try:
+        from carconnectivity.carconnectivity import CarConnectivity
+    except ImportError:
+        from carconnectivity import CarConnectivity  # type: ignore
     HAS_CARCONNECTIVITY = True
 except ImportError:
+    CarConnectivity = None  # type: ignore
     HAS_CARCONNECTIVITY = False
 
 from .base import VehicleConnector, VehicleStatus
@@ -51,7 +61,7 @@ class VAGConnector(VehicleConnector):
     def _get_cc(self):
         if self._cc is None:
             config = self._build_config()
-            self._cc = carconnectivity.CarConnectivity(
+            self._cc = CarConnectivity(
                 config=config,
                 tokenstore_file=self._tokenstore,
             )

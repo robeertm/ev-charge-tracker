@@ -1,5 +1,13 @@
 # Changelog
 
+## v2.17.3 (2026-04-16)
+
+### Fix: VAG-Connector — Importpfad für CarConnectivity-Klasse
+
+In `carconnectivity >= 0.11` ist die `CarConnectivity`-Klasse nicht mehr im Top-Level-Package, sondern im Submodul `carconnectivity.carconnectivity`. Der alte Import `carconnectivity.CarConnectivity(...)` warf: `module 'carconnectivity' has no attribute 'CarConnectivity'` — was mit v2.17.1 (dem Error-Surfacing-Fix) jetzt überhaupt erst sichtbar wurde; in v2.17.0 und davor hat das generische „Benutzer und Passwort prüfen"-Flash den eigentlichen Fehler verdeckt.
+
+Fix: Import mit Fallback — erst das neue Submodul probieren, dann das alte Top-Level-Import. Damit funktioniert's auf beiden Library-Versionen.
+
 ## v2.17.2 (2026-04-16)
 
 ### Fix: Hyundai Token-Fetch hängt im Selenium-Wait
