@@ -36,6 +36,21 @@ _set_req_log(False)
 
 
 def create_app(config_class=Config):
+    # ── Update safety net (must run BEFORE anything else) ─────────
+    # If the previous boot was an update and we've already crashed N
+    # times, this will restore the pre-update backup and os._exit(0)
+    # so the supervisor picks up the rolled-back files. Must run
+    # before db.create_all() — a broken migration is exactly the kind
+    # of thing that should trigger a rollback.
+    try:
+        from services.update_service import pre_boot_rollback_check
+        pre_boot_rollback_check()
+    except SystemExit:
+        raise
+    except Exception as _e:
+        # Never let the safety net itself bring the app down.
+        logger.error(f'pre_boot_rollback_check failed (continuing): {_e}')
+
     app = Flask(__name__)
     app.config.from_object(config_class)
     db.init_app(app)
@@ -237,6 +252,17 @@ def _get_custom_operators_text():
     """Render the stored custom-operators list as newline-separated text
     for the settings textarea."""
     return '\n'.join(_get_custom_operators())
+
+
+def _get_last_rollback():
+    """Read LAST_ROLLBACK.json if present so the settings page can
+    surface a banner explaining the auto-rollback to the user. Returns
+    None when nothing happened (common case)."""
+    try:
+        from services.update_service import read_last_rollback
+        return read_last_rollback()
+    except Exception:
+        return None
 
 
 def _json_logical_field_labels_for_ui():
@@ -1297,6 +1323,7 @@ def register_routes(app):
                                custom_operators_text=_get_custom_operators_text(),
                                operators_builtin=DEFAULT_OPERATORS,
                                _json_logical_field_labels=_json_logical_field_labels_for_ui(),
+                               last_rollback=_get_last_rollback(),
                                app_version=Config.APP_VERSION)
 
     # ── VEHICLE RAW-DATA VIEWER ────────────────────────────────
@@ -1755,6 +1782,18 @@ def register_routes(app):
                          mimetype='application/x-x509-ca-cert')
 
     # ── UPDATE ENDPOINTS ───────────────────────────────────────
+    @app.route('/api/update/last-rollback', methods=['GET', 'DELETE'])
+    def api_update_last_rollback():
+        """GET: return the most recent auto-rollback record (or {}).
+        DELETE: acknowledge the rollback — clears LAST_ROLLBACK.json so
+        the dashboard stops showing the banner on the next page load."""
+        from services.update_service import read_last_rollback, clear_last_rollback
+        if request.method == 'DELETE':
+            clear_last_rollback()
+            return jsonify({'ok': True})
+        data = read_last_rollback() or {}
+        return jsonify(data)
+
     @app.route('/api/update/check')
     def api_update_check():
         """Check GitHub for a strictly newer release."""

@@ -148,15 +148,36 @@ def _is_excluded(name: str) -> bool:
     return False
 
 
-def _inline_swap(staging_root: Path) -> bool:
+def _inline_swap(staging_root: Path, new_version: str = '') -> bool:
     """Swap files from staging into the app dir in the current process.
 
     Safe because Python already holds the source as bytecode in memory —
     overwriting the .py files on disk doesn't affect the running interpreter.
     The running process is expected to exit shortly after so a supervisor
     (systemd) restarts it with the new code.
+
+    Before touching files we snapshot the current versions into
+    ``updates/backup_pre_v<OLD>/`` and write UPDATE_PENDING.json so the
+    boot-time rollback guard (``pre_boot_rollback_check``) can revert on
+    repeated crashes.
     """
     app_dir = _app_dir()
+    # Backup first, swap second. If backup fails we bail out rather
+    # than apply an un-rollbackable update.
+    try:
+        from services.update_service import (
+            create_pre_update_backup, write_pending_marker,
+        )
+        backup_dir = create_pre_update_backup(staging_root, Config.APP_VERSION)
+        write_pending_marker(
+            old_version=Config.APP_VERSION,
+            new_version=new_version or '?',
+            backup_dir=backup_dir,
+        )
+    except Exception as e:
+        logger.error(f'pre-update backup failed — aborting update: {e}')
+        return False
+
     try:
         for item in staging_root.iterdir():
             name = item.name
@@ -204,7 +225,7 @@ def _inline_swap(staging_root: Path) -> bool:
     return True
 
 
-def _spawn_helper(staging_root: Path) -> None:
+def _spawn_helper(staging_root: Path, new_version: str = '') -> None:
     """Launch updater_helper.py fully detached from this process.
 
     Prefers the helper script from the **staging** directory (the new
@@ -222,6 +243,8 @@ def _spawn_helper(staging_root: Path) -> None:
         '--wait-pid', str(os.getpid()),
         '--update-deps', '1',
         '--restart', '1',
+        '--old-version', Config.APP_VERSION,
+        '--new-version', new_version or '?',
     ]
     log_path = app_dir / 'updates' / 'updater.log'
     log_path.parent.mkdir(parents=True, exist_ok=True)
@@ -282,12 +305,12 @@ def apply_update(zip_url: str, new_version: str) -> bool:
 
         if _running_under_systemd():
             logger.info("Detected systemd — applying update inline, will exit for restart")
-            if not _inline_swap(staging_root):
+            if not _inline_swap(staging_root, new_version=new_version):
                 return False
             return True
 
         logger.info("Spawning updater_helper")
-        _spawn_helper(staging_root)
+        _spawn_helper(staging_root, new_version=new_version)
         return True
     except Exception as e:
         logger.error(f"Update failed: {e}")

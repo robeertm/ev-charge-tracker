@@ -10,6 +10,22 @@
 {% endblock %}
 
 {% block content %}
+<a href="/settings#updaterCard" id="updateBanner" class="alert alert-warning mb-3 d-none text-decoration-none d-flex align-items-center gap-2" style="border-left: 5px solid #ff9500;">
+    <i class="bi bi-arrow-up-circle-fill fs-4"></i>
+    <div class="flex-grow-1">
+        <div class="fw-bold text-dark">{{ t('dash.update_available_title') }} <span id="updBannerVer" class="text-primary"></span></div>
+        <div class="small text-muted">{{ t('dash.update_available_hint') }}</div>
+    </div>
+    <i class="bi bi-chevron-right text-muted"></i>
+</a>
+<div id="rollbackBanner" class="alert alert-info mb-3 d-none d-flex align-items-start gap-2">
+    <i class="bi bi-arrow-counterclockwise fs-4"></i>
+    <div class="flex-grow-1">
+        <div class="fw-bold">{{ t('dash.rollback_title') }}</div>
+        <div class="small" id="rollbackBannerDetail"></div>
+    </div>
+    <button type="button" class="btn-close" id="rollbackBannerClose" aria-label="Close"></button>
+</div>
 {% if not stats %}
 <div class="text-center py-5">
     <i class="bi bi-database-x display-1 text-muted"></i>
@@ -928,4 +944,61 @@ new Chart(document.getElementById('chartCumulativeCo2'), {
 });
 </script>
 {% endif %}
+
+<script>
+// Update banner + rollback-notice banner. Both poll tiny endpoints on
+// load; nothing depends on them so they're fire-and-forget. Cached in
+// sessionStorage for the duration of the tab so navigating back and
+// forth doesn't spam /api/update/check.
+(function() {
+    const banner = document.getElementById('updateBanner');
+    const verEl  = document.getElementById('updBannerVer');
+    const CACHE_KEY = 'ev_update_check_cache_v1';
+    const CACHE_TTL_MS = 30 * 60 * 1000; // 30 min
+
+    async function fetchUpdateInfo() {
+        const now = Date.now();
+        try {
+            const cached = JSON.parse(sessionStorage.getItem(CACHE_KEY) || 'null');
+            if (cached && (now - cached.t) < CACHE_TTL_MS) return cached.data;
+        } catch(e) {}
+        try {
+            const r = await fetch('/api/update/check', { cache: 'no-store' });
+            if (!r.ok) return null;
+            const data = await r.json();
+            try { sessionStorage.setItem(CACHE_KEY, JSON.stringify({ t: now, data })); } catch(e) {}
+            return data;
+        } catch(e) { return null; }
+    }
+
+    (async function() {
+        const data = await fetchUpdateInfo();
+        if (data && data.update_available && data.latest) {
+            verEl.textContent = 'v' + data.latest;
+            banner.classList.remove('d-none');
+        }
+    })();
+
+    // Rollback notice
+    (async function() {
+        try {
+            const r = await fetch('/api/update/last-rollback', { cache: 'no-store' });
+            if (!r.ok) return;
+            const data = await r.json();
+            if (!data || !data.rolled_back_at) return;
+            const el = document.getElementById('rollbackBanner');
+            const detail = document.getElementById('rollbackBannerDetail');
+            const from = data.rolled_back_from || '?';
+            const to = data.restored_to || '?';
+            const when = data.rolled_back_at || '';
+            detail.textContent = 'v' + from + ' → v' + to + ' · ' + when + ' · ' + (data.reason || '');
+            el.classList.remove('d-none');
+            document.getElementById('rollbackBannerClose').addEventListener('click', async () => {
+                el.classList.add('d-none');
+                try { await fetch('/api/update/last-rollback', { method: 'DELETE' }); } catch(e) {}
+            });
+        } catch(e) {}
+    })();
+})();
+</script>
 {% endblock %}

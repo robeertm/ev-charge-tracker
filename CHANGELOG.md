@@ -1,5 +1,69 @@
 # Changelog
 
+## v2.20.0 (2026-04-16)
+
+### Automatisches Rollback bei kaputtem Update + Dashboard-Update-Banner
+
+Zwei user-gewünschte Features die eng zusammengehören: das Update-Erlebnis wird sichtbarer (wer nicht in die Einstellungen schaut sieht die neue Version) und sicherer (kaputte Updates landen den User nicht in einer nicht-mehr-startenden App).
+
+#### 1. Automatisches Rollback
+
+**Problem:** Wenn ein Update einen Bug einführt der die App nicht mehr starten lässt (Migration crasht, Import-Error, fehlende Dependency), stand der User vor einer toten App ohne Fallback. Systemd versucht neuzustarten, crasht jedesmal, gibt auf — die einzige Lösung war SSH + manueller Git-Checkout.
+
+**Lösung:** Kleiner State-Machine-Guard der auf jedem App-Boot läuft (`services/update_service.py:pre_boot_rollback_check`).
+
+**Flow:**
+1. Vor jedem Update-File-Swap wird ein **Backup der zu überschreibenden Dateien** in `updates/backup_pre_v<OLD>/` angelegt, plus ein `UPDATE_PENDING.json`-Marker mit alter/neuer Version, Backup-Pfad und Attempt-Counter.
+2. Beim App-Boot liest `pre_boot_rollback_check()` den Marker. Drei Fälle:
+   - **Kein Marker** → normaler Boot, nichts zu tun.
+   - **Marker vorhanden, `attempts < 3`** → Counter bumpen, Verification-Timer starten der den Marker nach 60 Sekunden erfolgreicher Laufzeit löscht.
+   - **Marker vorhanden, `attempts >= 3`** → Rollback: Backup zurückswappen, `LAST_ROLLBACK.json` schreiben, `os._exit(0)` — Supervisor startet mit altem Code neu.
+3. Zweite Verteidigungslinie: `updater_helper.py` überwacht nach dem Restart 60 Sekunden lang ob Port 7654 bindet. Wenn nicht → direkter Rollback ohne auf den Boot-Counter zu warten.
+
+**Warum 3 Versuche statt 1?** Transiente Fehler (Port kurz belegt, Race beim sqlite-Open) sollen nicht fälschlich einen Rollback triggern. Erst wenn **drei** Starts in Folge scheitern bevor der 60s-Timer feuern kann, ist die neue Version wirklich kaputt.
+
+**Plattform-agnostisch:** Die Mechanik braucht nichts außer einem Supervisor der bei Crash neu startet. Funktioniert unter systemd (`Restart=always`), unter macOS Terminal+nohup, unter Windows (falls jemand das nutzt).
+
+**Daten-sicher:** `data/`, `venv/`, `.git/`, `logs/`, `updates/` werden vom Backup/Restore grundsätzlich nicht angefasst. Die SQLite-DB des Users bleibt egal was passiert unberührt.
+
+**Von Hand bestätigt mit einer End-to-End-Simulation:**
+- Echte Flask-App in einen Temp-Dir kopiert
+- Backup angelegt, `app.py` durch eine kaputte Version mit `create_app → RuntimeError` ersetzt
+- Drei Boot-Versuche laufen jeweils in die Exception, Counter geht auf 1, 2, 3
+- Vierter Boot triggert Rollback: `app.py` restored, Marker weg, `LAST_ROLLBACK.json` geschrieben
+- Danach bootet die App wieder erfolgreich. DB-Dateigröße unverändert über die ganze Zeit.
+
+**Test-Suite (18 Tests über 4 Szenarien, alle grün vor Release):**
+- `/tmp/test_rollback.py`: 10 Tests der Decision-Logic (no marker, attempts 1→2→3, rollback fires, missing backup, corrupt JSON, read/clear API, backup pruning)
+- `/tmp/test_helper_rollback.py`: 5 Tests der duplizierten Backup/Restore-Pfade im Helper + Port-Watch
+- `/tmp/test_e2e_rollback.py`: echte Flask-App-Boot-Simulation mit absichtlich kaputtem `create_app`
+- API + Template-Smoketest: `/api/update/last-rollback` GET/DELETE, Settings-Banner-Rendering
+
+#### 2. Dashboard-Banner für verfügbare Updates
+
+Oben auf dem Dashboard gibt es jetzt zwei Banner die via JS/AJAX nach dem Laden gefüllt werden:
+
+- **Update-Banner** (gelb, 🔄): erscheint wenn `/api/update/check` eine neue Version meldet. Zeigt „Neue Version verfügbar v2.X.Y". **Klick springt direkt zu `/settings#updaterCard`** — die App-Info-Card hat jetzt die Anker-ID und der Browser scrollt automatisch dorthin.
+- **Rollback-Banner** (blau): erscheint nur einmal falls die App beim letzten Boot automatisch auf die alte Version zurückgekehrt ist. Erklärt von/nach welcher Version. Mit „X"-Button bestätigbar — `DELETE /api/update/last-rollback` löscht die `LAST_ROLLBACK.json`.
+
+Die Update-Check-Antwort wird für 30 Minuten in `sessionStorage` gecached, damit das Herumklicken zwischen Seiten nicht `/api/update/check` pro Pageload aufruft.
+
+**Settings-Seite** bekommt zusätzlich:
+- Anker-ID `updaterCard` für den Deep-Link vom Banner
+- Dauerhaften Hinweis unter den Buttons: „Vor jedem Update wird ein Backup angelegt. Wenn die neue Version nicht hochkommt, wird automatisch zur vorherigen zurückgekehrt."
+- Info-Box mit Details wenn ein `LAST_ROLLBACK.json` existiert
+
+#### Technisch
+
+- Neue Datei [services/update_service.py](services/update_service.py) — Single Source of Truth für die Decision-Logic (`MAX_ATTEMPTS=3`, `VERIFICATION_DELAY_S=60`).
+- [updater.py](updater.py) `_inline_swap` (systemd-Pfad): vor dem File-Swap wird `create_pre_update_backup()` + `write_pending_marker()` aufgerufen.
+- [updater_helper.py](updater_helper.py) (non-systemd Pfad): duplizierte stdlib-only Implementierung der gleichen Backup/Restore-Pfade plus Port-Watch nach Restart. Duplikation bewusst — der Helper muss laufen auch wenn der venv gebrochen ist.
+- Pre-Boot-Check als erstes Statement in [app.py:create_app()](app.py) — VOR `db.create_all()`, weil eine kaputte Migration genau das ist was einen Rollback triggern soll.
+- Maximal 3 Backups werden parallel aufgehoben (älteste per mtime ausgedünnt).
+- 5 neue i18n-Keys (de + en): `dash.update_available_title/hint`, `dash.rollback_title`, `set.app_last_rollback_title`, `set.app_rollback_safety_hint`.
+
+**Wichtiger Hinweis zum ersten Rollout:** Dieses Release v2.20.0 bringt den Schutzmechanismus. Das heißt konkret: **das Update VON v2.19.x AUF v2.20.0 ist noch nicht durch Rollback geschützt** (der alte v2.19.x-Updater kennt den Backup-Schritt noch nicht). Ab v2.20.0 → v2.20.1 greift die Mechanik dann automatisch bei jedem Update.
+
 ## v2.19.2 (2026-04-16)
 
 ### CSV-Import Vorschau: sehen was passiert bevor es passiert
