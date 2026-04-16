@@ -261,7 +261,7 @@
     <div class="card-header bg-white fw-bold d-flex justify-content-between align-items-center flex-wrap gap-2">
         <span><i class="bi bi-clock-history"></i> {{ t('dash.vehicle_history') }}</span>
         <div class="d-flex align-items-center gap-2">
-            <select id="vhRange" class="form-select form-select-sm" style="width:auto;" title="{{ t('dash.vh_range_title') }}">
+            <select id="vhRangeSel" class="form-select form-select-sm" style="width:auto;" title="{{ t('dash.vh_range_title') }}">
                 <option value="1"   {% if vehicle_history_days == 1 %}selected{% endif %}>{{ t('dash.vh_range_1d') }}</option>
                 <option value="7"   {% if vehicle_history_days == 7 %}selected{% endif %}>{{ t('dash.vh_range_7d') }}</option>
                 <option value="30"  {% if vehicle_history_days == 30 %}selected{% endif %}>{{ t('dash.vh_range_30d') }}</option>
@@ -467,7 +467,7 @@
     renderAll(VH);
 
     // ── Range dropdown: AJAX-reload with the chosen window. ─────────
-    const rangeSel = document.getElementById('vhRange');
+    const rangeSel = document.getElementById('vhRangeSel');
     const overlay  = document.getElementById('vhLoadingOverlay');
     const countEl  = document.getElementById('vhCount');
     if (rangeSel) {

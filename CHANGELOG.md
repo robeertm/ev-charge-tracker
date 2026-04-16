@@ -1,5 +1,28 @@
 # Changelog
 
+## v2.20.2 (2026-04-16)
+
+### Hotfix: Fahrzeughistorie — ID-Kollision zerstörte mehrere Plots gleichzeitig
+
+In v2.20.1 hatte ich das neue Zeitraum-Dropdown `<select id="vhRange">` genannt — aber das **Reichweiten-Chart-Canvas** trägt dieselbe ID `<canvas id="vhRange">`. Mit zwei gleichen IDs gibt `document.getElementById('vhRange')` das **erste** Element im DOM zurück: das Select (steht im Card-Header, kommt vor dem Canvas). Chart.js ruft dann `getContext('2d')` auf einem Select-Element auf → TypeError → Rest der IIFE läuft nicht mehr:
+
+- Reichweiten-Chart wird nicht gezeichnet (das ist das Chart mit der kaputten ID)
+- Alle Charts nach Reichweite werden auch nicht gezeichnet (IIFE abgebrochen)
+- Standort-Map wird nicht gezeichnet (wird nach dem Chart-Loop initialisiert)
+- Click-to-Fullscreen-Handler werden nie registriert (wird ganz am Ende der IIFE gemacht) → „Vergrößern geht nicht"
+- Dropdown-Change-Handler fehlt ebenfalls
+
+Das erklärt die drei Symptome auf einmal: „vergrößern geht nicht · Reichweite fehlt · Standort fehlt · alle plots hängen irgendwie zusammen".
+
+**Fix:** Select umbenannt auf `vhRangeSel`. JS-Referenz auf die Dropdown-Location mitgezogen. Canvas behält weiterhin `id="vhRange"` wie in `CHART_DEFS` erwartet, damit der Render-Loop unverändert bleibt.
+
+Automatische Verifikation im Dashboard-HTML:
+- `id="vhRange"` erscheint jetzt genau einmal (Canvas)
+- `id="vhRangeSel"` erscheint genau einmal (Select)
+- JS enthält `getElementById('vhRangeSel')`, nicht mehr `getElementById('vhRange')` im Dropdown-Pfad
+- Alle 7 Chart-IDs sind in CHART_DEFS
+- Modal + 7 klickbare Tiles im DOM
+
 ## v2.20.1 (2026-04-16)
 
 ### Fahrzeughistorie: Klick → Vollbild + Zeitraum-Wahl
