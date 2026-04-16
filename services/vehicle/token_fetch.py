@@ -108,10 +108,10 @@ def _do_fetch(brand_key):
         return
 
     login_url = _build_login_url(cfg)
-    redirect_url = (
-        f"{cfg['base_url']}authorize?response_type=code&client_id={cfg['client_id']}"
-        f"&redirect_uri={cfg['redirect_final']}&lang=de&state=ccsp"
-    )
+    # Shares the same builder as the manual flow so Selenium and manual
+    # paste both hit the exact same URL — and both rely on a properly
+    # URL-encoded redirect_uri.
+    redirect_url = get_manual_step2_url(brand_key)
     token_url = f"{cfg['base_url']}token"
 
     try:
@@ -285,14 +285,21 @@ def get_manual_step2_url(brand_key: str) -> str | None:
 
     The user's browser session from step 1 still has the IdP cookie, so
     this URL silently 302-redirects to the correct landing page without
-    asking for login again. Works identically for Kia and Hyundai."""
+    asking for login again. Works identically for Kia and Hyundai.
+
+    The redirect_uri is URL-encoded here because an unescaped "https://..."
+    inside a query parameter causes some strict OAuth2 servers (notably
+    Hyundai's) to return 400 Bad Request when the URL is used as an
+    `<a href>` click target. Selenium's `driver.get()` normalizes it
+    automatically, a browser click does not."""
     cfg = BRAND_CONFIG.get(brand_key)
     if not cfg:
         return None
+    encoded_redirect = urllib.parse.quote(cfg['redirect_final'], safe='')
     return (
         f"{cfg['base_url']}authorize?response_type=code"
         f"&client_id={cfg['client_id']}"
-        f"&redirect_uri={cfg['redirect_final']}"
+        f"&redirect_uri={encoded_redirect}"
         f"&lang=en&state=ccsp"
     )
 

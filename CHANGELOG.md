@@ -1,5 +1,13 @@
 # Changelog
 
+## v2.18.2 (2026-04-16)
+
+### Fix: Step-2-URL mit unencoded redirect_uri löst 400 Bad Request aus
+
+Beim Klick auf den Step-2-Link in der manuellen Anleitung kam „400 Bad Request — Invalid request". Ursache: der `redirect_uri`-Query-Parameter enthielt unencoded `https://...:8080/api/v1/user/oauth2/token`. Wenn man die URL in Selenium's `driver.get()` schickt, normalisiert Chromium das automatisch — bei einem `<a href>`-Click aus dem UI schickt der Browser die URL aber roh, und Hyundai's OAuth-Server ist streng genug den Request abzulehnen.
+
+Fix: `get_manual_step2_url()` benutzt jetzt `urllib.parse.quote(cfg['redirect_final'], safe='')` für den `redirect_uri`-Wert. Gleiche URL wird auch im Selenium-Pfad (`_do_fetch`) verwendet — vorher hatte dieser Pfad einen separaten Builder, was riskant war bei zukünftigen Änderungen. Jetzt ein Builder, eine Quelle der Wahrheit.
+
 ## v2.18.1 (2026-04-16)
 
 ### Manueller Token-Flow: 3-Schritt-Anleitung mit klickbaren Step-Links
