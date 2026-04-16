@@ -1180,7 +1180,7 @@ def register_routes(app):
                         connector = get_connector(brand, creds)
                         status = connector.get_status(force=force)
                         _save_vehicle_sync(status, _get_battery_kwh(),
-                                           raw_json=_json.dumps(status.raw_data))
+                                           raw_json=_json.dumps(status.raw_data, default=str))
                         log_sync_result(status,
                                         mode_label='force' if force else 'cached',
                                         source='settings')
@@ -1609,7 +1609,7 @@ def register_routes(app):
             connector = get_connector(brand, creds)
             s = connector.get_status(force=force)
             sync = _save_vehicle_sync(s, _get_battery_kwh(),
-                                      raw_json=_json.dumps(s.raw_data))
+                                      raw_json=_json.dumps(s.raw_data, default=str))
             log_sync_result(s,
                             mode_label='force' if force else 'cached',
                             source='dashboard')
@@ -1879,7 +1879,7 @@ def register_routes(app):
                                 connector = get_connector(captured_brand, creds)
                                 status = connector.get_status(force=True)
                                 _save_vehicle_sync(status, _get_battery_kwh(),
-                                                   raw_json=_json.dumps(status.raw_data))
+                                                   raw_json=_json.dumps(status.raw_data, default=str))
                                 log_sync_result(status, mode_label='force',
                                                 source='trips-auto')
                             except Exception as e:
@@ -2041,7 +2041,7 @@ def register_routes(app):
             connector = get_connector(brand, creds)
             status = connector.get_status(force=True)
             sync = _save_vehicle_sync(status, _get_battery_kwh(),
-                                      raw_json=_json.dumps(status.raw_data))
+                                      raw_json=_json.dumps(status.raw_data, default=str))
             log_sync_result(status, mode_label='force', source='manual')
             return jsonify({
                 'ok': True,

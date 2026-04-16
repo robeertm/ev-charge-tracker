@@ -1,5 +1,17 @@
 # Changelog
 
+## v2.19.1 (2026-04-16)
+
+### Fix: Vehicle sync crash „Object of type DailyDrivingStats is not JSON serializable"
+
+Der enriched `raw_data`-Dump aus v2.19.0 konnte das Kia/Hyundai-Feld `daily_stats` (Liste von `DailyDrivingStats`-Objekten aus der SDK) nicht serialisieren.
+
+**Root Cause**: Mein Introspection-Check in [connector_hyundai_kia.py:_dump_vehicle](services/vehicle/connector_hyundai_kia.py) testete Serialisierbarkeit mit `json.dumps(val, default=str)` — aber `default=str` stringified **jedes** unbekannte Objekt still und der Check passierte immer. Gespeichert wurde dann das Original-Objekt; erst wenn später `json.dumps(raw_data)` ohne default-Argument aufgerufen wurde, knallte es.
+
+**Fix**: Die Introspection macht jetzt einen echten Round-Trip `json.loads(json.dumps(val, default=str))` — das erzeugt eine wirklich JSON-sichere Kopie (nested `DailyDrivingStats` → String-Repr). Als Schutzgurt bekommen alle fünf Call-Sites von `json.dumps(raw_data)` (in `services/vehicle/sync_service.py` und vier Stellen in `app.py`) zusätzlich `default=str`, damit eine zukünftige Regression nicht wieder den Sync crashed.
+
+Regression-getestet mit einem Mock-Vehicle das `daily_stats = [DailyDrivingStats(...), …]` trägt plus nested dict mit Objekten drin → Dump jetzt voll JSON-safe, keine Exception mehr.
+
 ## v2.19.0 (2026-04-16)
 
 ### Großes Update: Datensicherheit beim CSV-Import, Rohdatenviewer, Bearbeiten-Seite komplett, Anbieter-Dropdown

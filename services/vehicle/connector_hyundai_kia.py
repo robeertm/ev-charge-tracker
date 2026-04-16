@@ -93,8 +93,14 @@ def _dump_vehicle(vehicle):
         elif isinstance(val, (list, tuple, dict)):
             try:
                 import json as _j
-                _j.dumps(val, default=str)
-                out[key] = val if not isinstance(val, tuple) else list(val)
+                # Round-trip through json with default=str so the stored
+                # value is **truly** JSON-safe. A bare `dumps(val,
+                # default=str)` check is misleading: default=str silently
+                # stringifies any unknown object (e.g. DailyDrivingStats
+                # from hyundai_kia_connect_api), so the check passes —
+                # but if we then keep the original val, a later naive
+                # `json.dumps(raw_data)` without default would crash.
+                out[key] = _j.loads(_j.dumps(val, default=str))
             except (TypeError, ValueError):
                 out[key] = str(val)[:500]
         else:

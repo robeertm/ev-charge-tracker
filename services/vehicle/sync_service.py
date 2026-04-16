@@ -192,7 +192,7 @@ def _do_sync(app):
 
         from app import _save_vehicle_sync, _get_battery_kwh
         sync = _save_vehicle_sync(status, _get_battery_kwh(),
-                                  raw_json=json.dumps(status.raw_data))
+                                  raw_json=json.dumps(status.raw_data, default=str))
 
         log_sync_result(status, mode_label=mode_label, source='bg-loop')
         return sync
