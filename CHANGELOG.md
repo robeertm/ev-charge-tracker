@@ -1,5 +1,15 @@
 # Changelog
 
+## v2.17.5 (2026-04-16)
+
+### Fix: Hyundai Token-POST benutzt falsches `redirect_uri`
+
+Hyundai-Token-Endpoint gab 400 zurück mit `"Mismatched token redirect uri. authorize: https://ctbapi.hyundai-europe.com/api/auth token: https://prd.eu-ccapi.hyundai.com:8080/api/v1/user/oauth2/token"`. OAuth2 verlangt, dass der `redirect_uri`-Parameter beim Token-Austausch **exakt** gleich ist wie beim vorangehenden Authorize-Request.
+
+Mein Code hat blind `cfg['redirect_final']` für den POST benutzt — das stimmt für Kia (dessen zweiter Authorize-Schritt tatsächlich mit `redirect_final` als redirect_uri läuft), aber nicht für Hyundai CTB. Hyundai hat nur **einen** Authorize-Schritt mit `redirect_uri=login_redirect` (`ctbapi.hyundai-europe.com/api/auth`). Der Browser landet danach zwar auf `prd.eu-ccapi.hyundai.com:8080/.../oauth2/token?code=...` (das ist das CTB-Display-URL), aber der Code wurde von idpconnect gegen `ctbapi...` ausgestellt.
+
+Fix: beim Token-POST wird pro Flow entschieden — `ctb` → `login_redirect`, `oneid` (Kia) → `redirect_final`. Kia bleibt byte-genau wie vorher.
+
 ## v2.17.4 (2026-04-16)
 
 ### Hyundai-Token-Fetch: URL-Match robuster + bessere Fehlermeldungen

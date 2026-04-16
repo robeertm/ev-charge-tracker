@@ -199,15 +199,28 @@ def _do_fetch(brand_key):
             code = match.group(1)
             _fetch_state['status'] = f'Code extrahiert, tausche gegen Token...'
 
-            # Exchange code for tokens. Kia's client_secret is literally
-            # "secret", Hyundai's is a real 48-char string — both come from
-            # the brand config dict so we never hard-code the wrong one.
+            # OAuth2 requires the redirect_uri in the token POST to match
+            # EXACTLY the one used during the authorize step.
+            #   - Kia oneid: two authorize steps, the 2nd uses redirect_final
+            #     (prd.eu-ccapi.kia.com/.../oauth2/redirect) as redirect_uri
+            #     — that's what the code was issued for.
+            #   - Hyundai CTB: single authorize step with redirect_uri =
+            #     login_redirect (ctbapi.hyundai-europe.com/api/auth). The
+            #     browser eventually lands on prd.eu-ccapi.hyundai.com to
+            #     display the code, but the code was issued against ctbapi.
+            token_redirect_uri = (
+                cfg['login_redirect'] if cfg['flow'] == 'ctb'
+                else cfg['redirect_final']
+            )
+
+            # Kia's client_secret is literally "secret", Hyundai's is a real
+            # 48-char string — both come from the brand config dict.
             import requests as req
             try:
                 resp = req.post(token_url, data={
                     'grant_type': 'authorization_code',
                     'code': code,
-                    'redirect_uri': cfg['redirect_final'],
+                    'redirect_uri': token_redirect_uri,
                     'client_id': cfg['client_id'],
                     'client_secret': cfg.get('client_secret', 'secret'),
                 }, timeout=15)
