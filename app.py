@@ -1059,6 +1059,17 @@ def register_routes(app):
     # ── SETTINGS ───────────────────────────────────────────────
     @app.route('/settings', methods=['GET', 'POST'])
     def settings():
+        # Preserve the section the user was in when they hit "save" — the
+        # hidden `return_section` field is injected by settings.html JS.
+        # Only whitelisted `sec-*` ids make it into the redirect to keep
+        # response-splitting/open-redirect attacks off the table.
+        def _settings_url_with_section():
+            sec = (request.form.get('return_section') or '').strip()
+            base = url_for('settings')
+            if sec.startswith('sec-') and all(c.isalnum() or c in '-_' for c in sec):
+                return f'{base}#{sec}'
+            return base
+
         if request.method == 'POST':
             action = request.form.get('action')
 
@@ -1083,7 +1094,7 @@ def register_routes(app):
                 AppConfig.set('app_language', lang)
                 from services.i18n import set_language
                 set_language(lang)
-                return redirect(url_for('settings'))
+                return redirect(_settings_url_with_section())
 
             elif action == 'save_car':
                 AppConfig.set('car_model', request.form.get('car_model', '').strip())
@@ -1331,7 +1342,7 @@ def register_routes(app):
                 else:
                     flash(t('flash.no_brand_configured'), 'warning')
 
-            return redirect(url_for('settings'))
+            return redirect(_settings_url_with_section())
 
         # Vehicle API brands (only those with installed dependencies)
         try:

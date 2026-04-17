@@ -1,5 +1,23 @@
 # Changelog
 
+## v2.23.0 (2026-04-17)
+
+### Settings page: sidebar navigation, scroll restore, alternating section tint
+
+The settings page had grown to fifteen cards stacked in a single long column. Finding a specific section meant scrolling, and saving inside a section always bounced the user back to the top of the page. Both are fixed.
+
+**Navigation.** On screens ≥ 992 px a sticky left-hand sidebar lists all fifteen sections (Language, Vehicle, THG, Locations, PV, API, ENTSOE, Operators, Database, SSL, Auth, Notifications, System Updates, Backup, About). Clicking an entry jumps to the section; as the user scrolls, the active entry highlights via IntersectionObserver. Below 992 px the sidebar collapses into a horizontally-scrolling tab bar pinned under the top navbar — no dropdown, no hamburger, just a swipeable strip.
+
+**Scroll restore on save.** Every form inside a settings card now includes the section id on submit, either as a hash appended to the form action (for POSTs that render the page directly) or as a hidden `return_section` field (for the two handlers that redirect — `save_language` and the vehicle-API refresh flow). After the round trip, the browser lands back on the section the user was editing, not at the page top. Section ids are validated server-side against a simple `sec-<alphanum>` whitelist to keep the redirect URL safe.
+
+**Alternating tint.** Every second card gets a subtle background tint (`--bs-tertiary-bg` in light mode, a hair-thin white overlay in dark mode), making the boundaries between sections obvious at a glance.
+
+**Anchor-link compatibility.** Legacy anchors `#updaterCard` (dashboard's update banner) and `#thg` (the THG reminder banner) have been updated to the new scheme (`#sec-app` and `#sec-thg`). External bookmarks to the old names will no longer scroll to the card but will still land on the settings page — the fallback is graceful.
+
+Reference layout borrowed from the Shelly Energy Analyzer project's settings page, adapted to Bootstrap 5 / Jinja instead of the JS-rendered schema used there.
+
+**Deployment note.** This rolls out to `ev-robert` only for initial testing. `ev-dirk` and `ev-mike` stay on v2.22.2 until feedback comes back; GitHub release and tag are held until the bundle grows.
+
 ## v2.22.2 (2026-04-17)
 
 ### Hotfix: Favorites invisible + add-button dead on Tailscale hosts
