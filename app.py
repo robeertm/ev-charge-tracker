@@ -1492,12 +1492,38 @@ def register_routes(app):
     # ── REPORT ─────────────────────────────────────────────────
     @app.route('/report')
     def report():
+        """Interactive report page. The old /report always generated a
+        PDF directly; that flow now lives at /report/export.pdf so the
+        user can pick a range in the UI first."""
+        has_any_data = bool(Charge.query.first()) or bool(db.session.query(
+            db.func.count(db.text('1'))).select_from(db.text('vehicle_trips')).scalar())
+        return render_template('report.html',
+                               has_any_data=has_any_data,
+                               car_model=AppConfig.get('car_model', Config.CAR_MODEL))
+
+    @app.route('/api/report')
+    def api_report():
+        """Range-bounded JSON feed for the /report page's Chart.js plots."""
+        from services.report_range import resolve_range, build_report
+        preset = request.args.get('preset', 'month')
+        start = request.args.get('start')
+        end = request.args.get('end')
+        s, e, label = resolve_range(preset, start, end)
+        data = build_report(s, e)
+        data['label'] = label
+        data['preset'] = preset
+        return jsonify(data)
+
+    @app.route('/report/export.pdf')
+    def report_export_pdf():
+        """Legacy PDF export, kept for users who want a printable copy.
+        Respects the current preset via query params."""
         from services.report_service import generate_report
         from flask import send_file
         pdf_bytes = generate_report()
         if not pdf_bytes:
             flash(t('flash.no_report_data'), 'warning')
-            return redirect(url_for('dashboard'))
+            return redirect(url_for('report'))
         car = AppConfig.get('car_model', 'EV')
         filename = f'EV_Report_{car}_{date.today().strftime("%Y%m%d")}.pdf'
         return send_file(

@@ -1,5 +1,38 @@
 # Changelog
 
+## v2.25.0 (2026-04-17)
+
+### Report: new interactive page with period picker and twelve colourful plots
+
+The old `/report` endpoint used to hand out a PDF immediately, which meant two pain points: no way to pick a time range, and no way to see the numbers without a round-trip through a 10-page document. Rebuilt as a proper interactive view.
+
+**Period picker** at the top: Today, Week (current ISO week), Month, Quarter (current calendar quarter), Half-year (H1 / H2), Year, and "All" (earliest recorded charge/trip through today). Plus a custom-range picker with two date inputs when none of those fit. The bucket size for the X-axis adapts automatically — ≤14 days renders daily bars, ≤95 days weekly (KW-NN), longer spans monthly — so a year chart doesn't become 365 illegible bars and a week chart doesn't collapse to a single one.
+
+**Four headline KPIs:** total kWh, total cost (with €/100 km avg), distance driven (with avg consumption in kWh/100 km), and CO₂ saved vs. an equivalent-distance ICE using the user's configured `fossil_co2_per_km`.
+
+**Three highlight cards** underneath: Euros saved vs. ICE (computed against `ice_cost_per_100km`, default €11.55 — configurable in future), biggest single charge in the window (date, kWh, type, cost), and longest single trip (date, km, minutes, max speed when the SDK reports it).
+
+**Twelve plots**, laid out in a responsive 2-column grid:
+
+1. kWh per bucket — blue bar
+2. Cost per bucket — red bar
+3. km per bucket — green bar
+4. CO₂ per bucket — orange bar
+5. AC / DC / PV split — doughnut, with kWh + count in the tooltip
+6. Consumption over time (kWh/100 km per bucket) — purple filled line
+7. Hour-of-day charging pattern — cyan bar (0 – 23)
+8. Day-of-week pattern — dual-axis bar (kWh) + line (trips), Mon – Sun
+9. Trip-length distribution — green bar (<5 / 5–20 / 20–50 / 50–100 / 100+ km buckets)
+10. Electricity price per charge over time — red scatter, €/kWh on Y
+11. Top charging operators — horizontal bar by kWh, tooltip shows cost and count
+12. Most-visited locations — horizontal bar by parking-event count (home/work/favourite/address)
+
+All plots are rendered client-side via Chart.js 4.4.6 (already a page dependency); the `/api/report?preset=…` endpoint returns a single JSON payload with every series pre-aggregated and pre-rounded so the frontend just has to paint.
+
+**PDF export is preserved** as a "PDF" button on the page — still the original generator at `/report/export.pdf`, so nothing that worked before is gone. The button sits next to the range label so users can download a printable copy of whatever window they have open.
+
+The navbar icon flips from the misleading `bi-file-earmark-pdf` to `bi-bar-chart-line` and the link finally gets a label ("Bericht" / "Report") instead of just "Report". New translation keys: about 45 of them, all under the `report.*` namespace in both `de.json` and `en.json`.
+
 ## v2.24.3 (2026-04-17)
 
 ### Trip log: sequential 2-pointer matcher fixes adjacent-trip cross-matches

@@ -60,8 +60,8 @@
                         </a>
                     </li>
                     <li class="nav-item">
-                        <a class="nav-link" href="/report" title="{{ t('nav.report_title') }}">
-                            <i class="bi bi-file-earmark-pdf"></i> Report
+                        <a class="nav-link {% if request.endpoint == 'report' %}active{% endif %}" href="/report" title="{{ t('nav.report_title') }}">
+                            <i class="bi bi-bar-chart-line"></i> {{ t('nav.report_title') }}
                         </a>
                     </li>
                 </ul>

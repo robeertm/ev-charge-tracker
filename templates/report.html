@@ -1,0 +1,494 @@
+{% extends "base.html" %}
+{% block title %}{{ t('report.title') }} — EV Charge Tracker{% endblock %}
+
+{% block head %}
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.6/dist/chart.umd.min.js"></script>
+<style>
+.report-kpi .kpi-value{font-size:1.7rem;font-weight:700;line-height:1;margin:0.25rem 0}
+.report-kpi .kpi-label{font-size:.72rem;color:var(--bs-secondary-color);text-transform:uppercase;letter-spacing:.04em}
+.report-kpi .kpi-sub{font-size:.72rem;color:var(--bs-secondary-color)}
+.report-kpi{border-radius:.5rem}
+.plot-card{border-radius:.5rem}
+.plot-card .card-header{font-weight:600;border-bottom:1px solid var(--bs-border-color);background:transparent}
+.plot-card .card-body{position:relative;min-height:260px}
+.plot-card canvas{max-height:300px}
+.plot-card.plot-lg canvas{max-height:340px}
+.range-pills .btn{border-radius:999px;padding:.25rem .75rem;font-size:.85rem}
+.range-pills .btn.active{box-shadow:inset 0 0 0 2px rgba(13,110,253,.3)}
+.highlight-card{border-left:4px solid var(--bs-primary);border-radius:.4rem;padding:.6rem .8rem}
+.highlight-card.green{border-left-color:#4caf50}
+.highlight-card.orange{border-left-color:#ff9800}
+.highlight-card.purple{border-left-color:#9c27b0}
+.highlight-card h6{font-size:.72rem;color:var(--bs-secondary-color);margin:0;text-transform:uppercase;letter-spacing:.04em}
+.highlight-card .v{font-size:1.1rem;font-weight:600}
+.highlight-card .sub{font-size:.72rem;color:var(--bs-secondary-color)}
+.report-loading{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;
+    background:rgba(255,255,255,.7);z-index:5;border-radius:.5rem}
+[data-bs-theme="dark"] .report-loading{background:rgba(0,0,0,.5)}
+</style>
+{% endblock %}
+
+{% block content %}
+{% if not has_any_data %}
+<div class="text-center py-5">
+    <i class="bi bi-bar-chart-line display-1 text-muted"></i>
+    <h3 class="mt-3 text-muted">{{ t('report.no_data') }}</h3>
+    <p class="text-muted">{{ t('report.no_data_hint') }}</p>
+    <a href="/input" class="btn btn-primary"><i class="bi bi-plus-circle"></i> {{ t('report.first_charge') }}</a>
+</div>
+{% else %}
+<div class="d-flex flex-wrap align-items-center gap-2 mb-3">
+    <h4 class="mb-0"><i class="bi bi-bar-chart-line"></i> {{ t('report.title') }}</h4>
+    <span class="text-muted small ms-2" id="rangeLabel">…</span>
+    <a href="/report/export.pdf" class="btn btn-sm btn-outline-secondary ms-auto" title="{{ t('report.export_pdf_title') }}">
+        <i class="bi bi-file-earmark-pdf"></i> {{ t('report.export_pdf') }}
+    </a>
+</div>
+
+<!-- Range picker ────────────────────────────────────────────────────────── -->
+<div class="card mb-3">
+    <div class="card-body py-2">
+        <div class="d-flex flex-wrap gap-1 range-pills align-items-center">
+            <button type="button" class="btn btn-outline-primary" data-preset="day">{{ t('report.range_day') }}</button>
+            <button type="button" class="btn btn-outline-primary" data-preset="week">{{ t('report.range_week') }}</button>
+            <button type="button" class="btn btn-outline-primary active" data-preset="month">{{ t('report.range_month') }}</button>
+            <button type="button" class="btn btn-outline-primary" data-preset="quarter">{{ t('report.range_quarter') }}</button>
+            <button type="button" class="btn btn-outline-primary" data-preset="half">{{ t('report.range_half') }}</button>
+            <button type="button" class="btn btn-outline-primary" data-preset="year">{{ t('report.range_year') }}</button>
+            <button type="button" class="btn btn-outline-primary" data-preset="all">{{ t('report.range_all') }}</button>
+            <div class="vr mx-1"></div>
+            <button type="button" class="btn btn-outline-secondary" data-preset="custom" id="btnCustomRange">
+                <i class="bi bi-calendar-range"></i> {{ t('report.range_custom') }}
+            </button>
+            <div id="customRange" class="d-none d-flex gap-1 align-items-center">
+                <input type="date" class="form-control form-control-sm" id="customStart" style="width:auto">
+                <span>–</span>
+                <input type="date" class="form-control form-control-sm" id="customEnd" style="width:auto">
+                <button type="button" class="btn btn-primary btn-sm" id="customApply">{{ t('report.apply') }}</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- KPI cards ────────────────────────────────────────────────────────────── -->
+<div class="row g-2 mb-3" id="kpiRow">
+    <div class="col-6 col-lg-3"><div class="card report-kpi border-primary">
+        <div class="card-body text-center p-2">
+            <div class="kpi-label">{{ t('report.kpi_kwh') }}</div>
+            <div class="kpi-value text-primary" id="kpiKwh">–</div>
+            <div class="kpi-sub" id="kpiKwhSub"></div>
+        </div></div></div>
+    <div class="col-6 col-lg-3"><div class="card report-kpi border-danger">
+        <div class="card-body text-center p-2">
+            <div class="kpi-label">{{ t('report.kpi_cost') }}</div>
+            <div class="kpi-value text-danger" id="kpiCost">–</div>
+            <div class="kpi-sub" id="kpiCostSub"></div>
+        </div></div></div>
+    <div class="col-6 col-lg-3"><div class="card report-kpi border-success">
+        <div class="card-body text-center p-2">
+            <div class="kpi-label">{{ t('report.kpi_km') }}</div>
+            <div class="kpi-value text-success" id="kpiKm">–</div>
+            <div class="kpi-sub" id="kpiKmSub"></div>
+        </div></div></div>
+    <div class="col-6 col-lg-3"><div class="card report-kpi border-warning">
+        <div class="card-body text-center p-2">
+            <div class="kpi-label">{{ t('report.kpi_co2_saved') }}</div>
+            <div class="kpi-value text-warning" id="kpiCo2Saved">–</div>
+            <div class="kpi-sub" id="kpiCo2Sub"></div>
+        </div></div></div>
+</div>
+
+<!-- Highlights + savings ─────────────────────────────────────────────────── -->
+<div class="row g-2 mb-3">
+    <div class="col-md-4"><div class="highlight-card green"><h6>{{ t('report.hl_cost_saved') }}</h6>
+        <div class="v text-success" id="hlCostSaved">–</div>
+        <div class="sub" id="hlCostSavedSub"></div></div></div>
+    <div class="col-md-4"><div class="highlight-card orange"><h6>{{ t('report.hl_biggest_charge') }}</h6>
+        <div class="v" id="hlBiggestCharge">–</div>
+        <div class="sub" id="hlBiggestChargeSub"></div></div></div>
+    <div class="col-md-4"><div class="highlight-card purple"><h6>{{ t('report.hl_longest_trip') }}</h6>
+        <div class="v" id="hlLongestTrip">–</div>
+        <div class="sub" id="hlLongestTripSub"></div></div></div>
+</div>
+
+<!-- Plot grid ────────────────────────────────────────────────────────────── -->
+<div class="row g-3">
+    <div class="col-lg-6"><div class="card plot-card">
+        <div class="card-header"><i class="bi bi-lightning-charge"></i> {{ t('report.plot_kwh_by_bucket') }}</div>
+        <div class="card-body"><canvas id="plotKwh"></canvas></div>
+    </div></div>
+    <div class="col-lg-6"><div class="card plot-card">
+        <div class="card-header"><i class="bi bi-cash-coin"></i> {{ t('report.plot_cost_by_bucket') }}</div>
+        <div class="card-body"><canvas id="plotCost"></canvas></div>
+    </div></div>
+    <div class="col-lg-6"><div class="card plot-card">
+        <div class="card-header"><i class="bi bi-signpost-split"></i> {{ t('report.plot_km_by_bucket') }}</div>
+        <div class="card-body"><canvas id="plotKm"></canvas></div>
+    </div></div>
+    <div class="col-lg-6"><div class="card plot-card">
+        <div class="card-header"><i class="bi bi-cloud-haze2"></i> {{ t('report.plot_co2_by_bucket') }}</div>
+        <div class="card-body"><canvas id="plotCo2"></canvas></div>
+    </div></div>
+
+    <div class="col-lg-6"><div class="card plot-card">
+        <div class="card-header"><i class="bi bi-pie-chart"></i> {{ t('report.plot_charge_types') }}</div>
+        <div class="card-body"><canvas id="plotChargeTypes"></canvas></div>
+    </div></div>
+    <div class="col-lg-6"><div class="card plot-card">
+        <div class="card-header"><i class="bi bi-graph-up"></i> {{ t('report.plot_efficiency') }}</div>
+        <div class="card-body"><canvas id="plotEfficiency"></canvas></div>
+    </div></div>
+
+    <div class="col-lg-6"><div class="card plot-card">
+        <div class="card-header"><i class="bi bi-clock-history"></i> {{ t('report.plot_hour_of_day') }}</div>
+        <div class="card-body"><canvas id="plotHourOfDay"></canvas></div>
+    </div></div>
+    <div class="col-lg-6"><div class="card plot-card">
+        <div class="card-header"><i class="bi bi-calendar-week"></i> {{ t('report.plot_day_of_week') }}</div>
+        <div class="card-body"><canvas id="plotDayOfWeek"></canvas></div>
+    </div></div>
+
+    <div class="col-lg-6"><div class="card plot-card">
+        <div class="card-header"><i class="bi bi-rulers"></i> {{ t('report.plot_trip_length') }}</div>
+        <div class="card-body"><canvas id="plotTripLength"></canvas></div>
+    </div></div>
+    <div class="col-lg-6"><div class="card plot-card">
+        <div class="card-header"><i class="bi bi-currency-euro"></i> {{ t('report.plot_price') }}</div>
+        <div class="card-body"><canvas id="plotPrice"></canvas></div>
+    </div></div>
+
+    <div class="col-lg-6"><div class="card plot-card">
+        <div class="card-header"><i class="bi bi-building"></i> {{ t('report.plot_top_operators') }}</div>
+        <div class="card-body p-2"><canvas id="plotOperators"></canvas></div>
+    </div></div>
+    <div class="col-lg-6"><div class="card plot-card">
+        <div class="card-header"><i class="bi bi-geo-alt"></i> {{ t('report.plot_top_locations') }}</div>
+        <div class="card-body p-2"><canvas id="plotLocations"></canvas></div>
+    </div></div>
+</div>
+
+<div id="reportOverlay" class="report-loading d-none">
+    <div class="spinner-border text-primary"></div>
+</div>
+{% endif %}
+{% endblock %}
+
+{% block scripts %}
+{% if has_any_data %}
+<script>
+(function() {
+    // ── Palette ─────────────────────────────────────────────────────────
+    const C = {
+        blue:   'rgba(33,150,243,0.85)',   blueL:   'rgba(33,150,243,0.25)',
+        red:    'rgba(244,67,54,0.85)',    redL:    'rgba(244,67,54,0.25)',
+        green:  'rgba(76,175,80,0.85)',    greenL:  'rgba(76,175,80,0.25)',
+        orange: 'rgba(255,152,0,0.85)',    orangeL: 'rgba(255,152,0,0.25)',
+        cyan:   'rgba(0,188,212,0.85)',    cyanL:   'rgba(0,188,212,0.25)',
+        purple: 'rgba(156,39,176,0.85)',   purpleL: 'rgba(156,39,176,0.25)',
+        grey:   'rgba(158,158,158,0.85)',
+        pv:     'rgba(3,169,244,0.85)',
+    };
+    const TYPE_COLORS = {AC: C.green, DC: C.orange, PV: C.pv};
+    const PIE_COLORS = [C.blue, C.green, C.orange, C.red, C.purple, C.cyan, C.grey];
+
+    Chart.defaults.maintainAspectRatio = false;
+    Chart.defaults.responsive = true;
+    Chart.defaults.plugins.legend.labels.font = {size: 10};
+
+    const T = {
+        kwh:     {{ t('report.lbl_kwh')|tojson }},
+        cost:    {{ t('report.lbl_cost')|tojson }},
+        km:      {{ t('report.lbl_km')|tojson }},
+        co2:     {{ t('report.lbl_co2')|tojson }},
+        trips:   {{ t('report.lbl_trips')|tojson }},
+        charges: {{ t('report.lbl_charges')|tojson }},
+        avg:     {{ t('report.lbl_avg')|tojson }},
+        fossil_eur: {{ t('report.lbl_vs_fossil_eur')|tojson }},
+        fossil_co2: {{ t('report.lbl_vs_fossil_co2')|tojson }},
+        eff_unit: {{ t('report.lbl_eff_unit')|tojson }},
+        bucket_day: {{ t('report.bucket_day')|tojson }},
+        bucket_week: {{ t('report.bucket_week')|tojson }},
+        bucket_month: {{ t('report.bucket_month')|tojson }},
+    };
+
+    let currentPreset = 'month';
+    let charts = {};
+
+    function destroyAll() {
+        Object.values(charts).forEach(c => { try { c.destroy(); } catch(e){} });
+        charts = {};
+    }
+
+    function fmtNum(n, d=0) {
+        if (n == null) return '–';
+        return Number(n).toLocaleString('de-DE', {minimumFractionDigits: d, maximumFractionDigits: d});
+    }
+
+    function renderKPIs(data) {
+        const s = data.summary;
+        document.getElementById('kpiKwh').textContent = fmtNum(s.total_kwh, 1) + ' kWh';
+        document.getElementById('kpiKwhSub').textContent = s.count_charges + ' × · Ø ' + fmtNum(s.avg_eur_per_kwh, 3).replace('.', ',') + ' €/kWh';
+        document.getElementById('kpiCost').textContent = '€' + fmtNum(s.total_cost, 2);
+        document.getElementById('kpiCostSub').textContent = s.avg_eur_per_100km > 0 ? fmtNum(s.avg_eur_per_100km, 2) + ' €/100km' : '';
+        document.getElementById('kpiKm').textContent = fmtNum(s.total_km, 0) + ' km';
+        document.getElementById('kpiKmSub').textContent = s.count_trips + ' ' + T.trips + (s.total_km > 0 ? ' · Ø ' + fmtNum(s.avg_efficiency_kwh_per_100km, 1) + ' kWh/100km' : '');
+        document.getElementById('kpiCo2Saved').textContent = fmtNum(s.co2_saved_kg, 1) + ' kg';
+        document.getElementById('kpiCo2Sub').textContent = (s.ice_co2_kg > 0 ? T.fossil_co2 + ' ' + fmtNum(s.ice_co2_kg, 1) + ' kg' : '');
+
+        document.getElementById('hlCostSaved').textContent = '€' + fmtNum(s.cost_saved_eur, 2);
+        document.getElementById('hlCostSavedSub').textContent = T.fossil_eur + ' €' + fmtNum(s.ice_cost_eur, 2);
+
+        const hl = data.highlights || {};
+        const bc = hl.biggest_charge;
+        if (bc) {
+            document.getElementById('hlBiggestCharge').textContent = fmtNum(bc.kwh, 1) + ' kWh';
+            document.getElementById('hlBiggestChargeSub').textContent = bc.date + ' · ' + (bc.type || '–') + ' · €' + fmtNum(bc.cost, 2);
+        } else {
+            document.getElementById('hlBiggestCharge').textContent = '–';
+            document.getElementById('hlBiggestChargeSub').textContent = '';
+        }
+        const lt = hl.longest_trip;
+        if (lt) {
+            document.getElementById('hlLongestTrip').textContent = fmtNum(lt.km, 1) + ' km';
+            document.getElementById('hlLongestTripSub').textContent = lt.date + ' · ' + (lt.drive_min || '–') + ' min' + (lt.max_speed ? ' · ⚡' + lt.max_speed + ' km/h' : '');
+        } else {
+            document.getElementById('hlLongestTrip').textContent = '–';
+            document.getElementById('hlLongestTripSub').textContent = '';
+        }
+    }
+
+    function makeBar(id, labels, data, color, yFmt) {
+        charts[id] = new Chart(document.getElementById(id), {
+            type: 'bar',
+            data: {labels, datasets: [{data, backgroundColor: color, borderRadius: 3}]},
+            options: {
+                plugins: {legend: {display: false}},
+                scales: {
+                    x: {ticks: {font: {size: 9}, maxTicksLimit: 12, autoSkip: true}},
+                    y: {beginAtZero: true, ticks: {font: {size: 10}, callback: yFmt}}
+                }
+            }
+        });
+    }
+
+    function render(data) {
+        destroyAll();
+        renderKPIs(data);
+        const s = data.series || {};
+        const labels = s.bucket_labels || [];
+
+        makeBar('plotKwh',  labels, s.kwh,    C.blue,   v => v + ' kWh');
+        makeBar('plotCost', labels, s.cost,   C.red,    v => '€' + v);
+        makeBar('plotKm',   labels, s.km,     C.green,  v => v + ' km');
+        makeBar('plotCo2',  labels, s.co2_kg, C.orange, v => v + ' kg');
+
+        // Charge type pie (counts + kWh in tooltip)
+        const ct = data.charge_type || {labels:[], counts:[], kwh:[]};
+        if (ct.labels.length) {
+            charts.plotChargeTypes = new Chart(document.getElementById('plotChargeTypes'), {
+                type: 'doughnut',
+                data: {
+                    labels: ct.labels,
+                    datasets: [{
+                        data: ct.kwh,
+                        backgroundColor: ct.labels.map(l => TYPE_COLORS[l] || C.grey),
+                        borderWidth: 2, borderColor: '#fff',
+                    }]
+                },
+                options: {
+                    plugins: {
+                        legend: {position: 'bottom'},
+                        tooltip: {callbacks: {label: ctx => {
+                            const i = ctx.dataIndex;
+                            return `${ct.labels[i]}: ${fmtNum(ct.kwh[i],1)} kWh · ${ct.counts[i]} ×`;
+                        }}}
+                    }
+                }
+            });
+        }
+
+        // Efficiency over time (one point per bucket where km>0)
+        const eff = data.efficiency_by_bucket || [];
+        if (eff.length) {
+            charts.plotEfficiency = new Chart(document.getElementById('plotEfficiency'), {
+                type: 'line',
+                data: {
+                    labels: eff.map(p => p.x),
+                    datasets: [{
+                        data: eff.map(p => p.y),
+                        borderColor: C.purple,
+                        backgroundColor: C.purpleL,
+                        fill: true, tension: 0.3, pointRadius: 2.5,
+                    }]
+                },
+                options: {
+                    plugins: {legend: {display: false}},
+                    scales: {
+                        x: {ticks: {font: {size: 9}, maxTicksLimit: 12, autoSkip: true}},
+                        y: {ticks: {font: {size: 10}, callback: v => v + ' ' + T.eff_unit}}
+                    }
+                }
+            });
+        } else {
+            document.getElementById('plotEfficiency').getContext('2d').clearRect(0,0,9999,9999);
+        }
+
+        // Hour-of-day
+        makeBar('plotHourOfDay', data.hour_of_day.labels, data.hour_of_day.kwh, C.cyan, v => v + ' kWh');
+
+        // Day-of-week: dual axis (kWh left, trips right)
+        charts.plotDayOfWeek = new Chart(document.getElementById('plotDayOfWeek'), {
+            data: {
+                labels: data.day_of_week.labels,
+                datasets: [
+                    {type:'bar', label: T.kwh, data: data.day_of_week.kwh, backgroundColor: C.blue, yAxisID: 'y', borderRadius: 3},
+                    {type:'line', label: T.trips, data: data.day_of_week.trips, borderColor: C.orange, yAxisID: 'y2', pointRadius: 3, tension: 0.2},
+                ]
+            },
+            options: {
+                plugins: {legend: {position: 'bottom', labels: {font: {size: 10}}}},
+                scales: {
+                    y:  {beginAtZero: true, position: 'left', ticks: {font:{size:10}, callback: v => v + ' kWh'}},
+                    y2: {beginAtZero: true, position: 'right', ticks: {font:{size:10}}, grid: {drawOnChartArea: false}},
+                }
+            }
+        });
+
+        makeBar('plotTripLength', data.trip_length_dist.labels, data.trip_length_dist.counts, C.green, v => v);
+
+        // Price timeseries
+        const pp = data.price_points || [];
+        if (pp.length) {
+            charts.plotPrice = new Chart(document.getElementById('plotPrice'), {
+                type: 'line',
+                data: {
+                    labels: pp.map(p => p.x),
+                    datasets: [{
+                        data: pp.map(p => p.y),
+                        borderColor: C.red,
+                        backgroundColor: C.redL,
+                        fill: false, tension: 0, pointRadius: 3, showLine: false,
+                    }]
+                },
+                options: {
+                    plugins: {legend: {display: false}},
+                    scales: {
+                        x: {type: 'time', time: {unit: 'day'}, ticks: {font:{size:9}, maxTicksLimit: 8}},
+                        y: {ticks: {font:{size:10}, callback: v => '€' + v.toFixed(2)}}
+                    }
+                }
+            });
+        }
+
+        // Top operators (horizontal bar by kWh)
+        const ops = data.top_operators || [];
+        if (ops.length) {
+            charts.plotOperators = new Chart(document.getElementById('plotOperators'), {
+                type: 'bar',
+                data: {
+                    labels: ops.map(o => o.name),
+                    datasets: [{
+                        data: ops.map(o => o.kwh),
+                        backgroundColor: C.blue,
+                        borderRadius: 3,
+                    }]
+                },
+                options: {
+                    indexAxis: 'y',
+                    plugins: {
+                        legend: {display: false},
+                        tooltip: {callbacks: {label: ctx => {
+                            const o = ops[ctx.dataIndex];
+                            return `${o.kwh} kWh · €${o.cost} · ${o.count}×`;
+                        }}}
+                    },
+                    scales: {x: {ticks: {font: {size: 10}}}, y: {ticks: {font: {size: 10}}}}
+                }
+            });
+        }
+        // Top locations
+        const locs = data.top_locations || [];
+        if (locs.length) {
+            charts.plotLocations = new Chart(document.getElementById('plotLocations'), {
+                type: 'bar',
+                data: {
+                    labels: locs.map(l => l.name),
+                    datasets: [{
+                        data: locs.map(l => l.count),
+                        backgroundColor: C.green,
+                        borderRadius: 3,
+                    }]
+                },
+                options: {
+                    indexAxis: 'y',
+                    plugins: {legend: {display: false}},
+                    scales: {x: {beginAtZero: true, ticks: {font: {size: 10}, stepSize: 1}}, y: {ticks: {font: {size: 10}}}}
+                }
+            });
+        }
+    }
+
+    async function load(preset, custom) {
+        const overlay = document.getElementById('reportOverlay');
+        overlay.classList.remove('d-none');
+        try {
+            let url = `/api/report?preset=${encodeURIComponent(preset)}`;
+            if (preset === 'custom' && custom) {
+                url += `&start=${custom.start}&end=${custom.end}`;
+            }
+            const r = await fetch(url, {cache: 'no-store'});
+            const data = await r.json();
+            document.getElementById('rangeLabel').textContent = data.label || '';
+            // Preserve PDF export range too
+            const pdfLink = document.querySelector('a[href^="/report/export.pdf"]');
+            if (pdfLink) {
+                pdfLink.href = '/report/export.pdf';
+            }
+            render(data);
+        } catch (e) {
+            console.error('report load failed', e);
+        } finally {
+            overlay.classList.add('d-none');
+        }
+    }
+
+    // Wire range buttons
+    document.querySelectorAll('[data-preset]').forEach(btn => {
+        btn.addEventListener('click', () => {
+            const p = btn.dataset.preset;
+            currentPreset = p;
+            document.querySelectorAll('[data-preset]').forEach(b => b.classList.remove('active'));
+            btn.classList.add('active');
+            if (p === 'custom') {
+                const wrap = document.getElementById('customRange');
+                wrap.classList.remove('d-none');
+                wrap.classList.add('d-flex');
+                // default dates: first-of-month to today
+                const today = new Date();
+                const first = new Date(today.getFullYear(), today.getMonth(), 1);
+                const iso = d => d.toISOString().slice(0,10);
+                if (!document.getElementById('customStart').value) {
+                    document.getElementById('customStart').value = iso(first);
+                    document.getElementById('customEnd').value = iso(today);
+                }
+                return;
+            }
+            document.getElementById('customRange').classList.add('d-none');
+            document.getElementById('customRange').classList.remove('d-flex');
+            load(p);
+        });
+    });
+
+    document.getElementById('customApply').addEventListener('click', () => {
+        const s = document.getElementById('customStart').value;
+        const e = document.getElementById('customEnd').value;
+        if (!s || !e) return;
+        load('custom', {start: s, end: e});
+    });
+
+    // Initial load
+    load('month');
+})();
+</script>
+{% endif %}
+{% endblock %}
