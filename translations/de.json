@@ -255,6 +255,8 @@
   "input.notes_placeholder": "z.B. Ladestation, Ort...",
   "input.odometer": "km-Stand",
   "input.operator": "Anbieter / Betreiber",
+  "input.operator_none": "— kein Anbieter —",
+  "input.operator_custom_option": "Eigener Anbieter (freie Eingabe)…",
   "input.operator_ph": "z.B. IONITY, EnBW, Zuhause …",
   "input.optional": "optional",
   "input.ready_to_save": "Bereit zum Speichern",

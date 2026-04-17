@@ -146,20 +146,26 @@
                         </div>
                     </div>
 
-                    <!-- Anbieter -->
+                    <!-- Anbieter — echtes Select für Mobile, Freitext als Fallback -->
                     <div class="mb-3">
-                        <label for="operator" class="form-label">
+                        <label for="operatorSelect" class="form-label">
                             <i class="bi bi-building"></i> {{ t('input.operator') }}
                             <small class="text-muted">{{ t('input.optional') }}</small>
                         </label>
-                        <input type="text" class="form-control" id="operator" name="operator"
-                               list="operatorsList"
-                               placeholder="{{ t('input.operator_ph') }}">
-                        <datalist id="operatorsList">
+                        <select class="form-select" id="operatorSelect">
+                            <option value="">{{ t('input.operator_none') }}</option>
                             {% for op in operators %}
-                            <option value="{{ op }}">
+                            <option value="{{ op }}">{{ op }}</option>
                             {% endfor %}
-                        </datalist>
+                            <option value="__custom">{{ t('input.operator_custom_option') }}</option>
+                        </select>
+                        <input type="text" class="form-control mt-2" id="operatorCustom"
+                               style="display:none" placeholder="{{ t('input.operator_ph') }}"
+                               autocomplete="off">
+                        <!-- Hidden field is what actually gets submitted.
+                             Kept in sync by JS below so the backend doesn't care
+                             whether the value came from the select or free text. -->
+                        <input type="hidden" name="operator" id="operator">
                     </div>
 
                     <!-- Standort der Ladung -->
@@ -698,22 +704,24 @@ document.getElementById('chargeForm').addEventListener('submit', () => {
     });
 })();
 
-// ── Operator price auto-fill ─────────────────────────────────────
-// When the user picks a known operator in the Anbieter field, fill the
-// eur_per_kwh input with the stored price — but only if that field is
-// still empty (or matches a previous auto-fill), so manual entries
-// never get overwritten.
+// ── Operator select (mobile-friendly) + price auto-fill ──────────
+// Native <select> works everywhere; datalist was invisible on iOS Safari.
+// "__custom" reveals a free-text input, otherwise the selected value is
+// committed to the hidden form field. Auto-fill kicks in on every
+// change that yields a known operator name.
 (function() {
     const prices = {{ operator_prices|tojson }};
-    const opIn = document.getElementById('operator');
+    const sel = document.getElementById('operatorSelect');
+    const custom = document.getElementById('operatorCustom');
+    const hidden = document.getElementById('operator');
     const priceIn = document.getElementById('eur_per_kwh');
-    if (!opIn || !priceIn || !prices) return;
+    if (!sel || !custom || !hidden) return;
 
     let lastAutoFilled = '';
-    function maybeFill() {
-        const name = (opIn.value || '').trim();
+
+    function tryAutoFillPrice(name) {
+        if (!priceIn || !prices) return;
         if (!name) return;
-        // Exact-match lookup first, then case-insensitive
         let p = prices[name];
         if (p === undefined) {
             const lower = name.toLowerCase();
@@ -723,14 +731,33 @@ document.getElementById('chargeForm').addEventListener('submit', () => {
         }
         if (p === undefined) return;
         const current = (priceIn.value || '').trim();
-        if (current && current !== lastAutoFilled) return;  // user typed, keep it
+        if (current && current !== lastAutoFilled) return;  // user typed, keep
         priceIn.value = p.toFixed(4).replace(/\.?0+$/, '');
         lastAutoFilled = priceIn.value;
         if (typeof updateCalcPrice === 'function') updateCalcPrice();
     }
-    // change fires on datalist-pick, blur covers free-text typing
-    opIn.addEventListener('change', maybeFill);
-    opIn.addEventListener('blur', maybeFill);
+
+    function commit(value) {
+        hidden.value = value || '';
+        tryAutoFillPrice(hidden.value);
+    }
+
+    sel.addEventListener('change', () => {
+        if (sel.value === '__custom') {
+            custom.style.display = '';
+            custom.value = '';
+            custom.focus();
+            commit('');
+        } else {
+            custom.style.display = 'none';
+            commit(sel.value);
+        }
+    });
+    // Free text — commit on input so the hidden field is always current
+    // before form submit; blur triggers price auto-fill for the finished
+    // name (input events would fire for every keystroke).
+    custom.addEventListener('input', () => { hidden.value = custom.value.trim(); });
+    custom.addEventListener('blur', () => { commit(custom.value); });
 })();
 
 // ── Cancel: discard any in-progress charge timer + form state ────

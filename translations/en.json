@@ -255,6 +255,8 @@
   "input.notes_placeholder": "e.g. charging station, location...",
   "input.odometer": "Odometer",
   "input.operator": "Operator (CPO)",
+  "input.operator_none": "— no operator —",
+  "input.operator_custom_option": "Custom operator (free text)…",
   "input.operator_ph": "e.g. IONITY, EnBW, Home …",
   "input.optional": "optional",
   "input.ready_to_save": "Ready to save",

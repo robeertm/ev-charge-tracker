@@ -87,21 +87,26 @@
                         </div>
                     </div>
 
-                    <!-- Anbieter -->
+                    <!-- Anbieter — echtes Select für Mobile, Freitext als Fallback -->
+                    {% set current_op = charge.operator or '' %}
+                    {% set op_in_list = current_op in operators %}
                     <div class="mb-3">
-                        <label for="operator" class="form-label">
+                        <label for="operatorSelect" class="form-label">
                             <i class="bi bi-building"></i> {{ t('edit.operator') }}
                             <small class="text-muted">{{ t('edit.optional') }}</small>
                         </label>
-                        <input type="text" class="form-control" id="operator" name="operator"
-                               value="{{ charge.operator or '' }}"
-                               list="operatorsList"
-                               placeholder="{{ t('edit.operator_ph') }}">
-                        <datalist id="operatorsList">
+                        <select class="form-select" id="operatorSelect">
+                            <option value="" {% if not current_op %}selected{% endif %}>{{ t('input.operator_none') }}</option>
                             {% for op in operators %}
-                            <option value="{{ op }}">
+                            <option value="{{ op }}" {% if op == current_op %}selected{% endif %}>{{ op }}</option>
                             {% endfor %}
-                        </datalist>
+                            <option value="__custom" {% if current_op and not op_in_list %}selected{% endif %}>{{ t('input.operator_custom_option') }}</option>
+                        </select>
+                        <input type="text" class="form-control mt-2" id="operatorCustom"
+                               style="{% if current_op and not op_in_list %}{% else %}display:none{% endif %}"
+                               value="{% if current_op and not op_in_list %}{{ current_op }}{% endif %}"
+                               placeholder="{{ t('edit.operator_ph') }}" autocomplete="off">
+                        <input type="hidden" name="operator" id="operator" value="{{ current_op }}">
                     </div>
 
                     <!-- Ladeort -->
@@ -267,17 +272,19 @@
     });
 })();
 
-// ── Operator price auto-fill (edit form) ─────────────────────────
+// ── Operator select (mobile-friendly) + price auto-fill ──────────
 (function() {
     const prices = {{ operator_prices|tojson }};
-    const opIn = document.getElementById('operator');
+    const sel = document.getElementById('operatorSelect');
+    const custom = document.getElementById('operatorCustom');
+    const hidden = document.getElementById('operator');
     const priceIn = document.querySelector('input[name="eur_per_kwh"]');
-    if (!opIn || !priceIn || !prices) return;
+    if (!sel || !custom || !hidden) return;
 
     let lastAutoFilled = '';
-    function maybeFill() {
-        const name = (opIn.value || '').trim();
-        if (!name) return;
+
+    function tryAutoFillPrice(name) {
+        if (!priceIn || !prices || !name) return;
         let p = prices[name];
         if (p === undefined) {
             const lower = name.toLowerCase();
@@ -291,8 +298,24 @@
         priceIn.value = p.toFixed(4).replace(/\.?0+$/, '');
         lastAutoFilled = priceIn.value;
     }
-    opIn.addEventListener('change', maybeFill);
-    opIn.addEventListener('blur', maybeFill);
+
+    function commit(value) {
+        hidden.value = value || '';
+        tryAutoFillPrice(hidden.value);
+    }
+
+    sel.addEventListener('change', () => {
+        if (sel.value === '__custom') {
+            custom.style.display = '';
+            custom.focus();
+            commit(custom.value);
+        } else {
+            custom.style.display = 'none';
+            commit(sel.value);
+        }
+    });
+    custom.addEventListener('input', () => { hidden.value = custom.value.trim(); });
+    custom.addEventListener('blur', () => { commit(custom.value); });
 })();
 </script>
 {% endblock %}

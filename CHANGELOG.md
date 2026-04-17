@@ -1,5 +1,19 @@
 # Changelog
 
+## v2.22.1 (2026-04-17)
+
+### Mobile-Fix: Anbieter-Auswahl als echtes Dropdown
+
+Dirk meldete, dass die Anbieter-Auswahl auf dem Handy nicht funktioniert — „da ist es kein Dropdown". Das lag am `<input list="operatorsList">` mit HTML-`<datalist>`: auf iOS Safari renderte das garkein Dropdown, auf Android war das Verhalten unregelmäßig.
+
+**Fix:** Auf Ladungsformular (`/input`) und Bearbeiten-Formular (`/edit/<id>`) durch ein natives `<select>` ersetzt, das auf allen Mobile-Browsern den nativen Picker nutzt. Letzte Option heißt "Eigener Anbieter (freie Eingabe)…" — wird sie gewählt, erscheint darunter ein Textfeld für freie Eingabe. Ein Hidden-Input `name="operator"` wird von JS synchron gehalten, damit der Backend-POST unverändert bleibt.
+
+Beim Bearbeiten einer Ladung mit Custom-Anbieter (nicht in der Liste) wird „Eigener Anbieter" vorausgewählt und das Textfeld mit dem bestehenden Wert gefüllt.
+
+Preis-Autofill hängt unverändert am gesetzten Operator-Wert.
+
+---
+
 ## v2.22.0 (2026-04-17)
 
 ### Fahrtenbuch: alle Felder editierbar + Kartenauswahl + Favoriten-Bearbeitung
