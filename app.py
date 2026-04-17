@@ -2193,18 +2193,23 @@ def register_routes(app):
 
     @app.route('/api/parking_event/<int:event_id>', methods=['GET', 'POST'])
     def api_parking_event(event_id):
-        """Read or update a parking event (label/favorite_name/address).
+        """Read or update a parking event.
 
-        Coords, arrival/departure timestamps and odometer come from the
-        car itself and are never overwritten here — editing those would
-        invalidate the derived trip metrics.
+        Every column that represents user-facing trip data is editable:
+        label, favorite_name, address, coordinates, arrival/departure
+        timestamps, odometer and SoC at arrival/departure. Trip km, SoC
+        delta and regen-kWh are re-derived from these on the next page
+        render — no stored override.
 
-        Old entries (>7 days) require an explicit 'confirm_old' flag in
-        the POST body so a casual click can't silently rewrite a week's
-        worth of history.
+        Old entries (>7 days) require an explicit ``confirm_old`` flag
+        in the POST body so a casual click can't silently rewrite a
+        week's worth of history.
         """
         from models.database import ParkingEvent
         evt = ParkingEvent.query.get_or_404(event_id)
+
+        def _iso(dt):
+            return dt.isoformat() if dt else None
 
         if request.method == 'GET':
             return jsonify({
@@ -2213,8 +2218,12 @@ def register_routes(app):
                 'favorite_name': evt.favorite_name,
                 'address': evt.address,
                 'lat': evt.lat, 'lon': evt.lon,
-                'arrived_at': evt.arrived_at.isoformat() if evt.arrived_at else None,
-                'departed_at': evt.departed_at.isoformat() if evt.departed_at else None,
+                'arrived_at': _iso(evt.arrived_at),
+                'departed_at': _iso(evt.departed_at),
+                'odometer_arrived': evt.odometer_arrived,
+                'odometer_departed': evt.odometer_departed,
+                'soc_arrived': evt.soc_arrived,
+                'soc_departed': evt.soc_departed,
                 'age_days': (datetime.now() - evt.arrived_at).days if evt.arrived_at else None,
             })
 
@@ -2222,6 +2231,25 @@ def register_routes(app):
         age_days = (datetime.now() - evt.arrived_at).days if evt.arrived_at else 0
         if age_days > 7 and not data.get('confirm_old'):
             return jsonify({'error': 'old_entry_requires_confirm', 'age_days': age_days}), 409
+
+        def _parse_dt(s):
+            """Accept ``YYYY-MM-DDTHH:MM`` and full ISO with seconds."""
+            if s is None:
+                return None
+            if s == '':
+                return False  # sentinel for "clear"
+            try:
+                return datetime.fromisoformat(s.replace('Z', '+00:00').split('+')[0])
+            except ValueError:
+                return 'INVALID'
+
+        def _parse_num(raw, kind='float'):
+            if raw is None or raw == '':
+                return None if raw == '' else '_skip_'
+            try:
+                return float(raw) if kind == 'float' else int(raw)
+            except (TypeError, ValueError):
+                return 'INVALID'
 
         new_label = data.get('label')
         if new_label is not None:
@@ -2235,6 +2263,42 @@ def register_routes(app):
         if 'address' in data:
             addr = (data.get('address') or '').strip()
             evt.address = addr if addr else None
+        if 'lat' in data and data['lat'] not in (None, ''):
+            try:
+                evt.lat = float(data['lat'])
+            except (TypeError, ValueError):
+                return jsonify({'error': 'invalid_lat'}), 400
+        if 'lon' in data and data['lon'] not in (None, ''):
+            try:
+                evt.lon = float(data['lon'])
+            except (TypeError, ValueError):
+                return jsonify({'error': 'invalid_lon'}), 400
+
+        # Times — HTML datetime-local sends "YYYY-MM-DDTHH:MM". Empty
+        # string clears the column (only meaningful for departed_at).
+        for col in ('arrived_at', 'departed_at'):
+            if col in data:
+                parsed = _parse_dt(data[col])
+                if parsed == 'INVALID':
+                    return jsonify({'error': f'invalid_{col}'}), 400
+                if parsed is False:
+                    # clear only allowed for departed_at
+                    if col == 'arrived_at':
+                        return jsonify({'error': 'arrived_at_required'}), 400
+                    setattr(evt, col, None)
+                elif parsed is not None:
+                    setattr(evt, col, parsed)
+
+        for col, kind in (('odometer_arrived', 'int'), ('odometer_departed', 'int'),
+                          ('soc_arrived', 'int'), ('soc_departed', 'int')):
+            if col in data:
+                parsed = _parse_num(data[col], kind=kind)
+                if parsed == 'INVALID':
+                    return jsonify({'error': f'invalid_{col}'}), 400
+                if parsed == '_skip_':
+                    # key sent but missing — leave alone
+                    continue
+                setattr(evt, col, parsed)  # None clears, number sets
 
         try:
             db.session.commit()
@@ -2247,6 +2311,9 @@ def register_routes(app):
             'label': evt.label,
             'favorite_name': evt.favorite_name,
             'address': evt.address,
+            'lat': evt.lat, 'lon': evt.lon,
+            'arrived_at': _iso(evt.arrived_at),
+            'departed_at': _iso(evt.departed_at),
         })
 
     @app.route('/api/trips/geocode_missing', methods=['POST'])
@@ -2336,7 +2403,7 @@ def register_routes(app):
         n = reclassify_all_events()
         return jsonify({'ok': True, 'reclassified': n})
 
-    @app.route('/api/locations/favorites', methods=['GET', 'POST', 'DELETE'])
+    @app.route('/api/locations/favorites', methods=['GET', 'POST', 'PUT', 'DELETE'])
     def api_locations_favorites():
         import json as _json
         favs_raw = AppConfig.get('favorite_locations', '[]')
@@ -2358,6 +2425,34 @@ def register_routes(app):
             except (TypeError, ValueError, KeyError):
                 return jsonify({'error': 'invalid'}), 400
             favs.append(fav)
+            AppConfig.set('favorite_locations', _json.dumps(favs))
+            from services.trips_service import reclassify_all_events
+            reclassify_all_events()
+            return jsonify({'ok': True, 'favorites': favs})
+
+        if request.method == 'PUT':
+            # Update an existing favorite by index. Any of name/lat/lon
+            # can be changed; missing keys keep the current value so the
+            # UI can do name-only or coord-only patches.
+            data = request.get_json() or {}
+            try:
+                idx = int(data.get('index'))
+                fav = favs[idx]
+            except (TypeError, ValueError, IndexError, KeyError):
+                return jsonify({'error': 'invalid_index'}), 400
+            if 'name' in data:
+                fav['name'] = str(data['name'])[:60].strip() or fav.get('name', 'Favorit')
+            if 'lat' in data:
+                try:
+                    fav['lat'] = float(data['lat'])
+                except (TypeError, ValueError):
+                    return jsonify({'error': 'invalid_lat'}), 400
+            if 'lon' in data:
+                try:
+                    fav['lon'] = float(data['lon'])
+                except (TypeError, ValueError):
+                    return jsonify({'error': 'invalid_lon'}), 400
+            favs[idx] = fav
             AppConfig.set('favorite_locations', _json.dumps(favs))
             from services.trips_service import reclassify_all_events
             reclassify_all_events()

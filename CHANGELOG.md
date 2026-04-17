@@ -1,5 +1,51 @@
 # Changelog
 
+## v2.22.0 (2026-04-17)
+
+### Fahrtenbuch: alle Felder editierbar + Kartenauswahl + Favoriten-Bearbeitung
+
+Folgt auf v2.21.0 nach Dirks Rückmeldung: „alle felder editierbar sein, start/stop wann km soc rekup. von und nach möglichkeit über die map auswählbar. standorte favoriten lassen sich nicht editieren".
+
+**1. Trip-Editor komplett neu: zwei Spalten, alle Felder**
+
+Das alte Modal editierte nur Label/Favoritenname/Adresse eines einzelnen Stopps. Das neue bearbeitet die komplette Fahrt — Start- UND Zielpunkt in zwei Spalten nebeneinander. Pro Seite editierbar:
+
+- Label (Zuhause/Arbeit/Favorit/Sonstiges) + Favoritenname
+- Adresse
+- Zeit angekommen + Zeit abgefahren (datetime-local)
+- km-Stand bei Ankunft + bei Abfahrt
+- SoC % bei Ankunft + bei Abfahrt
+- Koordinaten (Lat/Lon) — direkt eintippen oder per Karte wählen
+
+Abgeleitete Werte (km Trip-Länge, SoC-Verbrauch, Rekuperation) werden **nicht** separat editiert — die berechnen sich automatisch neu aus den gespeicherten Odometer-/SoC-/Zeitwerten. Ein Hinweistext unter der Karte erklärt das.
+
+**2. Karten-Auswahl im Modal**
+
+Unter den beiden Spalten ist jetzt eine Leaflet-Karte eingeblendet. Beide Marker (blau = Start, rot = Ziel) sind draggable. Zusätzlich gibt's pro Seite einen „Auf Karte wählen"-Button — klickt man den, wird die Karte zum Auswahlmodus und der nächste Karten-Klick setzt die Koordinaten der jeweiligen Seite. Das Modal scrollt die Karte via `invalidateSize()` nach `shown.bs.modal` damit Leaflet die Tiles nicht auf 0x0 rendert.
+
+**3. Favoriten in Einstellungen editierbar**
+
+Die Liste hatte bisher nur Löschen. Jetzt pro Favorit drei Aktions-Buttons:
+
+- **Umbenennen** (Bleistift): öffnet ein Inline-Input mit Check/Cancel, Enter = speichern, ESC = abbrechen. Klick auf den Namen öffnet denselben Edit-Modus.
+- **Neue Position** (Pin): Karte geht in Auswahlmodus, nächster Klick setzt die neuen Koordinaten dieses Favoriten.
+- **Löschen** (Mülleimer): wie vorher.
+
+### Neue Endpoints / API-Änderungen
+
+- `POST /api/parking_event/<id>` akzeptiert jetzt zusätzlich `lat`, `lon`, `arrived_at`, `departed_at`, `odometer_arrived`, `odometer_departed`, `soc_arrived`, `soc_departed`. Leerer String bei `departed_at` löscht die Spalte (für "currently parked"-Einträge). `arrived_at` ist pflicht.
+- `PUT /api/locations/favorites` — neuer Endpoint: `{index, name?, lat?, lon?}` patcht einen einzelnen Favoriten. Fehlende Keys werden nicht angerührt (partial update).
+
+### Server-Schutz
+
+Der 7-Tage-Check (409 bei fehlendem `confirm_old`) bleibt unverändert — gilt weiterhin für alle POST-Änderungen.
+
+### Keine Migration
+
+Keine Schema-Änderung. Kein Breaking-Change für alte Clients — die bisherigen POST-Felder (label/favorite_name/address) funktionieren genauso weiter.
+
+---
+
 ## v2.21.0 (2026-04-17)
 
 ### Vier UX-Verbesserungen nach Dirks Feedback

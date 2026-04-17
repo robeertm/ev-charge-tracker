@@ -595,6 +595,12 @@
                     fav_need_name: {{ t('set.loc_fav_need_name')|tojson }},
                     fav_click: {{ t('set.loc_fav_click')|tojson }},
                     fav_added: {{ t('set.loc_fav_added')|tojson }},
+                    fav_updated: {{ t('set.loc_fav_updated')|tojson }},
+                    fav_click_to_rename: {{ t('set.loc_fav_click_to_rename')|tojson }},
+                    fav_click_to_reposition: {{ t('set.loc_fav_click_to_reposition')|tojson }},
+                    fav_btn_rename: {{ t('set.loc_fav_btn_rename')|tojson }},
+                    fav_btn_reposition: {{ t('set.loc_fav_btn_reposition')|tojson }},
+                    fav_btn_delete: {{ t('set.loc_fav_btn_delete')|tojson }},
                 };
                 const T_FEAT = {
                     soc_range_odo:   {{ t('set.feat_soc_range_odo')|tojson }},
@@ -1815,8 +1821,9 @@
     refreshWorkMarker();
 
     // Click-to-set mode with prominent visual feedback
-    let pickMode = null;  // 'home' | 'work' | 'favorite' | null
+    let pickMode = null;  // 'home' | 'work' | 'favorite' | 'edit_favorite' | null
     let pendingFavName = null;
+    let pendingEditFavIdx = null;  // index of favorite being re-positioned
     const mapEl = document.getElementById('locMap');
 
     function setPickMode(mode, statusMsg) {
@@ -1893,6 +1900,31 @@
                 console.error('[loc] favorite POST failed', err);
                 setStatus(T_LOC.error + ' ' + err.message);
             }
+            return;
+        }
+
+        if (pickMode === 'edit_favorite') {
+            const idx = pendingEditFavIdx;
+            setPickMode(null);
+            pendingEditFavIdx = null;
+            if (idx == null) return;
+            setStatus(T_LOC.saving);
+            try {
+                const r = await fetch('/api/locations/favorites', {
+                    method: 'PUT',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({ index: idx, lat: parseFloat(lat), lon: parseFloat(lon) }),
+                });
+                if (r.ok) {
+                    setStatus(T_LOC.fav_updated + ' (' + lat + ', ' + lon + ')');
+                    loadFavs();
+                } else {
+                    const data = await r.json().catch(() => ({}));
+                    setStatus(T_LOC.error + ' HTTP ' + r.status + ' ' + (data.error || ''));
+                }
+            } catch (err) {
+                setStatus(T_LOC.error + ' ' + err.message);
+            }
         }
     }
     map.on('click', handleMapClick);
@@ -1921,6 +1953,108 @@
     document.getElementById('btnSaveWork').addEventListener('click', () => saveLocation('work'));
 
     // Favorites
+    async function renameFavorite(idx, newName) {
+        const r = await fetch('/api/locations/favorites', {
+            method: 'PUT',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({ index: idx, name: newName }),
+        });
+        return r.ok;
+    }
+
+    function buildFavRow(f, idx) {
+        const li = document.createElement('li');
+        li.className = 'list-group-item px-1 py-1';
+
+        const row = document.createElement('div');
+        row.className = 'd-flex justify-content-between align-items-center gap-1';
+
+        const nameSpan = document.createElement('span');
+        nameSpan.className = 'text-truncate';
+        nameSpan.innerHTML = '<i class="bi bi-star-fill text-info"></i> ';
+        const nameText = document.createElement('span');
+        nameText.textContent = f.name;
+        nameText.style.cursor = 'pointer';
+        nameText.title = T_LOC.fav_click_to_rename || '';
+        nameSpan.appendChild(nameText);
+
+        const btnGroup = document.createElement('div');
+        btnGroup.className = 'd-flex gap-1 flex-shrink-0';
+
+        const btnRename = document.createElement('button');
+        btnRename.className = 'btn btn-link btn-sm text-primary p-0 px-1';
+        btnRename.title = T_LOC.fav_btn_rename || 'Rename';
+        btnRename.innerHTML = '<i class="bi bi-pencil"></i>';
+
+        const btnReposition = document.createElement('button');
+        btnReposition.className = 'btn btn-link btn-sm text-success p-0 px-1';
+        btnReposition.title = T_LOC.fav_btn_reposition || 'Reposition';
+        btnReposition.innerHTML = '<i class="bi bi-geo-alt"></i>';
+
+        const btnDel = document.createElement('button');
+        btnDel.className = 'btn btn-link btn-sm text-danger p-0 px-1';
+        btnDel.title = T_LOC.fav_btn_delete || 'Delete';
+        btnDel.innerHTML = '<i class="bi bi-trash"></i>';
+
+        btnGroup.append(btnRename, btnReposition, btnDel);
+        row.append(nameSpan, btnGroup);
+        li.appendChild(row);
+
+        function startInlineRename() {
+            const input = document.createElement('input');
+            input.type = 'text';
+            input.className = 'form-control form-control-sm';
+            input.value = f.name;
+            input.maxLength = 60;
+
+            const save = document.createElement('button');
+            save.className = 'btn btn-sm btn-primary';
+            save.innerHTML = '<i class="bi bi-check"></i>';
+            const cancel = document.createElement('button');
+            cancel.className = 'btn btn-sm btn-outline-secondary';
+            cancel.innerHTML = '<i class="bi bi-x"></i>';
+
+            const ig = document.createElement('div');
+            ig.className = 'input-group input-group-sm';
+            ig.append(input, save, cancel);
+            li.innerHTML = '';
+            li.appendChild(ig);
+            input.focus();
+            input.select();
+
+            async function commit() {
+                const newName = input.value.trim();
+                if (!newName || newName === f.name) { loadFavs(); return; }
+                const ok = await renameFavorite(idx, newName);
+                setStatus(ok ? (T_LOC.fav_updated || 'Updated') : T_LOC.error);
+                loadFavs();
+            }
+            save.addEventListener('click', commit);
+            cancel.addEventListener('click', () => loadFavs());
+            input.addEventListener('keydown', e => {
+                if (e.key === 'Enter') commit();
+                else if (e.key === 'Escape') loadFavs();
+            });
+        }
+
+        btnRename.addEventListener('click', startInlineRename);
+        nameText.addEventListener('click', startInlineRename);
+        btnReposition.addEventListener('click', () => {
+            pendingEditFavIdx = idx;
+            setPickMode('edit_favorite', (T_LOC.fav_click_to_reposition || T_LOC.fav_click) + ' (' + f.name + ')');
+        });
+        btnDel.addEventListener('click', async () => {
+            await fetch('/api/locations/favorites', {
+                method: 'DELETE',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({ index: idx }),
+            });
+            loadFavs();
+        });
+
+        return li;
+    }
+
     async function loadFavs() {
         const r = await fetch('/api/locations/favorites');
         const data = await r.json();
@@ -1929,22 +2063,7 @@
         favMarkers.forEach(m => map.removeLayer(m));
         favMarkers = [];
         (data.favorites || []).forEach((f, idx) => {
-            const li = document.createElement('li');
-            li.className = 'list-group-item d-flex justify-content-between align-items-center px-1 py-1';
-            li.innerHTML = '<span><i class="bi bi-star-fill text-info"></i> ' + f.name + '</span>';
-            const del = document.createElement('button');
-            del.className = 'btn btn-link btn-sm text-danger p-0';
-            del.innerHTML = '<i class="bi bi-trash"></i>';
-            del.addEventListener('click', async () => {
-                await fetch('/api/locations/favorites', {
-                    method: 'DELETE',
-                    headers: {'Content-Type': 'application/json'},
-                    body: JSON.stringify({ index: idx }),
-                });
-                loadFavs();
-            });
-            li.appendChild(del);
-            list.appendChild(li);
+            list.appendChild(buildFavRow(f, idx));
             favMarkers.push(placeMarker('favorite', f.lat, f.lon, f.name));
         });
     }
