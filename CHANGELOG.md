@@ -1,5 +1,41 @@
 # Changelog
 
+## v2.21.0 (2026-04-17)
+
+### Vier UX-Verbesserungen nach Dirks Feedback
+
+**1. Ladung erfassen: Abbrechen-Button + „Mein Standort" kommt jetzt vom Auto**
+
+Vorher hatte das Formular keinen Weg, eingegebene Werte zu verwerfen — man musste zurücknavigieren und Browser-Warnungen ignorieren. Jetzt: expliziter Abbrechen-Button neben „Speichern", der optional nachfragt (nur wenn tatsächlich etwas eingegeben wurde) und die lokale Timer-Session mitlöscht.
+
+Die „Mein Standort"-Taste zog vorher `navigator.geolocation` vom Smartphone — was HTTPS verlangt und meistens lautlos scheiterte, außerdem reflektiert das nicht den Ladeort (Phone steht zuhause auf dem Tisch, geladen wurde am IONITY an der A4). Jetzt holt der Button die **letzte vom Auto übermittelte GPS-Position** aus den `vehicle_syncs` via neuem Endpoint `/api/vehicle/last_gps`. Funktioniert ohne HTTPS. Das Smartphone-GPS ist als sekundärer Button erhalten geblieben, aber der Default ist jetzt das Fahrzeug.
+
+**2. Anbieter in Einstellungen: richtige Tabelle statt Textarea + Preis-Autofill**
+
+Statt „Eigene Anbieter als Freitext" gibt es jetzt eine Zeile pro Anbieter (eingebaute + eigene) mit Name und Preis pro kWh. Preise werden als JSON in `operator_prices` gespeichert. Im Ladung-Erfassen-Formular füllt der passende Preis automatisch das `eur_per_kwh`-Feld, sobald der Anbieter ausgewählt wird — aber nur, wenn der User das Feld noch nicht selbst angefasst hat (verhindert ungewolltes Überschreiben). Gleiche Logik im Bearbeiten-Formular.
+
+**3. Fahrtenbuch: Stopps nachträglich bearbeiten mit 7-Tage-Schutz**
+
+Jede Stopp-Zelle (from/to) ist jetzt klickbar und öffnet ein Modal zum Bearbeiten von Label (Zuhause/Arbeit/Favorit/Sonstiges), Favoriten-Name und Adresse. Koordinaten und Zeitstempel bleiben unveränderlich — die kommen vom Auto und Änderungen würden die abgeleiteten km/SoC-Statistiken invalidieren.
+
+Einträge älter als 7 Tage erfordern eine explizite Bestätigung per Checkbox („Eintrag ist älter als 7 Tage — wirklich ändern?"). Der Check läuft zusätzlich serverseitig in `/api/parking_event/<id>` — ein hingeklicktes Modal ohne Bestätigung kriegt 409 zurück. Warnt mit Tage-Zahl und Hinweis auf Rückwirkung auf Statistiken.
+
+**4. Einstellungen → Standorte: klarere Bedienung**
+
+Die Save-Buttons hatten nur ein Disk-Icon ohne Text — leicht zu übersehen, was das „fehlen" des Save-Buttons aus Dirks Bericht erklärt. Jetzt: explizites „Speichern" auf Home- und Work-Buttons, separater „Karte wählen"-Button, Favoriten-Button mit Hint-Text unterhalb (Name → Button → Karte), und eine nummerierte 3-Schritt-Anleitung oben in der Card.
+
+### Neue/geänderte Endpoints
+
+- `GET /api/vehicle/last_gps` — letzte bekannte GPS-Position vom Auto
+- `GET/POST /api/parking_event/<id>` — Stopp anzeigen/bearbeiten (mit 7-Tage-Schutz)
+- Settings POST `action=save_operators` akzeptiert jetzt parallele Arrays `op_name[]`/`op_price[]`/`op_builtin[]` statt einem Textarea-Blob
+
+### Datenmodell
+
+Keine Schema-Änderung. Neue Config-Keys werden lazy angelegt: `operator_prices` (JSON-Dict).
+
+---
+
 ## v2.20.4 (2026-04-17)
 
 ### Hotfix: Dashboard-Crash bei Ladungen ohne Kostenwert

@@ -236,12 +236,15 @@ def get_trips(limit: Optional[int] = None,
             regen_kwh = round(max(cum_arr - cum_dep, 0), 2)
         trips.append({
             'from': {
+                'id': prev.id,
                 'lat': prev.lat, 'lon': prev.lon,
                 'label': prev.label, 'name': prev.favorite_name,
                 'address': prev.address,
+                'arrived_at': prev.arrived_at.isoformat() if prev.arrived_at else None,
                 'departed_at': prev.departed_at.isoformat() if prev.departed_at else None,
             },
             'to': {
+                'id': curr.id,
                 'lat': curr.lat, 'lon': curr.lon,
                 'label': curr.label, 'name': curr.favorite_name,
                 'address': curr.address,

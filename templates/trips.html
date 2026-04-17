@@ -92,20 +92,23 @@
                         <th class="text-end">km</th>
                         <th class="text-end">SoC</th>
                         <th class="text-end">{{ t('trips.col_regen') }}</th>
+                        <th class="text-end"></th>
                     </tr>
                 </thead>
                 <tbody>
                 {% for tr in trips %}
-                    <tr>
+                    <tr data-from-id="{{ tr.from.id }}" data-to-id="{{ tr.to.id }}">
                         <td class="small">{% if tr.from.departed_at %}{{ tr.from.departed_at[:16] | replace('T', ' ') }}{% endif %}</td>
-                        <td class="small">
+                        <td class="small trip-endpoint" data-evt-id="{{ tr.from.id }}" role="button"
+                            title="{{ t('trips.edit_title') }}">
                             {% if tr.from.label == 'home' %}<i class="bi bi-house-fill text-success"></i> {{ tr.from.name or t('trips.home') }}
                             {% elif tr.from.label == 'work' %}<i class="bi bi-briefcase-fill text-warning"></i> {{ tr.from.name or t('trips.work') }}
                             {% elif tr.from.label == 'favorite' %}<i class="bi bi-star-fill text-info"></i> {{ tr.from.name }}
                             {% elif tr.from.address %}{{ tr.from.address }}
                             {% else %}<span class="text-muted fst-italic">{{ t('trips.resolving') }}</span>{% endif %}
                         </td>
-                        <td class="small">
+                        <td class="small trip-endpoint" data-evt-id="{{ tr.to.id }}" role="button"
+                            title="{{ t('trips.edit_title') }}">
                             {% if tr.to.label == 'home' %}<i class="bi bi-house-fill text-success"></i> {{ tr.to.name or t('trips.home') }}
                             {% elif tr.to.label == 'work' %}<i class="bi bi-briefcase-fill text-warning"></i> {{ tr.to.name or t('trips.work') }}
                             {% elif tr.to.label == 'favorite' %}<i class="bi bi-star-fill text-info"></i> {{ tr.to.name }}
@@ -115,14 +118,74 @@
                         <td class="text-end">{% if tr.km %}{{ tr.km }}{% endif %}</td>
                         <td class="text-end">{% if tr.soc_used %}−{{ tr.soc_used }}%{% endif %}</td>
                         <td class="text-end text-success">{% if tr.regen_kwh %}+{{ "%.1f"|format(tr.regen_kwh) }}{% endif %}</td>
+                        <td class="text-end">
+                            <button type="button" class="btn btn-sm btn-outline-secondary btn-edit-trip"
+                                    data-evt-id="{{ tr.to.id }}" title="{{ t('trips.edit_title') }}">
+                                <i class="bi bi-pencil"></i>
+                            </button>
+                        </td>
                     </tr>
                 {% else %}
-                    <tr><td colspan="6" class="text-center text-muted py-4">{{ t('trips.empty') }}</td></tr>
+                    <tr><td colspan="7" class="text-center text-muted py-4">{{ t('trips.empty') }}</td></tr>
                 {% endfor %}
                 </tbody>
             </table>
         </div>
     </div>
+</div>
+
+<!-- Edit Modal ─────────────────────────────────────────────────── -->
+<div class="modal fade" id="tripEditModal" tabindex="-1" aria-hidden="true">
+  <div class="modal-dialog">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title"><i class="bi bi-pencil-square"></i> {{ t('trips.edit_heading') }}</h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+      </div>
+      <div class="modal-body">
+        <div id="tripEditAgeWarn" class="alert alert-warning small" style="display:none">
+            <i class="bi bi-exclamation-triangle"></i>
+            <span id="tripEditAgeText"></span>
+        </div>
+        <div class="mb-3 small text-muted" id="tripEditMeta"></div>
+
+        <div class="mb-3">
+            <label class="form-label small">{{ t('trips.edit_label') }}</label>
+            <select class="form-select form-select-sm" id="tripEditLabelSelect">
+                <option value="other">{{ t('trips.edit_label_other') }}</option>
+                <option value="home">{{ t('trips.edit_label_home') }}</option>
+                <option value="work">{{ t('trips.edit_label_work') }}</option>
+                <option value="favorite">{{ t('trips.edit_label_favorite') }}</option>
+            </select>
+        </div>
+        <div class="mb-3" id="tripEditFavNameWrap">
+            <label class="form-label small">{{ t('trips.edit_favorite_name') }}</label>
+            <input type="text" class="form-control form-control-sm" id="tripEditFavName"
+                   maxlength="120" placeholder="{{ t('trips.edit_favorite_name_ph') }}">
+        </div>
+        <div class="mb-3">
+            <label class="form-label small">{{ t('trips.edit_address') }}</label>
+            <input type="text" class="form-control form-control-sm" id="tripEditAddress"
+                   placeholder="{{ t('trips.edit_address_ph') }}">
+        </div>
+        <div class="form-check" id="tripEditConfirmOldWrap" style="display:none">
+            <input class="form-check-input" type="checkbox" id="tripEditConfirmOld">
+            <label class="form-check-label small" for="tripEditConfirmOld">
+                <strong class="text-warning">{{ t('trips.edit_confirm_old') }}</strong>
+            </label>
+        </div>
+        <div id="tripEditStatus" class="small text-muted mt-2"></div>
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn btn-outline-secondary btn-sm" data-bs-dismiss="modal">
+            {{ t('trips.edit_cancel') }}
+        </button>
+        <button type="button" class="btn btn-primary btn-sm" id="tripEditSave">
+            <i class="bi bi-save"></i> {{ t('trips.edit_save') }}
+        </button>
+      </div>
+    </div>
+  </div>
 </div>
 
 <script>
@@ -226,6 +289,133 @@
         }
         btn.disabled = false;
         btn.innerHTML = orig;
+    });
+})();
+
+// ── Edit a parking event (the "to" or "from" of a trip row) ──────
+(function() {
+    const modalEl = document.getElementById('tripEditModal');
+    if (!modalEl) return;
+    const T_EDIT = {
+        loading:         {{ t('trips.edit_loading')|tojson }},
+        load_error:      {{ t('trips.edit_load_error')|tojson }},
+        saving:          {{ t('trips.edit_saving')|tojson }},
+        saved:           {{ t('trips.edit_saved')|tojson }},
+        save_error:      {{ t('trips.edit_save_error')|tojson }},
+        requires_confirm:{{ t('trips.edit_requires_confirm')|tojson }},
+        age_note:        {{ t('trips.edit_age_note')|tojson }},
+    };
+    let _modal = null;
+    function getModal() {
+        if (_modal) return _modal;
+        if (typeof bootstrap === 'undefined' || !bootstrap.Modal) return null;
+        _modal = new bootstrap.Modal(modalEl);
+        return _modal;
+    }
+
+    const sel = {
+        label:   document.getElementById('tripEditLabelSelect'),
+        favName: document.getElementById('tripEditFavName'),
+        favWrap: document.getElementById('tripEditFavNameWrap'),
+        address: document.getElementById('tripEditAddress'),
+        meta:    document.getElementById('tripEditMeta'),
+        status:  document.getElementById('tripEditStatus'),
+        ageWarn: document.getElementById('tripEditAgeWarn'),
+        ageText: document.getElementById('tripEditAgeText'),
+        confirmWrap: document.getElementById('tripEditConfirmOldWrap'),
+        confirm: document.getElementById('tripEditConfirmOld'),
+        save:    document.getElementById('tripEditSave'),
+    };
+
+    let currentId = null;
+    let currentAgeDays = 0;
+
+    function setStatus(msg, cls) {
+        sel.status.className = 'small mt-2 text-' + (cls || 'muted');
+        sel.status.textContent = msg || '';
+    }
+    function updateFavVisibility() {
+        // Only "favorite" uses a user-chosen name; for other labels the
+        // field is irrelevant and would be confusing.
+        sel.favWrap.style.display = sel.label.value === 'favorite' ? '' : 'none';
+    }
+    sel.label.addEventListener('change', updateFavVisibility);
+
+    async function openEditor(evtId) {
+        const m = getModal();
+        if (!m) { alert('Bootstrap not loaded'); return; }
+        currentId = evtId;
+        sel.label.value = 'other';
+        sel.favName.value = '';
+        sel.address.value = '';
+        sel.meta.textContent = '';
+        sel.confirm.checked = false;
+        sel.ageWarn.style.display = 'none';
+        sel.confirmWrap.style.display = 'none';
+        setStatus(T_EDIT.loading);
+        m.show();
+
+        try {
+            const r = await fetch('/api/parking_event/' + encodeURIComponent(evtId));
+            if (!r.ok) throw new Error('HTTP ' + r.status);
+            const d = await r.json();
+            sel.label.value = d.label || 'other';
+            sel.favName.value = d.favorite_name || '';
+            sel.address.value = d.address || '';
+            sel.meta.innerHTML = '<i class="bi bi-geo"></i> ' +
+                d.lat.toFixed(5) + ', ' + d.lon.toFixed(5) +
+                (d.arrived_at ? ' · ' + d.arrived_at.slice(0, 16).replace('T', ' ') : '');
+            currentAgeDays = d.age_days || 0;
+            if (currentAgeDays > 7) {
+                sel.ageText.textContent = T_EDIT.age_note.replace('{days}', currentAgeDays);
+                sel.ageWarn.style.display = '';
+                sel.confirmWrap.style.display = '';
+            }
+            updateFavVisibility();
+            setStatus('');
+        } catch (e) {
+            setStatus(T_EDIT.load_error + ' ' + e.message, 'danger');
+        }
+    }
+
+    document.querySelectorAll('.btn-edit-trip, .trip-endpoint').forEach(el => {
+        el.addEventListener('click', () => {
+            const id = el.dataset.evtId;
+            if (id) openEditor(parseInt(id, 10));
+        });
+    });
+
+    sel.save.addEventListener('click', async () => {
+        if (currentId == null) return;
+        if (currentAgeDays > 7 && !sel.confirm.checked) {
+            setStatus(T_EDIT.requires_confirm, 'warning');
+            return;
+        }
+        setStatus(T_EDIT.saving);
+        sel.save.disabled = true;
+        try {
+            const payload = {
+                label: sel.label.value,
+                favorite_name: sel.label.value === 'favorite' ? sel.favName.value.trim() : null,
+                address: sel.address.value.trim(),
+                confirm_old: sel.confirm.checked ? true : false,
+            };
+            const r = await fetch('/api/parking_event/' + encodeURIComponent(currentId), {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify(payload),
+            });
+            const d = await r.json();
+            if (r.ok && d.ok) {
+                setStatus(T_EDIT.saved, 'success');
+                setTimeout(() => location.reload(), 800);
+            } else {
+                setStatus(T_EDIT.save_error + ' ' + (d.error || r.status), 'danger');
+            }
+        } catch (e) {
+            setStatus(T_EDIT.save_error + ' ' + e.message, 'danger');
+        }
+        sel.save.disabled = false;
     });
 })();
 </script>

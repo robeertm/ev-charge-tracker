@@ -179,13 +179,17 @@
                         <div class="d-flex gap-1 flex-wrap">
                             <button type="button" class="btn btn-sm btn-outline-info" id="btnGpsLocation"
                                     title="{{ t('input.location_gps_title') }}">
-                                <i class="bi bi-crosshair"></i> {{ t('input.location_gps') }}
+                                <i class="bi bi-car-front-fill"></i> {{ t('input.location_gps') }}
                             </button>
                             <button type="button" class="btn btn-sm btn-outline-success" id="btnHomeLocation">
                                 <i class="bi bi-house-fill"></i> {{ t('input.location_home') }}
                             </button>
                             <button type="button" class="btn btn-sm btn-outline-warning" id="btnWorkLocation">
                                 <i class="bi bi-briefcase-fill"></i> {{ t('input.location_work') }}
+                            </button>
+                            <button type="button" class="btn btn-sm btn-outline-secondary" id="btnPhoneGps"
+                                    title="{{ t('input.location_phone_gps_title') }}">
+                                <i class="bi bi-phone"></i> {{ t('input.location_phone_gps') }}
                             </button>
                             <button type="button" class="btn btn-sm btn-outline-secondary" id="btnClearLocation">
                                 <i class="bi bi-x"></i>
@@ -201,9 +205,15 @@
                                placeholder="{{ t('input.notes_placeholder') }}">
                     </div>
 
-                    <button type="submit" class="btn btn-success btn-lg w-100">
-                        <i class="bi bi-check-circle"></i> {{ t('input.save') }}
-                    </button>
+                    <div class="d-flex gap-2">
+                        <button type="submit" class="btn btn-success btn-lg flex-fill">
+                            <i class="bi bi-check-circle"></i> {{ t('input.save') }}
+                        </button>
+                        <button type="button" class="btn btn-outline-secondary btn-lg" id="btnCancelCharge"
+                                title="{{ t('input.cancel_title') }}">
+                            <i class="bi bi-x-circle"></i> {{ t('input.cancel') }}
+                        </button>
+                    </div>
                 </form>
 
                 {% if last_charge %}
@@ -579,6 +589,12 @@ document.getElementById('chargeForm').addEventListener('submit', () => {
         home_set:        {{ t('input.loc_home_set')|tojson }},
         work_set:        {{ t('input.loc_work_set')|tojson }},
         looking_up:      {{ t('input.loc_looking_up')|tojson }},
+        car_loading:     {{ t('input.loc_car_loading')|tojson }},
+        car_set:         {{ t('input.loc_car_set')|tojson }},
+        car_none:        {{ t('input.loc_car_none')|tojson }},
+        car_error:       {{ t('input.loc_car_error')|tojson }},
+        car_stale:       {{ t('input.loc_car_stale')|tojson }},
+        cancel_confirm:  {{ t('input.cancel_confirm')|tojson }},
     };
     const homeLat = {{ home_lat or 'null' }};
     const homeLon = {{ home_lon or 'null' }};
@@ -609,9 +625,36 @@ document.getElementById('chargeForm').addEventListener('submit', () => {
         } catch (e) { return null; }
     }
 
+    // Main "Mein Standort" button — fetches the car's last known GPS via
+    // VehicleSync. Works without HTTPS and represents where the charge
+    // actually happened (phone GPS only reflects where the phone is *now*).
     document.getElementById('btnGpsLocation').addEventListener('click', async () => {
+        setStatus(LOC.car_loading);
+        try {
+            const r = await fetch('/api/vehicle/last_gps');
+            if (r.status === 404) { setStatus(LOC.car_none); return; }
+            if (!r.ok) { setStatus(LOC.car_error + ' HTTP ' + r.status); return; }
+            const d = await r.json();
+            setCoords(d.lat, d.lon);
+            const stale = d.stale ? ' ' + LOC.car_stale : '';
+            setStatus(LOC.car_set + ' (' + d.at + ')' + stale);
+            if (!nameIn.value.trim()) {
+                setStatus(LOC.looking_up);
+                const addr = await reverseGeocode(d.lat, d.lon);
+                if (addr) nameIn.value = addr.split(',').slice(0, 2).join(',').slice(0, 60);
+                setStatus(LOC.car_set + ' (' + d.at + ')' + stale);
+            }
+        } catch (e) {
+            setStatus(LOC.car_error + ' ' + e.message);
+        }
+    });
+
+    // Optional fallback: phone GPS via navigator.geolocation.
+    // Only useful when HTTPS is available and the phone is physically at
+    // the charger. Hidden behind a secondary button so the main workflow
+    // doesn't depend on it.
+    document.getElementById('btnPhoneGps').addEventListener('click', async () => {
         if (!navigator.geolocation) { setStatus(LOC.gps_unsupported); return; }
-        // Geolocation API only works on https:// or http://localhost
         if (location.protocol !== 'https:' && location.hostname !== 'localhost' && location.hostname !== '127.0.0.1') {
             setStatus(LOC.not_https);
             return;
@@ -626,16 +669,11 @@ document.getElementById('chargeForm').addEventListener('submit', () => {
                 if (!nameIn.value.trim()) {
                     setStatus(LOC.looking_up);
                     const addr = await reverseGeocode(lat, lon);
-                    if (addr) {
-                        // Use the first 60 chars of the address as the name
-                        nameIn.value = addr.split(',').slice(0, 2).join(',').slice(0, 60);
-                    }
+                    if (addr) nameIn.value = addr.split(',').slice(0, 2).join(',').slice(0, 60);
                     setStatus(LOC.gps_set + ' (±' + Math.round(pos.coords.accuracy) + ' m)');
                 }
             },
-            err => {
-                setStatus(LOC.gps_denied + ' ' + err.message);
-            },
+            err => { setStatus(LOC.gps_denied + ' ' + err.message); },
             { enableHighAccuracy: true, timeout: 10000, maximumAge: 60000 }
         );
     });
@@ -657,6 +695,64 @@ document.getElementById('chargeForm').addEventListener('submit', () => {
         lonIn.value = '';
         nameIn.value = '';
         setStatus(LOC.cleared);
+    });
+})();
+
+// ── Operator price auto-fill ─────────────────────────────────────
+// When the user picks a known operator in the Anbieter field, fill the
+// eur_per_kwh input with the stored price — but only if that field is
+// still empty (or matches a previous auto-fill), so manual entries
+// never get overwritten.
+(function() {
+    const prices = {{ operator_prices|tojson }};
+    const opIn = document.getElementById('operator');
+    const priceIn = document.getElementById('eur_per_kwh');
+    if (!opIn || !priceIn || !prices) return;
+
+    let lastAutoFilled = '';
+    function maybeFill() {
+        const name = (opIn.value || '').trim();
+        if (!name) return;
+        // Exact-match lookup first, then case-insensitive
+        let p = prices[name];
+        if (p === undefined) {
+            const lower = name.toLowerCase();
+            for (const k in prices) {
+                if (k.toLowerCase() === lower) { p = prices[k]; break; }
+            }
+        }
+        if (p === undefined) return;
+        const current = (priceIn.value || '').trim();
+        if (current && current !== lastAutoFilled) return;  // user typed, keep it
+        priceIn.value = p.toFixed(4).replace(/\.?0+$/, '');
+        lastAutoFilled = priceIn.value;
+        if (typeof updateCalcPrice === 'function') updateCalcPrice();
+    }
+    // change fires on datalist-pick, blur covers free-text typing
+    opIn.addEventListener('change', maybeFill);
+    opIn.addEventListener('blur', maybeFill);
+})();
+
+// ── Cancel: discard any in-progress charge timer + form state ────
+(function() {
+    const btn = document.getElementById('btnCancelCharge');
+    if (!btn) return;
+    const T_CANCEL_CONFIRM = {{ t('input.cancel_confirm')|tojson }};
+    btn.addEventListener('click', () => {
+        const form = document.getElementById('chargeForm');
+        // Only show the confirm prompt if the user has started entering
+        // something — skip the nag for a brand-new empty form.
+        const hasInput = form && Array.from(form.elements).some(el =>
+            (el.type === 'number' || el.type === 'text' || el.type === 'date') &&
+            el.value && el.value.trim() !== '' &&
+            // date field is pre-filled with today — don't treat that as input
+            el.id !== 'date');
+        if (hasInput && !confirm(T_CANCEL_CONFIRM)) return;
+        try {
+            // Key is only defined when vehicle_configured, so guard access.
+            if (typeof CHARGE_KEY !== 'undefined') localStorage.removeItem(CHARGE_KEY);
+        } catch (e) { /* ignore */ }
+        window.location.href = '/';
     });
 })();
 </script>

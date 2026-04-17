@@ -266,5 +266,33 @@
         setStatus(T.cleared);
     });
 })();
+
+// ── Operator price auto-fill (edit form) ─────────────────────────
+(function() {
+    const prices = {{ operator_prices|tojson }};
+    const opIn = document.getElementById('operator');
+    const priceIn = document.querySelector('input[name="eur_per_kwh"]');
+    if (!opIn || !priceIn || !prices) return;
+
+    let lastAutoFilled = '';
+    function maybeFill() {
+        const name = (opIn.value || '').trim();
+        if (!name) return;
+        let p = prices[name];
+        if (p === undefined) {
+            const lower = name.toLowerCase();
+            for (const k in prices) {
+                if (k.toLowerCase() === lower) { p = prices[k]; break; }
+            }
+        }
+        if (p === undefined) return;
+        const current = (priceIn.value || '').trim();
+        if (current && current !== lastAutoFilled) return;
+        priceIn.value = p.toFixed(4).replace(/\.?0+$/, '');
+        lastAutoFilled = priceIn.value;
+    }
+    opIn.addEventListener('change', maybeFill);
+    opIn.addEventListener('blur', maybeFill);
+})();
 </script>
 {% endblock %}

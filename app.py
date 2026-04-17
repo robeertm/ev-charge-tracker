@@ -254,6 +254,30 @@ def _get_custom_operators_text():
     return '\n'.join(_get_custom_operators())
 
 
+def _get_operator_prices():
+    """Return the {operator_name: eur_per_kwh_float} map used by the
+    charge-input form to auto-fill the price field when the user picks a
+    known provider. Unset/blank prices are omitted so the UI knows not
+    to override what the user typed."""
+    import json as _json
+    try:
+        raw = AppConfig.get('operator_prices', '{}') or '{}'
+        data = _json.loads(raw)
+        if not isinstance(data, dict):
+            return {}
+        out = {}
+        for name, price in data.items():
+            try:
+                p = float(price)
+                if p > 0:
+                    out[str(name).strip()] = round(p, 4)
+            except (TypeError, ValueError):
+                continue
+        return out
+    except (ValueError, TypeError):
+        return {}
+
+
 def _get_last_rollback():
     """Read LAST_ROLLBACK.json if present so the settings page can
     surface a banner explaining the auto-rollback to the user. Returns
@@ -953,7 +977,8 @@ def register_routes(app):
                                work_lat=AppConfig.get('work_lat', ''),
                                work_lon=AppConfig.get('work_lon', ''),
                                work_label=AppConfig.get('work_label', ''),
-                               operators=_get_operator_list())
+                               operators=_get_operator_list(),
+                               operator_prices=_get_operator_prices())
 
     # ── HISTORY ────────────────────────────────────────────────
     @app.route('/history')
@@ -1015,6 +1040,7 @@ def register_routes(app):
 
         return render_template('edit.html', charge=charge,
                                operators=_get_operator_list(),
+                               operator_prices=_get_operator_prices(),
                                home_lat=AppConfig.get('home_lat', ''),
                                home_lon=AppConfig.get('home_lon', ''),
                                home_label=AppConfig.get('home_label', ''),
@@ -1070,16 +1096,41 @@ def register_routes(app):
 
             elif action == 'save_operators':
                 import json as _json
-                raw = request.form.get('custom_operators', '') or ''
-                # Accept both newline- and comma-separated input and
-                # normalize to a JSON list — easier to edit in either
-                # style from the textarea.
-                items = []
-                for chunk in raw.replace(',', '\n').splitlines():
-                    s = chunk.strip()
-                    if s and s not in items:
-                        items.append(s)
-                AppConfig.set('custom_operators', _json.dumps(items))
+                # The settings form submits parallel arrays: one row per
+                # operator, each with a name (may be blank for empty row),
+                # a price (may be blank), and an is_builtin flag so we
+                # know not to re-add built-ins to the custom list.
+                names    = request.form.getlist('op_name')
+                prices   = request.form.getlist('op_price')
+                builtins = request.form.getlist('op_builtin')  # '1'/'0' per row
+                # Pad the builtin flag in case the form was tampered with —
+                # safer than crashing on IndexError.
+                while len(builtins) < len(names):
+                    builtins.append('0')
+
+                custom_list = []
+                price_map = {}
+                for i, raw_name in enumerate(names):
+                    name = (raw_name or '').strip()
+                    if not name:
+                        continue
+                    if builtins[i] != '1' and name not in custom_list:
+                        # Skip names that collide with built-ins to avoid
+                        # duplicate dropdown entries.
+                        if name not in DEFAULT_OPERATORS:
+                            custom_list.append(name)
+                    raw_price = (prices[i] if i < len(prices) else '') or ''
+                    raw_price = raw_price.replace(',', '.').strip()
+                    if raw_price:
+                        try:
+                            p = float(raw_price)
+                            if p > 0:
+                                price_map[name] = round(p, 4)
+                        except ValueError:
+                            pass
+
+                AppConfig.set('custom_operators', _json.dumps(custom_list))
+                AppConfig.set('operator_prices', _json.dumps(price_map))
                 flash(t('flash.operators_saved'), 'success')
 
             elif action == 'save_pv':
@@ -1355,6 +1406,8 @@ def register_routes(app):
                                hide_ssl_card=hide_ssl_card,
                                custom_operators_text=_get_custom_operators_text(),
                                operators_builtin=DEFAULT_OPERATORS,
+                               operators_custom=_get_custom_operators(),
+                               operator_prices=_get_operator_prices(),
                                _json_logical_field_labels=_json_logical_field_labels_for_ui(),
                                last_rollback=_get_last_rollback(),
                                app_version=Config.APP_VERSION)
@@ -1672,6 +1725,30 @@ def register_routes(app):
             return jsonify({'series': None, 'summary': {'count': 0}, 'days': days})
         data['days'] = days
         return jsonify(data)
+
+    @app.route('/api/vehicle/last_gps')
+    def api_vehicle_last_gps():
+        """Most recent VehicleSync row that carries coords.
+
+        Used by the charge-input form's "Mein Standort" button so the user
+        can fill the location fields with the car's last known position
+        instead of the browser's GPS (which requires HTTPS and isn't useful
+        for charge sessions that happened before opening the phone).
+        """
+        row = (VehicleSync.query
+               .filter(VehicleSync.location_lat.isnot(None),
+                       VehicleSync.location_lon.isnot(None))
+               .order_by(VehicleSync.timestamp.desc())
+               .first())
+        if not row:
+            return jsonify({'error': 'no_gps'}), 404
+        latest = VehicleSync.query.order_by(VehicleSync.timestamp.desc()).first()
+        return jsonify({
+            'lat': row.location_lat,
+            'lon': row.location_lon,
+            'at': row.timestamp.strftime('%d.%m.%Y %H:%M'),
+            'stale': latest is not None and latest.id != row.id,
+        })
 
     @app.route('/api/vehicle/sync/status')
     def api_vehicle_sync_status():
@@ -2113,6 +2190,64 @@ def register_routes(app):
         out.append('</gpx>')
         return Response('\n'.join(out), mimetype='application/gpx+xml',
                         headers={'Content-Disposition': 'attachment;filename=fahrtenbuch.gpx'})
+
+    @app.route('/api/parking_event/<int:event_id>', methods=['GET', 'POST'])
+    def api_parking_event(event_id):
+        """Read or update a parking event (label/favorite_name/address).
+
+        Coords, arrival/departure timestamps and odometer come from the
+        car itself and are never overwritten here — editing those would
+        invalidate the derived trip metrics.
+
+        Old entries (>7 days) require an explicit 'confirm_old' flag in
+        the POST body so a casual click can't silently rewrite a week's
+        worth of history.
+        """
+        from models.database import ParkingEvent
+        evt = ParkingEvent.query.get_or_404(event_id)
+
+        if request.method == 'GET':
+            return jsonify({
+                'id': evt.id,
+                'label': evt.label,
+                'favorite_name': evt.favorite_name,
+                'address': evt.address,
+                'lat': evt.lat, 'lon': evt.lon,
+                'arrived_at': evt.arrived_at.isoformat() if evt.arrived_at else None,
+                'departed_at': evt.departed_at.isoformat() if evt.departed_at else None,
+                'age_days': (datetime.now() - evt.arrived_at).days if evt.arrived_at else None,
+            })
+
+        data = request.get_json() or {}
+        age_days = (datetime.now() - evt.arrived_at).days if evt.arrived_at else 0
+        if age_days > 7 and not data.get('confirm_old'):
+            return jsonify({'error': 'old_entry_requires_confirm', 'age_days': age_days}), 409
+
+        new_label = data.get('label')
+        if new_label is not None:
+            if new_label in ('home', 'work', 'favorite', 'other', ''):
+                evt.label = new_label or 'other'
+            else:
+                return jsonify({'error': 'invalid_label'}), 400
+        if 'favorite_name' in data:
+            name = (data.get('favorite_name') or '').strip()
+            evt.favorite_name = name[:120] if name else None
+        if 'address' in data:
+            addr = (data.get('address') or '').strip()
+            evt.address = addr if addr else None
+
+        try:
+            db.session.commit()
+        except Exception as e:
+            db.session.rollback()
+            return jsonify({'error': str(e)}), 500
+        return jsonify({
+            'ok': True,
+            'id': evt.id,
+            'label': evt.label,
+            'favorite_name': evt.favorite_name,
+            'address': evt.address,
+        })
 
     @app.route('/api/trips/geocode_missing', methods=['POST'])
     def api_trips_geocode_missing():

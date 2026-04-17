@@ -157,33 +157,46 @@
             </div>
             <div class="card-body">
                 <p class="small text-muted">{{ t('set.locations_hint') }}</p>
+                <ol class="small text-muted mb-2 ps-3">
+                    <li>{{ t('set.loc_flow_step1') }}</li>
+                    <li>{{ t('set.loc_flow_step2') }}</li>
+                    <li>{{ t('set.loc_flow_step3') }}</li>
+                </ol>
                 <div class="row g-2 mb-2">
                     <div class="col-md-4">
                         <label class="form-label small mb-1"><i class="bi bi-house-fill text-success"></i> {{ t('set.loc_home') }}</label>
                         <input type="text" id="homeLabel" class="form-control form-control-sm mb-1" placeholder="Home" value="{{ home_label }}">
-                        <div class="input-group input-group-sm">
+                        <div class="input-group input-group-sm mb-1">
                             <span class="input-group-text">{{ t('set.loc_lat') }}</span>
                             <input type="number" step="0.000001" id="homeLat" class="form-control" value="{{ home_lat }}">
                             <span class="input-group-text">{{ t('set.loc_lon') }}</span>
                             <input type="number" step="0.000001" id="homeLon" class="form-control" value="{{ home_lon }}">
                         </div>
-                        <div class="d-flex gap-1 mt-1">
-                            <button type="button" class="btn btn-sm btn-success flex-fill" id="btnSetHome"><i class="bi bi-bullseye"></i> {{ t('set.loc_set_from_map') }}</button>
-                            <button type="button" class="btn btn-sm btn-outline-success" id="btnSaveHome"><i class="bi bi-save"></i></button>
+                        <div class="d-flex gap-1">
+                            <button type="button" class="btn btn-sm btn-outline-success flex-fill" id="btnSetHome">
+                                <i class="bi bi-bullseye"></i> {{ t('set.loc_pick_on_map') }}
+                            </button>
+                            <button type="button" class="btn btn-sm btn-success" id="btnSaveHome">
+                                <i class="bi bi-save"></i> {{ t('set.loc_save_btn') }}
+                            </button>
                         </div>
                     </div>
                     <div class="col-md-4">
                         <label class="form-label small mb-1"><i class="bi bi-briefcase-fill text-warning"></i> {{ t('set.loc_work') }}</label>
                         <input type="text" id="workLabel" class="form-control form-control-sm mb-1" placeholder="Work" value="{{ work_label }}">
-                        <div class="input-group input-group-sm">
+                        <div class="input-group input-group-sm mb-1">
                             <span class="input-group-text">{{ t('set.loc_lat') }}</span>
                             <input type="number" step="0.000001" id="workLat" class="form-control" value="{{ work_lat }}">
                             <span class="input-group-text">{{ t('set.loc_lon') }}</span>
                             <input type="number" step="0.000001" id="workLon" class="form-control" value="{{ work_lon }}">
                         </div>
-                        <div class="d-flex gap-1 mt-1">
-                            <button type="button" class="btn btn-sm btn-warning flex-fill" id="btnSetWork"><i class="bi bi-bullseye"></i> {{ t('set.loc_set_from_map') }}</button>
-                            <button type="button" class="btn btn-sm btn-outline-warning" id="btnSaveWork"><i class="bi bi-save"></i></button>
+                        <div class="d-flex gap-1">
+                            <button type="button" class="btn btn-sm btn-outline-warning flex-fill" id="btnSetWork">
+                                <i class="bi bi-bullseye"></i> {{ t('set.loc_pick_on_map') }}
+                            </button>
+                            <button type="button" class="btn btn-sm btn-warning" id="btnSaveWork">
+                                <i class="bi bi-save"></i> {{ t('set.loc_save_btn') }}
+                            </button>
                         </div>
                     </div>
                     <div class="col-md-4">
@@ -191,8 +204,11 @@
                         <ul class="list-group list-group-flush small" id="favList" style="max-height:130px; overflow-y:auto"></ul>
                         <div class="input-group input-group-sm mt-1">
                             <input type="text" id="favName" class="form-control" placeholder="{{ t('set.loc_fav_name') }}">
-                            <button type="button" class="btn btn-info" id="btnAddFav"><i class="bi bi-plus"></i> {{ t('set.loc_set_from_map') }}</button>
+                            <button type="button" class="btn btn-info" id="btnAddFav" title="{{ t('set.loc_fav_add_title') }}">
+                                <i class="bi bi-geo-alt"></i> {{ t('set.loc_fav_pick') }}
+                            </button>
                         </div>
+                        <div class="form-text small mt-1">{{ t('set.loc_fav_hint') }}</div>
                     </div>
                 </div>
                 <div id="locMap" style="height:300px; border-radius:4px;"></div>
@@ -899,26 +915,97 @@
                 <i class="bi bi-building"></i> {{ t('set.operators_title') }}
             </div>
             <div class="card-body">
-                <p class="text-muted small mb-2">{{ t('set.operators_desc') }}</p>
-                <form method="POST">
-                    <div class="mb-2">
-                        <label class="form-label small">{{ t('set.operators_custom_label') }}</label>
-                        <textarea class="form-control form-control-sm" name="custom_operators"
-                                  rows="4" placeholder="{{ t('set.operators_custom_ph') }}">{{ custom_operators_text }}</textarea>
-                        <div class="form-text small">{{ t('set.operators_custom_hint') }}</div>
+                <p class="text-muted small mb-3">{{ t('set.operators_desc') }}</p>
+                <form method="POST" id="operatorsForm">
+                    <input type="hidden" name="action" value="save_operators">
+                    <div class="table-responsive">
+                        <table class="table table-sm align-middle mb-2" id="operatorsTable">
+                            <thead>
+                                <tr>
+                                    <th style="width:55%">{{ t('set.operators_col_name') }}</th>
+                                    <th style="width:35%">{{ t('set.operators_col_price') }}</th>
+                                    <th style="width:10%"></th>
+                                </tr>
+                            </thead>
+                            <tbody id="operatorsTbody">
+                                {% for op in operators_builtin %}
+                                <tr>
+                                    <td>
+                                        <input type="hidden" name="op_builtin" value="1">
+                                        <input type="text" class="form-control form-control-sm" name="op_name"
+                                               value="{{ op }}" readonly>
+                                    </td>
+                                    <td>
+                                        <div class="input-group input-group-sm">
+                                            <input type="number" step="0.0001" min="0" name="op_price"
+                                                   class="form-control" value="{{ '%.4f' % operator_prices[op] if op in operator_prices else '' }}"
+                                                   placeholder="0.00">
+                                            <span class="input-group-text">€/kWh</span>
+                                        </div>
+                                    </td>
+                                    <td class="text-muted small">{{ t('set.operators_builtin_badge') }}</td>
+                                </tr>
+                                {% endfor %}
+                                {% for op in operators_custom %}
+                                <tr class="operator-custom-row">
+                                    <td>
+                                        <input type="hidden" name="op_builtin" value="0">
+                                        <input type="text" class="form-control form-control-sm" name="op_name"
+                                               value="{{ op }}" placeholder="{{ t('set.operators_custom_ph_inline') }}">
+                                    </td>
+                                    <td>
+                                        <div class="input-group input-group-sm">
+                                            <input type="number" step="0.0001" min="0" name="op_price"
+                                                   class="form-control" value="{{ '%.4f' % operator_prices[op] if op in operator_prices else '' }}"
+                                                   placeholder="0.00">
+                                            <span class="input-group-text">€/kWh</span>
+                                        </div>
+                                    </td>
+                                    <td>
+                                        <button type="button" class="btn btn-sm btn-outline-danger btn-remove-operator" title="{{ t('set.operators_remove') }}">
+                                            <i class="bi bi-trash"></i>
+                                        </button>
+                                    </td>
+                                </tr>
+                                {% endfor %}
+                            </tbody>
+                        </table>
                     </div>
-                    <button type="submit" name="action" value="save_operators" class="btn btn-outline-primary btn-sm">
-                        <i class="bi bi-save"></i> {{ t('set.operators_save') }}
-                    </button>
+                    <div class="d-flex gap-2 flex-wrap">
+                        <button type="button" class="btn btn-outline-secondary btn-sm" id="btnAddOperator">
+                            <i class="bi bi-plus-lg"></i> {{ t('set.operators_add_custom') }}
+                        </button>
+                        <button type="submit" class="btn btn-primary btn-sm ms-auto">
+                            <i class="bi bi-save"></i> {{ t('set.operators_save') }}
+                        </button>
+                    </div>
+                    <div class="form-text small mt-2">{{ t('set.operators_price_hint') }}</div>
                 </form>
-                <details class="mt-3 small">
-                    <summary class="text-muted">{{ t('set.operators_builtin_toggle') }}</summary>
-                    <ul class="mt-2 mb-0">
-                        {% for op in operators_builtin %}<li>{{ op }}</li>{% endfor %}
-                    </ul>
-                </details>
             </div>
         </div>
+
+        <!-- Hidden template row for JS-added custom operators -->
+        <template id="operatorRowTemplate">
+            <tr class="operator-custom-row">
+                <td>
+                    <input type="hidden" name="op_builtin" value="0">
+                    <input type="text" class="form-control form-control-sm" name="op_name"
+                           placeholder="{{ t('set.operators_custom_ph_inline') }}">
+                </td>
+                <td>
+                    <div class="input-group input-group-sm">
+                        <input type="number" step="0.0001" min="0" name="op_price" class="form-control" placeholder="0.00">
+                        <span class="input-group-text">€/kWh</span>
+                    </div>
+                </td>
+                <td>
+                    <button type="button" class="btn btn-sm btn-outline-danger btn-remove-operator"
+                            title="{{ t('set.operators_remove') }}">
+                        <i class="bi bi-trash"></i>
+                    </button>
+                </td>
+            </tr>
+        </template>
 
         <!-- Database Info -->
         <div class="card mb-4">
@@ -1476,6 +1563,29 @@
 {% endblock %}
 
 {% block scripts %}
+<script>
+// ── Operators editor: add/remove custom rows in the settings table ──
+(function() {
+    const tbody = document.getElementById('operatorsTbody');
+    const template = document.getElementById('operatorRowTemplate');
+    const addBtn = document.getElementById('btnAddOperator');
+    if (!tbody || !template || !addBtn) return;
+
+    function wireRemove(row) {
+        const btn = row.querySelector('.btn-remove-operator');
+        if (btn) btn.addEventListener('click', () => row.remove());
+    }
+    tbody.querySelectorAll('.operator-custom-row').forEach(wireRemove);
+
+    addBtn.addEventListener('click', () => {
+        const clone = template.content.firstElementChild.cloneNode(true);
+        tbody.appendChild(clone);
+        wireRemove(clone);
+        const nameInput = clone.querySelector('input[name="op_name"]');
+        if (nameInput) nameInput.focus();
+    });
+})();
+</script>
 <script>
 (function() {
     const btn = document.getElementById('btnCheckUpdate');
