@@ -116,6 +116,7 @@
                             {% if tr.from.label == 'home' %}<i class="bi bi-house-fill text-success"></i> {{ tr.from.name or t('trips.home') }}
                             {% elif tr.from.label == 'work' %}<i class="bi bi-briefcase-fill text-warning"></i> {{ tr.from.name or t('trips.work') }}
                             {% elif tr.from.label == 'favorite' %}<i class="bi bi-star-fill text-info"></i> {{ tr.from.name }}
+                            {% elif tr.from.label == 'unknown' %}<span class="text-muted"><i class="bi bi-geo-alt-slash"></i> {{ t('trips.unknown_location') }}</span>
                             {% elif tr.from.address %}{{ tr.from.address }}
                             {% else %}<span class="text-muted fst-italic">{{ t('trips.resolving') }}</span>{% endif %}
                         </td>
@@ -124,6 +125,7 @@
                             {% if tr.to.label == 'home' %}<i class="bi bi-house-fill text-success"></i> {{ tr.to.name or t('trips.home') }}
                             {% elif tr.to.label == 'work' %}<i class="bi bi-briefcase-fill text-warning"></i> {{ tr.to.name or t('trips.work') }}
                             {% elif tr.to.label == 'favorite' %}<i class="bi bi-star-fill text-info"></i> {{ tr.to.name }}
+                            {% elif tr.to.label == 'unknown' %}<span class="text-muted"><i class="bi bi-geo-alt-slash"></i> {{ t('trips.unknown_location') }}</span>
                             {% elif tr.to.address %}{{ tr.to.address }}
                             {% else %}<span class="text-muted fst-italic">{{ t('trips.resolving') }}</span>{% endif %}
                         </td>

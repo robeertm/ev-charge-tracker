@@ -686,6 +686,7 @@
   "trips.backfill": "Aus Historie nachbauen",
   "trips.backfill_title": "Alle Fahrzeug-Syncs nochmal durch die Park-Erkennung schicken",
   "trips.sdk_backfill": "Vom Fahrzeug-Server laden",
+  "trips.unknown_location": "Ort unbekannt",
   "trips.sdk_backfill_title": "Fahrten der letzten 30 Tage direkt vom Kia/Hyundai-Server holen (keine Wecksignale, keine 12V-Belastung)",
   "trips.source_sdk": "Direkt vom Kia/Hyundai-Server (Bluelink/UVO)",
   "trips.edit_title": "Diesen Stopp bearbeiten",

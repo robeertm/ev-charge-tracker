@@ -1,5 +1,19 @@
 # Changelog
 
+## v2.24.2 (2026-04-17)
+
+### Trip log: honest "unknown location" + VehicleSync fallback for SDK trips
+
+Backfilling 30 days of Bluelink/UVO trips on a host that had the background sync disabled (ev-dirk before v2.23.2) exposed a gap in the SDK-trip enrichment path: the only location data we store outside the SDK is `parking_events`, and that table was almost empty for the backfill window, so most historical SDK trips couldn't be matched. The UI then fell through to the "Adresse wird ermittelt" branch and sat there forever — not because geocoding was broken, but because there were no coordinates to geocode in the first place.
+
+Two fixes:
+
+**VehicleSync as the second-chance source.** When a SDK trip's start/end doesn't line up with any `parking_events` row (±30 min), we now look for a `vehicle_syncs` row with GPS within ±2 hours. For the "from" endpoint we prefer a sync at or before the trip start; for "to" we prefer one at or after the trip end. That avoids using a mid-trip sync (smart-mode polling at 10-min cadence inside a drive) as a trip endpoint. When we find one, we reverse-geocode via the existing Nominatim-backed address cache — essentially free after the first call per coordinate.
+
+**Explicit "unknown" label.** When neither a parking event nor a nearby sync exists, the endpoint stub now carries `label='unknown'` instead of the generic `'other'` the old code used. The template renders it as `bi-geo-alt-slash` + "Ort unbekannt" / "Unknown location" so users see an honest "we have no GPS for this trip" instead of a perpetual "resolving address". This shows up on ev-dirk's March-era backfill where the car was driven but no polling data was captured.
+
+The SoC/regen columns continue to work whenever both endpoints match a parking event, which is the common recent case. Nothing changes for users on hosts with a fully populated parking-event history.
+
 ## v2.24.1 (2026-04-17)
 
 ### Hotfix: 30-day SDK backfill crashed on the first clean day

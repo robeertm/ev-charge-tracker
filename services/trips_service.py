@@ -197,14 +197,17 @@ def _cum_regen_at(lookup, ts, strict=False):
 
 
 def _enrich_from_parking(start_time: datetime, end_time: datetime,
-                         events: list, tolerance_min: int = 30):
+                         events: list, tolerance_min: int = 60):
     """Find the parking-event pair (from, to) closest to a trip's time
     boundaries. Returns (from_event|None, to_event|None).
 
-    Matching tolerance is generous (default 30 min) because the Bluelink
-    server's hhmmss can lag our polling by several minutes, and a long
-    idle portion of a trip pushes ``end_time`` well past the actual
-    parking moment.
+    Tolerance is 60 min because ParkingEvent's ``departed_at`` and
+    ``arrived_at`` are always set to the sync timestamp that first
+    *noticed* the movement — which on a cached/smart polling cadence
+    of 10 min + Kia/Hyundai's own cache lag can be 30–45 min behind
+    the SDK's authoritative trip-start time. 60 min catches the long
+    tail without risking cross-trip matches (no trip boundary is
+    realistically that close to another one).
     """
     tol = timedelta(minutes=tolerance_min)
     from_evt, to_evt = None, None
@@ -221,17 +224,97 @@ def _enrich_from_parking(start_time: datetime, end_time: datetime,
     return from_evt, to_evt
 
 
+_SYNC_ENRICH_TOLERANCE_MIN = 120
+
+
+def _load_sync_gps(since: Optional[datetime] = None):
+    """Return a list of (ts, lat, lon) for every vehicle sync that has a
+    GPS fix, sorted ascending by ts. Used as the second-chance lookup
+    when ParkingEvent matching fails for an SDK-sourced trip."""
+    from models.database import VehicleSync
+    q = (VehicleSync.query
+         .filter(VehicleSync.location_lat.isnot(None),
+                 VehicleSync.location_lon.isnot(None)))
+    if since:
+        q = q.filter(VehicleSync.timestamp >= since)
+    q = q.order_by(VehicleSync.timestamp.asc())
+    return [(s.timestamp, float(s.location_lat), float(s.location_lon)) for s in q.all()]
+
+
+def _nearest_sync(sync_list, ts: datetime,
+                  prefer_before: bool, tolerance_min: int = _SYNC_ENRICH_TOLERANCE_MIN):
+    """Return (ts, lat, lon) of the sync closest to ``ts`` within the
+    given tolerance window. When ``prefer_before`` is True we only
+    consider syncs at or before ``ts`` (departure location); otherwise
+    only at or after (arrival). That way a mid-trip sync in smart mode
+    doesn't get misused as the trip endpoint location."""
+    if not sync_list or ts is None:
+        return None
+    tol = timedelta(minutes=tolerance_min)
+    best = None
+    best_delta = tol + timedelta(seconds=1)
+    for s_ts, lat, lon in sync_list:
+        if prefer_before and s_ts > ts:
+            continue
+        if (not prefer_before) and s_ts < ts:
+            continue
+        d = abs(s_ts - ts)
+        if d <= tol and d < best_delta:
+            best, best_delta = (s_ts, lat, lon), d
+    return best
+
+
+def _sync_point_to_dict(point, locations, language='de',
+                        include_departed: bool = False,
+                        time_override: Optional[datetime] = None):
+    """Build a trip-endpoint dict from a bare (ts, lat, lon) sync tuple.
+
+    Uses the address cache (permanent + Nominatim fallback) for the label
+    and classifies against home/work/favorites the same way ParkingEvent
+    creation does.
+    """
+    ts, lat, lon = point
+    label, fav_name = _classify_location(lat, lon, locations)
+    addr = None
+    try:
+        from services.geocode_service import reverse as _reverse
+        addr = _reverse(lat, lon, language=language)
+    except Exception:
+        pass
+    effective_ts = time_override or ts
+    out = {
+        'id': None,
+        'lat': lat, 'lon': lon,
+        'label': label, 'name': fav_name,
+        'address': addr,
+        'arrived_at': effective_ts.isoformat() if effective_ts else None,
+    }
+    if include_departed:
+        out['departed_at'] = effective_ts.isoformat() if effective_ts else None
+    return out
+
+
+def _unknown_endpoint_dict(include_departed: bool = False,
+                           time_override: Optional[datetime] = None):
+    """Stub for SDK trips where we genuinely have no location data —
+    neither a ParkingEvent nor a VehicleSync in range. label='unknown'
+    lets the template render 'Ort unbekannt' instead of the misleading
+    'Adresse wird ermittelt'."""
+    return {
+        'id': None, 'lat': None, 'lon': None,
+        'label': 'unknown', 'name': None, 'address': None,
+        'arrived_at': time_override.isoformat() if time_override else None,
+        **({'departed_at': time_override.isoformat() if time_override else None}
+           if include_departed else {}),
+    }
+
+
 def _event_to_dict(evt, include_departed: bool = False):
     """Shape a ParkingEvent into the dict the trips UI expects. If the
     event is None we still return a stub so the frontend can render
     'Unknown' without breaking."""
     if evt is None:
-        return {
-            'id': None, 'lat': None, 'lon': None,
-            'label': 'other', 'name': None, 'address': None,
-            'arrived_at': None,
-            **({'departed_at': None} if include_departed else {}),
-        }
+        return _unknown_endpoint_dict(include_departed=include_departed)
     out = {
         'id': evt.id,
         'lat': evt.lat, 'lon': evt.lon,
@@ -246,12 +329,22 @@ def _event_to_dict(evt, include_departed: bool = False):
 
 def _sdk_trip_to_dict(trip: 'VehicleTrip',
                       events: list,
-                      regen_lookup) -> dict:
+                      regen_lookup,
+                      sync_list,
+                      locations,
+                      language='de') -> dict:
     """Translate a VehicleTrip (SDK row) into the same shape the
-    ParkingEvent-derived trips use, so the template stays uniform."""
+    ParkingEvent-derived trips use, so the template stays uniform.
+
+    Two-tier location enrichment:
+    1. Nearest ParkingEvent (±30 min, best data — has SoC/odo/label).
+    2. Nearest VehicleSync GPS (±2 h, only lat/lon + reverse-geocode).
+    3. Unknown-location stub (label='unknown', UI shows 'Ort unbekannt').
+    """
     start = trip.start_time
     total_min = (trip.drive_minutes or 0) + (trip.idle_minutes or 0)
     end = start + timedelta(minutes=total_min) if total_min > 0 else start
+
     from_evt, to_evt = _enrich_from_parking(start, end, events)
 
     # SoC / regen are only derivable when we have both endpoints from
@@ -267,14 +360,38 @@ def _sdk_trip_to_dict(trip: 'VehicleTrip',
     if cum_dep is not None and cum_arr is not None:
         regen_kwh = round(max(cum_arr - cum_dep, 0), 2)
 
+    # ── From endpoint ───────────────────────────────────────────────
+    if from_evt is not None:
+        from_dict = {**_event_to_dict(from_evt, include_departed=True),
+                     'departed_at': start.isoformat()}
+    else:
+        near = _nearest_sync(sync_list, start, prefer_before=True)
+        if near is not None:
+            from_dict = _sync_point_to_dict(near, locations, language,
+                                            include_departed=True,
+                                            time_override=start)
+        else:
+            from_dict = _unknown_endpoint_dict(include_departed=True,
+                                               time_override=start)
+
+    # ── To endpoint ─────────────────────────────────────────────────
+    arr_ts = end if total_min > 0 else None
+    if to_evt is not None:
+        to_dict = {**_event_to_dict(to_evt),
+                   'arrived_at': arr_ts.isoformat() if arr_ts else None}
+    else:
+        near = _nearest_sync(sync_list, end, prefer_before=False) if total_min > 0 else None
+        if near is not None:
+            to_dict = _sync_point_to_dict(near, locations, language,
+                                          include_departed=False,
+                                          time_override=arr_ts)
+        else:
+            to_dict = _unknown_endpoint_dict(include_departed=False,
+                                             time_override=arr_ts)
+
     return {
-        'from': {**_event_to_dict(from_evt, include_departed=True),
-                 # Override arrived/departed with the SDK's authoritative times
-                 # so the UI's start column shows the real trip start, not the
-                 # parking event's last-seen timestamp.
-                 'departed_at': start.isoformat()},
-        'to':   {**_event_to_dict(to_evt),
-                 'arrived_at': end.isoformat() if total_min > 0 else None},
+        'from': from_dict,
+        'to': to_dict,
         'km': round(trip.distance_km, 1) if trip.distance_km is not None else None,
         'soc_used': soc_used,
         'regen_kwh': regen_kwh,
@@ -316,8 +433,17 @@ def get_trips(limit: Optional[int] = None,
     sdk_dates = {row.trip_date for row in sdk_rows}
 
     regen_lookup = _load_regen_lookup()
+    # Second-chance location data for SDK trips whose start/end doesn't
+    # line up with a ParkingEvent (common on hosts where background sync
+    # was off for long stretches). Scoped to the same `since` cutoff so
+    # we don't pull the whole sync table for a short window.
+    sync_list = _load_sync_gps(since=since)
+    locations = _load_locations()
+    language = AppConfig.get('app_language', 'de')
 
-    trips = [_sdk_trip_to_dict(row, events, regen_lookup) for row in sdk_rows]
+    trips = [_sdk_trip_to_dict(row, events, regen_lookup,
+                               sync_list, locations, language)
+             for row in sdk_rows]
 
     # Fallback: ParkingEvent-pair derivation for days without SDK data.
     for prev, curr in zip(events, events[1:]):

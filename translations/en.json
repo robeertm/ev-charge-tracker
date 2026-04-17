@@ -686,6 +686,7 @@
   "trips.backfill": "Rebuild from history",
   "trips.backfill_title": "Replay all vehicle syncs through the parking detection",
   "trips.sdk_backfill": "Load from vehicle server",
+  "trips.unknown_location": "Unknown location",
   "trips.sdk_backfill_title": "Pull the last 30 days of trips from the Kia/Hyundai server (no wake-up, no 12V drain)",
   "trips.source_sdk": "Direct from Kia/Hyundai server (Bluelink/UVO)",
   "trips.edit_title": "Edit this stop",
