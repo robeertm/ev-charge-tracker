@@ -1,5 +1,23 @@
 # Changelog
 
+## v2.24.0 (2026-04-17)
+
+### Driving log: pull trips directly from the Kia/Hyundai server
+
+Until now the driving log was derived from our own GPS polling: every time the car changed location between two syncs, we closed the previous parking event and opened a new one. That works as long as polling is frequent enough to catch every stop. On a Hyundai install (ev-dirk) where the background sync was disabled, a week's worth of trips collapsed into four parking events, one of which claimed the car had driven 51 km while sitting at home. This release fixes that at the source.
+
+**What changed.** The `hyundai_kia_connect_api` SDK we already depend on exposes `update_day_trip_info(vehicle_id, yyyymmdd)`, which hits the same `/spa/vehicles/<id>/tripinfo` endpoint the Bluelink and UVO mobile apps use when you open the driving log. The car uploads a trip record at the end of every drive as part of its normal telemetry — that upload is independent of anything we do — and the manufacturer's server caches the list. Pulling it costs one API call per day requested (counted against the existing 200/vehicle daily budget) and **does not wake the car**: no cellular modem activation, no 12V battery drain. It's the same data the Bluelink app shows, just pulled from the server instead of the car.
+
+Each trip comes back with a start time (HH:MM:SS), drive and idle minutes, distance in km, and average/max speed — no GPS coordinates, since those live behind a separate endpoint we don't need. We store the trips in a new `vehicle_trips` table and match each one up with the nearest `parking_events` row (±30 minutes tolerance) to fill in the "from" and "to" location labels our UI already shows.
+
+**When it runs.** The background sync loop now calls `maybe_auto_fetch` after every successful vehicle sync, which refreshes today and yesterday at most once per hour — two API calls per day in the steady state. A manual "Vom Fahrzeug-Server laden" / "Load from vehicle server" button in the trips toolbar pulls the last 30 days on demand, useful for first-time setup or after a gap; it stops early if the daily quota is about to run out so it can't lock the user out of the normal polling path.
+
+**How the fallback works.** The existing polling-derived view still runs on any day the SDK didn't return data (or the brand doesn't support the endpoint — currently only Kia and Hyundai do). That keeps historical dates intact and means users on other brands see no regression. Days that have at least one SDK-sourced trip suppress the polled trips for the same day, so there are no duplicates.
+
+**UI.** SDK-sourced trips get a small cloud-check icon next to the timestamp with a tooltip explaining the source. The trip edit button is suppressed for SDK trips whose end couldn't be matched to a parking event (the underlying parking-event edit flow doesn't apply). Everything else — the map, km/SoC/regen totals, CSV/GPX export — works unchanged.
+
+**Why this solves the Hyundai-merges-trips complaint.** Kia and Hyundai use the same SDK, so the same code path serves both. The merged-trip appearance on ev-dirk was caused by polling being disabled there combined with our polling-only trip derivation. With the SDK pull, the trip log becomes server-authoritative and matches what the Bluelink app shows, regardless of how often we poll for GPS.
+
 ## v2.23.2 (2026-04-17)
 
 ### Dashboard: all remaining charts are now click-to-enlarge

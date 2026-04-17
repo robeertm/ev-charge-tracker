@@ -195,6 +195,17 @@ def _do_sync(app):
                                   raw_json=json.dumps(status.raw_data, default=str))
 
         log_sync_result(status, mode_label=mode_label, source='bg-loop')
+
+        # Opportunistic trip-info refresh. Server-side only (no car
+        # wake-up, no 12V drain) and rate-limited to once/hour inside
+        # the helper. Any failure here is swallowed — the polling sync
+        # itself succeeded and that's the critical path.
+        try:
+            from services.vehicle.trip_log_fetch import maybe_auto_fetch
+            maybe_auto_fetch()
+        except Exception as e:
+            logger.warning(f"Trip-info auto-fetch failed: {e}")
+
         return sync
 
 

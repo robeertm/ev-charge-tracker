@@ -171,6 +171,34 @@ class ParkingEvent(db.Model):
     soc_departed = db.Column(db.Integer)
 
 
+class VehicleTrip(db.Model):
+    """Individual trip as reported by the Kia/Hyundai server.
+
+    This is the truth source for Kia/Hyundai vehicles — the car uploads
+    a trip record at the end of every drive (unrelated to our polling)
+    and the manufacturer server caches it. `update_day_trip_info` pulls
+    the full list for a date from the same endpoint the Bluelink/UVO
+    mobile apps use — server-side, no car wake-up, no 12V drain.
+
+    `start_time` is derived from (date + hhmmss) in the vehicle's local
+    timezone as reported by the server; we store it as naive datetime to
+    match the rest of the schema. Trips without a parseable hhmmss are
+    skipped at ingest time (should not happen in practice).
+    """
+    __tablename__ = 'vehicle_trips'
+
+    id = db.Column(db.Integer, primary_key=True)
+    trip_date = db.Column(db.Date, index=True, nullable=False)
+    start_time = db.Column(db.DateTime, index=True, nullable=False, unique=True)
+    drive_minutes = db.Column(db.Integer)
+    idle_minutes = db.Column(db.Integer)
+    distance_km = db.Column(db.Float)
+    avg_speed_kmh = db.Column(db.Float)
+    max_speed_kmh = db.Column(db.Integer)
+    source = db.Column(db.String(32), default='sdk_day_trip_info')
+    fetched_at = db.Column(db.DateTime, default=datetime.now)
+
+
 class MaintenanceEntry(db.Model):
     """Maintenance log: inspections, tires, brakes, etc., with optional reminders."""
     __tablename__ = 'maintenance_log'

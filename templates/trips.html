@@ -49,6 +49,12 @@
             <button type="button" class="btn btn-sm btn-outline-secondary" id="btnBackfill" title="{{ t('trips.backfill_title') }}">
                 <i class="bi bi-arrow-counterclockwise"></i> {{ t('trips.backfill') }}
             </button>
+            {% if vehicle_brand in ('kia', 'hyundai') %}
+            <button type="button" class="btn btn-sm btn-outline-info" id="btnSdkBackfill"
+                    title="{{ t('trips.sdk_backfill_title') }}">
+                <i class="bi bi-cloud-download"></i> {{ t('trips.sdk_backfill') }}
+            </button>
+            {% endif %}
             <a href="/api/trips/export.csv" class="btn btn-sm btn-outline-secondary"><i class="bi bi-filetype-csv"></i> CSV</a>
             <a href="/api/trips/export.gpx" class="btn btn-sm btn-outline-secondary"><i class="bi bi-geo"></i> GPX</a>
             {% if gps_freshness %}
@@ -97,8 +103,14 @@
                 </thead>
                 <tbody>
                 {% for tr in trips %}
-                    <tr data-from-id="{{ tr.from.id }}" data-to-id="{{ tr.to.id }}">
-                        <td class="small">{% if tr.from.departed_at %}{{ tr.from.departed_at[:16] | replace('T', ' ') }}{% endif %}</td>
+                    <tr data-from-id="{{ tr.from.id }}" data-to-id="{{ tr.to.id }}" data-source="{{ tr.source or 'polled' }}">
+                        <td class="small">
+                            {% if tr.from.departed_at %}{{ tr.from.departed_at[:16] | replace('T', ' ') }}{% endif %}
+                            {% if tr.source == 'sdk' %}
+                            <i class="bi bi-cloud-check text-info ms-1" style="font-size:.75rem"
+                               title="{{ t('trips.source_sdk') }}{% if tr.drive_min %} · {{ tr.drive_min }}min{% endif %}"></i>
+                            {% endif %}
+                        </td>
                         <td class="small trip-endpoint" data-evt-id="{{ tr.from.id }}" role="button"
                             title="{{ t('trips.edit_title') }}">
                             {% if tr.from.label == 'home' %}<i class="bi bi-house-fill text-success"></i> {{ tr.from.name or t('trips.home') }}
@@ -119,10 +131,12 @@
                         <td class="text-end">{% if tr.soc_used %}−{{ tr.soc_used }}%{% endif %}</td>
                         <td class="text-end text-success">{% if tr.regen_kwh %}+{{ "%.1f"|format(tr.regen_kwh) }}{% endif %}</td>
                         <td class="text-end">
+                            {% if tr.to.id %}
                             <button type="button" class="btn btn-sm btn-outline-secondary btn-edit-trip"
                                     data-evt-id="{{ tr.to.id }}" title="{{ t('trips.edit_title') }}">
                                 <i class="bi bi-pencil"></i>
                             </button>
+                            {% endif %}
                         </td>
                     </tr>
                 {% else %}
@@ -301,6 +315,14 @@
         backfilled:     {{ t('trips.tb_backfilled')|tojson }},
         backfill_failed:{{ t('trips.tb_backfill_failed')|tojson }},
         backfill_confirm:{{ t('trips.tb_backfill_confirm')|tojson }},
+        sdk_backfill_confirm: {{ t('trips.tb_sdk_backfill_confirm')|tojson }},
+        sdk_backfilling:      {{ t('trips.tb_sdk_backfilling')|tojson }},
+        sdk_backfilled:       {{ t('trips.tb_sdk_backfilled')|tojson }},
+        sdk_backfill_failed:  {{ t('trips.tb_sdk_backfill_failed')|tojson }},
+        sdk_days:             {{ t('trips.tb_sdk_days')|tojson }},
+        sdk_new:              {{ t('trips.tb_sdk_new')|tojson }},
+        sdk_updated:          {{ t('trips.tb_sdk_updated')|tojson }},
+        sdk_quota_hit:        {{ t('trips.tb_sdk_quota_hit')|tojson }},
     };
     const status = document.getElementById('toolbarStatus');
     function setStatus(msg) { status.textContent = msg; }
@@ -357,6 +379,45 @@
         btn.disabled = false;
         btn.innerHTML = orig;
     });
+
+    // Bluelink / UVO server-side trip backfill. Only present for Kia/Hyundai
+    // (gated in Jinja above); button is absent for other brands, so we
+    // check for its existence before wiring the click handler.
+    const btnSdk = document.getElementById('btnSdkBackfill');
+    if (btnSdk) {
+        btnSdk.addEventListener('click', async () => {
+            if (!confirm(T_TB.sdk_backfill_confirm)) return;
+            btnSdk.disabled = true;
+            const orig = btnSdk.innerHTML;
+            btnSdk.innerHTML = '<span class="spinner-border spinner-border-sm"></span>';
+            setStatus(T_TB.sdk_backfilling);
+            try {
+                const r = await fetch('/api/trips/sdk_backfill', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({ days: 30 }),
+                });
+                const data = await r.json();
+                if (data.ok) {
+                    const parts = [
+                        T_TB.sdk_backfilled,
+                        data.days_attempted + ' ' + T_TB.sdk_days,
+                        '+' + data.added + ' ' + T_TB.sdk_new,
+                    ];
+                    if (data.updated) parts.push('~' + data.updated + ' ' + T_TB.sdk_updated);
+                    if (data.stopped_early) parts.push('(' + T_TB.sdk_quota_hit + ')');
+                    setStatus(parts.join(' · '));
+                    setTimeout(() => location.reload(), 2000);
+                } else {
+                    setStatus(T_TB.sdk_backfill_failed + ' ' + (data.error || ''));
+                }
+            } catch (e) {
+                setStatus(T_TB.sdk_backfill_failed + ' ' + e.message);
+            }
+            btnSdk.disabled = false;
+            btnSdk.innerHTML = orig;
+        });
+    }
 })();
 
 // ── Trip editor: two-sided (from/to) modal + shared Leaflet map ──

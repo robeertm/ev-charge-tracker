@@ -2143,6 +2143,7 @@ def register_routes(app):
 
         return render_template('trips.html',
                                gps_freshness=gps_freshness,
+                               vehicle_brand=AppConfig.get('vehicle_api_brand', ''),
                                trips=trips, events=[
                                    {'id': e.id, 'arrived_at': e.arrived_at.isoformat(),
                                     'departed_at': e.departed_at.isoformat() if e.departed_at else None,
@@ -2348,6 +2349,31 @@ def register_routes(app):
         wipe = bool(data.get('wipe', False))
         try:
             summary = backfill_parking_events(wipe_existing=wipe)
+            return jsonify({'ok': True, **summary})
+        except Exception as e:
+            return jsonify({'error': str(e)}), 500
+
+    @app.route('/api/trips/sdk_backfill', methods=['POST'])
+    def api_trips_sdk_backfill():
+        """Pull per-trip data from the Kia/Hyundai server for the last N
+        days and store them as VehicleTrip rows. Server-side call only
+        (no car wake-up, no 12V drain); counts one per day against the
+        200/vehicle daily API budget."""
+        brand = AppConfig.get('vehicle_api_brand', '')
+        if brand not in ('kia', 'hyundai'):
+            return jsonify({'error': 'brand_not_supported',
+                            'hint': 'SDK trip log only for Kia/Hyundai'}), 400
+
+        data = request.get_json(silent=True) or {}
+        try:
+            days = int(data.get('days', 30))
+        except (TypeError, ValueError):
+            days = 30
+        days = max(1, min(days, 90))  # cap at 90 days to avoid burning the quota
+
+        from services.vehicle.trip_log_fetch import backfill
+        try:
+            summary = backfill(days=days)
             return jsonify({'ok': True, **summary})
         except Exception as e:
             return jsonify({'error': str(e)}), 500

@@ -26,7 +26,7 @@ import math
 from datetime import datetime, timedelta
 from typing import Optional
 
-from models.database import db, ParkingEvent, AppConfig
+from models.database import db, ParkingEvent, AppConfig, VehicleTrip
 
 
 # Move thresholds (meters) — small enough to catch real movement but large
@@ -196,38 +196,147 @@ def _cum_regen_at(lookup, ts, strict=False):
     return lookup[idx][1]
 
 
+def _enrich_from_parking(start_time: datetime, end_time: datetime,
+                         events: list, tolerance_min: int = 30):
+    """Find the parking-event pair (from, to) closest to a trip's time
+    boundaries. Returns (from_event|None, to_event|None).
+
+    Matching tolerance is generous (default 30 min) because the Bluelink
+    server's hhmmss can lag our polling by several minutes, and a long
+    idle portion of a trip pushes ``end_time`` well past the actual
+    parking moment.
+    """
+    tol = timedelta(minutes=tolerance_min)
+    from_evt, to_evt = None, None
+    best_from = best_to = tol + timedelta(seconds=1)  # "infinity"
+    for e in events:
+        if e.departed_at is not None:
+            d = abs(e.departed_at - start_time)
+            if d <= tol and d < best_from:
+                from_evt, best_from = e, d
+        if e.arrived_at is not None:
+            d = abs(e.arrived_at - end_time)
+            if d <= tol and d < best_to:
+                to_evt, best_to = e, d
+    return from_evt, to_evt
+
+
+def _event_to_dict(evt, include_departed: bool = False):
+    """Shape a ParkingEvent into the dict the trips UI expects. If the
+    event is None we still return a stub so the frontend can render
+    'Unknown' without breaking."""
+    if evt is None:
+        return {
+            'id': None, 'lat': None, 'lon': None,
+            'label': 'other', 'name': None, 'address': None,
+            'arrived_at': None,
+            **({'departed_at': None} if include_departed else {}),
+        }
+    out = {
+        'id': evt.id,
+        'lat': evt.lat, 'lon': evt.lon,
+        'label': evt.label, 'name': evt.favorite_name,
+        'address': evt.address,
+        'arrived_at': evt.arrived_at.isoformat() if evt.arrived_at else None,
+    }
+    if include_departed:
+        out['departed_at'] = evt.departed_at.isoformat() if evt.departed_at else None
+    return out
+
+
+def _sdk_trip_to_dict(trip: 'VehicleTrip',
+                      events: list,
+                      regen_lookup) -> dict:
+    """Translate a VehicleTrip (SDK row) into the same shape the
+    ParkingEvent-derived trips use, so the template stays uniform."""
+    start = trip.start_time
+    total_min = (trip.drive_minutes or 0) + (trip.idle_minutes or 0)
+    end = start + timedelta(minutes=total_min) if total_min > 0 else start
+    from_evt, to_evt = _enrich_from_parking(start, end, events)
+
+    # SoC / regen are only derivable when we have both endpoints from
+    # the polling data; SDK trips by themselves don't carry SoC.
+    soc_used = None
+    if from_evt and to_evt \
+       and from_evt.soc_arrived is not None and to_evt.soc_arrived is not None:
+        soc_used = max(from_evt.soc_arrived - to_evt.soc_arrived, 0)
+
+    regen_kwh = None
+    cum_dep = _cum_regen_at(regen_lookup, start)
+    cum_arr = _cum_regen_at(regen_lookup, end)
+    if cum_dep is not None and cum_arr is not None:
+        regen_kwh = round(max(cum_arr - cum_dep, 0), 2)
+
+    return {
+        'from': {**_event_to_dict(from_evt, include_departed=True),
+                 # Override arrived/departed with the SDK's authoritative times
+                 # so the UI's start column shows the real trip start, not the
+                 # parking event's last-seen timestamp.
+                 'departed_at': start.isoformat()},
+        'to':   {**_event_to_dict(to_evt),
+                 'arrived_at': end.isoformat() if total_min > 0 else None},
+        'km': round(trip.distance_km, 1) if trip.distance_km is not None else None,
+        'soc_used': soc_used,
+        'regen_kwh': regen_kwh,
+        'source': 'sdk',
+        'drive_min': trip.drive_minutes,
+        'idle_min': trip.idle_minutes,
+        'avg_speed_kmh': trip.avg_speed_kmh,
+        'max_speed_kmh': trip.max_speed_kmh,
+    }
+
+
 def get_trips(limit: Optional[int] = None,
               since: Optional[datetime] = None):
-    """Derive trips from consecutive parking events.
+    """Unified trip feed.
 
-    Trip = (departure event, arrival event) where the arrival event has a
-    later arrived_at than the departure event's departed_at.
+    Source of truth, per day:
+    - If the Kia/Hyundai server reported ≥ 1 trip for that date (stored
+      in VehicleTrip), those are authoritative. Their GPS from/to is
+      enriched by matching the nearest ParkingEvent by time.
+    - Otherwise we fall back to the ParkingEvent-derived view that
+      existed before SDK trip-fetching was added, so historical days
+      that never got an SDK pull still render.
+
+    Trips are always sorted newest-first.
     """
-    q = ParkingEvent.query.order_by(ParkingEvent.arrived_at.asc())
+    # Parking events are needed for both the fallback path and the SDK
+    # GPS-enrichment path, so load once.
+    ev_q = ParkingEvent.query.order_by(ParkingEvent.arrived_at.asc())
     if since:
-        q = q.filter(ParkingEvent.arrived_at >= since)
-    events = q.all()
+        ev_q = ev_q.filter(ParkingEvent.arrived_at >= since)
+    events = ev_q.all()
+
+    # SDK trips first — these mark the "authoritative dates" we'll use
+    # to filter out the fallback.
+    sdk_q = VehicleTrip.query.order_by(VehicleTrip.start_time.asc())
+    if since:
+        sdk_q = sdk_q.filter(VehicleTrip.start_time >= since)
+    sdk_rows = sdk_q.all()
+    sdk_dates = {row.trip_date for row in sdk_rows}
 
     regen_lookup = _load_regen_lookup()
 
-    trips = []
+    trips = [_sdk_trip_to_dict(row, events, regen_lookup) for row in sdk_rows]
+
+    # Fallback: ParkingEvent-pair derivation for days without SDK data.
     for prev, curr in zip(events, events[1:]):
         if prev.departed_at is None:
             continue
-        # Trip km = odometer at the next arrival minus odometer at the prev arrival.
-        # We use arrival values because closing a parking event happens at the
-        # moment the next arrival is noticed — the "departed_at" odometer would
-        # already include the trip distance and yield 0.
+        dep_date = prev.departed_at.date()
+        if dep_date in sdk_dates:
+            # A merged trip pair straddling an SDK-covered day will be
+            # skipped here — the authoritative SDK entry already covers
+            # that movement. We compare against departed_at (the actual
+            # trip-start date) rather than arrived_at to handle trips
+            # that cross midnight cleanly.
+            continue
         km = None
         if prev.odometer_arrived is not None and curr.odometer_arrived is not None:
             km = max(curr.odometer_arrived - prev.odometer_arrived, 0)
         soc_used = None
         if prev.soc_arrived is not None and curr.soc_arrived is not None:
             soc_used = max(prev.soc_arrived - curr.soc_arrived, 0)
-        # Per-trip recuperation from cumulative regen delta.
-        # prev.departed_at == curr.arrived_at (both = the sync timestamp where
-        # movement was detected), so we anchor departure on the last confirmed
-        # sync at the previous spot — last_seen_at, or strictly before depart.
         regen_kwh = None
         dep_ts = prev.last_seen_at or prev.departed_at
         cum_dep = _cum_regen_at(regen_lookup, dep_ts, strict=(prev.last_seen_at is None))
@@ -235,27 +344,20 @@ def get_trips(limit: Optional[int] = None,
         if cum_dep is not None and cum_arr is not None:
             regen_kwh = round(max(cum_arr - cum_dep, 0), 2)
         trips.append({
-            'from': {
-                'id': prev.id,
-                'lat': prev.lat, 'lon': prev.lon,
-                'label': prev.label, 'name': prev.favorite_name,
-                'address': prev.address,
-                'arrived_at': prev.arrived_at.isoformat() if prev.arrived_at else None,
-                'departed_at': prev.departed_at.isoformat() if prev.departed_at else None,
-            },
-            'to': {
-                'id': curr.id,
-                'lat': curr.lat, 'lon': curr.lon,
-                'label': curr.label, 'name': curr.favorite_name,
-                'address': curr.address,
-                'arrived_at': curr.arrived_at.isoformat() if curr.arrived_at else None,
-            },
+            'from': _event_to_dict(prev, include_departed=True),
+            'to':   _event_to_dict(curr),
             'km': km,
             'soc_used': soc_used,
             'regen_kwh': regen_kwh,
+            'source': 'polled',
         })
 
-    trips.reverse()  # newest first
+    # Sort newest-first by the trip's start time. SDK trips use
+    # from.departed_at (= SDK start_time); polled trips use prev.departed_at.
+    def _sort_key(t):
+        return t['from'].get('departed_at') or t['to'].get('arrived_at') or ''
+    trips.sort(key=_sort_key, reverse=True)
+
     if limit:
         trips = trips[:limit]
     return trips
