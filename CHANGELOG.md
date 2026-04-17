@@ -1,5 +1,27 @@
 # Changelog
 
+## v2.22.2 (2026-04-17)
+
+### Hotfix: Favorites invisible + add-button dead on Tailscale hosts
+
+Users on Tailscale peers (ev-robert, ev-dirk, ev-mike — all accessed via the internal VPN) reported existing favorites not rendering in Settings → Locations, and the "add favorite" flow doing nothing. Two separate-sounding symptoms, one root cause.
+
+**Root cause:** The HTTPS/SSL controls card is intentionally hidden when the request comes from a Tailscale peer (the VPN already provides transport encryption, so the self-signed-cert UI is just clutter there). The SSL-setup JavaScript lives in an IIFE that is historically nested **inside** the Locations IIFE. When the SSL card is absent, every `document.getElementById('btnSslSave')` etc. returns null, and the first `addEventListener` call throws a TypeError. Because the SSL IIFE is nested, the throw escapes into the outer Locations IIFE and aborts it mid-flight — before `loadFavs()` is called and before the add-favorite click handler is wired up.
+
+That's why existing favorites stay invisible (`loadFavs()` never runs, so the `<ul>` stays empty) and why clicking the add button does nothing (the listener was never attached).
+
+**Fix:** Early-return guard at the top of the SSL IIFE:
+
+```js
+if (!document.getElementById('btnSslSave')) return;
+```
+
+One line. The SSL IIFE now exits cleanly when its card isn't present, the outer Locations IIFE continues, `loadFavs()` runs, the add-favorite handler is registered.
+
+Hit all three production hosts in the same rollout. Verified by fetching the rendered `/settings` page on each and confirming the `Siedlung` + `Eltern` favorites Robert has configured now show up in the list markup.
+
+---
+
 ## v2.22.1 (2026-04-17)
 
 ### Mobile-Fix: Anbieter-Auswahl als echtes Dropdown

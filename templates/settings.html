@@ -2069,6 +2069,16 @@
     }
     // ── HTTPS / SSL controls ─────────────────────────────────
     (function() {
+        // The SSL card is conditionally rendered — hidden on Tailscale peers
+        // since the VPN already provides transport encryption. When the card
+        // is absent, every getElementById below returns null and the very
+        // first addEventListener throws TypeError. Because this IIFE is
+        // nested inside the locations IIFE (historical artefact), that throw
+        // escapes into the outer scope and kills loadFavs() + the add-favorite
+        // click handler — exact reproduction of the bug where existing
+        // favorites are invisible and new ones can't be added on Tailscale
+        // hosts. Early-return guard keeps the outer IIFE alive.
+        if (!document.getElementById('btnSslSave')) return;
         const T_SSL = {
             saving: {{ t('set.ssl_saving')|tojson }},
             saved: {{ t('set.ssl_saved_restart')|tojson }},
