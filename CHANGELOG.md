@@ -24,763 +24,763 @@ Hit all three production hosts in the same rollout. Verified by fetching the ren
 
 ## v2.22.1 (2026-04-17)
 
-### Mobile-Fix: Anbieter-Auswahl als echtes Dropdown
+### Mobile fix: operator picker as a real dropdown
 
-Dirk meldete, dass die Anbieter-Auswahl auf dem Handy nicht funktioniert — „da ist es kein Dropdown". Das lag am `<input list="operatorsList">` mit HTML-`<datalist>`: auf iOS Safari renderte das garkein Dropdown, auf Android war das Verhalten unregelmäßig.
+A user reported that the operator picker did not work on mobile — "it's not a dropdown there". The cause was the `<input list="operatorsList">` with an HTML `<datalist>`: on iOS Safari it did not render a dropdown at all, and on Android the behaviour was inconsistent.
 
-**Fix:** Auf Ladungsformular (`/input`) und Bearbeiten-Formular (`/edit/<id>`) durch ein natives `<select>` ersetzt, das auf allen Mobile-Browsern den nativen Picker nutzt. Letzte Option heißt "Eigener Anbieter (freie Eingabe)…" — wird sie gewählt, erscheint darunter ein Textfeld für freie Eingabe. Ein Hidden-Input `name="operator"` wird von JS synchron gehalten, damit der Backend-POST unverändert bleibt.
+**Fix:** On the charge form (`/input`) and the edit form (`/edit/<id>`), replaced it with a native `<select>` that uses the native picker on every mobile browser. The last option is labelled "Custom operator (free input)…" — if selected, a text field appears below for free input. A hidden input `name="operator"` is kept in sync by JS so the backend POST stays unchanged.
 
-Beim Bearbeiten einer Ladung mit Custom-Anbieter (nicht in der Liste) wird „Eigener Anbieter" vorausgewählt und das Textfeld mit dem bestehenden Wert gefüllt.
+When editing a charge with a custom operator (not in the list), "Custom operator" is preselected and the text field is prefilled with the existing value.
 
-Preis-Autofill hängt unverändert am gesetzten Operator-Wert.
+Price autofill still hangs off the resolved operator value.
 
 ---
 
 ## v2.22.0 (2026-04-17)
 
-### Fahrtenbuch: alle Felder editierbar + Kartenauswahl + Favoriten-Bearbeitung
+### Trip log: all fields editable + map picker + favorites editing
 
-Folgt auf v2.21.0 nach Dirks Rückmeldung: „alle felder editierbar sein, start/stop wann km soc rekup. von und nach möglichkeit über die map auswählbar. standorte favoriten lassen sich nicht editieren".
+Follow-up on v2.21.0 following user feedback: "all fields should be editable, start/stop time, km, SoC, regen. from/to selectable via the map. location favorites can't be edited".
 
-**1. Trip-Editor komplett neu: zwei Spalten, alle Felder**
+**1. Trip editor rebuilt: two columns, all fields**
 
-Das alte Modal editierte nur Label/Favoritenname/Adresse eines einzelnen Stopps. Das neue bearbeitet die komplette Fahrt — Start- UND Zielpunkt in zwei Spalten nebeneinander. Pro Seite editierbar:
+The old modal only edited the label/favorite name/address of a single stop. The new one edits the entire trip — both the start AND the destination stop in two columns side by side. Per side, editable:
 
-- Label (Zuhause/Arbeit/Favorit/Sonstiges) + Favoritenname
-- Adresse
-- Zeit angekommen + Zeit abgefahren (datetime-local)
-- km-Stand bei Ankunft + bei Abfahrt
-- SoC % bei Ankunft + bei Abfahrt
-- Koordinaten (Lat/Lon) — direkt eintippen oder per Karte wählen
+- Label (Home/Work/Favorite/Other) + favorite name
+- Address
+- Arrival time + departure time (datetime-local)
+- Odometer on arrival + on departure
+- SoC % on arrival + on departure
+- Coordinates (lat/lon) — type directly or pick via map
 
-Abgeleitete Werte (km Trip-Länge, SoC-Verbrauch, Rekuperation) werden **nicht** separat editiert — die berechnen sich automatisch neu aus den gespeicherten Odometer-/SoC-/Zeitwerten. Ein Hinweistext unter der Karte erklärt das.
+Derived values (trip km, SoC consumption, recuperation) are **not** edited separately — they are automatically recalculated from the saved odometer/SoC/time values. A hint text below the map explains this.
 
-**2. Karten-Auswahl im Modal**
+**2. Map picker in the modal**
 
-Unter den beiden Spalten ist jetzt eine Leaflet-Karte eingeblendet. Beide Marker (blau = Start, rot = Ziel) sind draggable. Zusätzlich gibt's pro Seite einen „Auf Karte wählen"-Button — klickt man den, wird die Karte zum Auswahlmodus und der nächste Karten-Klick setzt die Koordinaten der jeweiligen Seite. Das Modal scrollt die Karte via `invalidateSize()` nach `shown.bs.modal` damit Leaflet die Tiles nicht auf 0x0 rendert.
+A Leaflet map is now shown below the two columns. Both markers (blue = start, red = destination) are draggable. Each side also has a "Pick on map" button — clicking it puts the map into selection mode and the next map click sets the coordinates of that side. The modal calls `invalidateSize()` on `shown.bs.modal` so Leaflet does not render tiles at 0x0.
 
-**3. Favoriten in Einstellungen editierbar**
+**3. Favorites editable in settings**
 
-Die Liste hatte bisher nur Löschen. Jetzt pro Favorit drei Aktions-Buttons:
+The list previously only had delete. Now there are three action buttons per favorite:
 
-- **Umbenennen** (Bleistift): öffnet ein Inline-Input mit Check/Cancel, Enter = speichern, ESC = abbrechen. Klick auf den Namen öffnet denselben Edit-Modus.
-- **Neue Position** (Pin): Karte geht in Auswahlmodus, nächster Klick setzt die neuen Koordinaten dieses Favoriten.
-- **Löschen** (Mülleimer): wie vorher.
+- **Rename** (pencil): opens an inline input with check/cancel, Enter = save, ESC = cancel. Clicking the name also opens the same edit mode.
+- **New position** (pin): the map enters selection mode, the next click sets the new coordinates of this favorite.
+- **Delete** (trash): unchanged.
 
-### Neue Endpoints / API-Änderungen
+### New endpoints / API changes
 
-- `POST /api/parking_event/<id>` akzeptiert jetzt zusätzlich `lat`, `lon`, `arrived_at`, `departed_at`, `odometer_arrived`, `odometer_departed`, `soc_arrived`, `soc_departed`. Leerer String bei `departed_at` löscht die Spalte (für "currently parked"-Einträge). `arrived_at` ist pflicht.
-- `PUT /api/locations/favorites` — neuer Endpoint: `{index, name?, lat?, lon?}` patcht einen einzelnen Favoriten. Fehlende Keys werden nicht angerührt (partial update).
+- `POST /api/parking_event/<id>` now additionally accepts `lat`, `lon`, `arrived_at`, `departed_at`, `odometer_arrived`, `odometer_departed`, `soc_arrived`, `soc_departed`. An empty string for `departed_at` clears the column (for "currently parked" entries). `arrived_at` is mandatory.
+- `PUT /api/locations/favorites` — new endpoint: `{index, name?, lat?, lon?}` patches a single favorite. Missing keys are left alone (partial update).
 
-### Server-Schutz
+### Server protection
 
-Der 7-Tage-Check (409 bei fehlendem `confirm_old`) bleibt unverändert — gilt weiterhin für alle POST-Änderungen.
+The 7-day check (409 when `confirm_old` is missing) is unchanged — still applies to all POST modifications.
 
-### Keine Migration
+### No migration
 
-Keine Schema-Änderung. Kein Breaking-Change für alte Clients — die bisherigen POST-Felder (label/favorite_name/address) funktionieren genauso weiter.
+No schema change. No breaking change for old clients — the existing POST fields (label/favorite_name/address) still work the same.
 
 ---
 
 ## v2.21.0 (2026-04-17)
 
-### Vier UX-Verbesserungen nach Dirks Feedback
+### Four UX improvements following user feedback
 
-**1. Ladung erfassen: Abbrechen-Button + „Mein Standort" kommt jetzt vom Auto**
+**1. Log charge: cancel button + "My location" now comes from the car**
 
-Vorher hatte das Formular keinen Weg, eingegebene Werte zu verwerfen — man musste zurücknavigieren und Browser-Warnungen ignorieren. Jetzt: expliziter Abbrechen-Button neben „Speichern", der optional nachfragt (nur wenn tatsächlich etwas eingegeben wurde) und die lokale Timer-Session mitlöscht.
+Previously the form had no way to discard entered values — you had to navigate back and ignore browser warnings. Now: an explicit Cancel button next to "Save" which optionally prompts (only if something has actually been entered) and also clears the local timer session.
 
-Die „Mein Standort"-Taste zog vorher `navigator.geolocation` vom Smartphone — was HTTPS verlangt und meistens lautlos scheiterte, außerdem reflektiert das nicht den Ladeort (Phone steht zuhause auf dem Tisch, geladen wurde am IONITY an der A4). Jetzt holt der Button die **letzte vom Auto übermittelte GPS-Position** aus den `vehicle_syncs` via neuem Endpoint `/api/vehicle/last_gps`. Funktioniert ohne HTTPS. Das Smartphone-GPS ist als sekundärer Button erhalten geblieben, aber der Default ist jetzt das Fahrzeug.
+The "My location" button previously pulled `navigator.geolocation` from the smartphone — which requires HTTPS and usually failed silently, and did not reflect the charging location anyway (phone is at home on the table, the charge happened at IONITY on the A4). Now the button fetches the **last GPS position reported by the car** from `vehicle_syncs` via a new endpoint `/api/vehicle/last_gps`. Works without HTTPS. The smartphone GPS is preserved as a secondary button, but the default is now the vehicle.
 
-**2. Anbieter in Einstellungen: richtige Tabelle statt Textarea + Preis-Autofill**
+**2. Operators in settings: proper table instead of a textarea + price autofill**
 
-Statt „Eigene Anbieter als Freitext" gibt es jetzt eine Zeile pro Anbieter (eingebaute + eigene) mit Name und Preis pro kWh. Preise werden als JSON in `operator_prices` gespeichert. Im Ladung-Erfassen-Formular füllt der passende Preis automatisch das `eur_per_kwh`-Feld, sobald der Anbieter ausgewählt wird — aber nur, wenn der User das Feld noch nicht selbst angefasst hat (verhindert ungewolltes Überschreiben). Gleiche Logik im Bearbeiten-Formular.
+Instead of "Custom operators as free text" there is now one row per operator (built-in + custom) with name and price per kWh. Prices are stored as JSON in `operator_prices`. In the log-charge form, the matching price automatically fills the `eur_per_kwh` field when the operator is selected — but only if the user has not yet touched the field themselves (prevents unwanted overwrite). Same logic in the edit form.
 
-**3. Fahrtenbuch: Stopps nachträglich bearbeiten mit 7-Tage-Schutz**
+**3. Trip log: edit stops after the fact with a 7-day guard**
 
-Jede Stopp-Zelle (from/to) ist jetzt klickbar und öffnet ein Modal zum Bearbeiten von Label (Zuhause/Arbeit/Favorit/Sonstiges), Favoriten-Name und Adresse. Koordinaten und Zeitstempel bleiben unveränderlich — die kommen vom Auto und Änderungen würden die abgeleiteten km/SoC-Statistiken invalidieren.
+Each stop cell (from/to) is now clickable and opens a modal for editing the label (Home/Work/Favorite/Other), favorite name and address. Coordinates and timestamps stay immutable — they come from the car and changes would invalidate the derived km/SoC statistics.
 
-Einträge älter als 7 Tage erfordern eine explizite Bestätigung per Checkbox („Eintrag ist älter als 7 Tage — wirklich ändern?"). Der Check läuft zusätzlich serverseitig in `/api/parking_event/<id>` — ein hingeklicktes Modal ohne Bestätigung kriegt 409 zurück. Warnt mit Tage-Zahl und Hinweis auf Rückwirkung auf Statistiken.
+Entries older than 7 days require an explicit confirmation checkbox ("Entry is older than 7 days — really change?"). The check also runs server-side in `/api/parking_event/<id>` — a hand-crafted modal call without confirmation gets a 409 back. Warns with the day count and a hint about retroactive effects on the statistics.
 
-**4. Einstellungen → Standorte: klarere Bedienung**
+**4. Settings → Locations: clearer operation**
 
-Die Save-Buttons hatten nur ein Disk-Icon ohne Text — leicht zu übersehen, was das „fehlen" des Save-Buttons aus Dirks Bericht erklärt. Jetzt: explizites „Speichern" auf Home- und Work-Buttons, separater „Karte wählen"-Button, Favoriten-Button mit Hint-Text unterhalb (Name → Button → Karte), und eine nummerierte 3-Schritt-Anleitung oben in der Card.
+The Save buttons only had a disk icon without text — easy to overlook, which explains the "missing" save button in the user's report. Now: explicit "Save" on Home and Work buttons, separate "Pick on map" button, favorites button with hint text below (Name → Button → Map), and a numbered 3-step instruction at the top of the card.
 
-### Neue/geänderte Endpoints
+### New/changed endpoints
 
-- `GET /api/vehicle/last_gps` — letzte bekannte GPS-Position vom Auto
-- `GET/POST /api/parking_event/<id>` — Stopp anzeigen/bearbeiten (mit 7-Tage-Schutz)
-- Settings POST `action=save_operators` akzeptiert jetzt parallele Arrays `op_name[]`/`op_price[]`/`op_builtin[]` statt einem Textarea-Blob
+- `GET /api/vehicle/last_gps` — last known GPS position from the car
+- `GET/POST /api/parking_event/<id>` — view/edit a stop (with 7-day guard)
+- Settings POST `action=save_operators` now accepts parallel arrays `op_name[]`/`op_price[]`/`op_builtin[]` instead of one textarea blob
 
-### Datenmodell
+### Data model
 
-Keine Schema-Änderung. Neue Config-Keys werden lazy angelegt: `operator_prices` (JSON-Dict).
+No schema change. New config keys are created lazily: `operator_prices` (JSON dict).
 
 ---
 
 ## v2.20.4 (2026-04-17)
 
-### Hotfix: Dashboard-Crash bei Ladungen ohne Kostenwert
+### Hotfix: Dashboard crash for charges without a cost value
 
-Produktiv-User meldete „Internal Server Error" beim Aufrufen des Dashboards, kam nicht mehr in die App.
+A production user reported "Internal Server Error" when opening the dashboard, could no longer get into the app.
 
-**Ursache:** In [services/stats_service.py:268](services/stats_service.py#L268) prüft die Monatsstatistik bei der Berechnung von `cost_per_kwh` nur, ob `r.kwh > 0` ist — nicht ob `r.cost` NULL ist. Sobald eine Ladung mit `kwh_loaded` aber ohne `total_cost` in der DB liegt (typisch bei PV-Ladungen oder noch nicht nachgetragenem Preis), knallt die Division:
+**Cause:** In [services/stats_service.py:268](services/stats_service.py#L268) the monthly statistics computation for `cost_per_kwh` only checked whether `r.kwh > 0`, not whether `r.cost` is NULL. As soon as a charge with `kwh_loaded` but no `total_cost` is in the DB (typical for PV charges or a price not yet entered), the division blows up:
 
 ```
 TypeError: unsupported operand type(s) for /: 'NoneType' and 'float'
 ```
 
-Der Dashboard-Handler aggregiert Monatsstatistiken beim Rendern → jede Anfrage → 500.
+The dashboard handler aggregates monthly statistics on render → every request → 500.
 
-**Fix:** Check erweitert auf `if r.cost and r.kwh and r.kwh > 0` — bei fehlendem Kostenwert wird `cost_per_kwh: 0` zurückgegeben, analog zum bereits bestehenden `round(r.cost or 0, 2)` eine Zeile darüber.
+**Fix:** Check extended to `if r.cost and r.kwh and r.kwh > 0` — when the cost value is missing, `cost_per_kwh: 0` is returned, analogous to the existing `round(r.cost or 0, 2)` one line above.
 
-Keine DB-Migration nötig. Kein Breaking-Change. Eine einzige Zeile.
+No DB migration needed. No breaking change. A single line.
 
-Betroffen: alle User mit mindestens einer Ladung wo `total_cost` NULL ist und `kwh_loaded > 0`.
+Affected: all users with at least one charge where `total_cost` is NULL and `kwh_loaded > 0`.
 
 ---
 
 ## v2.20.3 (2026-04-16)
 
-### Fahrzeughistorie: echte Frames pro Plot, Vollbild funktioniert, Karte erscheint auch bei Cached-Sync
+### Vehicle history: real frames per plot, fullscreen works, map also appears in cached sync
 
-Drei Folge-Bugs aus v2.20.1/.2 aufgearbeitet nachdem der User meldete „alle plots müssen einen eigenen frame bekommen, standort wird auch noch nicht angezeigt und zoomen geht nicht".
+Three follow-up bugs from v2.20.1/.2 addressed after the user reported "all plots need their own frame, location also not showing yet and zoom doesn't work".
 
-#### 1. Klick → Vollbild geht jetzt wirklich
+#### 1. Click → fullscreen actually works now
 
-Ursache (tiefer als die ID-Kollision von v2.20.2): `bootstrap.bundle.min.js` wird in [templates/base.html:106](templates/base.html) **nach** `{% block content %}` geladen. Mein Inline-Script in der Fahrzeughistorie-Card lief aber **während** des Content-Parsings und rief `new bootstrap.Modal(modalEl)` sofort — zu diesem Zeitpunkt ist `bootstrap` noch nicht definiert. ReferenceError → restliche IIFE abgebrochen → kein Klick-Handler, keine Map.
+Cause (deeper than the ID collision in v2.20.2): `bootstrap.bundle.min.js` is loaded in [templates/base.html:106](templates/base.html) **after** `{% block content %}`. But my inline script in the vehicle-history card ran **during** content parsing and called `new bootstrap.Modal(modalEl)` immediately — at that point `bootstrap` was not yet defined. ReferenceError → rest of the IIFE aborted → no click handler, no map.
 
-Fix: Modal wird jetzt **lazy** beim ersten Klick erzeugt via `getModal()`-Helper. Bis dahin ist `bootstrap` längst verfügbar. Der `hidden.bs.modal`-Listener wird bei derselben Gelegenheit einmalig angehängt.
+Fix: The modal is now created **lazily** on the first click via a `getModal()` helper. By then `bootstrap` is long since available. The `hidden.bs.modal` listener is attached once at the same opportunity.
 
-#### 2. Jeder Plot hat jetzt seinen eigenen Frame
+#### 2. Each plot now has its own frame
 
-Die 7 Charts waren vorher nackte `<div>` mit Label + Canvas, in einem gemeinsamen `.row`. Keine visuelle Trennung. Jetzt in einer Jinja-Loop über eine `vh_plots`-Tupel-Liste wrappt jeden Plot in ein eigenes `<div class="card h-100 vh-chart-tile shadow-sm">` mit:
-- **Card-Header** (weiß, schmal) mit Titel + Fullscreen-Icon rechts
-- **Card-Body** mit dem Chart-Canvas
-- `shadow-sm` und `h-100` damit die Höhen im Row einheitlich sind
-- Komplette Card ist Click-Target (`role="button"`, `tabindex="0"`, `cursor:pointer`)
+The 7 charts used to be bare `<div>`s with a label + canvas in a shared `.row`. No visual separation. Now a Jinja loop over a `vh_plots` tuple list wraps each plot in its own `<div class="card h-100 vh-chart-tile shadow-sm">` with:
+- **Card header** (white, narrow) with title + fullscreen icon on the right
+- **Card body** with the chart canvas
+- `shadow-sm` and `h-100` so heights are uniform in the row
+- Whole card is the click target (`role="button"`, `tabindex="0"`, `cursor:pointer`)
 
-Die Standort-Karte bekommt dasselbe Card-Styling + das Geo-Icon im Header.
+The location map gets the same card styling + the geo icon in the header.
 
-#### 3. Karte erscheint auch unter Kia/Hyundai „Cached"-Modus
+#### 3. Map also appears in Kia/Hyundai "Cached" mode
 
-Vorher war die Karten-Card auf `vehicle_history.summary.last.lat` gated — also: nur wenn der **aller letzte Sync** GPS mitgeliefert hat. Unter Kia/Hyundai Cached-Modus liefert die API meistens kein GPS, wodurch die Karte dauerhaft fehlte.
+The map card was previously gated on `vehicle_history.summary.last.lat` — i.e.: only if the **very last sync** delivered GPS. Under Kia/Hyundai Cached mode the API usually does not deliver GPS, so the map was permanently missing.
 
-Jetzt: neue Server-Helper in [app.py](app.py) `dashboard`-Route scannt die `series.lat/lon`-Arrays rückwärts und nimmt den **zuletzt bekannten** GPS-Punkt. Ergebnis landet als `vehicle_history_last_gps` dict im Template mit `{lat, lon, stale, at}`. `stale=True` wenn der Punkt nicht die aktuellste Sync-Zeile war → UI blendet dann „zuletzt bekannte Position" hinter dem Standort-Label ein.
+Now: a new server helper in the [app.py](app.py) `dashboard` route scans the `series.lat/lon` arrays backwards and takes the **last known** GPS point. The result ends up as a `vehicle_history_last_gps` dict in the template with `{lat, lon, stale, at}`. `stale=True` when the point was not the most recent sync row → the UI then shows "last known position" behind the location label.
 
-Der Leaflet-Asset-Include im `<head>` ist jetzt auch auf diese neue Variable gated statt auf `summary.last.lat`, damit die Assets für Cached-Modus-Nutzer geladen werden.
+The Leaflet asset include in the `<head>` is now also gated on this new variable instead of `summary.last.lat`, so the assets are loaded for Cached-mode users.
 
-#### Nebensache: Jinja-Template-Fall
+#### Side note: Jinja template trap
 
-Ein Kommentar im JS enthielt literales `{% block content %}` als Erklärung, was Jinja fälschlicherweise als Block-Open interpretiert hat → `TemplateSyntaxError`. Habe den Text neu formuliert damit der Parser ihn in Ruhe lässt. Typische „das hab ich nicht kommen sehen"-Falle bei Template-Engines.
+A comment in the JS contained the literal `{% block content %}` as an explanation, which Jinja mistakenly interpreted as a block open → `TemplateSyntaxError`. Reworded the text so the parser leaves it alone. Classic "didn't see that coming" trap with template engines.
 
-#### Verifikation
+#### Verification
 
-- `py_compile` clean auf app.py
-- Dashboard rendert mit Status 200, 63k char
-- Genau 7 `card h-100 vh-chart-tile`-Frames im HTML
-- `function getModal()` im Bundle, **kein** eager `new bootstrap.Modal` mehr
-- Szenario A (aktuellste Sync hat GPS): map rendert normal, kein „stale"-Badge
-- Szenario B (nur frühere Sync hat GPS, aktuellste nicht): map rendert mit zuletzt-bekannten Koordinaten, „zuletzt bekannte Position"-Label im Header
-- Szenario C (kein GPS überhaupt): map-Block einfach weg, Rest der Seite rendert weiter ohne Crash
+- `py_compile` clean on app.py
+- Dashboard renders with status 200, 63k chars
+- Exactly 7 `card h-100 vh-chart-tile` frames in the HTML
+- `function getModal()` in the bundle, **no** eager `new bootstrap.Modal` anymore
+- Scenario A (latest sync has GPS): map renders normally, no "stale" badge
+- Scenario B (only earlier sync has GPS, latest does not): map renders with last-known coordinates, "last known position" label in the header
+- Scenario C (no GPS at all): map block simply gone, rest of page renders without crashing
 
 ## v2.20.2 (2026-04-16)
 
-### Hotfix: Fahrzeughistorie — ID-Kollision zerstörte mehrere Plots gleichzeitig
+### Hotfix: Vehicle history — ID collision broke several plots simultaneously
 
-In v2.20.1 hatte ich das neue Zeitraum-Dropdown `<select id="vhRange">` genannt — aber das **Reichweiten-Chart-Canvas** trägt dieselbe ID `<canvas id="vhRange">`. Mit zwei gleichen IDs gibt `document.getElementById('vhRange')` das **erste** Element im DOM zurück: das Select (steht im Card-Header, kommt vor dem Canvas). Chart.js ruft dann `getContext('2d')` auf einem Select-Element auf → TypeError → Rest der IIFE läuft nicht mehr:
+In v2.20.1 I named the new period dropdown `<select id="vhRange">` — but the **range chart canvas** carries the same ID `<canvas id="vhRange">`. With two identical IDs, `document.getElementById('vhRange')` returns the **first** element in the DOM: the select (in the card header, comes before the canvas). Chart.js then calls `getContext('2d')` on a select element → TypeError → the rest of the IIFE does not run:
 
-- Reichweiten-Chart wird nicht gezeichnet (das ist das Chart mit der kaputten ID)
-- Alle Charts nach Reichweite werden auch nicht gezeichnet (IIFE abgebrochen)
-- Standort-Map wird nicht gezeichnet (wird nach dem Chart-Loop initialisiert)
-- Click-to-Fullscreen-Handler werden nie registriert (wird ganz am Ende der IIFE gemacht) → „Vergrößern geht nicht"
-- Dropdown-Change-Handler fehlt ebenfalls
+- Range chart is not drawn (that's the chart with the broken ID)
+- All charts after Range are also not drawn (IIFE aborted)
+- Location map is not drawn (initialized after the chart loop)
+- Click-to-fullscreen handlers are never registered (done at the very end of the IIFE) → "Enlarge doesn't work"
+- Dropdown change handler is also missing
 
-Das erklärt die drei Symptome auf einmal: „vergrößern geht nicht · Reichweite fehlt · Standort fehlt · alle plots hängen irgendwie zusammen".
+That explains the three symptoms at once: "enlarge doesn't work · range is missing · location is missing · all plots somehow hang together".
 
-**Fix:** Select umbenannt auf `vhRangeSel`. JS-Referenz auf die Dropdown-Location mitgezogen. Canvas behält weiterhin `id="vhRange"` wie in `CHART_DEFS` erwartet, damit der Render-Loop unverändert bleibt.
+**Fix:** Renamed the select to `vhRangeSel`. Pulled the JS reference to the dropdown location along. Canvas still keeps `id="vhRange"` as expected in `CHART_DEFS`, so the render loop stays unchanged.
 
-Automatische Verifikation im Dashboard-HTML:
-- `id="vhRange"` erscheint jetzt genau einmal (Canvas)
-- `id="vhRangeSel"` erscheint genau einmal (Select)
-- JS enthält `getElementById('vhRangeSel')`, nicht mehr `getElementById('vhRange')` im Dropdown-Pfad
-- Alle 7 Chart-IDs sind in CHART_DEFS
-- Modal + 7 klickbare Tiles im DOM
+Automatic verification in the dashboard HTML:
+- `id="vhRange"` now appears exactly once (canvas)
+- `id="vhRangeSel"` appears exactly once (select)
+- JS contains `getElementById('vhRangeSel')`, no longer `getElementById('vhRange')` on the dropdown path
+- All 7 chart IDs are in CHART_DEFS
+- Modal + 7 clickable tiles in the DOM
 
 ## v2.20.1 (2026-04-16)
 
-### Fahrzeughistorie: Klick → Vollbild + Zeitraum-Wahl
+### Vehicle history: click → fullscreen + period selection
 
-Zwei gewünschte Usability-Verbesserungen an der Fahrzeughistorie-Card im Dashboard:
+Two requested usability improvements to the vehicle history card on the dashboard:
 
-**1. Jeder Plot ist klickbar → öffnet Vollbild-Modal.**
-Alle 7 Mini-Charts (SoC, Reichweite, Tacho, 12V, SoH, Rekuperation, Verbrauch) haben jetzt einen Fullscreen-Icon-Hinweis oben rechts und sind klick- (und Enter/Space-)aktiv. Klick öffnet ein Bootstrap `modal-fullscreen` mit einer größeren Version desselben Charts: dickere Linie, mehr Achsen-Ticks (12 statt 5), Grid sichtbar, Datenpunkte als kleine Kreise, Tooltips mit Intersect-off Mode für leichtes Hovern. ESC / Klick außerhalb schließt.
+**1. Each plot is clickable → opens a fullscreen modal.**
+All 7 mini charts (SoC, range, odometer, 12V, SoH, recuperation, consumption) now have a fullscreen icon hint in the top right corner and are click- (and Enter/Space-) active. A click opens a Bootstrap `modal-fullscreen` with a larger version of the same chart: thicker line, more axis ticks (12 instead of 5), grid visible, data points as small circles, tooltips with Intersect-off mode for easy hovering. ESC / click outside closes.
 
-**2. Zeitraum-Dropdown in der Card-Header-Zeile.**
-Neue Auswahl: **24h · 7 Tage · 30 Tage · 90 Tage · 1 Jahr · Alles**. Bei Änderung wird per AJAX `/api/vehicle/history?days=N&persist=1` aufgerufen, die Charts werden zerstört und mit den neuen Daten neu gezeichnet — Loading-Overlay mit Spinner während des Requests. Die Wahl wird in `AppConfig` unter `dash_history_days` persistiert, der nächste Pageload zeigt denselben Range direkt.
+**2. Period dropdown in the card header row.**
+New choices: **24h · 7 days · 30 days · 90 days · 1 year · All**. On change, `/api/vehicle/history?days=N&persist=1` is called via AJAX, the charts are destroyed and redrawn with the new data — loading overlay with spinner during the request. The choice is persisted in `AppConfig` under `dash_history_days`, the next page load shows the same range directly.
 
-**Standard-Range ist jetzt 30 Tage** (vorher war's "alles"). Bei Accounts mit vielen Monaten Daten sind die 30 Tage lesbarer; wer mehr will klickt in der Card auf "1 Jahr" oder "Alles" — das bleibt dann auch für die nächsten Besuche so.
+**Default range is now 30 days** (previously "all"). For accounts with many months of data, 30 days is more readable; anyone who wants more clicks "1 year" or "All" in the card — that then sticks for future visits too.
 
-**Technisch:**
-- [app.py](app.py) neue Route `/api/vehicle/history?days=N[&persist=1]` mit Clamp auf 0..10 Jahre, ruft das bestehende `get_vehicle_history(days=...)` auf — keine Änderung am Stats-Service nötig.
-- Dashboard-Template refactored: Chart-Konfigs liegen jetzt in einer `CHART_DEFS`-Liste mit `id`, `field`, `color`, `fmt`, `label`. Die `renderAll(series)`-Funktion zerstört alte Chart-Instanzen (`charts[id].destroy()`) und baut sie neu, damit Range-Wechsel sauber sind und keine Memory-Leaks haben.
-- Fullscreen-Modal reuses `buildChartConfig` mit `{fullscreen: true}`-Flag, der größere Font-Sizes, Grid und Punkte aktiviert. Eine zweite Chart-Instanz wird auf `#vhFullscreenCanvas` gezeichnet; bei Modal-close wird sie wieder destroyed. Chart.js braucht einen sichtbaren Container zum Messen, daher `setTimeout(..., 120)` nach `modal.show()`.
-- 8 neue i18n-Keys in de + en (`dash.vh_range_title`, `dash.vh_range_{1d,7d,30d,90d,365d,all}`, `dash.vh_click_fullscreen`).
+**Technical:**
+- [app.py](app.py) new route `/api/vehicle/history?days=N[&persist=1]` with clamp on 0..10 years, calls the existing `get_vehicle_history(days=...)` — no change to the stats service needed.
+- Dashboard template refactored: chart configs now live in a `CHART_DEFS` list with `id`, `field`, `color`, `fmt`, `label`. The `renderAll(series)` function destroys old chart instances (`charts[id].destroy()`) and rebuilds them, so range switches are clean and have no memory leaks.
+- Fullscreen modal reuses `buildChartConfig` with a `{fullscreen: true}` flag, which enables larger font sizes, grid and points. A second chart instance is drawn on `#vhFullscreenCanvas`; on modal close it is destroyed again. Chart.js needs a visible container to measure, so `setTimeout(..., 120)` after `modal.show()`.
+- 8 new i18n keys in de + en (`dash.vh_range_title`, `dash.vh_range_{1d,7d,30d,90d,365d,all}`, `dash.vh_click_fullscreen`).
 
-**Verifiziert:**
+**Verified:**
 - py_compile clean
-- Dashboard rendert mit Dropdown + Modal + 7 klickbaren Tiles
-- `/api/vehicle/history?days={1,7,30,90,365,0}` liefert für alle Werte korrekte Shape (`days`, `series`, `summary`), `series` hat 11 erwartete Felder
-- Unknown `days=abc` clamped auf 30
-- `persist=1` aktualisiert `AppConfig['dash_history_days']`
-- Server-Render selektiert die gespeicherte Option korrekt
-- Keine Daten / leerer Range: API liefert `series=null`, JS guarded mit `if (data && data.series)`, kein Crash
+- Dashboard renders with dropdown + modal + 7 clickable tiles
+- `/api/vehicle/history?days={1,7,30,90,365,0}` delivers the correct shape for all values (`days`, `series`, `summary`), `series` has 11 expected fields
+- Unknown `days=abc` clamped to 30
+- `persist=1` updates `AppConfig['dash_history_days']`
+- Server render selects the saved option correctly
+- No data / empty range: API returns `series=null`, JS guarded with `if (data && data.series)`, no crash
 
 ## v2.20.0 (2026-04-16)
 
-### Automatisches Rollback bei kaputtem Update + Dashboard-Update-Banner
+### Automatic rollback on broken updates + dashboard update banner
 
-Zwei user-gewünschte Features die eng zusammengehören: das Update-Erlebnis wird sichtbarer (wer nicht in die Einstellungen schaut sieht die neue Version) und sicherer (kaputte Updates landen den User nicht in einer nicht-mehr-startenden App).
+Two user-requested features that belong closely together: the update experience becomes more visible (anyone not checking settings sees the new version) and safer (broken updates don't leave the user in an app that won't start).
 
-#### 1. Automatisches Rollback
+#### 1. Automatic rollback
 
-**Problem:** Wenn ein Update einen Bug einführt der die App nicht mehr starten lässt (Migration crasht, Import-Error, fehlende Dependency), stand der User vor einer toten App ohne Fallback. Systemd versucht neuzustarten, crasht jedesmal, gibt auf — die einzige Lösung war SSH + manueller Git-Checkout.
+**Problem:** If an update introduces a bug that prevents the app from starting (migration crashes, import error, missing dependency), the user was left with a dead app and no fallback. systemd tries to restart, crashes each time, gives up — the only remedy was SSH + manual git checkout.
 
-**Lösung:** Kleiner State-Machine-Guard der auf jedem App-Boot läuft (`services/update_service.py:pre_boot_rollback_check`).
+**Solution:** A small state-machine guard that runs on every app boot (`services/update_service.py:pre_boot_rollback_check`).
 
 **Flow:**
-1. Vor jedem Update-File-Swap wird ein **Backup der zu überschreibenden Dateien** in `updates/backup_pre_v<OLD>/` angelegt, plus ein `UPDATE_PENDING.json`-Marker mit alter/neuer Version, Backup-Pfad und Attempt-Counter.
-2. Beim App-Boot liest `pre_boot_rollback_check()` den Marker. Drei Fälle:
-   - **Kein Marker** → normaler Boot, nichts zu tun.
-   - **Marker vorhanden, `attempts < 3`** → Counter bumpen, Verification-Timer starten der den Marker nach 60 Sekunden erfolgreicher Laufzeit löscht.
-   - **Marker vorhanden, `attempts >= 3`** → Rollback: Backup zurückswappen, `LAST_ROLLBACK.json` schreiben, `os._exit(0)` — Supervisor startet mit altem Code neu.
-3. Zweite Verteidigungslinie: `updater_helper.py` überwacht nach dem Restart 60 Sekunden lang ob Port 7654 bindet. Wenn nicht → direkter Rollback ohne auf den Boot-Counter zu warten.
+1. Before every update file-swap, a **backup of the files to be overwritten** is created in `updates/backup_pre_v<OLD>/`, plus an `UPDATE_PENDING.json` marker with old/new version, backup path and attempt counter.
+2. On app boot, `pre_boot_rollback_check()` reads the marker. Three cases:
+   - **No marker** → normal boot, nothing to do.
+   - **Marker present, `attempts < 3`** → bump the counter, start a verification timer that deletes the marker after 60 seconds of successful uptime.
+   - **Marker present, `attempts >= 3`** → rollback: swap the backup back, write `LAST_ROLLBACK.json`, `os._exit(0)` — supervisor restarts with the old code.
+3. Second line of defense: after the restart, `updater_helper.py` watches port 7654 for 60 seconds for binding. If it doesn't → direct rollback without waiting for the boot counter.
 
-**Warum 3 Versuche statt 1?** Transiente Fehler (Port kurz belegt, Race beim sqlite-Open) sollen nicht fälschlich einen Rollback triggern. Erst wenn **drei** Starts in Folge scheitern bevor der 60s-Timer feuern kann, ist die neue Version wirklich kaputt.
+**Why 3 attempts instead of 1?** Transient errors (port briefly occupied, race on sqlite open) should not falsely trigger a rollback. Only when **three** starts in a row fail before the 60s timer fires is the new version truly broken.
 
-**Plattform-agnostisch:** Die Mechanik braucht nichts außer einem Supervisor der bei Crash neu startet. Funktioniert unter systemd (`Restart=always`), unter macOS Terminal+nohup, unter Windows (falls jemand das nutzt).
+**Platform-agnostic:** The mechanism needs nothing but a supervisor that restarts on crash. Works under systemd (`Restart=always`), under macOS Terminal+nohup, under Windows (if anyone uses that).
 
-**Daten-sicher:** `data/`, `venv/`, `.git/`, `logs/`, `updates/` werden vom Backup/Restore grundsätzlich nicht angefasst. Die SQLite-DB des Users bleibt egal was passiert unberührt.
+**Data-safe:** `data/`, `venv/`, `.git/`, `logs/`, `updates/` are never touched by the backup/restore. The user's SQLite DB stays untouched no matter what happens.
 
-**Von Hand bestätigt mit einer End-to-End-Simulation:**
-- Echte Flask-App in einen Temp-Dir kopiert
-- Backup angelegt, `app.py` durch eine kaputte Version mit `create_app → RuntimeError` ersetzt
-- Drei Boot-Versuche laufen jeweils in die Exception, Counter geht auf 1, 2, 3
-- Vierter Boot triggert Rollback: `app.py` restored, Marker weg, `LAST_ROLLBACK.json` geschrieben
-- Danach bootet die App wieder erfolgreich. DB-Dateigröße unverändert über die ganze Zeit.
+**Manually confirmed with an end-to-end simulation:**
+- Real Flask app copied into a temp dir
+- Backup created, `app.py` replaced with a broken version where `create_app → RuntimeError`
+- Three boot attempts each run into the exception, counter goes 1, 2, 3
+- Fourth boot triggers rollback: `app.py` restored, marker gone, `LAST_ROLLBACK.json` written
+- Afterwards the app boots successfully again. DB file size unchanged the whole time.
 
-**Test-Suite (18 Tests über 4 Szenarien, alle grün vor Release):**
-- `/tmp/test_rollback.py`: 10 Tests der Decision-Logic (no marker, attempts 1→2→3, rollback fires, missing backup, corrupt JSON, read/clear API, backup pruning)
-- `/tmp/test_helper_rollback.py`: 5 Tests der duplizierten Backup/Restore-Pfade im Helper + Port-Watch
-- `/tmp/test_e2e_rollback.py`: echte Flask-App-Boot-Simulation mit absichtlich kaputtem `create_app`
-- API + Template-Smoketest: `/api/update/last-rollback` GET/DELETE, Settings-Banner-Rendering
+**Test suite (18 tests across 4 scenarios, all green before release):**
+- `/tmp/test_rollback.py`: 10 tests of the decision logic (no marker, attempts 1→2→3, rollback fires, missing backup, corrupt JSON, read/clear API, backup pruning)
+- `/tmp/test_helper_rollback.py`: 5 tests of the duplicated backup/restore paths in the helper + port watch
+- `/tmp/test_e2e_rollback.py`: real Flask-app boot simulation with a deliberately broken `create_app`
+- API + template smoke test: `/api/update/last-rollback` GET/DELETE, settings banner rendering
 
-#### 2. Dashboard-Banner für verfügbare Updates
+#### 2. Dashboard banner for available updates
 
-Oben auf dem Dashboard gibt es jetzt zwei Banner die via JS/AJAX nach dem Laden gefüllt werden:
+At the top of the dashboard there are now two banners filled in via JS/AJAX after load:
 
-- **Update-Banner** (gelb, 🔄): erscheint wenn `/api/update/check` eine neue Version meldet. Zeigt „Neue Version verfügbar v2.X.Y". **Klick springt direkt zu `/settings#updaterCard`** — die App-Info-Card hat jetzt die Anker-ID und der Browser scrollt automatisch dorthin.
-- **Rollback-Banner** (blau): erscheint nur einmal falls die App beim letzten Boot automatisch auf die alte Version zurückgekehrt ist. Erklärt von/nach welcher Version. Mit „X"-Button bestätigbar — `DELETE /api/update/last-rollback` löscht die `LAST_ROLLBACK.json`.
+- **Update banner** (yellow, refresh icon): appears when `/api/update/check` reports a new version. Shows "New version available v2.X.Y". **Click jumps directly to `/settings#updaterCard`** — the app-info card now has the anchor ID and the browser scrolls there automatically.
+- **Rollback banner** (blue): only appears once if the app automatically reverted to the old version on the last boot. Explains from/to which version. Dismissible with "X" button — `DELETE /api/update/last-rollback` clears the `LAST_ROLLBACK.json`.
 
-Die Update-Check-Antwort wird für 30 Minuten in `sessionStorage` gecached, damit das Herumklicken zwischen Seiten nicht `/api/update/check` pro Pageload aufruft.
+The update-check response is cached in `sessionStorage` for 30 minutes so clicking between pages does not call `/api/update/check` on every page load.
 
-**Settings-Seite** bekommt zusätzlich:
-- Anker-ID `updaterCard` für den Deep-Link vom Banner
-- Dauerhaften Hinweis unter den Buttons: „Vor jedem Update wird ein Backup angelegt. Wenn die neue Version nicht hochkommt, wird automatisch zur vorherigen zurückgekehrt."
-- Info-Box mit Details wenn ein `LAST_ROLLBACK.json` existiert
+**Settings page** additionally gets:
+- Anchor ID `updaterCard` for the deep link from the banner
+- Permanent hint under the buttons: "Before every update, a backup is created. If the new version doesn't come up, it automatically reverts to the previous one."
+- Info box with details if a `LAST_ROLLBACK.json` exists
 
-#### Technisch
+#### Technical
 
-- Neue Datei [services/update_service.py](services/update_service.py) — Single Source of Truth für die Decision-Logic (`MAX_ATTEMPTS=3`, `VERIFICATION_DELAY_S=60`).
-- [updater.py](updater.py) `_inline_swap` (systemd-Pfad): vor dem File-Swap wird `create_pre_update_backup()` + `write_pending_marker()` aufgerufen.
-- [updater_helper.py](updater_helper.py) (non-systemd Pfad): duplizierte stdlib-only Implementierung der gleichen Backup/Restore-Pfade plus Port-Watch nach Restart. Duplikation bewusst — der Helper muss laufen auch wenn der venv gebrochen ist.
-- Pre-Boot-Check als erstes Statement in [app.py:create_app()](app.py) — VOR `db.create_all()`, weil eine kaputte Migration genau das ist was einen Rollback triggern soll.
-- Maximal 3 Backups werden parallel aufgehoben (älteste per mtime ausgedünnt).
-- 5 neue i18n-Keys (de + en): `dash.update_available_title/hint`, `dash.rollback_title`, `set.app_last_rollback_title`, `set.app_rollback_safety_hint`.
+- New file [services/update_service.py](services/update_service.py) — single source of truth for the decision logic (`MAX_ATTEMPTS=3`, `VERIFICATION_DELAY_S=60`).
+- [updater.py](updater.py) `_inline_swap` (systemd path): before the file swap, `create_pre_update_backup()` + `write_pending_marker()` are called.
+- [updater_helper.py](updater_helper.py) (non-systemd path): duplicated stdlib-only implementation of the same backup/restore paths plus port watch after restart. Duplication intentional — the helper must run even if the venv is broken.
+- Pre-boot check as the first statement in [app.py:create_app()](app.py) — BEFORE `db.create_all()`, because a broken migration is exactly the kind of thing that should trigger a rollback.
+- At most 3 backups are kept in parallel (oldest pruned by mtime).
+- 5 new i18n keys (de + en): `dash.update_available_title/hint`, `dash.rollback_title`, `set.app_last_rollback_title`, `set.app_rollback_safety_hint`.
 
-**Wichtiger Hinweis zum ersten Rollout:** Dieses Release v2.20.0 bringt den Schutzmechanismus. Das heißt konkret: **das Update VON v2.19.x AUF v2.20.0 ist noch nicht durch Rollback geschützt** (der alte v2.19.x-Updater kennt den Backup-Schritt noch nicht). Ab v2.20.0 → v2.20.1 greift die Mechanik dann automatisch bei jedem Update.
+**Important note about the first rollout:** This release v2.20.0 brings the protection mechanism. That means concretely: **the update FROM v2.19.x TO v2.20.0 is not yet protected by rollback** (the old v2.19.x updater does not know about the backup step yet). From v2.20.0 → v2.20.1 onwards the mechanism kicks in automatically on every update.
 
 ## v2.19.2 (2026-04-16)
 
-### CSV-Import Vorschau: sehen was passiert bevor es passiert
+### CSV import preview: see what happens before it happens
 
-Vorher war der Import ein Sprung ins Kalte: hochladen, Modus wählen, klicken — und hoffen dass die Spalten richtig erkannt wurden und nichts Wichtiges schief läuft. Jetzt gibt es einen Preview-Schritt.
+Previously the import was a leap into the unknown: upload, choose mode, click — and hope that the columns were recognized correctly and nothing important went wrong. Now there is a preview step.
 
 **Workflow:**
-1. User wählt CSV + Modus → klickt **Vorschau** (nicht mehr direkt Importieren)
-2. Browser holt per AJAX `POST /api/import/preview` — das Backend analysiert die Datei ohne sie zu importieren und gibt strukturiertes JSON zurück
-3. UI rendert:
-   - **Info-Zeile**: erkanntes Trennzeichen, ob Header erkannt wurde, wie viele Zeilen schon in der DB sind
-   - **Spalten-Tabelle**: jede CSV-Spalte mit Index, Header-Name, auto-erkannter Zuordnung (als Dropdown, **änderbar**), und einem Beispielwert
-   - **Fehlende App-Felder**: welche unserer Logical Fields (z.B. Anbieter, Ladeort) die CSV nicht enthält — bleiben leer
-   - **Zusammenfassung**: Zeilen gesamt / neu / ergänzt / Duplikate / leer / Fehler
-   - **Beispielzeilen** (erste 20) mit Aktions-Badge pro Zeile (`neu`, `ergänzen`, `Duplikat`, `leer`, `Fehler`)
-   - **Fehler-Liste** mit Zeilennummern, falls welche aufgetreten sind
-4. User kann **die Spalten-Zuordnung per Dropdown ändern** wenn die Auto-Detection eine Spalte falsch gemappt hat. Die Overrides landen in einem versteckten `column_override`-Form-Field.
-5. Zufrieden → **Importieren**-Button (der bisherige) — der POST nimmt die `column_override` mit und wendet sie beim echten Import an.
+1. User chooses CSV + mode → clicks **Preview** (no longer direct Import)
+2. Browser fetches `POST /api/import/preview` via AJAX — the backend analyses the file without importing it and returns structured JSON
+3. UI renders:
+   - **Info row**: detected delimiter, whether a header was detected, how many rows are already in the DB
+   - **Column table**: each CSV column with index, header name, auto-detected mapping (as a dropdown, **changeable**), and a sample value
+   - **Missing app fields**: which of our logical fields (e.g. operator, charge location) the CSV does not contain — these remain empty
+   - **Summary**: total rows / new / updated / duplicates / empty / errors
+   - **Sample rows** (first 20) with an action badge per row (`new`, `update`, `duplicate`, `empty`, `error`)
+   - **Error list** with row numbers, if any occurred
+4. User can **change the column mapping via dropdown** if auto-detection mapped a column incorrectly. The overrides end up in a hidden `column_override` form field.
+5. Satisfied → **Import** button (the previous one) — the POST carries the `column_override` along and applies it during the real import.
 
-**Architektur:**
-- Refactor in [import_gsheet.py](import_gsheet.py): geteilte Helper `_analyze_csv`, `_parse_one_row`, `_classify_row`. Sowohl `preview_csv_data()` (neue Funktion, DB-read-only) als auch `import_csv_data()` (commit path) gehen durch dasselbe Code-Path, so dass die Vorschau garantiert dasselbe Resultat anzeigt was der Import später macht.
-- Neuer Route-Endpunkt `/api/import/preview` (POST multipart form) → JSON mit Spalten, Samples, Zusammenfassung, Fehlern.
-- `import_csv_data(column_override=...)` akzeptiert jetzt optional ein Override-Dict `{logical_field: col_index}` das die Auto-Detection patcht. `null` unmapt ein Feld.
-- Auch der POST `action=import_csv` im Settings-Handler parst `column_override` als JSON aus dem Form und reicht es durch.
-- Settings-Template bekommt JS das AJAX den Preview holt, ein vollständiges UI rendert (Tabellen + Badges + Dropdowns), und bei Dropdown-Änderung ein korrektes `column_override`-JSON zurück ins Hidden-Field schreibt.
-- 49 neue i18n-Keys in de + en (Preview-Labels, Action-Labels, und benutzerfreundliche Feld-Labels wie „Anbieter" statt `operator`).
+**Architecture:**
+- Refactor in [import_gsheet.py](import_gsheet.py): shared helpers `_analyze_csv`, `_parse_one_row`, `_classify_row`. Both `preview_csv_data()` (new function, DB-read-only) and `import_csv_data()` (commit path) go through the same code path, so the preview is guaranteed to show the same result the import will later produce.
+- New route endpoint `/api/import/preview` (POST multipart form) → JSON with columns, samples, summary, errors.
+- `import_csv_data(column_override=...)` now optionally accepts an override dict `{logical_field: col_index}` that patches auto-detection. `null` unmaps a field.
+- The POST `action=import_csv` in the settings handler also parses `column_override` as JSON from the form and passes it through.
+- Settings template gets JS that AJAX-fetches the preview, renders a complete UI (tables + badges + dropdowns), and on dropdown change writes a correct `column_override` JSON back into the hidden field.
+- 49 new i18n keys in de + en (preview labels, action labels, and user-friendly field labels like "Operator" instead of `operator`).
 
-**Verifikation:**
-- Preview-Unit-Test mit 3-Zeilen-CSV (2 gültig, 1 Bad-Date) → Summary korrekt, Samples korrekt, unmapped CSV-Columns erkannt
-- Column-Override-Unit-Test: CSV mit „Mein Spezielles Feld" Header, auto = None → override auf `operator` → korrekt geparsed als Anbieter
-- End-to-End-API-Test: `POST /api/import/preview` returned valid JSON mit allen Feldern
-- End-to-End-Import-Test: Upload mit `column_override='{"date":0,"operator":1,"kwh_loaded":2}'` durch `/settings` → Daten korrekt mit gemapptem Operator gespeichert
-- Regression: bestehender Import ohne Override funktioniert weiter (Dedup greift, Import-Counts stimmen)
+**Verification:**
+- Preview unit test with 3-row CSV (2 valid, 1 bad date) → summary correct, samples correct, unmapped CSV columns detected
+- Column-override unit test: CSV with "My Special Field" header, auto = None → override to `operator` → correctly parsed as operator
+- End-to-end API test: `POST /api/import/preview` returns valid JSON with all fields
+- End-to-end import test: upload with `column_override='{"date":0,"operator":1,"kwh_loaded":2}'` through `/settings` → data correctly saved with mapped operator
+- Regression: existing import without override keeps working (dedup kicks in, import counts correct)
 
 ## v2.19.1 (2026-04-16)
 
-### Fix: Vehicle sync crash „Object of type DailyDrivingStats is not JSON serializable"
+### Fix: Vehicle sync crash "Object of type DailyDrivingStats is not JSON serializable"
 
-Der enriched `raw_data`-Dump aus v2.19.0 konnte das Kia/Hyundai-Feld `daily_stats` (Liste von `DailyDrivingStats`-Objekten aus der SDK) nicht serialisieren.
+The enriched `raw_data` dump from v2.19.0 could not serialize the Kia/Hyundai `daily_stats` field (a list of `DailyDrivingStats` objects from the SDK).
 
-**Root Cause**: Mein Introspection-Check in [connector_hyundai_kia.py:_dump_vehicle](services/vehicle/connector_hyundai_kia.py) testete Serialisierbarkeit mit `json.dumps(val, default=str)` — aber `default=str` stringified **jedes** unbekannte Objekt still und der Check passierte immer. Gespeichert wurde dann das Original-Objekt; erst wenn später `json.dumps(raw_data)` ohne default-Argument aufgerufen wurde, knallte es.
+**Root cause**: My introspection check in [connector_hyundai_kia.py:_dump_vehicle](services/vehicle/connector_hyundai_kia.py) tested serializability with `json.dumps(val, default=str)` — but `default=str` silently stringifies **every** unknown object and the check always passed. What got saved was then the original object; only when `json.dumps(raw_data)` was later called without the default argument did it blow up.
 
-**Fix**: Die Introspection macht jetzt einen echten Round-Trip `json.loads(json.dumps(val, default=str))` — das erzeugt eine wirklich JSON-sichere Kopie (nested `DailyDrivingStats` → String-Repr). Als Schutzgurt bekommen alle fünf Call-Sites von `json.dumps(raw_data)` (in `services/vehicle/sync_service.py` und vier Stellen in `app.py`) zusätzlich `default=str`, damit eine zukünftige Regression nicht wieder den Sync crashed.
+**Fix**: The introspection now does a real round-trip `json.loads(json.dumps(val, default=str))` — which produces a truly JSON-safe copy (nested `DailyDrivingStats` → string repr). As a belt, all five call sites of `json.dumps(raw_data)` (in `services/vehicle/sync_service.py` and four places in `app.py`) additionally get `default=str`, so a future regression doesn't crash the sync again.
 
-Regression-getestet mit einem Mock-Vehicle das `daily_stats = [DailyDrivingStats(...), …]` trägt plus nested dict mit Objekten drin → Dump jetzt voll JSON-safe, keine Exception mehr.
+Regression-tested with a mock vehicle that carries `daily_stats = [DailyDrivingStats(...), …]` plus a nested dict with objects in it → dump now fully JSON-safe, no more exceptions.
 
 ## v2.19.0 (2026-04-16)
 
-### Großes Update: Datensicherheit beim CSV-Import, Rohdatenviewer, Bearbeiten-Seite komplett, Anbieter-Dropdown
+### Big update: CSV import data safety, raw-data viewer, complete edit page, operator dropdown
 
-Produktiv eingesetztes Release — jedes Feature wurde mit Python-Syntax-Check, Migrations-Test, Template-Smoke-Test und End-to-End-Unit-Tests für die Import-Logik verifiziert bevor getaggt wurde.
+Production release — every feature was verified with a Python syntax check, migration test, template smoke test and end-to-end unit tests for the import logic before tagging.
 
-#### 1. CSV-Import ist jetzt sicher und tolerant
+#### 1. CSV import is now safe and tolerant
 
-Der alte Importer [import_gsheet.py](import_gsheet.py) war **positions-basiert** und hatte nur einen Modus (`replace=True` → `DELETE FROM charges`, dann neu einfügen). Das bedeutete: **manuell nachträglich hinzugefügte Ladungen wurden beim Re-Import einfach gelöscht**. Für ein Produktiv-Tool das Nutzer aktiv einsetzen, ist das ein Datenverlust-Risiko.
+The old importer [import_gsheet.py](import_gsheet.py) was **position-based** and had only one mode (`replace=True` → `DELETE FROM charges`, then re-insert). That meant: **charges manually added after the fact were simply deleted on re-import**. For a production tool users actively rely on, that's a data loss risk.
 
-Neu:
+New:
 
-- **Spalten werden per Header erkannt**, nicht per Position. Fuzzy-Matching (case-insensitive, Typos via `SequenceMatcher`-Ratio ≥ 0.82) gegen eine Alias-Tabelle: `Datum` / `date` / `tag` / `day` treffen alle auf dieselbe Logik, ebenso `EUR/kWh` / `€/kWh` / `preis`, `Uhrzeit` / `zeit` / `hour`, `Anbieter` / `provider` / `cpo` / `betreiber`, usw.
-- **Delimiter wird autodetektiert**: Semikolon (unser eigener Export), Komma (Google Sheet), Tab, Pipe. Gewählt wird das Zeichen mit der höchsten Medianspaltenzahl auf den ersten 5 Zeilen.
-- **Datumsformat wird autodetektiert**: `YYYY-MM-DD`, `DD.MM.YYYY`, `MM/DD/YYYY` (Google Sheet US), und als Fallback `DD/MM/YYYY`.
-- **Legacy-Fallback**: wenn kein Header-Zeile gefunden wird (Google-Sheet-Export startet direkt mit Datumszeilen), läuft die alte positions-basierte Zuordnung.
-- **Vier Import-Modi** statt eines Boolean:
-  - `skip` (Default) — Zeilen mit gleichem `(date, charge_hour, kwh_loaded)` wie vorhandene Einträge werden übersprungen. **Manuelle Daten werden nie überschrieben.**
-  - `update` — kein Duplikat wird erzeugt, aber wenn die CSV Felder hat die im bestehenden Eintrag leer sind (z.B. Anbieter oder Ladeort), werden sie ergänzt. Vorhandene Werte bleiben unangetastet.
-  - `append` — alles wird eingefügt, auch exakte Duplikate. Für fortgeschrittene User.
-  - `replace` — das alte nukleare Verhalten. Zeigt jetzt einen roten Warnkasten mit Pflicht-Checkbox (`replace_confirm`). Vor dem Delete wird **automatisch ein DB-Backup** nach `data/backups/pre_import_YYYYMMDD_HHMMSS.db` geschrieben; die letzten 5 Backups bleiben erhalten.
-- **Export ist wieder verlustfrei**: der eigene CSV-Export (`/api/export/csv`) enthält jetzt alle Felder inkl. Uhrzeit, km-Stand, Anbieter, Ladeort, Lat/Lon. Ein Round-Trip (Export → Re-Import im Skip-Modus) führt zu 0 neuen Einträgen und 0 Fehlern — getestet mit der Live-DB (474 Einträge).
+- **Columns are detected by header**, not by position. Fuzzy matching (case-insensitive, typos via `SequenceMatcher` ratio ≥ 0.82) against an alias table: `Datum` / `date` / `tag` / `day` all hit the same logic, likewise `EUR/kWh` / `€/kWh` / `preis`, `Uhrzeit` / `zeit` / `hour`, `Anbieter` / `provider` / `cpo` / `betreiber`, etc.
+- **Delimiter is autodetected**: semicolon (our own export), comma (Google Sheet), tab, pipe. The character with the highest median column count across the first 5 rows wins.
+- **Date format is autodetected**: `YYYY-MM-DD`, `DD.MM.YYYY`, `MM/DD/YYYY` (Google Sheet US), and as fallback `DD/MM/YYYY`.
+- **Legacy fallback**: if no header row is found (Google Sheet export starts directly with date rows), the old position-based mapping runs.
+- **Four import modes** instead of one boolean:
+  - `skip` (default) — rows with the same `(date, charge_hour, kwh_loaded)` as existing entries are skipped. **Manual data is never overwritten.**
+  - `update` — no duplicate is created, but if the CSV has fields that are empty in the existing entry (e.g. operator or location), they are filled in. Existing values are left untouched.
+  - `append` — everything is inserted, including exact duplicates. For advanced users.
+  - `replace` — the old nuclear behaviour. Now shows a red warning box with a mandatory checkbox (`replace_confirm`). Before the delete, **a DB backup is automatically written** to `data/backups/pre_import_YYYYMMDD_HHMMSS.db`; the last 5 backups are retained.
+- **Export is lossless again**: the own CSV export (`/api/export/csv`) now contains all fields including time, odometer, operator, location, lat/lon. A round trip (export → re-import in skip mode) leads to 0 new entries and 0 errors — tested with the live DB (474 entries).
 
-#### 2. „Eintrag bearbeiten" zeigt endlich alle Felder
+#### 2. "Edit entry" finally shows all fields
 
-Die alte [edit.html](templates/edit.html) war unvollständig — weder Ladeort noch Anbieter wurden angezeigt, und der Backend-POST-Handler in [app.py:edit_charge](app.py) ignorierte die Felder auch wenn man sie vorher im Input-Formular gesetzt hatte (Daten gingen bei jedem Edit verloren).
+The old [edit.html](templates/edit.html) was incomplete — neither location nor operator were shown, and the backend POST handler in [app.py:edit_charge](app.py) ignored the fields even if they were set in the input form (data was lost on every edit).
 
-- Alle Location-Felder (Name, Lat, Lon) sind jetzt auf der Edit-Seite
-- **Leaflet-Kartenpicker inline** (wie in Einstellungen): Button „Karte" klappt eine OSM-Karte auf, Klick setzt die Marker-Position, Marker ist ziehbar, Koordinaten werden live in die Lat/Lon-Felder geschrieben
-- Schnellbuttons „Zuhause"/„Arbeit" übernehmen die Koordinaten aus den Settings
-- Backend speichert `location_name`, `location_lat`, `location_lon`, `operator`
+- All location fields (name, lat, lon) are now on the edit page
+- **Inline Leaflet map picker** (like in settings): "Map" button unfolds an OSM map, click sets the marker position, marker is draggable, coordinates are written live into the lat/lon fields
+- Quick buttons "Home"/"Work" take the coordinates from settings
+- Backend saves `location_name`, `location_lat`, `location_lon`, `operator`
 
-#### 3. Anbieter-Feld (CPO) auf jeder Ladung
+#### 3. Operator field (CPO) on every charge
 
-Neue Spalte `operator` (VARCHAR(64), nullable) im `charges`-Tabelle — Migration läuft beim ersten Start nach Update automatisch via `ALTER TABLE`, idempotent.
+New column `operator` (VARCHAR(64), nullable) on the `charges` table — migration runs automatically on first start after update via `ALTER TABLE`, idempotent.
 
-- Eingabe-Formular und Edit-Seite haben ein `<datalist>`-Feld mit 19 eingebauten Anbietern (IONITY, EnBW mobility+, Aral pulse, Tesla Supercharger, Shell Recharge, Allego, Fastned, Elli (VW), EWE Go, Maingau, Lidl, Kaufland, Aldi Süd, REWE, Mer, Stadtwerke, Zuhause / privat, Arbeit, Sonstiges). Der User kann frei tippen oder aus der Liste wählen.
-- Neue Settings-Card **„Ladesäulen-Anbieter"** mit Textarea für eigene Einträge (newline- oder komma-separiert). Eigene Einträge werden zusätzlich zur Built-in-Liste angezeigt. Stored als JSON unter AppConfig-Key `custom_operators`.
-- History-Tabelle zeigt Anbieter + Ort als kleine Zweit-Zeile unter dem Datum (`…` wenn zu lang, Full-Text im Tooltip).
+- Input form and edit page have a `<datalist>` field with 19 built-in operators (IONITY, EnBW mobility+, Aral pulse, Tesla Supercharger, Shell Recharge, Allego, Fastned, Elli (VW), EWE Go, Maingau, Lidl, Kaufland, Aldi Süd, REWE, Mer, Stadtwerke, Home / private, Work, Other). The user can type freely or choose from the list.
+- New settings card **"Charging station operators"** with a textarea for custom entries (newline- or comma-separated). Custom entries appear in addition to the built-in list. Stored as JSON under AppConfig key `custom_operators`.
+- History table shows operator + location as a small second line under the date (`…` if too long, full text in tooltip).
 
-#### 4. Rohdatenviewer für alle Fahrzeug-Marken
+#### 4. Raw-data viewer for all vehicle brands
 
-Neue Routen `/vehicle/raw` (Liste aller Syncs) und `/vehicle/raw/<id>` (Details einer Sync-Zeile). Erreichbar via Button „Rohdaten ansehen" in der Fahrzeug-API-Card, sobald eine Marke konfiguriert ist.
+New routes `/vehicle/raw` (list of all syncs) and `/vehicle/raw/<id>` (details of one sync row). Reachable via a "View raw data" button in the vehicle API card as soon as a brand is configured.
 
-- Detail-Seite zeigt **alle normalisierten Felder** (wie in der DB gespeichert) oberhalb und **den kompletten Raw-API-Dump** als pretty-printed JSON mit Scroll-Container + Copy-to-Clipboard-Button.
-- `raw_data` der Kia/Hyundai- und VAG-Connectoren wurde von `{'vin': …}` auf **vollständige Introspection** erweitert: alle öffentlichen, JSON-serialisierbaren Attribute des Vehicle-Objekts landen im Dump (primitive Typen direkt, `datetime` → ISO-String, nested objects gestringified mit Längen-Cap). Das macht den Viewer erst nützlich.
-- **SoH-Banner für Kia/Hyundai**: wenn `battery_soh_percent > 100` in einem Snapshot steht, erscheint eine blaue Info-Box die erklärt warum — die API misst gegen die werksseitig freigegebene Nutzkapazität, während die Batterie physikalisch noch Reserve hat. Neuwertige Batterien zeigen typisch 110–125 %, der Wert fällt mit Alterung Richtung 100 %.
+- Detail page shows **all normalized fields** (as stored in the DB) above and **the complete raw API dump** as pretty-printed JSON with a scroll container + copy-to-clipboard button.
+- `raw_data` of the Kia/Hyundai and VAG connectors was expanded from `{'vin': …}` to **full introspection**: all public, JSON-serializable attributes of the Vehicle object end up in the dump (primitive types directly, `datetime` → ISO string, nested objects stringified with a length cap). That's what makes the viewer useful in the first place.
+- **SoH banner for Kia/Hyundai**: if `battery_soh_percent > 100` is in a snapshot, a blue info box appears explaining why — the API measures against the factory-released usable capacity, while the battery still has physical reserve. New batteries typically show 110–125 %, the value drops with ageing towards 100 %.
 
-#### 5. Migrations & Rückwärts-Kompatibilität
+#### 5. Migrations & backwards compatibility
 
-- `charges.operator` wird per `ALTER TABLE ADD COLUMN operator VARCHAR(64)` idempotent nachgezogen beim ersten Start mit v2.19.0. Bestehende Zeilen haben `operator = NULL`, was überall konsistent behandelt wird (History zeigt nichts an, CSV-Export schreibt leer, Edit-Seite rendert als leeres Feld).
-- Der alte `replace=True` Parameter an `import_csv_data()` funktioniert weiterhin (mapped auf `mode='replace'`), damit bestehende Aufrufer nicht brechen.
-- i18n: 62 neue Keys in `de.json` und `en.json` — beide Dateien haben identische Key-Sets.
+- `charges.operator` is idempotently added via `ALTER TABLE ADD COLUMN operator VARCHAR(64)` on the first start with v2.19.0. Existing rows have `operator = NULL`, which is handled consistently everywhere (history shows nothing, CSV export writes empty, edit page renders as an empty field).
+- The old `replace=True` parameter to `import_csv_data()` still works (maps to `mode='replace'`), so existing callers don't break.
+- i18n: 62 new keys in `de.json` and `en.json` — both files have identical key sets.
 
-#### Verifikation
+#### Verification
 
-Vor dem Commit durchlaufen:
+Before commit:
 
-- `python -m py_compile` auf allen geänderten Python-Dateien — clean
-- CSV-Import Unit-Tests mit 6 Format-Varianten (Semikolon+Header, Re-Import dedup, Update-Modus manuelle-Schutz, Legacy-Komma-no-Header, ISO-Date+Tab, Replace-mit-Backup) — alle grün
-- App boot-test: Migration läuft, `charges.operator` existiert, alle Kern-Routen liefern 200
-- Edit-POST Round-Trip: operator + location werden persistiert
-- Raw-Viewer: handled invalid/null raw_json graceful
-- CSV Round-Trip: eigener Export (474 Zeilen) → Re-Import im Skip-Modus → 0 neu, 0 Fehler
+- `python -m py_compile` on all changed Python files — clean
+- CSV import unit tests with 6 format variants (semicolon+header, re-import dedup, update mode manual-protection, legacy comma-no-header, ISO-date+tab, replace-with-backup) — all green
+- App boot test: migration runs, `charges.operator` exists, all core routes return 200
+- Edit POST round-trip: operator + location are persisted
+- Raw viewer: handles invalid/null raw_json gracefully
+- CSV round-trip: own export (474 rows) → re-import in skip mode → 0 new, 0 errors
 
 ## v2.18.3 (2026-04-16)
 
-### Fix: Hyundai-Selenium wartete auf nicht existierenden Button, obwohl Login-Chain schon durch war
+### Fix: Hyundai Selenium waited for a non-existent button even though the login chain was already through
 
-Screenshots vom User zeigten die Ursache des 5-Min-Timeouts: **Der Browser landet bei Hyundai direkt auf der finalen URL** `prd.eu-ccapi.hyundai.com:8080/api/v1/user/oauth2/token?code=...&state=ccsp&login_success=y` — also mit gültigem CCSP-Code in der Adressleiste. Aber Selenium wartete auf den CSS-Selector `button.mail_check, button.ctb_button`, der auf dieser JSON-Response-Seite überhaupt nicht existiert. Ergebnis: 300 Sekunden Leerlauf trotz erfolgreich erhaltenem Code.
+Screenshots from the user showed the cause of the 5-min timeout: **The browser lands on Hyundai directly on the final URL** `prd.eu-ccapi.hyundai.com:8080/api/v1/user/oauth2/token?code=...&state=ccsp&login_success=y` — that is, with a valid CCSP code in the address bar. But Selenium was waiting for the CSS selector `button.mail_check, button.ctb_button`, which does not exist at all on this JSON response page. Result: 300 seconds of idling despite successfully obtained code.
 
-Research-Agent hat verbatim im Upstream-Script [`hyundai_kia_connect_api/Hyundai Token Solution/hyundai_token.py`](https://github.com/Hyundai-Kia-Connect/hyundai_kia_connect_api/tree/master/Hyundai%20Token%20Solution) nachgesehen: die Selektoren `button.mail_check`/`button.ctb_button` **stehen nicht im Upstream-Code**. Upstream benutzt einen Terminal-`input("Press ENTER after login is complete...")`-Gate, kein Selenium-Wait. Die Selektoren waren also eine Eigenkonstruktion, die auf einer Seite suchte, die der Browser schon längst verlassen hatte.
+The research agent verified against the upstream script [`hyundai_kia_connect_api/Hyundai Token Solution/hyundai_token.py`](https://github.com/Hyundai-Kia-Connect/hyundai_kia_connect_api/tree/master/Hyundai%20Token%20Solution): the selectors `button.mail_check`/`button.ctb_button` **are not in the upstream code**. Upstream uses a terminal `input("Press ENTER after login is complete...")` gate, no Selenium wait. So the selectors were a homegrown construction that searched on a page the browser had long since left.
 
-Fix: Statt auf einen CSS-Selector wird jetzt auf das **URL-Muster** gewartet — entweder landet der Browser direkt auf dem `redirect_final`-Host (Hyundai: Auto-Chain durch Session-Cookies) oder auf dem `login_redirect`-Host (Kia: Zwischenlandung auf kia.com, danach ist Schritt 2 nötig). Die Logik unterscheidet beide Fälle und springt direkt zur Code-Extraktion wenn die Chain schon durch ist, oder macht den zweiten `driver.get()` sonst. Kia's `a[class='logout user']`-Selector bleibt als zusätzlicher Trigger für den oneid-Flow erhalten.
+Fix: Instead of waiting for a CSS selector, we now wait on the **URL pattern** — either the browser lands directly on the `redirect_final` host (Hyundai: auto-chain via session cookies) or on the `login_redirect` host (Kia: intermediate landing on kia.com, after which step 2 is needed). The logic distinguishes the two cases and jumps directly to code extraction when the chain is already through, or performs the second `driver.get()` otherwise. Kia's `a[class='logout user']` selector stays as an additional trigger for the oneid flow.
 
-Zweiter Fix im gleichen Zug: die manuelle Paste-URL-Validierung lehnte URLs mit `login_success=y` als „Stufe 1" ab — aber `login_success=y` steht auch in der finalen `prd.eu-ccapi`-URL. Jetzt wird nur noch am **Host** unterschieden (`ctbapi.hyundai-europe.com` = Stufe 1, sonst akzeptiert).
+Second fix in the same pass: the manual paste-URL validation rejected URLs with `login_success=y` as "step 1" — but `login_success=y` also appears in the final `prd.eu-ccapi` URL. Now the distinction is made only by **host** (`ctbapi.hyundai-europe.com` = step 1, otherwise accepted).
 
 ## v2.18.2 (2026-04-16)
 
-### Fix: Step-2-URL mit unencoded redirect_uri löst 400 Bad Request aus
+### Fix: Step-2 URL with unencoded redirect_uri triggers 400 Bad Request
 
-Beim Klick auf den Step-2-Link in der manuellen Anleitung kam „400 Bad Request — Invalid request". Ursache: der `redirect_uri`-Query-Parameter enthielt unencoded `https://...:8080/api/v1/user/oauth2/token`. Wenn man die URL in Selenium's `driver.get()` schickt, normalisiert Chromium das automatisch — bei einem `<a href>`-Click aus dem UI schickt der Browser die URL aber roh, und Hyundai's OAuth-Server ist streng genug den Request abzulehnen.
+Clicking the Step-2 link in the manual instructions produced "400 Bad Request — Invalid request". Cause: the `redirect_uri` query parameter contained an unencoded `https://...:8080/api/v1/user/oauth2/token`. If you send the URL through Selenium's `driver.get()`, Chromium normalizes it automatically — but on an `<a href>` click from the UI, the browser sends the URL raw, and Hyundai's OAuth server is strict enough to reject the request.
 
-Fix: `get_manual_step2_url()` benutzt jetzt `urllib.parse.quote(cfg['redirect_final'], safe='')` für den `redirect_uri`-Wert. Gleiche URL wird auch im Selenium-Pfad (`_do_fetch`) verwendet — vorher hatte dieser Pfad einen separaten Builder, was riskant war bei zukünftigen Änderungen. Jetzt ein Builder, eine Quelle der Wahrheit.
+Fix: `get_manual_step2_url()` now uses `urllib.parse.quote(cfg['redirect_final'], safe='')` for the `redirect_uri` value. The same URL is used in the Selenium path (`_do_fetch`) too — previously this path had a separate builder, which was risky for future changes. Now one builder, one source of truth.
 
 ## v2.18.1 (2026-04-16)
 
-### Manueller Token-Flow: 3-Schritt-Anleitung mit klickbaren Step-Links
+### Manual token flow: 3-step instructions with clickable step links
 
-User hat beim manuellen Paste-Flow die **ctbapi-URL** eingefügt (Stage 1, das Login-Ergebnis mit `?code=...&login_success=y`). Der Code dort ist für `peuhyundaiidm-ctb` ausgestellt — das Token-Endpoint sagt zurecht „code is not exist in redis", weil er für den API-Client `6d477c38-...` nicht bekannt ist. Die Meldung hilft dem User aber null weiter.
+The user pasted the **ctbapi URL** in the manual paste flow (Stage 1, the login result with `?code=...&login_success=y`). The code there is issued for `peuhyundaiidm-ctb` — the token endpoint rightfully says "code is not exist in redis" because it is not known for the API client `6d477c38-...`. But that message doesn't help the user at all.
 
-Zwei Verbesserungen:
+Two improvements:
 
-**1. ctbapi-URL wird explizit abgefangen.** `exchange_manual_url()` checkt jetzt `'ctbapi.hyundai-europe.com' in url` oder `'login_success=y' in url` und gibt eine klare Meldung zurück: „Das ist die Login-URL (Stufe 1), nicht die finale Token-URL (Stufe 2). Nächster Schritt: öffne diese URL im gleichen Browser ...".
+**1. ctbapi URL is explicitly intercepted.** `exchange_manual_url()` now checks `'ctbapi.hyundai-europe.com' in url` or `'login_success=y' in url` and returns a clear message: "This is the login URL (stage 1), not the final token URL (stage 2). Next step: open this URL in the same browser...".
 
-**2. UI zeigt 3-Schritt-Anleitung mit klickbaren Links.** Wenn der User das „Manuell"-Details aufklappt, lädt die Seite per `GET /api/vehicle/token/manual/step_urls?brand=...` die zwei Schritt-URLs:
-- **Schritt 1**: Login-URL → User öffnet im eigenen Browser, loggt sich ein
-- **Schritt 2**: CCSP-Authorize-URL → User öffnet *im gleichen Browser*. Wegen IdP-Session-Cookie aus Schritt 1 redirected diese URL automatisch per 302 zur finalen URL mit `?code=Y` (dem richtigen CCSP-Code)
-- **Schritt 3**: User kopiert die finale URL aus der Adressleiste und fügt sie ein
+**2. UI shows 3-step instructions with clickable links.** When the user expands the "Manual" details, the page loads via `GET /api/vehicle/token/manual/step_urls?brand=...` the two step URLs:
+- **Step 1**: login URL → user opens in their own browser, logs in
+- **Step 2**: CCSP authorize URL → user opens *in the same browser*. Due to the IdP session cookie from step 1, this URL automatically redirects via 302 to the final URL with `?code=Y` (the correct CCSP code)
+- **Step 3**: user copies the final URL from the address bar and pastes it in
 
-Beide Links sind direkt klickbar (`target="_blank"`), der Placeholder im Paste-Feld wird dynamisch auf `prd.eu-ccapi.hyundai.com:8080/.../token?code=...` (Hyundai) bzw. `.../redirect?code=...` (Kia) gesetzt.
+Both links are directly clickable (`target="_blank"`), the placeholder in the paste field is dynamically set to `prd.eu-ccapi.hyundai.com:8080/.../token?code=...` (Hyundai) or `.../redirect?code=...` (Kia).
 
 ## v2.18.0 (2026-04-16)
 
-### Manuelle URL-Paste als Fallback für Kia/Hyundai-Token + bessere InvalidSessionId-Meldung
+### Manual URL paste as fallback for Kia/Hyundai token + better InvalidSessionId message
 
-Zwei Themen:
+Two topics:
 
-**1. InvalidSessionIdException-Handling.** Wenn der Nutzer während des Selenium-Flows das Browserfenster im noVNC schließt (oder Chromium abstürzt), wirft Selenium `InvalidSessionIdException` mit längerem Stacktrace. Bisher landete der Raw-Stacktrace im UI. Jetzt: spezifische Erkennung des Fehlers plus freundliche Meldung „Browser-Session beendet. Bitte das Browserfenster nicht schließen während der Token geholt wird."
+**1. InvalidSessionIdException handling.** If the user closes the browser window in noVNC during the Selenium flow (or Chromium crashes), Selenium throws `InvalidSessionIdException` with a long stack trace. Previously the raw stack trace ended up in the UI. Now: specific detection of the error plus friendly message "Browser session ended. Please do not close the browser window while the token is being fetched."
 
-**2. Manueller Paste-Fallback.** Wenn Selenium aus irgendeinem Grund crasht, hängt oder vom Nutzer gekillt wird, musste bisher der komplette Prozess neu gestartet werden. Neu: unter dem „Token holen"-Button gibt's ein aufklappbares `<details>`-Element „Manueller Fallback: URL mit Code einfügen". Workflow:
-1. Nutzer öffnet Kia/Hyundai-Login in seinem eigenen Browser (Mac/iPhone, egal wo)
-2. Loggt sich ein, lässt den Flow durchlaufen, landet auf der URL mit `?code=...` (bei Hyundai: `prd.eu-ccapi.hyundai.com:8080/.../oauth2/token?code=...`)
-3. Kopiert die URL aus der Adressleiste
-4. Fügt sie in das neue Textfeld in der App ein, klickt „Token aus URL holen"
-5. App extrahiert den Code per Regex, POSTet an den Token-Endpoint, speichert den Refresh-Token im Passwort-Feld
+**2. Manual paste fallback.** If Selenium crashes, hangs or gets killed by the user for any reason, previously the whole process had to be restarted. New: under the "Fetch token" button there is a collapsible `<details>` element "Manual fallback: paste URL with code". Workflow:
+1. User opens Kia/Hyundai login in their own browser (Mac/iPhone, wherever)
+2. Logs in, lets the flow run through, lands on the URL with `?code=...` (for Hyundai: `prd.eu-ccapi.hyundai.com:8080/.../oauth2/token?code=...`)
+3. Copies the URL from the address bar
+4. Pastes it into the new text field in the app, clicks "Fetch token from URL"
+5. App extracts the code via regex, POSTs to the token endpoint, saves the refresh token in the password field
 
-Völlig unabhängig vom Selenium-Pfad, funktioniert auch wenn Chromium/noVNC down sind, ARM-Hosts wo ChromeDriver Probleme macht, etc. Neue Route `POST /api/vehicle/token/manual`, neue Funktion `exchange_manual_url()` in `token_fetch.py`. 3 Übersetzungs-Keys pro Sprache.
+Completely independent from the Selenium path, also works when Chromium/noVNC are down, ARM hosts where ChromeDriver has issues, etc. New route `POST /api/vehicle/token/manual`, new function `exchange_manual_url()` in `token_fetch.py`. 3 translation keys per language.
 
 ## v2.17.7 (2026-04-16)
 
-### Hyundai Token-Fetch: fehlender 2. Authorize-Schritt (endgültiger Fix)
+### Hyundai token fetch: missing 2nd authorize step (final fix)
 
-Nach verbatim-Vergleich mit zwei funktionierenden Upstream-Scripts (`Hyundai%20Token%20Solution/hyundai_token.py` von den Library-Authoren und `RustyDust/bluelinktoken.py`) war klar: der CTB-Flow hat **zwei Authorize-Schritte**, genau wie Kia. Mein Code hat den zweiten Schritt nie gemacht.
+After verbatim comparison with two working upstream scripts (`Hyundai%20Token%20Solution/hyundai_token.py` by the library authors and `RustyDust/bluelinktoken.py`) it was clear: the CTB flow has **two authorize steps**, just like Kia. My code never did the second step.
 
-**Der tatsächliche Flow:**
-1. User loggt sich ein via `login_client_id=peuhyundaiidm-ctb` → Browser landet auf `ctbapi.hyundai-europe.com/api/auth?code=X`. `button.mail_check` / `button.ctb_button` erscheint — dort bleibt der Browser stehen.
-2. Das Script muss **programmatisch** auf eine zweite Authorize-URL navigieren: `idpconnect-eu.hyundai.com/.../authorize?response_type=code&client_id=6d477c38-...&redirect_uri=prd.eu-ccapi.hyundai.com:8080/.../oauth2/token&state=ccsp`. Dank der IdP-Session-Cookie aus Schritt 1 302-redirected die URL sofort auf die Final-URL mit dem CCSP-Code Y.
-3. Code Y extrahieren, gegen Token tauschen.
+**The actual flow:**
+1. User logs in via `login_client_id=peuhyundaiidm-ctb` → browser lands on `ctbapi.hyundai-europe.com/api/auth?code=X`. `button.mail_check` / `button.ctb_button` appears — that's where the browser stops.
+2. The script must **programmatically** navigate to a second authorize URL: `idpconnect-eu.hyundai.com/.../authorize?response_type=code&client_id=6d477c38-...&redirect_uri=prd.eu-ccapi.hyundai.com:8080/.../oauth2/token&state=ccsp`. Thanks to the IdP session cookie from step 1, this URL immediately 302-redirects to the final URL with the CCSP code Y.
+3. Extract code Y, exchange for token.
 
-In v2.17.2 hatte ich fälschlich den CSS-Selector-Wait durch einen URL-Wait auf prd.eu-ccapi ersetzt — der Browser navigiert aber NIE von selbst dorthin, deshalb das „dauerhaft hängen bleiben". Jetzt: CSS-Wait → driver.get(redirect_url) → 15-Sekunden-Poll auf URL-Match. Der ganze CTB-Special-Case fliegt raus, Kia und Hyundai laufen jetzt durch denselben Code-Pfad.
+In v2.17.2 I mistakenly replaced the CSS selector wait with a URL wait on prd.eu-ccapi — but the browser never navigates there by itself, hence the "permanent hang". Now: CSS wait → driver.get(redirect_url) → 15-second poll on URL match. The entire CTB special case is gone, Kia and Hyundai now run through the same code path.
 
 ## v2.17.6 (2026-04-16)
 
-### Fix: Hyundai Token-Fetch — warten auf CCSP-Code, nicht auf ctbapi-Code
+### Fix: Hyundai token fetch — wait for CCSP code, not for ctbapi code
 
-Revert von v2.17.5 plus Grund-Ursache. Der Hyundai CTB-Flow hat **zwei Codes** in der Redirect-Kette:
-1. `ctbapi.hyundai-europe.com/api/auth?code=X` — Code für `client_id=peuhyundaiidm-ctb` (der Login-Client). Dieser Code gehört NICHT zum Token-POST.
-2. Danach Server-Redirect auf `prd.eu-ccapi.hyundai.com:8080/.../oauth2/token?code=Y` — Y ist der CCSP-Code für `client_id=6d477c38-...` (der API-Client). Das ist der Code, den das Token-Endpoint erwartet.
+Revert of v2.17.5 plus root cause. The Hyundai CTB flow has **two codes** in the redirect chain:
+1. `ctbapi.hyundai-europe.com/api/auth?code=X` — code for `client_id=peuhyundaiidm-ctb` (the login client). This code does NOT belong to the token POST.
+2. Then a server redirect to `prd.eu-ccapi.hyundai.com:8080/.../oauth2/token?code=Y` — Y is the CCSP code for `client_id=6d477c38-...` (the API client). This is the code the token endpoint expects.
 
-In v2.17.4 hatte ich die URL-Prüfung auf „enthält `code=`" gelockert — Selenium hat dadurch Code X von ctbapi gegriffen. Mein v2.17.5-Versuch mit `redirect_uri=ctbapi` beim Token-POST ging in die Hose, weil der API-Client ctbapi gar nicht als Redirect registriert hat (→ „Invalid redirect uri").
+In v2.17.4 I loosened the URL check to "contains `code=`" — Selenium consequently grabbed code X from ctbapi. My v2.17.5 attempt with `redirect_uri=ctbapi` on the token POST failed because the API client does not have ctbapi registered as a redirect at all (→ "Invalid redirect uri").
 
-Richtiger Fix:
-1. Wait-Bedingung zurückgenommen auf **URL enthält `prd.eu-ccapi.hyundai.com` UND `code=`**. So wartet Selenium den zweiten Redirect ab und bekommt den richtigen CCSP-Code Y.
-2. Token-POST benutzt wieder **`redirect_uri=redirect_final`** (entspricht der URL, auf der der CCSP-Code ausgestellt wurde). v2.17.5-Branching rückgängig.
-3. Error-Meldung bei Wait-Timeout zeigt jetzt explizit welche URL erreicht wurde, damit wir im Log-Fall sofort sehen ob's an einem dritten Redirect-Host hing.
+Correct fix:
+1. Wait condition reverted to **URL contains `prd.eu-ccapi.hyundai.com` AND `code=`**. So Selenium waits for the second redirect and gets the correct CCSP code Y.
+2. Token POST again uses **`redirect_uri=redirect_final`** (matching the URL against which the CCSP code was issued). v2.17.5 branching rolled back.
+3. Error message on wait timeout now explicitly shows which URL was reached, so in a log case we can immediately see whether it got stuck on a third redirect host.
 
-Kia (oneid, 2-Step-Authorize) unverändert.
+Kia (oneid, 2-step authorize) unchanged.
 
 ## v2.17.5 (2026-04-16)
 
-### Fix: Hyundai Token-POST benutzt falsches `redirect_uri`
+### Fix: Hyundai token POST uses wrong `redirect_uri`
 
-Hyundai-Token-Endpoint gab 400 zurück mit `"Mismatched token redirect uri. authorize: https://ctbapi.hyundai-europe.com/api/auth token: https://prd.eu-ccapi.hyundai.com:8080/api/v1/user/oauth2/token"`. OAuth2 verlangt, dass der `redirect_uri`-Parameter beim Token-Austausch **exakt** gleich ist wie beim vorangehenden Authorize-Request.
+Hyundai token endpoint returned 400 with `"Mismatched token redirect uri. authorize: https://ctbapi.hyundai-europe.com/api/auth token: https://prd.eu-ccapi.hyundai.com:8080/api/v1/user/oauth2/token"`. OAuth2 requires that the `redirect_uri` parameter on token exchange is **exactly** the same as on the preceding authorize request.
 
-Mein Code hat blind `cfg['redirect_final']` für den POST benutzt — das stimmt für Kia (dessen zweiter Authorize-Schritt tatsächlich mit `redirect_final` als redirect_uri läuft), aber nicht für Hyundai CTB. Hyundai hat nur **einen** Authorize-Schritt mit `redirect_uri=login_redirect` (`ctbapi.hyundai-europe.com/api/auth`). Der Browser landet danach zwar auf `prd.eu-ccapi.hyundai.com:8080/.../oauth2/token?code=...` (das ist das CTB-Display-URL), aber der Code wurde von idpconnect gegen `ctbapi...` ausgestellt.
+My code blindly used `cfg['redirect_final']` for the POST — that's correct for Kia (whose second authorize step actually runs with `redirect_final` as redirect_uri), but not for Hyundai CTB. Hyundai has only **one** authorize step with `redirect_uri=login_redirect` (`ctbapi.hyundai-europe.com/api/auth`). The browser subsequently lands on `prd.eu-ccapi.hyundai.com:8080/.../oauth2/token?code=...` (that's the CTB display URL), but the code was issued by idpconnect against `ctbapi...`.
 
-Fix: beim Token-POST wird pro Flow entschieden — `ctb` → `login_redirect`, `oneid` (Kia) → `redirect_final`. Kia bleibt byte-genau wie vorher.
+Fix: on the token POST, decide per flow — `ctb` → `login_redirect`, `oneid` (Kia) → `redirect_final`. Kia stays byte-for-byte the same.
 
 ## v2.17.4 (2026-04-16)
 
-### Hyundai-Token-Fetch: URL-Match robuster + bessere Fehlermeldungen
+### Hyundai token fetch: URL match more robust + better error messages
 
-Zwei Fixes in einem Release:
+Two fixes in one release:
 
-**1. URL-Match relaxt.** In v2.17.2 hat der Wait verlangt, dass die Final-URL mit `https://prd.eu-ccapi.hyundai.com` startet **und** `code=` enthält. In der Praxis landet der Browser je nach Flow-Variante manchmal auf `ctbapi.hyundai-europe.com/api/auth?code=XXX` statt direkt auf prd.eu-ccapi — mein Match hat das nicht akzeptiert und gelaufen bis zum 5-Minuten-Timeout. Jetzt reicht: URL enthält `code=`, egal auf welchem Host.
+**1. URL match relaxed.** In v2.17.2 the wait required the final URL to start with `https://prd.eu-ccapi.hyundai.com` **and** contain `code=`. In practice the browser sometimes lands on `ctbapi.hyundai-europe.com/api/auth?code=XXX` instead of directly on prd.eu-ccapi depending on the flow variant — my match did not accept that and ran until the 5-minute timeout. Now it suffices: URL contains `code=`, no matter on which host.
 
-**2. Leere Fehlermeldungen aufgelöst.** User berichtete eine rote „message:"-Anzeige ohne weiteren Text neben dem Token-Button — das war entweder eine Selenium-`TimeoutException` mit leerer Message, oder ein verschluckter Exception-Body. Alle Error-Paths im Token-Fetch-Flow geben jetzt explizit `{Typ}: {Message}` zurück, plus Kontext (letzte URL bei Timeout, HTTP-Body bei Token-POST-Fehler, usw.). Bei völlig leerem `str(e)` fällt der Code auf den Exception-Typnamen zurück. Zusätzlich wird der komplette Traceback auf dem Server geloggt (`journalctl -u ev-tracker.service`) damit auch Server-seitige Diagnose möglich ist.
+**2. Empty error messages resolved.** The user reported a red "message:" display without further text next to the token button — that was either a Selenium `TimeoutException` with an empty message, or a swallowed exception body. All error paths in the token fetch flow now explicitly return `{type}: {message}`, plus context (last URL on timeout, HTTP body on token POST error, etc.). On a completely empty `str(e)` the code falls back to the exception type name. Additionally, the complete traceback is logged on the server (`journalctl -u ev-tracker.service`) so server-side diagnosis is also possible.
 
-Kia-Pfad unverändert.
+Kia path unchanged.
 
 ## v2.17.3 (2026-04-16)
 
-### Fix: VAG-Connector — Importpfad für CarConnectivity-Klasse
+### Fix: VAG connector — import path for the CarConnectivity class
 
-In `carconnectivity >= 0.11` ist die `CarConnectivity`-Klasse nicht mehr im Top-Level-Package, sondern im Submodul `carconnectivity.carconnectivity`. Der alte Import `carconnectivity.CarConnectivity(...)` warf: `module 'carconnectivity' has no attribute 'CarConnectivity'` — was mit v2.17.1 (dem Error-Surfacing-Fix) jetzt überhaupt erst sichtbar wurde; in v2.17.0 und davor hat das generische „Benutzer und Passwort prüfen"-Flash den eigentlichen Fehler verdeckt.
+In `carconnectivity >= 0.11` the `CarConnectivity` class is no longer in the top-level package but in the submodule `carconnectivity.carconnectivity`. The old import `carconnectivity.CarConnectivity(...)` threw: `module 'carconnectivity' has no attribute 'CarConnectivity'` — which only became visible at all with v2.17.1 (the error-surfacing fix); in v2.17.0 and earlier, the generic "check username and password" flash hid the actual error.
 
-Fix: Import mit Fallback — erst das neue Submodul probieren, dann das alte Top-Level-Import. Damit funktioniert's auf beiden Library-Versionen.
+Fix: Import with fallback — first try the new submodule, then the old top-level import. Works on both library versions.
 
 ## v2.17.2 (2026-04-16)
 
-### Fix: Hyundai Token-Fetch hängt im Selenium-Wait
+### Fix: Hyundai token fetch hangs in Selenium wait
 
-v2.17.0 hat für Hyundai als „Login erkannt"-Kondition auf `button.mail_check` oder `button.ctb_button` gewartet — Selektoren aus dem RustyDust-Script, die aber auf einer Zwischen-Confirmation-Seite sitzen, die Hyundai offenbar in manchen Flows **überspringt**. Der Browser landet direkt auf `prd.eu-ccapi.hyundai.com:8080/api/v1/user/oauth2/token?code=XXX` und zeigt den JSON-Body `{"result":"E","data":null,"message":"url is not defined"}` — was übrigens **kein Fehler** ist, sondern der erwartete End-Zustand (der Server strippt den `code`-Query-Param beim Rendern). Selenium hat aber weiter auf Buttons gewartet, die nie kommen, und ist nach 5 min in den Timeout gerannt.
+v2.17.0 waited for `button.mail_check` or `button.ctb_button` as the "login detected" condition for Hyundai — selectors from the RustyDust script, but they sit on an intermediate confirmation page that Hyundai apparently **skips** in some flows. The browser lands directly on `prd.eu-ccapi.hyundai.com:8080/api/v1/user/oauth2/token?code=XXX` and shows the JSON body `{"result":"E","data":null,"message":"url is not defined"}` — which is, incidentally, **not an error** but the expected end state (the server strips the `code` query param when rendering). But Selenium kept waiting for buttons that never come, and ran into the timeout after 5 min.
 
-Fix: Per-Flow-Logik in `_do_fetch()`. Für den CTB-Flow (Hyundai) warte nicht auf DOM-Elemente sondern auf die URL-Änderung — sobald `driver.current_url` auf `prd.eu-ccapi.hyundai.com` startet und `code=` enthält, ist der Login durch. Selenium extrahiert direkt aus der URL und überspringt den separaten `driver.get(redirect_url)`-Schritt (den Hyundai im CTB-Flow eh schon selbst macht). Der Kia-oneid-Flow bleibt 1:1 wie vorher: CSS-Wait auf `a.logout.user`, dann manuelle Navigation zum CCSP-Authorize-Endpoint.
+Fix: per-flow logic in `_do_fetch()`. For the CTB flow (Hyundai), don't wait on DOM elements but on the URL change — as soon as `driver.current_url` starts with `prd.eu-ccapi.hyundai.com` and contains `code=`, the login is through. Selenium extracts directly from the URL and skips the separate `driver.get(redirect_url)` step (which Hyundai already performs itself in the CTB flow). The Kia oneid flow stays 1:1 as before: CSS wait on `a.logout.user`, then manual navigation to the CCSP authorize endpoint.
 
 ## v2.17.1 (2026-04-16)
 
-### Fix: VAG (VW/Skoda/Seat/Cupra/Audi) zeigt echten Fehler statt generischem „Passwort prüfen"
+### Fix: VAG (VW/Skoda/Seat/Cupra/Audi) shows the real error instead of generic "check password"
 
-VW-Group's Identity-Server (`identity.vwgroup.io`) fordert regelmäßig — nach Passwort-Änderungen, AGB-Updates oder neuen Datenschutzbestimmungen — ein **erneutes Akzeptieren** durch den Nutzer. Die CarConnectivity-Library wirft in dem Fall eine Exception mit der exakten URL zum Akzeptieren (`Try visiting: https://identity.vwgroup.io/...`). Bisher hat `VAGConnector.test_connection()` diese Exception aber mit `except Exception: return False` stumm verworfen und die App flashte das generische „Verbindung fehlgeschlagen. Zugangsdaten prüfen." — wodurch jeder Nutzer naheliegenderweise dachte Benutzername/Passwort wären falsch, was dann beim Testen Login-Throttling getriggert hat.
+VW Group's identity server (`identity.vwgroup.io`) regularly — after password changes, T&C updates or new data protection provisions — requires **renewed acceptance** by the user. The CarConnectivity library throws in that case an exception with the exact URL to accept (`Try visiting: https://identity.vwgroup.io/...`). Previously `VAGConnector.test_connection()` silently discarded this exception with `except Exception: return False` and the app flashed the generic "Connection failed. Check credentials." — whereupon every user naturally thought the username/password was wrong, which then triggered login throttling on testing.
 
-Fix: `test_connection()` fängt die Exception nicht mehr, lässt sie zur App-Route durchpropagieren, die sie in der flash-Message mit `flash.error` ausgibt — inklusive der Consent-URL. `authenticate()` (das für den Background-Sync benutzt wird) bleibt defensiv und speichert jetzt zusätzlich `self._last_error` als Hinweis für Log-Auswertung.
+Fix: `test_connection()` no longer catches the exception, lets it propagate to the app route, which outputs it with `flash.error` in the flash message — including the consent URL. `authenticate()` (used for the background sync) stays defensive and now additionally saves `self._last_error` as a hint for log analysis.
 
-**Nutzer-seitig**: wenn das Error nochmal kommt, steht in der flash-Message jetzt die URL, die der Nutzer im Browser öffnen, sich einloggen und den Consent klicken muss. Dann geht die Skoda/VW/Audi/Seat/Cupra-Verbindung wieder.
+**User-side**: if the error comes up again, the flash message now contains the URL the user needs to open in a browser, log in and click the consent. Then the Skoda/VW/Audi/Seat/Cupra connection works again.
 
 ## v2.17.0 (2026-04-15)
 
-### Hyundai Refresh-Token: richtige OAuth-URLs (CTB-Flow)
+### Hyundai refresh token: correct OAuth URLs (CTB flow)
 
-Der „Token holen"-Button funktioniert jetzt auch für Hyundai EU. Hintergrund: in v2.16.0 und davor hatte `services/vehicle/token_fetch.py` für Hyundai einfach die Kia-Konfiguration kopiert und nur die Domain getauscht — das konnte nie funktionieren, weil Kia und Hyundai EU **komplett unterschiedliche OAuth-Flows** verwenden, obwohl sie beide zur selben Mutterfirma gehören und auf derselben `hyundai_kia_connect_api`-Library aufsetzen.
+The "Fetch token" button now works for Hyundai EU too. Background: in v2.16.0 and earlier, `services/vehicle/token_fetch.py` simply copied the Kia configuration for Hyundai and only swapped the domain — which could never work because Kia and Hyundai EU use **completely different OAuth flows** even though they both belong to the same parent company and build on the same `hyundai_kia_connect_api` library.
 
-**Die Unterschiede:**
+**The differences:**
 
-| Feld | Kia EU (oneid) | Hyundai EU (CTB) |
+| Field | Kia EU (oneid) | Hyundai EU (CTB) |
 |---|---|---|
-| Flow | oneid/online-sales auf kia.com | CTB (Connected Car Telematics Business) auf ctbapi.hyundai-europe.com |
+| Flow | oneid/online-sales on kia.com | CTB (Connected Car Telematics Business) on ctbapi.hyundai-europe.com |
 | `login_client_id` | `peukiaidm-online-sales` | `peuhyundaiidm-ctb` |
 | `login_redirect` | `www.kia.com/api/bin/oneid/login` | `ctbapi.hyundai-europe.com/api/auth` |
-| `state` | Base64-URL + `_default`-Suffix | Kurzer Country-Code + `_` (z.B. `EN_`) |
+| `state` | Base64-URL + `_default` suffix | Short country code + `_` (e.g. `EN_`) |
 | `redirect_final` | `.../oauth2/redirect` | `.../oauth2/token` |
-| `client_secret` | Literal-String `"secret"` | Echter 48-Zeichen-Key `KUy49Xx...` |
+| `client_secret` | Literal string `"secret"` | Real 48-character key `KUy49Xx...` |
 | User-Agent | Mobile Android | Desktop Chrome |
-| Extra authorize-Params | keine | `connector_client_id`, `captcha=1`, `ui_locales`, `nonce` |
+| Extra authorize params | none | `connector_client_id`, `captcha=1`, `ui_locales`, `nonce` |
 
-Die alte Config hat sechs von sieben Feldern falsch gehabt — nur `client_id` war korrekt. Der Token-Austausch scheiterte außerdem immer an der hart kodierten `client_secret: 'secret'`, weil Hyundai's Endpoint bei falschem Secret 401 zurückgibt.
+The old config had six out of seven fields wrong — only `client_id` was correct. The token exchange also always failed on the hard-coded `client_secret: 'secret'` because Hyundai's endpoint returns 401 on a wrong secret.
 
 **Fix:**
 
-- `services/vehicle/token_fetch.py` — `BRAND_CONFIG['hyundai']` komplett ersetzt, `BRAND_CONFIG['kia']` explizit `client_secret: 'secret'` hinzugefügt (früher hart kodiert, jetzt konsistent). Neues Feld `user_agent` pro Marke (Mobile für Kia, Desktop für Hyundai, beide behalten das `_CCS_APP_AOS`-Suffix das den „use the app"-Block umgeht). Neues Feld `flow` pro Marke als Discriminator. Neue Helper-Funktion `_build_login_url(cfg)` baut die Login-URL per Flow — CTB braucht `connector_client_id`, `captcha=1`, `ui_locales` etc., die der Kia-oneid-Flow gar nicht kennt. Der Token-Exchange-POST zieht jetzt `cfg.get('client_secret', 'secret')` statt der Hardcoding.
-- `services/vehicle/connector_hyundai_kia.py` — Docstring aktualisiert, beide Connectors (Kia + Hyundai) teilen sich wieder den Refresh-Token-Flow, haben aber weiterhin eigene `credential_fields()`-Overrides für saubere Labels.
-- `templates/settings.html` — `updateVehicleFields()` zurück auf `isKiaHyundai` für Token-Hint-Section und Refresh-Token-Label. Hyundai-User sehen den „Token holen"-Button wieder (war in v2.16.2 fälschlich ausgeblendet, weil ich damals dachte, Hyundai ginge mit Passwort-Login).
+- `services/vehicle/token_fetch.py` — `BRAND_CONFIG['hyundai']` completely replaced, `BRAND_CONFIG['kia']` explicitly given `client_secret: 'secret'` (previously hard-coded, now consistent). New field `user_agent` per brand (mobile for Kia, desktop for Hyundai, both retain the `_CCS_APP_AOS` suffix that bypasses the "use the app" block). New field `flow` per brand as discriminator. New helper function `_build_login_url(cfg)` builds the login URL per flow — CTB needs `connector_client_id`, `captcha=1`, `ui_locales` etc., which the Kia oneid flow doesn't know at all. The token exchange POST now pulls `cfg.get('client_secret', 'secret')` instead of the hardcoding.
+- `services/vehicle/connector_hyundai_kia.py` — docstring updated, both connectors (Kia + Hyundai) again share the refresh token flow, but still have separate `credential_fields()` overrides for clean labels.
+- `templates/settings.html` — `updateVehicleFields()` back to `isKiaHyundai` for the token-hint section and the refresh-token label. Hyundai users see the "Fetch token" button again (it was mistakenly hidden in v2.16.2, because at the time I thought Hyundai worked with password login).
 
-**Quellen**: zwei unabhängige Working-Scripts aus der hyundai_kia_connect_api-Community (Hyundai Token Solution Subfolder im upstream repo + RustyDust/bluelink_refresh_token) bestätigen alle Werte identisch. Dazu die Library-Source selbst (`KiaUvoApiEU.py`) mit `CCSP_SERVICE_ID` und `CCS_SERVICE_SECRET` als Runtime-Konstanten — die werden bei jedem späteren API-Call validiert, sind also garantiert aktuell.
+**Sources**: two independent working scripts from the hyundai_kia_connect_api community (Hyundai Token Solution subfolder in the upstream repo + RustyDust/bluelink_refresh_token) confirm all values identically. Plus the library source itself (`KiaUvoApiEU.py`) with `CCSP_SERVICE_ID` and `CCS_SERVICE_SECRET` as runtime constants — they are validated on every subsequent API call, so guaranteed to be current.
 
-Kia-Flow bleibt **1:1 unverändert** bis auf das Auslagern von `client_secret` in die Config — der funktionierende Pfad wird nicht angefasst.
+The Kia flow stays **1:1 unchanged** except for the extraction of `client_secret` into the config — the working path is not touched.
 
 ## v2.16.2 (2026-04-15)
 
-### Hyundai: Login mit Passwort + PIN statt Refresh-Token
+### Hyundai: login with password + PIN instead of refresh token
 
-Bis jetzt hat die App sowohl für Kia als auch für Hyundai ein Refresh-Token verlangt (beides lief über `CREDENTIAL_FIELDS` mit Label „Refresh-Token"). Für **Kia EU** ist das seit 2025 Pflicht weil reCAPTCHA den direkten Passwort-Login blockt, für **Hyundai EU** funktioniert aber weiterhin der klassische Flow mit E-Mail + Passwort + 4-stelliger PIN.
+Until now, the app required a refresh token for both Kia and Hyundai (both ran through `CREDENTIAL_FIELDS` with the label "Refresh token"). For **Kia EU** that has been mandatory since 2025 because reCAPTCHA blocks direct password login, but for **Hyundai EU** the classic flow with email + password + 4-digit PIN still works.
 
-Fix: credential_fields pro Marke trennen.
+Fix: split credential_fields per brand.
 
-- `services/vehicle/connector_hyundai_kia.py` — zwei separate Listen: `KIA_CREDENTIAL_FIELDS` (Refresh-Token, Help-Text verweist auf den Token-Fetch-Button) und `HYUNDAI_CREDENTIAL_FIELDS` (normales Passwort-Feld). Beide Connector-Klassen überschreiben `credential_fields()` mit ihrer eigenen Liste.
-- `templates/settings.html` — Frontend-Logik in `updateVehicleFields()` splittet `isKiaHyundai` in `isKia` und `isHyundai`. Token-Hint-Section und „Refresh-Token"-Label jetzt nur noch für Kia (und Tesla) — Hyundai zeigt normales „Passwort"-Feld, kein „Token holen"-Button.
-- Kia-Flow bleibt **exakt** wie er ist (unangetastet, funktioniert).
+- `services/vehicle/connector_hyundai_kia.py` — two separate lists: `KIA_CREDENTIAL_FIELDS` (refresh token, help text refers to the token fetch button) and `HYUNDAI_CREDENTIAL_FIELDS` (normal password field). Both connector classes override `credential_fields()` with their own list.
+- `templates/settings.html` — frontend logic in `updateVehicleFields()` splits `isKiaHyundai` into `isKia` and `isHyundai`. Token-hint section and "Refresh token" label now only for Kia (and Tesla) — Hyundai shows a normal "Password" field, no "Fetch token" button.
+- Kia flow stays **exactly** as it is (untouched, works).
 
-Falls Hyundai EU irgendwann auch reCAPTCHA aktiviert, fliegt das hier beim Auth-Versuch mit einem Fehler auf und wir müssen Hyundai in den Token-Flow schieben. Aktuell reicht aber User + Passwort.
+If Hyundai EU enables reCAPTCHA at some point too, this will surface with an auth attempt error and we'll have to push Hyundai into the token flow. For now user + password is enough.
 
 ## v2.16.1 (2026-04-15)
 
-### Fix: /api/system/updates/status crasht bei Permission-Denied auf UU-Log
+### Fix: /api/system/updates/status crashes on permission-denied on UU log
 
-`/var/log/unattended-upgrades/unattended-upgrades.log` ist standardmäßig `root:adm` mit Mode 640 — der ev-tracker-User kann es nicht lesen. In v2.16.0 fing mein Code `PermissionError` nur beim `open()` ab, nicht aber beim vorangehenden `.is_file()` auf dem Path-Objekt (das auf einem 640-Verzeichnis ebenfalls knallt). Ergebnis: 500 auf der Status-Route, Card blieb bei „Status wird geladen …" hängen.
+`/var/log/unattended-upgrades/unattended-upgrades.log` is by default `root:adm` with mode 640 — the ev-tracker user cannot read it. In v2.16.0 my code caught `PermissionError` only on `open()`, but not on the preceding `.is_file()` on the Path object (which also blows up on a 640 directory). Result: 500 on the status route, the card stayed at "Status is being loaded…".
 
-Fix: `.is_file()` komplett entfernt, stattdessen direkt `open()` mit einem umfassenden `except (FileNotFoundError, PermissionError, OSError)`. Wenn das Log unlesbar ist, zeigt die Card halt „nie" als letzten Lauf — das ist kein Fehler, weil die `pending_count` aus dem Dry-Run eh die aktuellen Infos liefert.
+Fix: `.is_file()` removed entirely, instead direct `open()` with a broad `except (FileNotFoundError, PermissionError, OSError)`. If the log is unreadable, the card just shows "never" as the last run — that's not an error, because the `pending_count` from the dry-run delivers the current info anyway.
 
 ## v2.16.0 (2026-04-15)
 
-### System-Updates (Debian Security-Only) im Settings-Menü
+### System updates (Debian security-only) in the settings menu
 
-Neue Settings-Card „System-Updates (Sicherheit)" zwischen Benachrichtigungen und Backup. Debian-Sicherheitsupdates lassen sich jetzt aus dem Browser heraus manuell prüfen, installieren und ein eventuell erforderlicher Neustart auslösen — bei gleichzeitig minimaler Angriffsfläche.
+New settings card "System updates (security)" between notifications and backup. Debian security updates can now be manually checked, installed from the browser, and a required reboot can be triggered — with minimal attack surface.
 
-**Design-Entscheidung: strikt security-only.** Kein voller apt-Zugriff aus der Web-UI. Grund: wer das Web-Login knackt, bekäme sonst effektiv Root-Rechte aufs OS (apt kann beliebige Pakete installieren + Post-Install-Scripts als root laufen lassen). Stattdessen wird auf der VM das Debian-Standard-Tool `unattended-upgrades` eingerichtet, das ausschließlich aus `${distro_id}:${distro_codename}-security` zieht. Die Sudoers-Regel erlaubt dem ev-tracker-User exakt **einen** Befehl: `/usr/bin/unattended-upgrade -v`. Ein Angreifer mit Web-Login kann bestenfalls einen Security-Patch-Lauf auslösen — kein Paket seiner Wahl installieren.
+**Design decision: strict security-only.** No full apt access from the web UI. Reason: whoever cracks the web login would otherwise effectively get root on the OS (apt can install arbitrary packages + run post-install scripts as root). Instead, on the VM the Debian standard tool `unattended-upgrades` is set up, which pulls exclusively from `${distro_id}:${distro_codename}-security`. The sudoers rule allows the ev-tracker user exactly **one** command: `/usr/bin/unattended-upgrade -v`. An attacker with web login can at best trigger a security patch run — not install any package of their choice.
 
-**Neue Features:**
+**New features:**
 
-- Card zeigt: Anzahl verfügbarer Security-Patches, Datum des letzten automatischen Laufs, „Reboot erforderlich"-Warnbanner wenn `/var/run/reboot-required` vorhanden ist
-- „Security-Updates jetzt installieren"-Button startet `unattended-upgrade -v` in einem Background-Thread. Die UI pollt alle 2,5 s den Status und zeigt das Log live an.
-- „Jetzt neu starten"-Button erscheint nur wenn ein Reboot nötig ist, mit doppelter Bestätigung (User muss ja die LUKS-Passphrase nach dem Boot neu eingeben)
-- Unattended-upgrades läuft auch ganz normal weiter automatisch via Debian's `apt-daily.timer` und `apt-daily-upgrade.timer` — die UI ist nur der manuelle Override plus Statusanzeige
+- Card shows: number of available security patches, date of last automatic run, "reboot required" warning banner when `/var/run/reboot-required` is present
+- "Install security updates now" button starts `unattended-upgrade -v` in a background thread. The UI polls the status every 2.5 s and shows the log live.
+- "Restart now" button only appears when a reboot is needed, with double confirmation (user has to re-enter the LUKS passphrase after boot)
+- Unattended-upgrades continues to run normally on its own via Debian's `apt-daily.timer` and `apt-daily-upgrade.timer` — the UI is only the manual override plus status display
 
-**Technik:**
+**Technical:**
 
-- `services/system_update_service.py` — kapselt das Lesen des UU-Logs (`/var/log/unattended-upgrades/unattended-upgrades.log`), das Zählen der pending Updates (via `unattended-upgrade --dry-run -v`), den Background-Thread-Runner für Apply, und den Reboot-Scheduler. State liegt in einem thread-safe Modul-Dict, kein DB-Eintrag nötig.
-- `app.py` — neue Routen: `GET /api/system/updates/status`, `POST /api/system/updates/apply`, `POST /api/system/reboot`. Alle drei hinter dem Auth-Guard.
-- `templates/settings.html` — neue Card plus separater `<script>`-Block (nach dem gleichen Pattern wie die Notify-Card in v2.15.2, damit ein JS-Error weiter oben die Sysupd-Handler nicht killt)
-- **19 neue Übersetzungs-Keys** (`set.sysupd_*`) in allen 6 Sprachen
+- `services/system_update_service.py` — encapsulates reading the UU log (`/var/log/unattended-upgrades/unattended-upgrades.log`), counting pending updates (via `unattended-upgrade --dry-run -v`), the background thread runner for apply, and the reboot scheduler. State lives in a thread-safe module dict, no DB entry needed.
+- `app.py` — new routes: `GET /api/system/updates/status`, `POST /api/system/updates/apply`, `POST /api/system/reboot`. All three behind the auth guard.
+- `templates/settings.html` — new card plus a separate `<script>` block (following the same pattern as the notify card in v2.15.2, so a JS error higher up doesn't kill the sysupd handlers)
+- **19 new translation keys** (`set.sysupd_*`) in all 6 languages
 
-**Eingriff auf den VMs (Paste-Block als root):**
+**Setup on the VMs (paste block as root):**
 
-- `apt install -y unattended-upgrades` falls fehlt
-- `/etc/apt/apt.conf.d/20auto-upgrades` aktivieren (`APT::Periodic::Update-Package-Lists "1"; APT::Periodic::Unattended-Upgrade "1";`)
-- `/etc/apt/apt.conf.d/50unattended-upgrades` checken: `${distro_id}:${distro_codename}-security` muss aktiv sein, andere Origins müssen kommentiert bleiben
-- Sudoers-Zeilen hinzufügen: `/usr/bin/unattended-upgrade -v`, `/usr/bin/unattended-upgrade --dry-run *`, `/sbin/shutdown -r now`
+- `apt install -y unattended-upgrades` if missing
+- Enable `/etc/apt/apt.conf.d/20auto-upgrades` (`APT::Periodic::Update-Package-Lists "1"; APT::Periodic::Unattended-Upgrade "1";`)
+- Check `/etc/apt/apt.conf.d/50unattended-upgrades`: `${distro_id}:${distro_codename}-security` must be active, other origins must stay commented
+- Add sudoers lines: `/usr/bin/unattended-upgrade -v`, `/usr/bin/unattended-upgrade --dry-run *`, `/sbin/shutdown -r now`
 
 ## v2.15.2 (2026-04-15)
 
-### Fix: Notify-Card Handler liefen gar nicht mehr
+### Fix: Notify card handlers no longer ran at all
 
-v2.15.1 hat die `<form>` entfernt und den Save-Button auf `type="button"` umgestellt. Das hat den Reload verhindert, aber jetzt passierte **gar nichts** beim Klick — Button reagierte nicht. Safari-Konsole bestätigte: Button-Element existiert, aber der Click-Handler war nicht angehängt. Das heißt: die IIFE hat nicht bis zum `addEventListener` durchlaufen.
+v2.15.1 removed the `<form>` and switched the save button to `type="button"`. That prevented the reload, but now **nothing** happened on click — the button did not respond. Safari console confirmed: button element exists, but the click handler was not attached. That means: the IIFE did not run through to the `addEventListener`.
 
-Ursache vermutlich: im großen `<script>`-Block von `settings.html` läuft weiter oben Code mit Leaflet, Location-Map und diversen Formularen. Ein Fehler irgendwo früher hat den Parse der Notify-IIFE in Safari blockiert. Backup-Form war zufällig noch OK (vielleicht anderer Codepfad), Notify nicht.
+Cause likely: in the large `<script>` block of `settings.html`, Leaflet, location map and various forms run higher up. An error somewhere earlier blocked the parse of the notify IIFE in Safari. Backup form happened to still be OK (maybe a different code path), notify not.
 
-Fix: Notify-Handler wurde komplett aus dem großen Script rausgezogen und läuft jetzt in einem **eigenen `<script>`-Block am Ende der Seite**. Kein IIFE-Pyramiding, kein Promise-basiertes `.then()` statt `async/await` (falls Safari da irgendeinen Edge-Case hat), explizite `credentials: 'same-origin'` in den fetch-Calls, plus console.log an strategischen Stellen (`[notify] init start`, `[notify] handlers attached`, `[notify] save click`) damit man beim nächsten Problem sofort in der Konsole sieht, was passiert.
+Fix: the notify handler was pulled completely out of the large script and now runs in **its own `<script>` block at the end of the page**. No IIFE pyramiding, no Promise-based `.then()` instead of `async/await` (in case Safari has an edge case there), explicit `credentials: 'same-origin'` in the fetch calls, plus console.log at strategic points (`[notify] init start`, `[notify] handlers attached`, `[notify] save click`) so at the next problem, one immediately sees in the console what's happening.
 
 ## v2.15.1 (2026-04-15)
 
-### Fix: Benachrichtigungen-Card speicherte nicht
+### Fix: Notifications card did not save
 
-In v2.15.0 war die Benachrichtigungen-Card als echtes `<form>`-Element mit einem `<button type="submit">` gebaut. Aus noch unverstandenen Gründen hat der JS-Submit-Handler in Safari nicht gegriffen (vermutlich ein Reihenfolge-Problem mit einer vorangehenden IIFE im gleichen `<script>`-Block, die in bestimmten Fällen den weiteren Parse abbricht). Effekt: beim Klick auf „Speichern" machte der Browser ein natives Form-Submit (GET ohne Body), die Seite lud neu, die Felder waren wieder leer — obwohl der Backend-Code und die Routen einwandfrei funktionierten (per fetch aus der Devtools-Konsole direkt bestätigt: POST und GET liefern `{ok:true, ...}`).
+In v2.15.0 the notifications card was built as a real `<form>` element with a `<button type="submit">`. For reasons not yet understood, the JS submit handler did not fire in Safari (probably an ordering problem with a preceding IIFE in the same `<script>` block which in certain cases aborts further parsing). Effect: on click on "Save", the browser did a native form submit (GET without body), the page reloaded, the fields were empty again — even though the backend code and routes worked fine (verified directly via fetch from the DevTools console: POST and GET return `{ok:true, ...}`).
 
-Fix ist pragmatisch statt chirurgisch: `<form>` → `<div>`, `<button type="submit">` → `<button type="button">` mit direktem Click-Handler. Kein Form-Submit-Event mehr = kein möglicher Reload, egal was sonst im Script passiert. Funktional identisch, nur ohne die versteckte Reload-Falle.
+Fix is pragmatic rather than surgical: `<form>` → `<div>`, `<button type="submit">` → `<button type="button">` with a direct click handler. No more form-submit event = no possible reload, no matter what else happens in the script. Functionally identical, just without the hidden reload trap.
 
 ## v2.15.0 (2026-04-15)
 
-### Push-Benachrichtigung bei VM-Neustart (ntfy.sh)
+### Push notification on VM restart (ntfy.sh)
 
-Die VMs auf dem NAS kommen nach einem Reboot (Stromausfall, NAS-Update, manueller Neustart) automatisch wieder hoch, aber das LUKS-Volume ist dann versiegelt — der Nutzer muss manuell im Browser auf die Unlock-Seite und die Passphrase eintippen. Das Problem: ohne Rückkanal merkt der Nutzer das erst, wenn er das nächste Mal die App aufruft. Diese Version baut einen leichten Push-Kanal über **ntfy.sh**:
+The VMs on the NAS come back up automatically after a reboot (power outage, NAS update, manual restart), but the LUKS volume is sealed afterwards — the user has to manually open the unlock page in the browser and enter the passphrase. Problem: without a back channel, the user only notices that when he next opens the app. This version builds a lightweight push channel via **ntfy.sh**:
 
-- Neue Settings-Card **„Benachrichtigungen"** (zwischen Zugangsschutz und Backup). Checkbox zum Aktivieren, Feld für den ntfy-Topic-Namen, optional eigener ntfy-Server, Speichern- und Test-Button. Der Topic-Name ist frei wählbar; er ist das einzige „Geheimnis" des Push-Kanals — die UI weist explizit darauf hin, einen schwer zu erratenden Namen zu wählen.
-- Der Nutzer installiert die kostenlose **ntfy-App** (iOS/Android), abonniert dort den gleichen Topic-Namen — fertig. Kein Account, kein Server, keine Gebühren.
-- **Config lebt außerhalb des LUKS-Volumes** unter `/var/lib/ev-tracker/notify.json`. Das ist wichtig, weil der Unlock-Helper (`ev-unlock-web`) genau dann läuft, wenn LUKS versiegelt ist — er könnte keine Config aus der App-DB lesen. Der Ordner gehört `ev-tracker:ev-tracker` mit Mode 0750, so dass weder sudo noch root nötig sind. Der Trade-off: der Topic-Name liegt im Klartext außerhalb der Verschlüsselung. Wer Root auf der VM hat, kann ihn lesen — wer Root hat, hat aber ohnehin gewonnen, insofern ist das akzeptabel.
-- Technik: `services/notify_service.py` kapselt Lesen/Schreiben der JSON-Datei (mit Fallback auf `data/notify.json` für lokale Entwicklung) und den tatsächlichen HTTP-POST via `urllib.request` — kein curl, keine zusätzliche Dependency. Neue Routen `GET/POST /api/settings/notify` (Config laden/speichern) und `POST /api/settings/notify/test` (Testnachricht).
-- **15 neue Übersetzungskeys** pro Sprache in allen 6 Sprachen (`set.notify_*`).
+- New settings card **"Notifications"** (between access protection and backup). Checkbox to enable, field for the ntfy topic name, optional custom ntfy server, save and test button. The topic name is freely chosen; it is the only "secret" of the push channel — the UI explicitly notes to choose a hard-to-guess name.
+- The user installs the free **ntfy app** (iOS/Android), subscribes to the same topic name there — done. No account, no server, no fees.
+- **Config lives outside the LUKS volume** at `/var/lib/ev-tracker/notify.json`. That's important because the unlock helper (`ev-unlock-web`) runs exactly when LUKS is sealed — it could not read any config from the app DB. The folder is owned by `ev-tracker:ev-tracker` with mode 0750, so neither sudo nor root is needed. Trade-off: the topic name is in plaintext outside the encryption. Whoever has root on the VM can read it — but whoever has root has already won anyway, so that's acceptable.
+- Technical: `services/notify_service.py` encapsulates reading/writing the JSON file (with fallback to `data/notify.json` for local development) and the actual HTTP POST via `urllib.request` — no curl, no additional dependency. New routes `GET/POST /api/settings/notify` (load/save config) and `POST /api/settings/notify/test` (test message).
+- **15 new translation keys** per language in all 6 languages (`set.notify_*`).
 
-**Eingriff auf den VMs (per Paste-Block als root):**
+**Setup on the VMs (paste block as root):**
 
-Da der eigentliche Push aus dem Boot-Pfad feuern muss (bevor LUKS entsperrt ist, also außerhalb des App-Updates), kommt dazu eine kleine neue systemd-Unit `ev-notify-boot.service` plus das Helper-Script `/usr/local/bin/ev-notify-boot`. Die Unit läuft als Oneshot vor `ev-unlock-web.service`, aber nur wenn LUKS noch versiegelt ist (`ConditionPathExists=!/srv/ev-data/app/venv/bin/python`). Sie liest `/var/lib/ev-tracker/notify.json`, und wenn `enabled:true` und ein Topic gesetzt ist, schickt sie einen einzigen POST an `<server>/<topic>` mit Hostname + Uhrzeit in der Message. Schlägt der POST fehl → exit 0, damit ein ausgefallener ntfy-Server niemals den Boot blockiert.
+Since the actual push has to fire from the boot path (before LUKS is unlocked, so outside the app updates), a small new systemd unit `ev-notify-boot.service` plus the helper script `/usr/local/bin/ev-notify-boot` comes with it. The unit runs as a oneshot before `ev-unlock-web.service`, but only if LUKS is still sealed (`ConditionPathExists=!/srv/ev-data/app/venv/bin/python`). It reads `/var/lib/ev-tracker/notify.json`, and if `enabled:true` and a topic is set, sends a single POST to `<server>/<topic>` with hostname + time in the message. If the POST fails → exit 0, so a down ntfy server can never block the boot.
 
 ## v2.14.0 (2026-04-15)
 
-### Wizard-Schritt 2 wird „Web-Login anlegen" + Backup/Restore-Feature
+### Wizard step 2 becomes "create web login" + backup/restore feature
 
-**Wizard-Umbau**
+**Wizard rework**
 
-Der Setup-Wizard auf frisch provisionierten VMs hat jetzt einen anderen zweiten Schritt. Bisher wollte er das `ev-tracker`-Unix-SSH-Passwort ändern, was aber genau die Admin-SSH-Verbindung gekappt und die Wartung unnötig erschwert hat. Stattdessen:
+The setup wizard on freshly provisioned VMs now has a different second step. Previously it wanted to change the `ev-tracker` unix SSH password, which cut exactly the admin SSH connection and made maintenance unnecessarily harder. Instead:
 
-- **Schritt 1** bleibt: LUKS-Passphrase ändern. Muss der Nutzer durchführen.
-- **Schritt 2 NEU**: der Nutzer legt einen **Web-UI-Benutzer + Web-UI-Passwort** an. Die Auswahl zum Ändern des Shell-Passworts ist komplett entfernt — der Shell-User bleibt unangetastet, damit der Admin mit dem ev-provision-Temp-Passwort weiterhin per SSH für Wartung auf die VM kann. Der Web-Login ist ab sofort der einzige Weg ins Dashboard.
+- **Step 1** stays: change the LUKS passphrase. User must perform this.
+- **Step 2 NEW**: the user creates a **web UI user + web UI password**. The option to change the shell password is removed entirely — the shell user is left untouched, so the admin can still get onto the VM via SSH with the ev-provision temp password for maintenance. The web login is from now on the only way into the dashboard.
 
-Technische Details:
+Technical details:
 
-- `templates/setup.html` — Schritt 2 komplett umgebaut: Eingabefelder für Username + Passwort + Confirm, Submit ruft jetzt `POST /api/setup/create_web_login`. Progress-Pills und die Stepwelcome-Liste nennen den neuen Schritt namentlich. Der Wizard-Header zeigt jetzt auch die App-Version als Badge.
-- `services/setup_service.py` — `change_user_password()` und die sudoers-Abhängigkeit auf `chpasswd` sind weg. Wizard-State-Key heißt jetzt `weblogin_done` statt `password_done`. Der Modul-Docstring ist aktualisiert und erklärt explizit, dass der Wizard den Unix-Login **nicht** anfasst.
-- `app.py` — neuer Endpoint `POST /api/setup/create_web_login` ersetzt `POST /api/setup/change_password`. Er ruft `auth_service.set_credentials()` auf (das den Guard automatisch scharfschaltet), loggt den Nutzer direkt ein und räumt bei abgeschlossener Wizard-State-Kombination den Setup-Marker auf. Die `app_version` wird jetzt auch an das Wizard-Template durchgereicht.
+- `templates/setup.html` — step 2 completely reworked: input fields for username + password + confirm, submit now calls `POST /api/setup/create_web_login`. Progress pills and the step-welcome list name the new step. The wizard header now also shows the app version as a badge.
+- `services/setup_service.py` — `change_user_password()` and the sudoers dependency on `chpasswd` are gone. Wizard state key is now `weblogin_done` instead of `password_done`. The module docstring is updated and explicitly states that the wizard **does not** touch the unix login.
+- `app.py` — new endpoint `POST /api/setup/create_web_login` replaces `POST /api/setup/change_password`. It calls `auth_service.set_credentials()` (which automatically arms the guard), logs the user in directly, and cleans up the setup marker on completed wizard state combination. `app_version` is now also passed through to the wizard template.
 
-Settings → Zugangsschutz bleibt unverändert und erlaubt dem Nutzer jederzeit, seinen Web-User/Pw zu ändern, hinzuzufügen oder zu deaktivieren.
+Settings → access protection stays unchanged and allows the user at any time to change, add or deactivate his web user/password.
 
-**Backup & Wiederherstellung der Datenbank**
+**Database backup & restore**
 
-Neues Feature für VM-Umzüge, Backups und Wiederherstellung nach Fehler:
+New feature for VM migrations, backups and recovery after errors:
 
-- Neue Settings-Card „Backup & Wiederherstellung" (platziert zwischen Zugangsschutz und App-Info).
-- **Export**: `GET /api/backup/export` flushed die SQLite-WAL via `PRAGMA wal_checkpoint(TRUNCATE)` und schickt die komplette `data/ev_tracker.db` als Download mit Zeitstempel im Dateinamen (`ev-tracker-backup-YYYYMMDD-HHMMSS.db`). Enthält absolut alles: Ladungen, Fahrtenlog, Wartungslogbuch, AppConfig (inkl. Vehicle-API-Credentials, Home/Work-Koordinaten, ENTSO-E-Key, ThgQuoten, Zugangsschutz-Hash, Session-Secret), Geocode- und Weather-Cache, VehicleSync-Historie. Ein einziger File.
-- **Import**: `POST /api/backup/import` als Multipart-Upload. Validiert die Datei als echte SQLite-DB und prüft, dass die Pflichttabellen `charges`, `app_config`, `vehicle_syncs` drin sind. Legt vor der Überschreibung eine Sicherheitskopie der aktuellen DB in `data/backups/ev_tracker-pre-import-<ts>.db` an, schließt dann das SQLAlchemy-Engine (wichtig auf POSIX, sonst hält die alte Inode die DB am Leben) und kopiert die neue DB drüber. Anschließend Background-Thread mit 500ms Verzögerung → `sudo systemctl restart ev-tracker.service`. Der Browser lädt nach 4.5 Sekunden automatisch neu.
-- **Warnung im UI** ist bewusst drastisch: der Import überschreibt Zugangsschutz-Credentials und Vehicle-API-Keys. Nach einem Import gilt der Web-Login aus dem Backup, nicht der bisherige.
+- New settings card "Backup & restore" (placed between access protection and app info).
+- **Export**: `GET /api/backup/export` flushes the SQLite WAL via `PRAGMA wal_checkpoint(TRUNCATE)` and sends the complete `data/ev_tracker.db` as a download with timestamp in the filename (`ev-tracker-backup-YYYYMMDD-HHMMSS.db`). Contains absolutely everything: charges, trip log, maintenance log, AppConfig (incl. vehicle API credentials, home/work coordinates, ENTSO-E key, THG quotas, access-protection hash, session secret), geocode and weather cache, VehicleSync history. A single file.
+- **Import**: `POST /api/backup/import` as multipart upload. Validates the file as a real SQLite DB and checks that the required tables `charges`, `app_config`, `vehicle_syncs` are inside. Before overwriting, creates a safety copy of the current DB in `data/backups/ev_tracker-pre-import-<ts>.db`, then closes the SQLAlchemy engine (important on POSIX, otherwise the old inode keeps the DB alive) and copies the new DB over. Then background thread with 500ms delay → `sudo systemctl restart ev-tracker.service`. The browser reloads automatically after 4.5 seconds.
+- **Warning in the UI** is deliberately drastic: the import overwrites access-protection credentials and vehicle API keys. After an import, the web login from the backup applies, not the previous one.
 
-Neu in `config.py`: `DATA_DIR` ist jetzt exportiert, damit `app.py` den DB-Pfad sauber für Export/Import-Routen auflösen kann.
+New in `config.py`: `DATA_DIR` is now exported so `app.py` can resolve the DB path cleanly for the export/import routes.
 
-**Übersetzungen**
+**Translations**
 
-25 neue Keys in allen 6 Sprachen (de/en/fr/es/it/nl): `wiz.welcome_step1_luks`, `wiz.welcome_step2_weblogin`, `wiz.weblogin_title`, `wiz.weblogin_desc`, `wiz.weblogin_username`, `wiz.weblogin_password`, `wiz.weblogin_password_hint`, `wiz.weblogin_password_confirm`, `wiz.weblogin_info`, `wiz.weblogin_submit`, `wiz.status_creating`, `wiz.err_user_empty`, und 13 `set.backup_*`-Keys.
+25 new keys in all 6 languages (de/en/fr/es/it/nl): `wiz.welcome_step1_luks`, `wiz.welcome_step2_weblogin`, `wiz.weblogin_title`, `wiz.weblogin_desc`, `wiz.weblogin_username`, `wiz.weblogin_password`, `wiz.weblogin_password_hint`, `wiz.weblogin_password_confirm`, `wiz.weblogin_info`, `wiz.weblogin_submit`, `wiz.status_creating`, `wiz.err_user_empty`, and 13 `set.backup_*` keys.
 
-**Upgrade auf laufenden VMs**
+**Upgrade on running VMs**
 
-Die alten Tags v2.11.x / v2.12.0 / v2.13.0 wurden gelöscht und `main` auf den v2.9.0-Commit zurückgesetzt. Laufende VMs, die vorher eine dieser Versionen hatten, können mit `git pull` nicht mehr auf den aktuellen main kommen (die History wurde umgeschrieben). Stattdessen `git fetch origin && git reset --hard origin/main` — siehe Upgrade-Paste-Block in den Release Notes.
+The old tags v2.11.x / v2.12.0 / v2.13.0 were deleted and `main` was reset to the v2.9.0 commit. Running VMs that previously had one of these versions can no longer get to the current main via `git pull` (history has been rewritten). Instead `git fetch origin && git reset --hard origin/main` — see the upgrade paste block in the release notes.
 
 ## v2.9.0 (2026-04-14)
 
-### Übersetzungen für alle v2.7.x/v2.8.x Features + HTTPS-Autohide + README
+### Translations for all v2.7.x/v2.8.x features + HTTPS autohide + README
 
-- **60 neue Übersetzungskeys** in allen 6 Sprachen (de/en/fr/es/it/nl) — deckt den Setup-Wizard (`wiz.*`), die Login-Seite (`login.*`) und den Zugangsschutz-Block in den Settings (`set.auth_*`) ab. Damit sind alle neuen Features aus v2.7.0–v2.8.1 vollständig lokalisiert.
-- **Setup-Wizard (`templates/setup.html`)** nutzt jetzt `t()` statt hardkodiertem Deutsch — Title, Welcome, beide Wizard-Schritte, Done-Screen, Fehlermeldungen und Button-Texte.
-- **Login-Seite (`templates/login.html`)** ist vollständig übersetzt inkl. Footer-Text.
-- **Zugangsschutz-Block in Settings** übersetzt inkl. Fehlermeldungen und Disable-Confirm-Dialog.
-- **HTTPS-Autohide**: Wenn der Request aus dem Tailscale-CGNAT-Bereich (`100.64.0.0/10`) kommt, blendet `/settings` die komplette HTTPS-Card aus. Tailscale verschlüsselt den Transport schon — ein self-signed-Zertifikat obendrauf ist dann nur Rauschen. Direkter LAN- oder Localhost-Zugriff sieht die Card weiterhin wie gehabt.
-- **README aktualisiert** mit Abschnitten zu Web-UI-Login, First-Run-Setup-Wizard, VM-Deployment-Flow und der systemd-Awareness des In-App-Updaters. String-Count auf ~540 pro Locale aktualisiert.
+- **60 new translation keys** in all 6 languages (de/en/fr/es/it/nl) — covers the setup wizard (`wiz.*`), the login page (`login.*`) and the access-protection block in the settings (`set.auth_*`). With that, all new features from v2.7.0–v2.8.1 are fully localized.
+- **Setup wizard (`templates/setup.html`)** now uses `t()` instead of hardcoded German — title, welcome, both wizard steps, done screen, error messages and button texts.
+- **Login page (`templates/login.html`)** is fully translated including footer text.
+- **Access-protection block in settings** translated including error messages and disable-confirm dialog.
+- **HTTPS autohide**: If the request comes from the Tailscale CGNAT range (`100.64.0.0/10`), `/settings` hides the entire HTTPS card. Tailscale already encrypts the transport — a self-signed certificate on top is just noise. Direct LAN or localhost access still sees the card as before.
+- **README updated** with sections on web UI login, first-run setup wizard, VM deployment flow and the systemd awareness of the in-app updater. String count updated to ~540 per locale.
 
 ## v2.8.1 (2026-04-14)
 
-- **Dashboard: Durchschnittslinie im SOH-Plot** — Der SOH-Chart in der Vehicle-History bekommt eine horizontale graue gestrichelte Linie mit dem Mittelwert aller angezeigten Messpunkte. Macht Drift/Trends auf einen Blick erkennbar. Der Mittelwert wird in der Legende unter dem Chart als `Ø xx.x%` angezeigt. Nur aktiv wenn ≥3 Datenpunkte vorhanden sind. Andere Charts bleiben unverändert.
+- **Dashboard: average line in the SoH plot** — The SoH chart in the vehicle history gets a horizontal grey dashed line with the mean of all displayed measurement points. Makes drift/trends visible at a glance. The mean is shown in the legend below the chart as `Ø xx.x%`. Only active when ≥3 data points are present. Other charts stay unchanged.
 
 ## v2.8.0 (2026-04-14)
 
-### Optional: Web-UI Login als Vorschaltseite
+### Optional: Web UI login as a gatekeeper page
 
-Tailscale schützt den Netzwerkzugriff — aber wer den Share-Link kennt und im Tailnet ist, landet ohne weitere Hürde im Dashboard. Dieses Release bringt eine eingebaute Passwort-Vorschaltseite als Defense-in-Depth:
+Tailscale protects network access — but whoever knows the share link and is in the tailnet lands in the dashboard without further hurdles. This release brings a built-in password gatekeeper page as defense-in-depth:
 
-- **Optional**: Standardmäßig aus. Wer sie will, schaltet sie in Settings → „Zugangsschutz" ein. Bestehende Installs sind nach dem Update unverändert, niemand wird aus seiner eigenen App gesperrt.
-- **Integriert**: Teil der App, nicht vor die App geschoben. Updates vom GitHub-Repo rollen normal durch und brechen die Auth nicht.
-- **Session-Cookies**: Flask-Sessions mit einem pro-Install generierten, in AppConfig persistierten 32-Byte-Secret (siehe `services/auth_service.py:get_or_create_session_secret`). 30 Tage Lifetime.
-- **Password-Hashing**: Werkzeug `generate_password_hash` / `check_password_hash` (bcrypt-kompatibel). Klartext landet nie auf Disk.
-- **Einfache UX**: Simpler Username+Password-Login, keine E-Mail, kein Account-Management. Einziger Flow für den Ein-Personen-Fall.
+- **Optional**: off by default. Whoever wants it enables it in Settings → "Access protection". Existing installs are unchanged after update, nobody is locked out of their own app.
+- **Integrated**: part of the app, not shoved in front of the app. Updates from the GitHub repo roll through normally and don't break auth.
+- **Session cookies**: Flask sessions with a per-install generated 32-byte secret persisted in AppConfig (see `services/auth_service.py:get_or_create_session_secret`). 30-day lifetime.
+- **Password hashing**: Werkzeug `generate_password_hash` / `check_password_hash` (bcrypt-compatible). Plaintext never lands on disk.
+- **Simple UX**: simple username+password login, no email, no account management. Single flow for the one-person case.
 
-Neue Endpunkte: `/login`, `/logout`, `/api/auth/enable`, `/api/auth/disable`, `/api/auth/change_password`. Guard läuft als `before_request`-Hook parallel zum Setup-Wizard-Guard — Setup hat Vorrang, damit ein frisch provisionierter Nutzer erstmal durch den Wizard kann ohne schon auth-konfiguriert zu sein.
+New endpoints: `/login`, `/logout`, `/api/auth/enable`, `/api/auth/disable`, `/api/auth/change_password`. Guard runs as a `before_request` hook in parallel with the setup-wizard guard — setup has priority, so a freshly provisioned user can first get through the wizard without already being auth-configured.
 
-Voraussetzung für echte Sicherheit ist nach wie vor, dass die VM nur über Tailscale erreichbar ist (UFW nur auf `tailscale0`). Der App-Login ist die zweite Schicht nach dem VPN.
+The prerequisite for real security is still that the VM is only reachable via Tailscale (UFW only on `tailscale0`). The app login is the second layer after the VPN.
 
 ## v2.7.4 (2026-04-14)
 
-- **Setup-Wizard: LUKS-Device-Detection ohne Root-Privilegien** — `get_luks_device()` rief vorher `cryptsetup status evdata` auf, das aber `/dev/mapper/evdata` öffnen muss, und das gehört auf Debian `root:disk 660`. Der App-User `ev-tracker` ist nicht in der `disk`-Gruppe, deshalb schlug der Aufruf mit Permission denied fehl. Folge: Das Wizard-Footer zeigte „LUKS-Device: (unknown)" und — viel gravierender — der tatsächliche Passphrase-Change brach mit „LUKS-Device nicht gefunden" ab. Jetzt wird der Pfad per **Sysfs** aufgelöst: `/dev/mapper/evdata` → `dm-N` → `/sys/block/dm-N/slaves/` → Parent-Block-Device. Sysfs ist world-readable, also braucht's dafür kein sudo und keine Gruppenmitgliedschaft.
+- **Setup wizard: LUKS device detection without root privileges** — `get_luks_device()` previously called `cryptsetup status evdata`, but that has to open `/dev/mapper/evdata`, which on Debian belongs to `root:disk 660`. The app user `ev-tracker` is not in the `disk` group, so the call failed with Permission denied. Consequence: the wizard footer showed "LUKS device: (unknown)" and — much more seriously — the actual passphrase change aborted with "LUKS device not found". Now the path is resolved via **sysfs**: `/dev/mapper/evdata` → `dm-N` → `/sys/block/dm-N/slaves/` → parent block device. Sysfs is world-readable, so this needs neither sudo nor group membership.
 
 ## v2.7.3 (2026-04-14)
 
-- **Setup-Wizard: Browser-Redirect zuverlässig machen** — Der `before_request`-Hook prüfte den `Accept`-Header, um Browser-Zugriffe von API-Calls zu unterscheiden. Das war zu zerbrechlich: je nach Browser/Accept-Header landete der Nutzer auf der JSON-Antwort `{"error":"setup_pending",...}` statt auf dem Wizard. Jetzt einfach: alle GET-Requests werden während des Setups auf `/setup` umgeleitet, nur Nicht-GET (POST/PUT/DELETE) bekommen weiter die JSON-503-Antwort für API-Clients.
+- **Setup wizard: make the browser redirect reliable** — The `before_request` hook checked the `Accept` header to distinguish browser accesses from API calls. That was too fragile: depending on browser/Accept header, the user landed on the JSON response `{"error":"setup_pending",...}` instead of the wizard. Now it's simple: all GET requests are redirected to `/setup` during setup, only non-GET (POST/PUT/DELETE) still get the JSON 503 response for API clients.
 
 ## v2.7.2 (2026-04-14)
 
-- **Setup-Wizard explizit auf Linux beschränken** — `is_setup_pending()` gibt auf macOS und Windows jetzt hart `False` zurück, ohne überhaupt den Marker-Pfad zu prüfen. Praktisch war das schon vorher der Fall (der Pfad `/srv/ev-data/.setup_pending` existiert auf Nicht-Linux-Hosts sowieso nicht), aber jetzt ist's auch im Code klar dokumentiert, dass der Wizard VM-spezifisch ist. Schützt zusätzlich vor dem Randfall, dass jemand versehentlich eine Datei unter dem Pfad anlegt und damit den Wizard triggert, obwohl die nötigen `sudo cryptsetup`/`chpasswd`-Kommandos gar nicht existieren.
+- **Setup wizard explicitly restricted to Linux** — `is_setup_pending()` now hard-returns `False` on macOS and Windows, without even checking the marker path. In practice that was already the case (the path `/srv/ev-data/.setup_pending` doesn't exist on non-Linux hosts anyway), but now it's also clearly documented in the code that the wizard is VM-specific. Additionally protects against the edge case where somebody accidentally creates a file under the path and thereby triggers the wizard even though the necessary `sudo cryptsetup`/`chpasswd` commands don't exist.
 
 ## v2.7.1 (2026-04-14)
 
-- **Setup-Wizard: zweiter Schritt für das SSH-Login-Passwort** — Der First-Run-Wizard nimmt jetzt neben der LUKS-Passphrase auch ein neues Login-Passwort für den `ev-tracker`-User entgegen. Ruft unter der Haube `sudo chpasswd` auf (braucht einen zusätzlichen NOPASSWD-sudoers-Eintrag für `/usr/sbin/chpasswd`). Wizard-Fortschritt wird in `/srv/ev-data/.setup_state.json` getrackt, sodass ein Mid-Wizard-Reload den Nutzer nahtlos an den nächsten offenen Schritt stellt statt LUKS nochmal abzufragen. Erst wenn beide Schritte durch sind, wird der Marker gelöscht und das Dashboard freigegeben. Damit kann der Admin nach Provisioning beide Temp-Credentials vergessen — der Nutzer ist vollständig autark.
+- **Setup wizard: second step for the SSH login password** — The first-run wizard now takes, alongside the LUKS passphrase, a new login password for the `ev-tracker` user. Under the hood calls `sudo chpasswd` (needs an additional NOPASSWD sudoers entry for `/usr/sbin/chpasswd`). Wizard progress is tracked in `/srv/ev-data/.setup_state.json` so a mid-wizard reload puts the user seamlessly at the next open step instead of asking for LUKS again. Only when both steps are done is the marker deleted and the dashboard released. With that, the admin can forget both temp credentials after provisioning — the user is fully self-sufficient.
 
 ## v2.7.0 (2026-04-14)
 
-### First-Run Setup-Wizard für VM-Deployments
+### First-run setup wizard for VM deployments
 
-Bisher musste der End-Nutzer einer frisch provisionierten VM per SSH reinloggen und `sudo cryptsetup luksChangeKey /dev/sdb` manuell ausführen, um die temporäre LUKS-Passphrase zu ersetzen. Das war für nicht-technische Nutzer eine dicke Hürde. Jetzt erscheint beim ersten Browser-Zugriff automatisch ein Setup-Wizard:
+Previously the end user of a freshly provisioned VM had to SSH in and manually run `sudo cryptsetup luksChangeKey /dev/sdb` to replace the temporary LUKS passphrase. That was a big hurdle for non-technical users. Now a setup wizard automatically appears on first browser access:
 
-1. Die Provisioning-Pipeline (`ev-provision`) legt am Ende einen Marker `/srv/ev-data/.setup_pending` an.
-2. Ein `before_request`-Hook leitet alle Nicht-Setup-Requests auf `/setup` um, solange der Marker existiert.
-3. Der Wizard (eine einseitige HTML-Wizard-UI in `templates/setup.html`) fragt die temporäre und die neue Passphrase ab, ruft per `sudo cryptsetup luksChangeKey` das Device aus dem laufenden `cryptsetup status evdata` auf, und entfernt bei Erfolg den Marker.
-4. Nach erfolgreichem Change ist der Nutzer „angekommen" — ab diesem Moment kennt niemand ausser ihm selbst die Passphrase, auch der Admin nicht.
+1. The provisioning pipeline (`ev-provision`) creates a marker `/srv/ev-data/.setup_pending` at the end.
+2. A `before_request` hook redirects all non-setup requests to `/setup` as long as the marker exists.
+3. The wizard (a single-page HTML wizard UI in `templates/setup.html`) prompts for the temp and the new passphrase, calls `sudo cryptsetup luksChangeKey` on the device from the running `cryptsetup status evdata`, and removes the marker on success.
+4. After a successful change, the user has "arrived" — from that moment on nobody but the user knows the passphrase, not even the admin.
 
-Der Wizard ist Deutschland-only getextet (Setup ist ein einmaliger Flow und das Zielpublikum sind deutsche Nutzer), der Rest der App bleibt übersetzt wie gehabt. Nicht-VM-Hosts (z.B. Entwickler-Laptops) sind nicht betroffen, weil der Marker nie existiert.
+The wizard is German-only in its text (setup is a one-time flow and the target audience is German users), the rest of the app stays translated as before. Non-VM hosts (e.g. developer laptops) are unaffected because the marker never exists.
 
-**Voraussetzung für den Live-Betrieb**: `ev-provision` muss am Ende den Marker anlegen und die sudoers-Regel für `cryptsetup luksChangeKey` setzen. Beides ist in der Admin-Anleitung dokumentiert; für bestehende VMs einmalig nachziehen.
+**Requirement for live operation**: `ev-provision` has to create the marker at the end and set the sudoers rule for `cryptsetup luksChangeKey`. Both are documented in the admin guide; for existing VMs, retrofit once.
 
 ## v2.6.0 (2026-04-14)
 
-### In-App Updater unter systemd reparieren
+### Fix the in-app updater under systemd
 
-Auf Linux-Installationen mit `ev-tracker` als systemd-Service hatte der Update-Button über die App-UI faktisch nichts getan: Klick → kurze Anzeige „Update wird installiert" → nach Refresh immer noch alte Version. Root cause: Der Updater spawnt einen detached `updater_helper.py`-Prozess, der nach dem Exit des Flask-Prozesses den File-Swap erledigen soll. Unter systemd landet der Helper aber **im gleichen cgroup** wie der Service — und wenn systemd den Service zum Neustart kill't, wird der Helper mitgerissen, **bevor er die Dateien getauscht hat**. Ergebnis: Service startet neu, nichts hat sich geändert.
+On Linux installations with `ev-tracker` as a systemd service, the update button via the app UI effectively did nothing: click → brief "Update is being installed" display → after refresh still the old version. Root cause: the updater spawns a detached `updater_helper.py` process that is supposed to do the file swap after the Flask process exits. Under systemd, the helper lands in the **same cgroup** as the service — and when systemd kills the service for restart, the helper is dragged along **before it has swapped the files**. Result: service restarts, nothing has changed.
 
-Fix: systemd wird jetzt erkannt (via `INVOCATION_ID` oder `/run/systemd/system`), und in dem Fall läuft der File-Swap **inline im Flask-Prozess**, bevor dieser sich beendet. Python-Bytecode liegt schon im RAM, das Überschreiben der `.py`-Dateien auf der Disk ist sicher. `pip install -r requirements.txt` wird synchron durchgeführt, dann `os._exit(0)` — und `Restart=always` in der systemd-Unit sorgt dafür, dass der Service mit dem neuen Code wieder hochkommt.
+Fix: systemd is now detected (via `INVOCATION_ID` or `/run/systemd/system`), and in that case the file swap runs **inline in the Flask process** before it exits. Python bytecode is already in RAM, so overwriting the `.py` files on disk is safe. `pip install -r requirements.txt` runs synchronously, then `os._exit(0)` — and `Restart=always` in the systemd unit ensures the service comes back up with the new code.
 
-Für Standalone-Installationen (macOS, Windows, oder Linux ohne systemd) bleibt der bestehende Helper-Pfad unverändert.
+For standalone installations (macOS, Windows, or Linux without systemd), the existing helper path stays unchanged.
 
 ## v2.5.9 (2026-04-13)
 
-- **Kia/Hyundai Token-Fetch: Selenium-Flow für headless Linux-Umgebungen fit gemacht** — Auf VMs ohne DBus-Session (z.B. Server-Installationen mit Xvfb+noVNC für den Login-Flow) hat der Selenium-basierte Token-Fetch gleich mehrfach gestolpert: (1) Chromium crashte mit „DevToolsActivePort file doesn't exist" wegen fehlender `--no-sandbox` / `--disable-dev-shm-usage` Flags, (2) `webdriver-manager` holte eine veraltete ChromeDriver-Version (max 114) die zu modernem Chromium 147 nicht passte, (3) Debian's Chromium liegt unter `/usr/bin/chromium` statt `/usr/bin/chrome`, was Selenium nicht automatisch fand.
-- Fix: `webdriver-manager` komplett rausgeworfen zugunsten des eingebauten **Selenium Manager** (ab Selenium 4.11), der den passenden ChromeDriver automatisch zieht. Chromium-Binary-Pfad wird jetzt aus `/usr/bin/chromium|chromium-browser|google-chrome` automatisch erkannt. Sandbox- und Shared-Memory-Flags werden immer gesetzt. Requirement wird bei Bedarf auf `selenium>=4.11` hochgeschoben.
+- **Kia/Hyundai token fetch: Selenium flow made fit for headless Linux environments** — On VMs without a DBus session (e.g. server installs with Xvfb+noVNC for the login flow), the Selenium-based token fetch stumbled several times: (1) Chromium crashed with "DevToolsActivePort file doesn't exist" due to missing `--no-sandbox` / `--disable-dev-shm-usage` flags, (2) `webdriver-manager` pulled an outdated ChromeDriver version (max 114) that didn't fit modern Chromium 147, (3) Debian's Chromium lives under `/usr/bin/chromium` instead of `/usr/bin/chrome`, which Selenium didn't find automatically.
+- Fix: `webdriver-manager` completely removed in favour of the built-in **Selenium Manager** (from Selenium 4.11), which pulls the matching ChromeDriver automatically. Chromium binary path is now automatically detected from `/usr/bin/chromium|chromium-browser|google-chrome`. Sandbox and shared-memory flags are always set. Requirement bumped where needed to `selenium>=4.11`.
 
 ## v2.5.8 (2026-04-12)
 
-- **Fahrtenbuch: Rekup-Spalte war immer leer** — Bei jeder Bewegungserkennung sind `prev.departed_at` und `curr.arrived_at` derselbe Sync-Zeitstempel (der Moment, in dem die Bewegung erkannt wurde), wodurch das kumulative Regen-Delta immer 0 war. Die Abfahrt ankert jetzt auf `prev.last_seen_at` (letzter bestätigter Sync am alten Spot vor Abfahrt), die Ankunft bleibt `curr.arrived_at` — damit liegt die Delta-Berechnung über zwei verschiedene Syncs.
+- **Trip log: regen column was always empty** — On every movement detection, `prev.departed_at` and `curr.arrived_at` are the same sync timestamp (the moment movement was detected), so the cumulative regen delta was always 0. The departure now anchors on `prev.last_seen_at` (last confirmed sync at the old spot before departure), the arrival stays `curr.arrived_at` — so the delta calculation spans two different syncs.
 
 ## v2.5.7 (2026-04-11)
 
-- **Lade- und Rekup-Zyklen als ganze Zahlen** — `charge_cycles` und `recup_cycles` in `get_summary_stats` runden jetzt auf ganze Zyklen statt eine Nachkommastelle. Fraktions-Zyklen ergeben keinen intuitiven Sinn; ein ganzer Zyklus ist die Maßeinheit.
+- **Charge and regen cycles as whole numbers** — `charge_cycles` and `recup_cycles` in `get_summary_stats` now round to whole cycles instead of one decimal place. Fractional cycles make no intuitive sense; a whole cycle is the unit.
 
 ## v2.5.6 (2026-04-11)
 

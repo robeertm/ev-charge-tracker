@@ -67,16 +67,22 @@ Built for EV owners who want **full control over their charging data** — runs 
 ## Features
 
 ### Tracking
-- **Mobile-friendly input form** — quickly log charges from your phone, with optional GPS-captured station location ("Mein Standort" via browser Geolocation, "Zuhause"/"Arbeit" quick-fill, reverse-geocoded names via Nominatim)
+- **Mobile-friendly input form** — quickly log charges from your phone, with Cancel button, native operator `<select>` (datalist-free so iOS Safari works), and optional GPS-captured station location
+- **"My Location" uses the car's last GPS, not the phone** — pulls from the most recent `VehicleSync` row with coordinates so the station position reflects where the charge actually happened, even if you're back home when logging it. Phone GPS remains a secondary option
+- **Operator price auto-fill** — configure per-operator `€/kWh` prices in Settings; picking an operator on the charge form auto-fills the price field (only while you haven't typed anything, so manual overrides are never lost)
 - **Start/Stop charge tracking** — force-refresh from vehicle, auto-fill date/time/SoC/odometer, auto-stop when charge limit reached
 - **Live vehicle status widget** on dashboard — SoC, range, odometer, doors, tires, climate, SoH, location
 - **Vehicle history** — every sync persists SoC, range, odometer, 12V, SoH, recuperation, 30-day consumption, GPS. Stored only when a tracked value changes (compact, audit-friendly history)
+- **Raw data viewer** (`/vehicle/raw`) — pretty-prints the full API dump for every sync, per brand, for debugging unusual SoH/range values
 - **History** with filtering, inline km editing, CSV export
+- **Full edit form** — every stored charge field (location, operator, coordinates, map picker) editable after the fact via `/edit/<id>`
 
 ### Driving log / Fahrtenbuch
 - **Auto-detected parking events** — every vehicle sync hooks into a parking-event log; >100 m means "moved", new event opened, previous closed with arrival/departure odometer + SoC
-- **Home / Work / Favorites** — pick locations on a Leaflet/OpenStreetMap card in Settings; events are auto-classified (home / work / favorite / other) within a 200 m radius
+- **Home / Work / Favorites** — pick locations on a Leaflet/OpenStreetMap card in Settings; events are auto-classified (home / work / favorite / other) within a 200 m radius. Favorites are inline-editable (rename, reposition via map, delete) with per-row action buttons
 - **Trips page** at `/trips` — KPI cards (count, km, drive time, commute km), marker-cluster map, full table with from/to/km/duration/avg-speed/SoC
+- **Full trip editor** — click the pencil on any trip row to open a two-column modal (Start / End) with every `ParkingEvent` field: label, favorite name, address, arrival/departure times, odometer and SoC at arrival/departure, coordinates. A shared Leaflet map below has draggable markers (blue = start, red = end) plus a "pick on map" button per side. Derived values (trip km, SoC used, recuperation) recompute automatically from the stored fields
+- **7-day safety gate** on trip edits — entries older than 7 days require an explicit confirmation checkbox; server-enforced via 409 response, so hand-crafted requests can't bypass it
 - **CSV + GPX export** — `/api/trips/export.csv` for the tax advisor, `/api/trips/export.gpx` for Google Earth / Komoot / OsmAnd
 - **Smart sync mode** — runs cached by default but auto-upgrades to a force-refresh when GPS is older than 6 h and the car is not charging, so the Fahrtenbuch stays current without burning the daily API quota
 - **Backfill** — replays existing vehicle syncs through the parking hook to retroactively rebuild the driving log
@@ -87,6 +93,8 @@ Built for EV owners who want **full control over their charging data** — runs 
 
 ### Analytics
 - **Dashboard** with KPI cards, Chart.js visualizations, and 7 vehicle-history mini time-series (SoC, range, odometer, 12V, SoH, recuperation, consumption)
+- **Click-to-fullscreen on every plot** — each mini-chart is its own framed card with a fullscreen icon; click opens a Bootstrap `modal-fullscreen` with a larger version (thicker line, more axis ticks, grid, data-point circles). Time-range selector in the card header: 24h / 7d / 30d / 90d / 1y / all. Chosen range persists per-user in `AppConfig`
+- **Last-known GPS** — the dashboard location card walks the vehicle-history series backwards to find the most recent GPS-bearing sync, so the map still renders under Kia/Hyundai cached mode where the latest sync typically has no coordinates
 - **Range calculator** card — uses live SoC + battery capacity + 30-day consumption + outdoor temperature (Open-Meteo at home location), with a temperature penalty curve
 - **Weather correlation** chart — bar (kWh/month) + line (avg outdoor degC) showing exactly why winter is more expensive
 - **Highlights / fun facts** — cheapest/most expensive charge, biggest single charge, longest trip, fastest trip, longest park
@@ -102,8 +110,9 @@ Built for EV owners who want **full control over their charging data** — runs 
 - **ENTSO-E integration** — fetch hourly CO2 grid intensity for Germany, auto-backfill missing values
 - **Open-Meteo** — daily mean temperatures for the range calculator and weather correlation, with DB cache (no key, no rate limits)
 - **Nominatim reverse geocoding** — for street addresses on parking events and charge locations, with permanent DB cache and ToS-compliant rate limiter
-- **CSV import** — upload Google Sheet CSV directly in settings UI
+- **CSV import with live preview** — upload your Google Sheet or exported CSV in Settings, get a dry-run preview showing detected delimiter, column mapping (per-column dropdown to correct misdetections), per-row action badges (`new` / `update` / `duplicate` / `empty` / `error`), and an error list with line numbers. Only when you hit "Import" does the data actually land in the DB. Automatic dedup by (date, hour, kWh) with 0.1 kWh tolerance
 - **PV charging support** — third charge type with auto-calculated CO2 from PV system specs
+- **Operator price directory** — Settings has an editable table of charging operators (19 built-ins + your customs) with per-operator `€/kWh`. Stored as JSON in `AppConfig` and consulted by the charge-entry form to auto-fill the price
 
 ### Security / HTTPS
 - **Self-signed certificate** auto-generation via `cryptography` (or `openssl` CLI fallback). SAN entries cover `localhost`, `127.0.0.1`, and the LAN IP, so the same cert works on desktop AND smartphone
@@ -125,8 +134,10 @@ Built for EV owners who want **full control over their charging data** — runs 
 - **Result**: an end user can take ownership of a VM without touching a terminal — no SSH, no `cryptsetup`, no manpages
 
 ### Self-hosting / updates
-- **In-app updater** — "Update verfuegbar" button in Settings actually rolls out the new release on your machine (download zip, stage, detached helper swaps files, pip install, restart). No `git pull`, no terminal.
+- **In-app updater** — "Update available" button in Settings actually rolls out the new release on your machine (download zip, stage, detached helper swaps files, pip install, restart). No `git pull`, no terminal.
 - **systemd-aware**: under systemd the file swap is done inline in the running process and the supervisor restarts the service; outside systemd the legacy detached-helper flow is used
+- **Automatic rollback on a broken update** — before every swap, a backup of the files that would be overwritten is written to `updates/backup_pre_v<OLD>/` along with a `UPDATE_PENDING.json` marker. On each boot, a pre-flight state machine checks the marker: three failed boots in a row (or a port-7654 bind timeout within 60 seconds of launch) trigger an automatic restore of the previous version plus a `LAST_ROLLBACK.json` note for the UI. Works under any supervisor that restarts on crash. `data/`, `venv/`, `.git/`, `logs/`, `updates/` are never touched by the backup/restore.
+- **Dashboard update banner** — a visible banner appears on the dashboard when a newer release is available; clicking jumps directly to `Settings → #updaterCard`. If the last update auto-rolled back, a second banner explains which versions were involved and offers a one-click dismiss (`DELETE /api/update/last-rollback`). Update-check response is cached in `sessionStorage` for 30 minutes so page-hopping doesn't hit the GitHub API on every view.
 - **Restart button** in Settings for applying HTTPS changes or new certs
 - **API rate limiter** — tracks daily API calls (Kia EU: 190/200 limit), counter on dashboard
 
@@ -138,7 +149,7 @@ Built for EV owners who want **full control over their charging data** — runs 
 
 ### UX
 - **Dark/Light mode** — toggle in navbar, synced across all tabs via localStorage
-- **6 languages** — German, English, French, Spanish, Italian, Dutch (~540 translated strings per locale)
+- **6 languages** — German, English, French, Spanish, Italian, Dutch (~800 translated strings per locale)
 
 ---
 
@@ -250,7 +261,7 @@ Switchable from Settings > Language:
 - Italiano
 - Nederlands
 
-~447 translated strings per language. Falls back to German if a key is missing. New languages can be added by dropping a `<lang>.json` file into `translations/`.
+~800 translated strings per language. Falls back to German if a key is missing. New languages can be added by dropping a `<lang>.json` file into `translations/`.
 
 ---
 
