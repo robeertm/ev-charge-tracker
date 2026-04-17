@@ -581,6 +581,16 @@
                                 <div class="col-12">
                                     <div class="small text-muted fst-italic">{{ t('set.api_smart_hint') }}</div>
                                 </div>
+                                <div class="col-12">
+                                    <div id="smartWindowTripWarning" class="alert alert-warning py-2 px-3 small mb-0 mt-1 d-none">
+                                        <i class="bi bi-exclamation-triangle-fill"></i>
+                                        <strong>{{ t('set.api_smart_warning_title') }}</strong>
+                                        {{ t('set.api_smart_warning_body') }}
+                                        <button type="button" class="btn btn-sm btn-link py-0 px-1 ms-2" id="smartWindowResetDefault">
+                                            {{ t('set.api_smart_reset_default') }}
+                                        </button>
+                                    </div>
+                                </div>
                             </div>
                         </div>
                     </div>
@@ -595,8 +605,17 @@
                 </div>
                 {% endif %}
                 <script>
-                // Show cached-GPS warning + smart-window row when relevant
+                // Show cached-GPS warning + smart-window row when relevant,
+                // plus a trip-log accuracy warning when the smart window is
+                // tighter than the defaults.
                 (function() {
+                    const DEFAULT_START = 6, DEFAULT_END = 22, DEFAULT_INTERVAL = 10;
+                    const startSel    = document.querySelector('select[name="smart_active_start_hour"]');
+                    const endSel      = document.querySelector('select[name="smart_active_end_hour"]');
+                    const intervalSel = document.querySelector('select[name="smart_active_interval_min"]');
+                    const tripWarn    = document.getElementById('smartWindowTripWarning');
+                    const resetBtn    = document.getElementById('smartWindowResetDefault');
+
                     function updateUi() {
                         const sel = document.getElementById('vehicleSyncModeSel');
                         const brand = document.getElementById('vehicle_api_brand').value;
@@ -607,6 +626,31 @@
                         const wantsGps = ['kia', 'hyundai'].includes(brand);
                         w.style.display = (isCached && wantsGps) ? '' : 'none';
                         smartRow.style.display = isSmart ? '' : 'none';
+                        refreshTripWarning();
+                    }
+                    function refreshTripWarning() {
+                        if (!tripWarn || !startSel || !endSel || !intervalSel) return;
+                        const sel = document.getElementById('vehicleSyncModeSel');
+                        if (!sel || sel.value !== 'smart') { tripWarn.classList.add('d-none'); return; }
+                        const s = parseInt(startSel.value, 10);
+                        const e = parseInt(endSel.value, 10);
+                        const iv = parseInt(intervalSel.value, 10);
+                        // "Narrower than default" = starts later, ends earlier, or polls less often.
+                        // Any one of these reduces GPS coverage of real driving hours
+                        // and degrades Von/Nach-address resolution on the trips page.
+                        const tighter = s > DEFAULT_START || e < DEFAULT_END || iv > DEFAULT_INTERVAL;
+                        tripWarn.classList.toggle('d-none', !tighter);
+                    }
+                    if (startSel)    startSel.addEventListener('change', refreshTripWarning);
+                    if (endSel)      endSel.addEventListener('change', refreshTripWarning);
+                    if (intervalSel) intervalSel.addEventListener('change', refreshTripWarning);
+                    if (resetBtn) {
+                        resetBtn.addEventListener('click', () => {
+                            startSel.value = String(DEFAULT_START);
+                            endSel.value = String(DEFAULT_END);
+                            intervalSel.value = String(DEFAULT_INTERVAL);
+                            refreshTripWarning();
+                        });
                     }
                     document.getElementById('vehicleSyncModeSel').addEventListener('change', updateUi);
                     document.getElementById('vehicle_api_brand').addEventListener('change', updateUi);

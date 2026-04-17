@@ -1,5 +1,15 @@
 # Changelog
 
+## v2.25.1 (2026-04-17)
+
+### Warn users that narrowing the smart-sync window degrades trip location data
+
+The smart-sync window controls when the background polling loop actually runs (default 06:00–22:00 every 10 min). Tightening it — starting later, ending earlier, or polling less often — has a subtle downstream effect on the v2.24+ trip log: the **SDK trip list itself stays accurate** because it's fetched from the Kia/Hyundai server's cache independently of our polling, but the **From/To address labels** come from `parking_events` / `vehicle_syncs`, which are only populated while the poll loop is active. Trips happening outside the active window therefore get "Ort unbekannt" / "Unknown location" instead of a real address.
+
+Added an inline warning banner in Settings → Vehicle API that appears the moment any of the three smart-window selects deviates from the 06:00 / 22:00 / 10-min default. The banner explicitly calls out that trips will still be **detected** (SDK-sourced, polling-independent) but that their **location labels** will often be blank, and offers a one-click "Restore default" button that snaps all three selects back to the recommended values (the user still has to hit Save to persist the change).
+
+The check fires on every `change` event on any of the three selects, and re-evaluates when the user toggles between cached / smart / force modes — so switching back to `smart` immediately re-runs the validation.
+
 ## v2.25.0 (2026-04-17)
 
 ### Report: new interactive page with period picker and twelve colourful plots
