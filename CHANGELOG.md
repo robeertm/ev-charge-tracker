@@ -1,5 +1,16 @@
 # Changelog
 
+## v2.23.1 (2026-04-17)
+
+### Settings sidebar: scroll-spy fixes
+
+Two scroll-spy regressions reported immediately after v2.23.0 rolled out:
+
+- **Clicking "HTTPS Security" jumped to "Notifications"** on Tailscale hosts, because the SSL card is `{% if not hide_ssl_card %}`-gated and isn't rendered at all — but the SSL entry in the sidebar nav was still there. Clicking the orphan link fell through to the next visible card. Fix: on page init, walk the nav links and hide every entry whose target id isn't in the DOM (or has zero height).
+- **Clicking "System Updates" highlighted "Backup"** in the sidebar. The IntersectionObserver picked whichever card had the highest intersection ratio inside a narrow viewport band, which for short cards meant the *next* short card would beat the one just clicked. Fix: replaced IntersectionObserver with a deterministic "last card whose top has crossed the sticky-nav line" computation on scroll, and added a 700 ms spy-suppression window after a click so smooth-scroll can't be overruled mid-flight.
+
+Also: the alternating tint stripe is now computed on the filtered (visible) card list rather than the raw list, so hiding the SSL card doesn't break the two-tone pattern below it. And the manual scroll now subtracts the live navbar + mobile-tab-bar height, so target cards land cleanly under the sticky header on both breakpoints instead of relying on CSS `scroll-margin-top` alone.
+
 ## v2.23.0 (2026-04-17)
 
 ### Settings page: sidebar navigation, scroll restore, alternating section tint

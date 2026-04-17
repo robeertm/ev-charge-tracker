@@ -1633,58 +1633,111 @@
 // ── Settings navigation: sidebar scroll-spy + preserve section on save ──
 (function() {
     const nav  = document.getElementById('settingsNav');
-    const cards = Array.from(document.querySelectorAll('.settings-card'));
-    if (!nav || !cards.length) return;
+    const allCards = Array.from(document.querySelectorAll('.settings-card'));
+    if (!nav || !allCards.length) return;
 
-    // Alternating background — every second card gets a tinted look.
-    cards.forEach((c, i) => { if (i % 2 === 1) c.classList.add('settings-card-alt'); });
+    // A card is considered "present" if it actually renders (non-zero height
+    // and not display:none). On Tailscale peers the SSL card is hidden; we
+    // must exclude it from both the nav and the scroll-spy so clicking
+    // Auth/SSL doesn't fall through into Notifications.
+    function isVisible(card) {
+        return card.offsetParent !== null && card.offsetHeight > 0;
+    }
 
-    // Active-link highlighting via IntersectionObserver.
     const links = Array.from(nav.querySelectorAll('.nav-link[data-section]'));
     const linkById = Object.fromEntries(links.map(a => [a.dataset.section, a]));
+
+    // Hide nav links whose card is hidden; then rebuild the live list so
+    // alternating-tint and spy logic only sees what the user actually sees.
+    links.forEach(a => {
+        const card = document.getElementById(a.dataset.section);
+        if (!card || !isVisible(card)) a.classList.add('d-none');
+    });
+    const cards = allCards.filter(isVisible);
+
+    // Alternating background — applied to the visible card sequence only so
+    // the stripe pattern doesn't skip with hidden cards mixed in.
+    cards.forEach((c, i) => c.classList.toggle('settings-card-alt', i % 2 === 1));
+
+    // The sticky top nav height changes at the 992px breakpoint (navbar only
+    // vs. navbar + horizontal tabs). Recompute on demand; this is cheap.
+    function topOffset() {
+        const nb = document.querySelector('nav.navbar') || document.querySelector('.navbar');
+        const nbH = nb ? nb.getBoundingClientRect().height : 56;
+        const isMobile = window.matchMedia('(max-width: 991.98px)').matches;
+        const tabsH = isMobile ? nav.getBoundingClientRect().height : 0;
+        return nbH + tabsH + 8;
+    }
+
     let currentId = null;
+    // Click suppresses scroll-spy for ~700ms so smooth-scroll into a short
+    // card can't be overruled by spy latching onto the next card below it.
+    let suppressSpyUntil = 0;
     function setActive(id) {
         if (id === currentId) return;
         currentId = id;
         links.forEach(a => a.classList.toggle('active', a.dataset.section === id));
         const active = linkById[id];
         if (active) {
-            // Keep the active link visible inside the scrollable nav (useful on mobile).
+            // Keep the active link visible inside the scrollable nav (mobile).
             active.scrollIntoView({block: 'nearest', inline: 'nearest', behavior: 'smooth'});
         }
     }
-    // Fires when a section crosses an imaginary line 30% down the viewport.
-    // Using rootMargin keeps the active entry feeling "current" even when the
-    // card occupies most of the screen.
-    const obs = new IntersectionObserver(entries => {
-        const visible = entries.filter(e => e.isIntersecting)
-            .sort((a, b) => b.intersectionRatio - a.intersectionRatio);
-        if (visible[0]) setActive(visible[0].target.id);
-    }, {rootMargin: '-20% 0px -60% 0px', threshold: [0, 0.1, 0.25, 0.5, 0.75, 1]});
-    cards.forEach(c => obs.observe(c));
 
-    // Smooth scroll with JS-controlled offset (CSS scroll-margin-top already
-    // handles anchor jumps; this makes clicks consistent across browsers).
-    links.forEach(a => a.addEventListener('click', ev => {
-        const id = a.dataset.section;
+    // "Active" = the last visible card whose top has scrolled above the nav
+    // line. Simple, predictable, behaves right even for short cards.
+    function computeActive() {
+        if (Date.now() < suppressSpyUntil) return;
+        const line = topOffset() + 4;
+        let picked = cards[0];
+        for (const card of cards) {
+            const top = card.getBoundingClientRect().top;
+            if (top <= line) picked = card;
+            else break;
+        }
+        if (picked) setActive(picked.id);
+    }
+
+    let rafPending = false;
+    function onScroll() {
+        if (rafPending) return;
+        rafPending = true;
+        requestAnimationFrame(() => { rafPending = false; computeActive(); });
+    }
+    window.addEventListener('scroll', onScroll, {passive: true});
+    window.addEventListener('resize', onScroll, {passive: true});
+    computeActive();
+
+    // Manual scroll with offset for the sticky nav stack — we can't rely on
+    // CSS scroll-margin alone because mobile also has the sticky tab bar.
+    function scrollToId(id, smooth) {
         const card = document.getElementById(id);
         if (!card) return;
+        const y = card.getBoundingClientRect().top + window.pageYOffset - topOffset();
+        window.scrollTo({top: y, behavior: smooth ? 'smooth' : 'auto'});
+    }
+
+    links.forEach(a => a.addEventListener('click', ev => {
+        const id = a.dataset.section;
+        if (!document.getElementById(id)) return;
         ev.preventDefault();
         history.replaceState(null, '', '#' + id);
-        card.scrollIntoView({behavior: 'smooth', block: 'start'});
         setActive(id);
+        suppressSpyUntil = Date.now() + 700;
+        scrollToId(id, true);
     }));
 
     // Restore scroll position on page load from URL hash.
     function restoreFromHash() {
         const h = location.hash || '';
         if (!h.startsWith('#sec-')) return;
-        const el = document.getElementById(h.slice(1));
-        if (!el) return;
+        const id = h.slice(1);
+        if (!document.getElementById(id)) return;
         // Allow layout to settle (Leaflet / Chart.js / etc. lazy content).
         setTimeout(() => {
-            el.scrollIntoView({behavior: 'auto', block: 'start'});
-            setActive(h.slice(1));
+            setActive(id);
+            suppressSpyUntil = Date.now() + 700;
+            scrollToId(id, false);
         }, 0);
     }
     restoreFromHash();
