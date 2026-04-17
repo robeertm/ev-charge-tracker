@@ -649,7 +649,10 @@
         const labels = d.months.map(m => m.label);
         const kwh = d.months.map(m => m.kwh);
         const temp = d.months.map(m => m.temp_avg_c);
-        new Chart(document.getElementById('weatherChart'), {
+        // makeExpandableChart is defined in the scripts block below — by
+        // the time this fetch resolves the whole page has parsed and the
+        // helper is available on the global scope.
+        makeExpandableChart('weatherChart', {
             data: {
                 labels: labels,
                 datasets: [
@@ -666,7 +669,7 @@
                     y2: { position: 'right', ticks: { font: { size: 8 }, callback: v => v + '°' }, grid: { drawOnChartArea: false } },
                 }
             }
-        });
+        }, '{{ t("dash.weather_corr") }}');
     }).catch(() => {
         document.getElementById('weatherHint').textContent = '{{ t("dash.weather_no_home") }}';
     });
@@ -913,6 +916,26 @@
 </div>
 
 {% endif %}
+
+<!-- Shared fullscreen modal for every expandable dashboard chart (weather,
+     monthly cost, cumulative cost, monthly kWh, monthly CO2, cumulative CO2).
+     Separate from the vehicle-history modal so it's available even when the
+     car-history row isn't rendered. -->
+<div class="modal fade" id="dashFullscreenModal" tabindex="-1" aria-hidden="true">
+    <div class="modal-dialog modal-fullscreen">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title"><i class="bi bi-graph-up"></i> <span id="dashFullscreenTitle"></span></h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+            </div>
+            <div class="modal-body p-3">
+                <div class="h-100" style="position:relative;">
+                    <canvas id="dashFullscreenCanvas"></canvas>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
 {% endblock %}
 
 {% block scripts %}
@@ -951,10 +974,75 @@ const mobileLegend = { display: true, position: 'bottom', labels: { font: { size
 Chart.defaults.maintainAspectRatio = false;
 Chart.defaults.responsive = true;
 
+// ── Expandable-chart helpers ────────────────────────────────────────────
+// Each non-vehicle chart on this page is clickable to open a fullscreen
+// modal. We stash a deep-clone of the original config so we can spin up
+// a second Chart.js instance inside the modal without worrying about
+// Chart.js mutating shared option objects.
+const DASH_CHARTS = {};
+function cloneCfg(v) {
+    if (v === null || typeof v !== 'object') return v;   // functions pass through
+    if (Array.isArray(v)) return v.map(cloneCfg);
+    const o = {};
+    for (const k of Object.keys(v)) o[k] = cloneCfg(v[k]);
+    return o;
+}
+function makeExpandableChart(canvasId, cfg, title) {
+    const el = document.getElementById(canvasId);
+    if (!el) return null;
+    DASH_CHARTS[canvasId] = { cfg: cloneCfg(cfg), title: title };
+    const chart = new Chart(el, cfg);
+    const card = el.closest('.card');
+    if (card) {
+        card.style.cursor = 'pointer';
+        card.tabIndex = 0;
+        card.dataset.dashChart = canvasId;
+        const header = card.querySelector('.card-header');
+        if (header && !header.querySelector('.dash-fs-icon')) {
+            header.classList.add('d-flex', 'justify-content-between', 'align-items-center');
+            const ic = document.createElement('i');
+            ic.className = 'bi bi-arrows-fullscreen text-muted dash-fs-icon ms-2';
+            ic.style.fontSize = '.8rem';
+            header.appendChild(ic);
+        }
+        card.addEventListener('click', ev => {
+            // Don't hijack clicks on form elements embedded in the card.
+            if (ev.target.closest('a,button,input,select,textarea,label')) return;
+            openDashFullscreen(canvasId);
+        });
+        card.addEventListener('keydown', ev => {
+            if (ev.key === 'Enter' || ev.key === ' ') {
+                ev.preventDefault();
+                openDashFullscreen(canvasId);
+            }
+        });
+    }
+    return chart;
+}
+let _dashModal = null, _dashModalChart = null;
+function openDashFullscreen(canvasId) {
+    const entry = DASH_CHARTS[canvasId];
+    const modalEl = document.getElementById('dashFullscreenModal');
+    if (!entry || !modalEl || typeof bootstrap === 'undefined') return;
+    if (!_dashModal) {
+        _dashModal = new bootstrap.Modal(modalEl);
+        modalEl.addEventListener('hidden.bs.modal', () => {
+            if (_dashModalChart) { try { _dashModalChart.destroy(); } catch(e){} _dashModalChart = null; }
+        });
+    }
+    document.getElementById('dashFullscreenTitle').textContent = entry.title;
+    _dashModal.show();
+    // Chart.js needs the canvas visible before it can measure; one frame.
+    setTimeout(() => {
+        if (_dashModalChart) { try { _dashModalChart.destroy(); } catch(e){} _dashModalChart = null; }
+        _dashModalChart = new Chart(document.getElementById('dashFullscreenCanvas'), cloneCfg(entry.cfg));
+    }, 150);
+}
+
 // Monthly Cost Chart
 const monthlyCostData = {{ chart_data.monthly_cost | tojson }};
 const monthlyCostAvg = monthlyCostData.reduce((a, b) => a + b, 0) / (monthlyCostData.length || 1);
-new Chart(document.getElementById('chartMonthlyCost'), {
+makeExpandableChart('chartMonthlyCost', {
     type: 'bar',
     data: {
         labels: labels,
@@ -981,10 +1069,10 @@ new Chart(document.getElementById('chartMonthlyCost'), {
             y: { beginAtZero: true, ticks: { ...mobileYTicks, callback: v => '€' + v } }
         }
     }
-});
+}, T.chart_cost_eur);
 
 // Cumulative Cost Chart
-new Chart(document.getElementById('chartCumulative'), {
+makeExpandableChart('chartCumulative', {
     type: 'line',
     data: {
         labels: {{ chart_data.cumulative_labels | tojson }},
@@ -1005,12 +1093,12 @@ new Chart(document.getElementById('chartCumulative'), {
             y: { ticks: { ...mobileYTicks, callback: v => '€' + v.toLocaleString() } }
         }
     }
-});
+}, T.cumulative_cost);
 
 // Monthly kWh Chart
 const monthlyKwhData = {{ chart_data.monthly_kwh | tojson }};
 const monthlyKwhAvg = monthlyKwhData.reduce((a, b) => a + b, 0) / (monthlyKwhData.length || 1);
-new Chart(document.getElementById('chartMonthlyKwh'), {
+makeExpandableChart('chartMonthlyKwh', {
     type: 'bar',
     data: {
         labels: labels,
@@ -1037,12 +1125,12 @@ new Chart(document.getElementById('chartMonthlyKwh'), {
             y: { beginAtZero: true, ticks: mobileYTicks }
         }
     }
-});
+}, T.chart_kwh_loaded);
 
 // Monthly CO2 Chart
 const monthlyCo2Data = {{ chart_data.monthly_co2 | tojson }};
 const monthlyCo2Avg = monthlyCo2Data.reduce((a, b) => a + b, 0) / (monthlyCo2Data.length || 1);
-new Chart(document.getElementById('chartMonthlyCo2'), {
+makeExpandableChart('chartMonthlyCo2', {
     type: 'bar',
     data: {
         labels: labels,
@@ -1069,12 +1157,12 @@ new Chart(document.getElementById('chartMonthlyCo2'), {
             y: { beginAtZero: true, ticks: { ...mobileYTicks, callback: v => v + ' kg' } }
         }
     }
-});
+}, T.chart_co2_kg);
 
 // Cumulative CO2 Savings vs Battery Production Break-Even
 const batteryProductionCo2 = {{ chart_data.battery_production_co2 }};
 const savingsLabels = {{ chart_data.cumulative_labels | tojson }};
-new Chart(document.getElementById('chartCumulativeCo2'), {
+makeExpandableChart('chartCumulativeCo2', {
     type: 'line',
     data: {
         labels: savingsLabels,
@@ -1119,7 +1207,7 @@ new Chart(document.getElementById('chartCumulativeCo2'), {
             y: { ticks: { ...mobileYTicks, callback: v => v.toLocaleString() + ' kg' } }
         }
     }
-});
+}, T.chart_co2_savings);
 </script>
 {% endif %}
 

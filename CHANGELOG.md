@@ -1,5 +1,24 @@
 # Changelog
 
+## v2.23.2 (2026-04-17)
+
+### Dashboard: all remaining charts are now click-to-enlarge
+
+The vehicle-history tiles already supported a click-to-fullscreen flow in previous versions, but the six "stats" charts on the same page did not — clicking them did nothing. Those are now all expandable too:
+
+- Weather correlation (kWh vs temperature per month)
+- Monthly cost
+- Cumulative cost
+- Monthly kWh
+- Monthly CO2
+- Cumulative CO2 savings vs battery-production break-even
+
+Implementation is a single helper `makeExpandableChart(canvasId, cfg, title)` that wraps every `new Chart(...)` call. It keeps a deep-cloned copy of the config (preserving callback functions via `typeof` sniffing, since `structuredClone` won't copy them), adds a fullscreen icon to the card header, wires a click + Enter/Space handler on the whole card, and lazily opens a shared Bootstrap fullscreen modal that spins up a fresh Chart.js instance from the cloned config. The main chart stays live underneath; the modal chart is destroyed on close.
+
+One subtlety worth noting: the weather chart is built inside a `fetch().then()` callback, so by the time the callback runs the scripts block at the bottom of the page has already defined the helper — safe to reference by bare name. The five stats charts live in the same scripts block and see the helper directly.
+
+A separate `#dashFullscreenModal` sits outside the `{% if vehicle_history %}` guard so it's available even on installs where the car-history row isn't rendered (no Kia/Hyundai API configured, insufficient samples, etc).
+
 ## v2.23.1 (2026-04-17)
 
 ### Settings sidebar: scroll-spy fixes
