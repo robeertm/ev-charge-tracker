@@ -20,9 +20,44 @@ from models.database import db, Charge, VehicleTrip, ParkingEvent, AppConfig
 DAY_NAMES_DE = ['Mo', 'Di', 'Mi', 'Do', 'Fr', 'Sa', 'So']
 DAY_NAMES_EN = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun']
 
+# All human-visible strings this module returns get pulled from here so the
+# /report page doesn't leak German text to English users (and vice versa).
+# The backend stays translation-aware so we can include the labels directly
+# in the JSON payload — the frontend doesn't need a second round-trip to
+# resolve them.
+_LABELS = {
+    'de': {
+        'week_preset':    'KW {w}/{y}',     # e.g. "KW 16/2026"
+        'week_bucket':    'KW{w:02d}',      # e.g. "KW16" for bucket-label charts
+        'all':            'Gesamtzeitraum',
+        'month_names':    ['Januar', 'Februar', 'März', 'April', 'Mai', 'Juni',
+                           'Juli', 'August', 'September', 'Oktober', 'November', 'Dezember'],
+    },
+    'en': {
+        'week_preset':    'Week {w}/{y}',
+        'week_bucket':    'W{w:02d}',
+        'all':            'All time',
+        'month_names':    ['January', 'February', 'March', 'April', 'May', 'June',
+                           'July', 'August', 'September', 'October', 'November', 'December'],
+    },
+}
+
+
+def _pack(lang: str) -> dict:
+    return _LABELS.get(lang, _LABELS['de'])
+
+
+def _format_month_year(d: date, lang: str) -> str:
+    """Locale-independent month-year label. `strftime('%B %Y')` would use
+    the server's LC_TIME setting, which isn't always what the app language
+    is configured to."""
+    p = _pack(lang)
+    return f'{p["month_names"][d.month - 1]} {d.year}'
+
 
 def resolve_range(preset: str, start: Optional[str] = None,
-                  end: Optional[str] = None) -> tuple[date, date, str]:
+                  end: Optional[str] = None,
+                  lang: str = 'de') -> tuple[date, date, str]:
     """Turn a preset name (or custom start/end strings) into a concrete
     [start_date, end_date] pair (inclusive) plus a human-readable label.
 
@@ -33,6 +68,7 @@ def resolve_range(preset: str, start: Optional[str] = None,
     """
     today = date.today()
     p = (preset or 'month').lower()
+    pack = _pack(lang)
 
     if p == 'custom' and start and end:
         try:
@@ -49,12 +85,12 @@ def resolve_range(preset: str, start: Optional[str] = None,
     if p == 'week':
         start_dt = today - timedelta(days=today.weekday())  # Monday
         end_dt = start_dt + timedelta(days=6)
-        return start_dt, end_dt, f'KW {start_dt.isocalendar()[1]}/{start_dt.year}'
+        return start_dt, end_dt, pack['week_preset'].format(w=start_dt.isocalendar()[1], y=start_dt.year)
     if p == 'month':
         s = today.replace(day=1)
         last_day = monthrange(today.year, today.month)[1]
         e = today.replace(day=last_day)
-        return s, e, s.strftime('%B %Y')
+        return s, e, _format_month_year(s, lang)
     if p == 'quarter':
         q = (today.month - 1) // 3 + 1
         qs_month = (q - 1) * 3 + 1
@@ -81,12 +117,12 @@ def resolve_range(preset: str, start: Optional[str] = None,
                          .with_entities(VehicleTrip.trip_date).first())
         candidates = [d[0] for d in (earliest_charge, earliest_trip) if d and d[0]]
         s = min(candidates) if candidates else today
-        return s, today, 'Gesamtzeitraum'
+        return s, today, pack['all']
 
     # Default fallback: current month.
     s = today.replace(day=1)
     last_day = monthrange(today.year, today.month)[1]
-    return s, today.replace(day=last_day), s.strftime('%B %Y')
+    return s, today.replace(day=last_day), _format_month_year(s, lang)
 
 
 def _bucket_interval(start: date, end: date) -> str:
@@ -100,10 +136,11 @@ def _bucket_interval(start: date, end: date) -> str:
     return 'month'
 
 
-def _iter_buckets(start: date, end: date, size: str):
+def _iter_buckets(start: date, end: date, size: str, lang: str = 'de'):
     """Yield (bucket_start, bucket_end, label) for each bucket in the
-    range. Labels are ISO dates for daily, KW-NN for weekly, yyyy-MM for
-    monthly — UI-ready without further formatting."""
+    range. Labels are ISO dates for daily, W-NN / KW-NN for weekly,
+    yyyy-MM for monthly — UI-ready without further formatting."""
+    pack = _pack(lang)
     if size == 'day':
         d = start
         while d <= end:
@@ -114,7 +151,7 @@ def _iter_buckets(start: date, end: date, size: str):
         while d <= end:
             we = d + timedelta(days=6)
             label_w = d.isocalendar()[1]
-            yield max(d, start), min(we, end), f'KW{label_w:02d}'
+            yield max(d, start), min(we, end), pack['week_bucket'].format(w=label_w)
             d = d + timedelta(days=7)
     else:  # month
         d = start.replace(day=1)
@@ -133,11 +170,15 @@ def _safe(v, default=0):
     return default if v is None else v
 
 
-def build_report(start: date, end: date) -> dict:
+def build_report(start: date, end: date, lang: str = 'de') -> dict:
     """The heavy lifter — queries Charge + VehicleTrip + ParkingEvent for
     the window and shapes them into the JSON structure the /report page
     consumes. All numbers are rounded server-side so the frontend can
-    render without worrying about precision."""
+    render without worrying about precision.
+
+    ``lang`` controls the bucket labels (KW vs W), day-of-week short
+    names, and month-year preset label. The route layer should pull it
+    from ``AppConfig['app_language']``."""
     charges = (Charge.query
                .filter(Charge.date >= start, Charge.date <= end)
                .order_by(Charge.date.asc()).all())
@@ -146,7 +187,7 @@ def build_report(start: date, end: date) -> dict:
              .order_by(VehicleTrip.start_time.asc()).all())
 
     bucket_size = _bucket_interval(start, end)
-    buckets = list(_iter_buckets(start, end, bucket_size))
+    buckets = list(_iter_buckets(start, end, bucket_size, lang))
     bucket_labels = [b[2] for b in buckets]
 
     # ── Buckets: kWh, cost, CO2, km ─────────────────────────────────
@@ -225,7 +266,6 @@ def build_report(start: date, end: date) -> dict:
         hour_kwh[h] += _safe(c.kwh_loaded)
 
     # ── Day-of-week pattern ────────────────────────────────────────
-    lang = AppConfig.get('app_language', 'de')
     day_names = DAY_NAMES_DE if lang == 'de' else DAY_NAMES_EN
     dow_kwh = [0.0] * 7
     dow_trips = [0] * 7

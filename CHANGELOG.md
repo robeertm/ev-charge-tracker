@@ -1,5 +1,15 @@
 # Changelog
 
+## v2.25.2 (2026-04-17)
+
+### Report: localise week / "all time" / month-name labels
+
+The v2.25.0 report page leaked three hardcoded German strings through its JSON payload: the week-preset label (`KW 16/2026`), the all-time label (`Gesamtzeitraum`), and the per-bucket weekly chart label (`KW16`). On top of that, `strftime('%B %Y')` for the month-preset label depended on the server's LC_TIME locale, which isn't what the app language is actually set to.
+
+Moved all four into a `_LABELS` pack keyed by language inside `services/report_range.py` with explicit month-name arrays for DE and EN, so "April 2026" renders as "April 2026" (both languages — coincidentally identical) while "KW 16/2026" becomes "Week 16/2026" in English and "Gesamtzeitraum" becomes "All time". `resolve_range()` and `build_report()` now accept a `lang` kwarg; the `/api/report` route pulls it from `AppConfig['app_language']` and passes it through.
+
+No other v2.23–v2.25 changes had hardcoded user-visible German — verified by grepping the touched files for umlauts and German word tokens.
+
 ## v2.25.1 (2026-04-17)
 
 ### Warn users that narrowing the smart-sync window degrades trip location data

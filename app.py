@@ -1508,8 +1508,9 @@ def register_routes(app):
         preset = request.args.get('preset', 'month')
         start = request.args.get('start')
         end = request.args.get('end')
-        s, e, label = resolve_range(preset, start, end)
-        data = build_report(s, e)
+        lang = AppConfig.get('app_language', 'de')
+        s, e, label = resolve_range(preset, start, end, lang=lang)
+        data = build_report(s, e, lang=lang)
         data['label'] = label
         data['preset'] = preset
         return jsonify(data)
