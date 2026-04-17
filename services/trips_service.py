@@ -196,32 +196,94 @@ def _cum_regen_at(lookup, ts, strict=False):
     return lookup[idx][1]
 
 
-def _enrich_from_parking(start_time: datetime, end_time: datetime,
-                         events: list, tolerance_min: int = 60):
-    """Find the parking-event pair (from, to) closest to a trip's time
-    boundaries. Returns (from_event|None, to_event|None).
+PARKING_MATCH_TOLERANCE_MIN = 60
 
-    Tolerance is 60 min because ParkingEvent's ``departed_at`` and
-    ``arrived_at`` are always set to the sync timestamp that first
-    *noticed* the movement — which on a cached/smart polling cadence
-    of 10 min + Kia/Hyundai's own cache lag can be 30–45 min behind
-    the SDK's authoritative trip-start time. 60 min catches the long
-    tail without risking cross-trip matches (no trip boundary is
-    realistically that close to another one).
+
+def _trip_end_time(trip):
+    """Reconstruct the SDK trip's end_time from start + drive + idle."""
+    total = (trip.drive_minutes or 0) + (trip.idle_minutes or 0)
+    return trip.start_time + timedelta(minutes=total) if total > 0 else trip.start_time
+
+
+def _assign_events_to_trips(sdk_trips: list, events: list,
+                            tolerance_min: int = PARKING_MATCH_TOLERANCE_MIN):
+    """Sequential 2-pointer assignment: each ParkingEvent endpoint goes
+    to at most one SDK trip, chosen by *chronological order* rather than
+    absolute nearest-neighbour distance.
+
+    Why not nearest-neighbour: our ParkingEvent timestamps are set by the
+    polling sync that first noticed movement, so ``departed_at`` is
+    ALWAYS ≥ the SDK's authoritative trip start (the car left, we saw it
+    N minutes later when the next poll fired). A plain abs(delta) matcher
+    lets a preceding trip's "from-candidate" event steal the next
+    trip's slot when two short trips cluster inside the 60-min tolerance
+    — concretely: on 2026-04-17 the 15:47 trip latched onto the 15:32
+    ``work.departed_at`` (which belongs to the 15:03 trip), pushing the
+    15:03 trip into the sync fallback and surfacing a visible "home/work"
+    mismatch on consecutive rows.
+
+    The fix is to match ordinally: sort both lists, walk them in lockstep,
+    advancing the event pointer past candidates that can't plausibly fit
+    the current trip. Each event is consumed at most once per endpoint,
+    so adjacent trips can never fight over the same event side.
+
+    Small negative delta (-5 min) is tolerated to absorb clock skew —
+    polling lag is overwhelmingly *positive*, but occasionally the
+    server's hhmmss sits a hair behind our sync timestamp.
     """
+    if not sdk_trips or not events:
+        return {}, {}
+
     tol = timedelta(minutes=tolerance_min)
-    from_evt, to_evt = None, None
-    best_from = best_to = tol + timedelta(seconds=1)  # "infinity"
-    for e in events:
-        if e.departed_at is not None:
-            d = abs(e.departed_at - start_time)
-            if d <= tol and d < best_from:
-                from_evt, best_from = e, d
-        if e.arrived_at is not None:
-            d = abs(e.arrived_at - end_time)
-            if d <= tol and d < best_to:
-                to_evt, best_to = e, d
-    return from_evt, to_evt
+    neg_slack = timedelta(minutes=5)
+
+    trips_sorted = sorted(sdk_trips, key=lambda t: t.start_time)
+    dep_events = sorted([e for e in events if e.departed_at is not None],
+                        key=lambda e: e.departed_at)
+    arr_events = sorted([e for e in events if e.arrived_at is not None],
+                        key=lambda e: e.arrived_at)
+
+    from_by_id = {}
+    to_by_id = {}
+
+    # ── "from" pairing: trip.start_time ↔ event.departed_at ───────────
+    ei = 0
+    for t in trips_sorted:
+        # Advance past any event that can't possibly fit this trip or a
+        # later one — i.e. whose departed_at is more than neg_slack
+        # before the current trip's start (which would mean the event
+        # fired *before* the trip began, a polling anomaly, or more
+        # likely that this event already belongs to an earlier trip).
+        while ei < len(dep_events) and \
+              dep_events[ei].departed_at < t.start_time - neg_slack:
+            ei += 1
+        if ei >= len(dep_events):
+            break
+        cand = dep_events[ei]
+        delta = cand.departed_at - t.start_time
+        if -neg_slack <= delta <= tol:
+            from_by_id[t.id] = cand
+            ei += 1
+        # else: no match for this trip; keep ei where it is, next trip
+        # may still want this event (delta > tol means the event is far
+        # in the future relative to us).
+
+    # ── "to" pairing: trip.end_time ↔ event.arrived_at ────────────────
+    ei = 0
+    for t in trips_sorted:
+        end = _trip_end_time(t)
+        while ei < len(arr_events) and \
+              arr_events[ei].arrived_at < end - neg_slack:
+            ei += 1
+        if ei >= len(arr_events):
+            break
+        cand = arr_events[ei]
+        delta = cand.arrived_at - end
+        if -neg_slack <= delta <= tol:
+            to_by_id[t.id] = cand
+            ei += 1
+
+    return from_by_id, to_by_id
 
 
 _SYNC_ENRICH_TOLERANCE_MIN = 120
@@ -328,7 +390,8 @@ def _event_to_dict(evt, include_departed: bool = False):
 
 
 def _sdk_trip_to_dict(trip: 'VehicleTrip',
-                      events: list,
+                      from_evt,
+                      to_evt,
                       regen_lookup,
                       sync_list,
                       locations,
@@ -337,15 +400,15 @@ def _sdk_trip_to_dict(trip: 'VehicleTrip',
     ParkingEvent-derived trips use, so the template stays uniform.
 
     Two-tier location enrichment:
-    1. Nearest ParkingEvent (±30 min, best data — has SoC/odo/label).
+    1. ParkingEvent assigned to this trip by ``_assign_events_to_trips``
+       (exclusive per endpoint, prevents cross-matching across adjacent
+       short trips).
     2. Nearest VehicleSync GPS (±2 h, only lat/lon + reverse-geocode).
     3. Unknown-location stub (label='unknown', UI shows 'Ort unbekannt').
     """
     start = trip.start_time
     total_min = (trip.drive_minutes or 0) + (trip.idle_minutes or 0)
     end = start + timedelta(minutes=total_min) if total_min > 0 else start
-
-    from_evt, to_evt = _enrich_from_parking(start, end, events)
 
     # SoC / regen are only derivable when we have both endpoints from
     # the polling data; SDK trips by themselves don't carry SoC.
@@ -441,8 +504,13 @@ def get_trips(limit: Optional[int] = None,
     locations = _load_locations()
     language = AppConfig.get('app_language', 'de')
 
-    trips = [_sdk_trip_to_dict(row, events, regen_lookup,
-                               sync_list, locations, language)
+    # Exclusive event-to-trip assignment. Each parking_event ends up
+    # claimed by at most one SDK trip per endpoint, so adjacent short
+    # trips don't cross-match (see docstring on _assign_events_to_trips).
+    from_by_id, to_by_id = _assign_events_to_trips(sdk_rows, events)
+
+    trips = [_sdk_trip_to_dict(row, from_by_id.get(row.id), to_by_id.get(row.id),
+                               regen_lookup, sync_list, locations, language)
              for row in sdk_rows]
 
     # Fallback: ParkingEvent-pair derivation for days without SDK data.

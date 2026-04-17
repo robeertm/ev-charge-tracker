@@ -1,5 +1,21 @@
 # Changelog
 
+## v2.24.3 (2026-04-17)
+
+### Trip log: sequential 2-pointer matcher fixes adjacent-trip cross-matches
+
+v2.24.2's enrichment looked up the nearest-by-abs-delta parking event for each SDK trip independently, which broke down when two short trips boundaried each other inside the 60-minute matching tolerance. Concrete case on ev-robert from 2026-04-17: the 15:47 trip latched onto the 15:32 `work.departed_at` (polling lag from the previous trip leaving work), pushing the 15:03 trip into the sync fallback and surfacing a visible "home/work" mismatch on consecutive rows.
+
+Replaced the independent per-trip search with an **ordinal two-pointer merge**:
+
+1. Sort SDK trips by start_time.
+2. Sort parking events by departed_at (and separately by arrived_at).
+3. Walk both lists in lockstep. For each trip, advance the event pointer past events whose timestamp is more than 5 minutes BEFORE the current trip (can't belong to us). If the current event is within the 60-minute forward tolerance, claim it and advance both. If not, leave the trip without a parking match (falls to VehicleSync fallback → 'unknown').
+
+Why this works: our parking-event timestamps always LAG the SDK's authoritative trip boundary (polling notices movement N minutes after it happened). That's an asymmetric relationship, not a symmetric one — a proper matcher has to respect the order. Each parking-event endpoint is consumed at most once per side, so adjacent trips can never fight over the same event.
+
+Verified on ev-robert: consecutive-pair label consistency jumped from 8/13 to 12/13 across the last 14 days. The remaining mismatch on 2026-04-16 is a legitimate data gap (the SDK doesn't report a trip between the "other" arrival at 15:52 and the "home" departure at 16:10 — which would imply a 3rd trip the server didn't record). That's a question for the Bluelink server, not the matcher.
+
 ## v2.24.2 (2026-04-17)
 
 ### Trip log: honest "unknown location" + VehicleSync fallback for SDK trips
