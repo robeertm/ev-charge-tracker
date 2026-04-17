@@ -226,12 +226,35 @@ def _get_battery_kwh():
 # Built-in Anbieter/CPO list — the common German + European operators.
 # Users can add custom entries via /api/providers/custom which are stored
 # in AppConfig as a JSON list and merged in.
-DEFAULT_OPERATORS = [
+# Default charge-operator dropdown. Real brand names are culture-neutral
+# and stay as-is in every language. The three generic "labels" at the tail
+# ("Home / private", "Work", "Other") are translated via `set.op_*` keys
+# so an English user sees "Home / private" instead of "Zuhause / privat".
+# `Stadtwerke` is left as-is because it's used in Germany as a near-brand
+# tag (any of the many municipal utilities); translating to "Municipal
+# utility" would be less recognisable than the German original.
+_DEFAULT_OPERATOR_BRANDS = [
     'IONITY', 'EnBW mobility+', 'Aral pulse', 'Tesla Supercharger',
     'Shell Recharge', 'Allego', 'Fastned', 'Elli (VW)', 'EWE Go',
     'Maingau EinfachStromLaden', 'Lidl', 'Kaufland', 'Aldi Süd',
-    'REWE', 'Mer', 'Stadtwerke', 'Zuhause / privat', 'Arbeit', 'Sonstiges',
+    'REWE', 'Mer', 'Stadtwerke',
 ]
+_DEFAULT_OPERATOR_GENERICS = ['op_home_private', 'op_work', 'op_other']
+
+
+def get_default_operators():
+    """Built-in charge-operator list, localised to the user's current
+    language. Returned fresh on every call because the app language
+    can change at runtime via the settings page."""
+    from services.i18n import t as _t
+    return (_DEFAULT_OPERATOR_BRANDS
+            + [_t(f'set.{key}') for key in _DEFAULT_OPERATOR_GENERICS])
+
+
+# Kept for backwards-compat in case any downstream code still expects a
+# list constant. Callers that need the live-localised view should use
+# `get_default_operators()` instead.
+DEFAULT_OPERATORS = _DEFAULT_OPERATOR_BRANDS
 
 
 def _get_custom_operators():
@@ -302,7 +325,7 @@ def _get_operator_list():
     names show first."""
     seen = set()
     out = []
-    for name in list(DEFAULT_OPERATORS) + _get_custom_operators():
+    for name in get_default_operators() + _get_custom_operators():
         key = name.lower()
         if key in seen:
             continue
@@ -481,7 +504,7 @@ def register_routes(app):
         new_pass_confirm = (data.get('new_passphrase_confirm') or '').strip()
 
         if new_pass != new_pass_confirm:
-            return jsonify({'error': 'Neue Passphrase und Bestätigung stimmen nicht überein.'}), 400
+            return jsonify({'error': t('err.passphrase_mismatch')}), 400
 
         ok, msg = change_luks_passphrase(old_pass, new_pass)
         if not ok:
@@ -514,9 +537,9 @@ def register_routes(app):
         confirm = data.get('password_confirm') or ''
 
         if not username:
-            return jsonify({'error': 'Benutzername darf nicht leer sein.'}), 400
+            return jsonify({'error': t('err.username_empty')}), 400
         if password != confirm:
-            return jsonify({'error': 'Neues Passwort und Bestätigung stimmen nicht überein.'}), 400
+            return jsonify({'error': t('err.new_password_mismatch')}), 400
 
         try:
             set_credentials(username, password)
@@ -534,7 +557,7 @@ def register_routes(app):
         if state.get('luks_done') and state.get('weblogin_done'):
             complete_setup()
 
-        return jsonify({'ok': True, 'message': 'Web-Login angelegt.', 'redirect': '/'})
+        return jsonify({'ok': True, 'message': t('msg.web_login_created'), 'redirect': '/'})
 
     @app.route('/api/health', methods=['GET'])
     def api_health():
@@ -601,14 +624,14 @@ def register_routes(app):
         password = data.get('password') or ''
         confirm = data.get('password_confirm') or ''
         if password != confirm:
-            return jsonify({'error': 'Passwörter stimmen nicht überein.'}), 400
+            return jsonify({'error': t('err.password_mismatch')}), 400
         try:
             set_credentials(username, password)
         except ValueError as e:
             return jsonify({'error': str(e)}), 400
         # Log the owner in immediately so they don't lock themselves out.
         login_user(username)
-        return jsonify({'ok': True, 'message': 'Zugangsschutz aktiviert.'})
+        return jsonify({'ok': True, 'message': t('msg.auth_enabled')})
 
     @app.route('/api/auth/disable', methods=['POST'])
     def api_auth_disable():
@@ -618,7 +641,7 @@ def register_routes(app):
         if not is_logged_in():
             return jsonify({'error': 'nicht eingeloggt'}), 401
         disable_auth()
-        return jsonify({'ok': True, 'message': 'Zugangsschutz deaktiviert.'})
+        return jsonify({'ok': True, 'message': t('msg.auth_disabled')})
 
     @app.route('/api/auth/change_password', methods=['POST'])
     def api_auth_change_password():
@@ -632,15 +655,15 @@ def register_routes(app):
         new_pw = data.get('new_password') or ''
         confirm = data.get('new_password_confirm') or ''
         if new_pw != confirm:
-            return jsonify({'error': 'Neue Passwörter stimmen nicht überein.'}), 400
+            return jsonify({'error': t('err.new_password_mismatch')}), 400
         username = get_username()
         if not verify_credentials(username, current):
-            return jsonify({'error': 'Aktuelles Passwort falsch.'}), 400
+            return jsonify({'error': t('err.current_password_wrong')}), 400
         try:
             set_credentials(username, new_pw)
         except ValueError as e:
             return jsonify({'error': str(e)}), 400
-        return jsonify({'ok': True, 'message': 'Passwort geändert.'})
+        return jsonify({'ok': True, 'message': t('msg.password_changed')})
 
     # ── BACKUP & RESTORE (DB export / import) ────────────────
     # Exports and imports the SQLite DB at data/ev_tracker.db. Contains
@@ -654,7 +677,7 @@ def register_routes(app):
         from sqlalchemy import text as _text
         db_path = Path(DATA_DIR) / 'ev_tracker.db'
         if not db_path.is_file():
-            return jsonify({'error': 'Datenbank-Datei nicht gefunden.'}), 404
+            return jsonify({'error': t('err.db_file_not_found')}), 404
         # Force SQLite to flush any pending writes so the export file is
         # consistent. checkpoint is cheap for an idle DB.
         try:
@@ -685,7 +708,7 @@ def register_routes(app):
 
         up = request.files.get('backup')
         if not up or not up.filename:
-            return jsonify({'error': 'Keine Datei hochgeladen.'}), 400
+            return jsonify({'error': t('err.no_file_uploaded')}), 400
 
         tmp = _tempfile.NamedTemporaryFile(
             prefix='ev-tracker-import-', suffix='.db', delete=False
@@ -706,7 +729,7 @@ def register_routes(app):
             except _sqlite3.DatabaseError:
                 os.unlink(tmp.name)
                 return jsonify({
-                    'error': 'Datei ist keine gültige SQLite-Datenbank.'
+                    'error': t('err.not_valid_sqlite')
                 }), 400
 
             required = {'charges', 'app_config', 'vehicle_syncs'}
@@ -767,7 +790,7 @@ def register_routes(app):
                     os.unlink(tmp.name)
             except Exception:
                 pass
-            return jsonify({'error': f'Import fehlgeschlagen: {e}'}), 500
+            return jsonify({'error': t('err.import_failed', error=str(e))}), 500
 
     # ── Notify settings (ntfy.sh reboot alerts) ──────────────────
     # Config lives outside the encrypted volume at /var/lib/ev-tracker/notify.json
@@ -807,8 +830,8 @@ def register_routes(app):
             return jsonify({'error': 'unattended-upgrades ist auf diesem System nicht installiert.'}), 400
         started = system_update_service.start_apply()
         if not started:
-            return jsonify({'error': 'Ein Update-Job läuft bereits.'}), 409
-        return jsonify({'ok': True, 'message': 'Security-Updates werden im Hintergrund installiert …'})
+            return jsonify({'error': t('err.update_job_running')}), 409
+        return jsonify({'ok': True, 'message': t('msg.security_updates_started')})
 
     @app.route('/api/system/reboot', methods=['POST'])
     def api_system_reboot():
@@ -825,7 +848,7 @@ def register_routes(app):
         topic = (data.get('topic') or '').strip()
         server = (data.get('server') or '').strip() or 'https://ntfy.sh'
         if not topic:
-            return jsonify({'error': 'Topic fehlt'}), 400
+            return jsonify({'error': t('err.topic_missing')}), 400
         ok, info = notify_service.send(
             topic=topic,
             server=server,
@@ -1127,8 +1150,11 @@ def register_routes(app):
                         continue
                     if builtins[i] != '1' and name not in custom_list:
                         # Skip names that collide with built-ins to avoid
-                        # duplicate dropdown entries.
-                        if name not in DEFAULT_OPERATORS:
+                        # duplicate dropdown entries. Compare against the
+                        # language-agnostic brand list AND the currently
+                        # localised generic labels so switching languages
+                        # later doesn't resurrect an already-hidden entry.
+                        if name not in _DEFAULT_OPERATOR_BRANDS and name not in get_default_operators():
                             custom_list.append(name)
                     raw_price = (prices[i] if i < len(prices) else '') or ''
                     raw_price = raw_price.replace(',', '.').strip()
@@ -1416,7 +1442,7 @@ def register_routes(app):
                                auth_username=AppConfig.get('auth_username', ''),
                                hide_ssl_card=hide_ssl_card,
                                custom_operators_text=_get_custom_operators_text(),
-                               operators_builtin=DEFAULT_OPERATORS,
+                               operators_builtin=get_default_operators(),
                                operators_custom=_get_custom_operators(),
                                operator_prices=_get_operator_prices(),
                                _json_logical_field_labels=_json_logical_field_labels_for_ui(),
@@ -1613,7 +1639,7 @@ def register_routes(app):
         data = request.get_json() or {}
         brand = data.get('brand') or AppConfig.get('vehicle_api_brand', '')
         if brand not in ('kia', 'hyundai'):
-            return jsonify({'error': 'Nur für Kia/Hyundai verfügbar'}), 400
+            return jsonify({'error': t('err.kia_hyundai_only')}), 400
         AppConfig.set('vehicle_api_brand', brand)
         from services.vehicle.token_fetch import start_fetch
         if start_fetch(brand):
@@ -1643,7 +1669,7 @@ def register_routes(app):
         brand = data.get('brand') or AppConfig.get('vehicle_api_brand', '')
         url = data.get('url') or ''
         if brand not in ('kia', 'hyundai'):
-            return jsonify({'error': 'Nur für Kia/Hyundai verfügbar'}), 400
+            return jsonify({'error': t('err.kia_hyundai_only')}), 400
         from services.vehicle.token_fetch import exchange_manual_url
         ok, msg, token = exchange_manual_url(brand, url)
         if ok and token:
@@ -1659,7 +1685,7 @@ def register_routes(app):
         ?code=... URL). Frontend uses these as clickable links."""
         brand = request.args.get('brand', '')
         if brand not in ('kia', 'hyundai'):
-            return jsonify({'error': 'Nur für Kia/Hyundai verfügbar'}), 400
+            return jsonify({'error': t('err.kia_hyundai_only')}), 400
         from services.vehicle.token_fetch import (
             BRAND_CONFIG, _build_login_url, get_manual_step2_url,
         )

@@ -467,15 +467,15 @@
                                     <div class="mt-2 small">
                                         <ol class="mb-2 ps-3">
                                             <li class="mb-2">
-                                                <strong>Schritt 1:</strong> Login-URL in <u>deinem eigenen Browser</u> öffnen (nicht noVNC), einloggen, reCAPTCHA lösen:<br>
+                                                <strong>{{ t('set.api_token_step1_title') }}</strong> {{ t('set.api_token_step1_body') }}<br>
                                                 <a href="#" id="tokenStep1Link" target="_blank" rel="noopener" class="small text-break"></a>
                                             </li>
                                             <li class="mb-2">
-                                                <strong>Schritt 2:</strong> <em>Im gleichen Browser</em> diese zweite URL öffnen. Sie redirected per 302 automatisch, weil du schon eingeloggt bist. Die Ziel-URL enthält <code>?code=...</code>:<br>
+                                                <strong>{{ t('set.api_token_step2_title') }}</strong> {{ t('set.api_token_step2_body') }} <code>?code=...</code>:<br>
                                                 <a href="#" id="tokenStep2Link" target="_blank" rel="noopener" class="small text-break"></a>
                                             </li>
                                             <li>
-                                                <strong>Schritt 3:</strong> Komplette URL aus deiner Adressleiste (die mit <code>prd.eu-ccapi</code>) kopieren und hier einfügen:
+                                                <strong>{{ t('set.api_token_step3_title') }}</strong> {{ t('set.api_token_step3_body') }} <code>prd.eu-ccapi</code>:
                                             </li>
                                         </ol>
                                     </div>
@@ -665,6 +665,10 @@
                     api_starting: {{ t('set.api_starting')|tojson }},
                     api_fetch_token: {{ t('set.api_fetch_token')|tojson }},
                     api_token_saved: {{ t('set.api_token_saved')|tojson }},
+                    api_token_paste_url_empty: {{ t('set.api_token_paste_url_empty')|tojson }},
+                    api_token_paste_exchanging: {{ t('set.api_token_paste_exchanging')|tojson }},
+                    api_token_paste_saved: {{ t('set.api_token_paste_saved')|tojson }},
+                    api_token_paste_error_generic: {{ t('set.api_token_paste_error_generic')|tojson }},
                     api_installing: {{ t('set.api_installing')|tojson }},
                     api_installed: {{ t('set.api_installed')|tojson }},
                     api_retry: {{ t('set.api_retry')|tojson }},
@@ -878,8 +882,8 @@
                     if (btnPaste && inPaste) {
                         btnPaste.addEventListener('click', async () => {
                             const url = inPaste.value.trim();
-                            if (!url) { pasteStatus.innerHTML = '<span class="text-danger">URL leer</span>'; return; }
-                            pasteStatus.innerHTML = '<span class="text-primary"><span class="spinner-border spinner-border-sm me-1"></span>Tausche Code gegen Token...</span>';
+                            if (!url) { pasteStatus.innerHTML = '<span class="text-danger">' + T.api_token_paste_url_empty + '</span>'; return; }
+                            pasteStatus.innerHTML = '<span class="text-primary"><span class="spinner-border spinner-border-sm me-1"></span>' + T.api_token_paste_exchanging + '</span>';
                             btnPaste.disabled = true;
                             try {
                                 const brand = document.getElementById('vehicle_api_brand').value;
@@ -890,10 +894,10 @@
                                 });
                                 const d = await r.json();
                                 if (r.ok && d.success) {
-                                    pasteStatus.innerHTML = '<span class="text-success fw-bold"><i class="bi bi-check-circle"></i> Token gespeichert. Seite wird neu geladen...</span>';
+                                    pasteStatus.innerHTML = '<span class="text-success fw-bold"><i class="bi bi-check-circle"></i> ' + T.api_token_paste_saved + '</span>';
                                     setTimeout(() => location.reload(), 1500);
                                 } else {
-                                    pasteStatus.innerHTML = '<span class="text-danger">' + (d.error || 'Fehler') + '</span>';
+                                    pasteStatus.innerHTML = '<span class="text-danger">' + (d.error || T.api_token_paste_error_generic) + '</span>';
                                     btnPaste.disabled = false;
                                 }
                             } catch(e) {

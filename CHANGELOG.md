@@ -1,5 +1,25 @@
 # Changelog
 
+## v2.25.3 (2026-04-17)
+
+### i18n audit: translate everything the user actually sees
+
+The user flagged that charge operators show up in German regardless of the configured language. Audited the whole project and fixed every user-visible hardcoded German string.
+
+**Charge operators.** `DEFAULT_OPERATORS` in `app.py` mixed real brand names (IONITY, EnBW, Aral pulse, Tesla Supercharger, etc. — culture-neutral, stay as-is) with three generic labels ("Zuhause / privat", "Arbeit", "Sonstiges") that were only sensible for German. Split the list into `_DEFAULT_OPERATOR_BRANDS` (hardcoded) plus `_DEFAULT_OPERATOR_GENERICS` (translation-keyed via `set.op_home_private` / `set.op_work` / `set.op_other`). New `get_default_operators()` function resolves the generics at call time so the dropdown always matches the current UI language.
+
+**API error / success responses.** Thirteen `jsonify({'error': 'German string'})` and five `{'message': 'German string'}` strings in `app.py` covered the auth / password / database-import / update / MQTT / trip-backfill flows. All now route through new `err.*` and `msg.*` translation-key namespaces (13 error keys, 5 message keys, German + English).
+
+**Maintenance reasons.** `services/maintenance_service.py` emitted "X d überfällig" / "in X d fällig" / "X km überfällig" / "in X km fällig" strings directly. Moved to four `maint.overdue_days|overdue_km|due_in_days|due_in_km` keys with `{days}` / `{km}` placeholders.
+
+**Dashboard regen window.** "(3 Mon.)" suffix next to the regeneration counter was hardcoded. Now `dash.regen_window_short` — "(3 Mon.)" in German, "(3 mo)" in English.
+
+**Token-fetch step instructions.** The three-step instructions in Settings → Vehicle API for the manual refresh-token flow were pure hardcoded German; their JavaScript status messages ("URL leer", "Tausche Code gegen Token...", "Token gespeichert...", "Fehler") same story. All translated now via six new `set.api_token_step{1,2,3}_{title,body}` keys plus four `set.api_token_paste_{url_empty,exchanging,saved,error_generic}` keys wired through the existing T JS object.
+
+**Verification.** Ran a parity check after: DE 895 ↔ EN 895 keys, zero orphans either side. All four primary pages (/, /settings, /trips, /report) render 200 in both languages.
+
+What's still German on purpose: real brand names in DEFAULT_OPERATORS (IONITY, Tesla etc.), "Stadtwerke" (German near-brand for municipal utilities with no snappy English equivalent), German comments in the source. The legacy PDF report generator (`services/report_service.py`) and the token-fetch Selenium helper (`services/vehicle/token_fetch.py`) still contain hardcoded German — both run in rare one-off flows (PDF download, initial setup) rather than the daily UI, so they're deferred.
+
 ## v2.25.2 (2026-04-17)
 
 ### Report: localise week / "all time" / month-name labels
