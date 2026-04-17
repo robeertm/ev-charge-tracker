@@ -1,5 +1,27 @@
 # Changelog
 
+## v2.20.4 (2026-04-17)
+
+### Hotfix: Dashboard-Crash bei Ladungen ohne Kostenwert
+
+Produktiv-User meldete „Internal Server Error" beim Aufrufen des Dashboards, kam nicht mehr in die App.
+
+**Ursache:** In [services/stats_service.py:268](services/stats_service.py#L268) prüft die Monatsstatistik bei der Berechnung von `cost_per_kwh` nur, ob `r.kwh > 0` ist — nicht ob `r.cost` NULL ist. Sobald eine Ladung mit `kwh_loaded` aber ohne `total_cost` in der DB liegt (typisch bei PV-Ladungen oder noch nicht nachgetragenem Preis), knallt die Division:
+
+```
+TypeError: unsupported operand type(s) for /: 'NoneType' and 'float'
+```
+
+Der Dashboard-Handler aggregiert Monatsstatistiken beim Rendern → jede Anfrage → 500.
+
+**Fix:** Check erweitert auf `if r.cost and r.kwh and r.kwh > 0` — bei fehlendem Kostenwert wird `cost_per_kwh: 0` zurückgegeben, analog zum bereits bestehenden `round(r.cost or 0, 2)` eine Zeile darüber.
+
+Keine DB-Migration nötig. Kein Breaking-Change. Eine einzige Zeile.
+
+Betroffen: alle User mit mindestens einer Ladung wo `total_cost` NULL ist und `kwh_loaded > 0`.
+
+---
+
 ## v2.20.3 (2026-04-16)
 
 ### Fahrzeughistorie: echte Frames pro Plot, Vollbild funktioniert, Karte erscheint auch bei Cached-Sync

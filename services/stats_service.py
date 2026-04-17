@@ -265,7 +265,7 @@ def get_monthly_stats():
             'count': r.count,
             'km': km,
             'avg_loss_pct': round(r.avg_loss_pct or 0, 1),
-            'cost_per_kwh': round((r.cost / r.kwh), 2) if r.kwh and r.kwh > 0 else 0,
+            'cost_per_kwh': round((r.cost / r.kwh), 2) if r.cost and r.kwh and r.kwh > 0 else 0,
         })
     return months
 
