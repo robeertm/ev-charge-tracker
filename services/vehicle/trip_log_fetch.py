@@ -234,7 +234,8 @@ def backfill(days: int = DEFAULT_BACKFILL_DAYS) -> dict:
         d = today - timedelta(days=i)
         r = fetch_day_trip_info(d)
         results.append(r)
-        if r.get('skipped_reason', '').startswith('daily API budget'):
+        reason = r.get('skipped_reason') or ''
+        if reason.startswith('daily API budget'):
             stopped_early = True
             break
     AppConfig.set('last_trip_fetch_at', datetime.now().isoformat())

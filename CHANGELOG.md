@@ -1,5 +1,13 @@
 # Changelog
 
+## v2.24.1 (2026-04-17)
+
+### Hotfix: 30-day SDK backfill crashed on the first clean day
+
+The `backfill()` helper checked `r.get('skipped_reason', '').startswith(...)` to detect API-quota stops — but the normal-case code path explicitly sets `skipped_reason` to `None`, so `dict.get(key, '')` happily returned `None` (the present-but-None case), and the `.startswith` call blew up on the first successful day. The 30-day button therefore never got past the first fetch.
+
+One-line fix: `reason = r.get('skipped_reason') or ''` before the `startswith` check, so both "key absent" and "key is None" resolve to an empty string.
+
 ## v2.24.0 (2026-04-17)
 
 ### Driving log: pull trips directly from the Kia/Hyundai server
