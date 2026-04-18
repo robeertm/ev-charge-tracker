@@ -1,5 +1,23 @@
 # Changelog
 
+## v2.26.0 (2026-04-18)
+
+### Trip log: ParkingEvent-primary again, SDK demoted to manual backfill
+
+v2.24 had made the Kia/Hyundai `update_day_trip_info` SDK endpoint the *primary* source for the trip list, with ParkingEvent pairs doing GPS enrichment underneath. In steady state this worked, but whenever polling was sparser than the SDK's trip count — either because smart-sync was narrowed, or simply because short back-to-back trips clustered faster than the poll interval — the unmatched SDK rows fell through to "Ort unbekannt" instead of a real address. The user reported this as a regression: the pre-v2.24 ParkingEvent-pair view had shown fewer (merged) trips but *every* trip had a location.
+
+Back to ParkingEvent pairs as the source of truth. `services/trips_service.get_trips()` now iterates `parking_events` pairwise exactly like it did in v2.23, and only falls back to SDK `vehicle_trips` rows on dates where zero ParkingEvent pairs exist (i.e. historical days from before polling was on). Where a polled trip's `departed_at` lines up within 60 min of an SDK row's `start_time`, the SDK row's stats (drive/idle minutes, avg/max speed) ride along as extra detail on the polled trip — best of both worlds.
+
+**SoC calculation bug fix.** While rewriting `get_trips` I noticed the pre-existing SoC delta was wrong: it used `prev.soc_arrived` (SoC when the car arrived at the *start* location, possibly captured pre-charge) minus `curr.soc_arrived` (SoC at trip end). If the user charged between arriving at and leaving the start location, the "used" SoC included the charge and got clamped to 0 by the `max(..., 0)`. Changed to `prev.soc_departed` (SoC captured by the sync that first noticed the car leaving), falling back to `prev.soc_arrived` only when no departure sync fired. Values now match what the Bluelink/UVO app reports.
+
+**Auto-fetch disabled.** `maybe_auto_fetch()` was called from `services/vehicle/sync_service._save_vehicle_sync` after every successful poll (rate-limited to 1×/h), silently pulling SDK trip-info. Since the SDK rows now only show as a fallback, there's no reason to keep burning API calls on auto-fetches for days that already have polling coverage. Removed the hook from the sync loop; the "Vom Fahrzeug-Server laden" button in Settings → Trips still works for manual backfilling of historical days. Corresponding helpers `fetch_recent` / `maybe_auto_fetch` and the `TODAY_REFRESH_AFTER_MIN` constant were deleted from `services/vehicle/trip_log_fetch.py`.
+
+**Dead code removal.** `_assign_events_to_trips` (the 2-pointer merge introduced in v2.24.3), `_sdk_trip_to_dict`, `_load_sync_gps`, `_nearest_sync`, `_sync_point_to_dict`, and the `_SYNC_ENRICH_TOLERANCE_MIN` / `PARKING_MATCH_TOLERANCE_MIN` constants all supported the SDK-as-primary flow that no longer runs. Stripped them out. `_event_to_dict` simplified — no more need to handle `evt is None`.
+
+**Template.** `templates/trips.html` used to show the cloud-check icon only on `source == 'sdk'` rows; now it shows whenever `drive_min` is present, i.e. on polled trips with SDK stats attached *and* on SDK-only historical rows. The tooltip also picks up `avg_speed_kmh` / `max_speed_kmh`.
+
+**User-observed effect.** On ev-robert today the log shows 2 PE-pair trips (home → Elbepark → home) instead of the 1 consolidated SDK round-trip — matches what polling actually captured. On ev-dirk where polling is sparser (smart-mode never got turned on explicitly), some days will now show fewer PE-pair trips than SDK had on record; user can enable smart-mode for denser polling, or manually backfill historical days if needed.
+
 ## v2.25.3 (2026-04-17)
 
 ### i18n audit: translate everything the user actually sees

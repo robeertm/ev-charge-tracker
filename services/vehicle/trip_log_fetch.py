@@ -1,7 +1,7 @@
 """Fetch per-trip data from Kia UVO / Hyundai Bluelink servers.
 
-The hyundai_kia_connect_api SDK exposes `update_day_trip_info(vehicle_id,
-yyyymmdd)` which hits the `/spa/vehicles/<id>/tripinfo` endpoint — the
+The hyundai_kia_connect_api SDK exposes ``update_day_trip_info(vehicle_id,
+yyyymmdd)`` which hits the ``/spa/vehicles/<id>/tripinfo`` endpoint — the
 same server-side cache the Bluelink/UVO mobile apps read from. The car
 itself uploads a trip record at the end of every drive as part of its
 normal telemetry, independent of anything we do, so this pull:
@@ -12,11 +12,11 @@ normal telemetry, independent of anything we do, so this pull:
   - costs exactly one API call per day requested, counted against the
     200/vehicle daily quota the rest of this app already observes.
 
-This replaces the coarser ParkingEvent-polling derivation for Kia/Hyundai
-vehicles. The polling-based trip log still runs as a fallback for days
-without SDK data and provides the GPS from/to enrichment (the SDK's
-TripInfo payload is GPS-free — the apps look location data up through a
-separate endpoint we don't need).
+Since v2.26 this is a **manual backfill tool only**. The primary trip
+log is ParkingEvent-pair based (polled GPS) — see services/trips_service
+for the rationale. SDK rows surface in the UI only on historical days
+where zero ParkingEvent pairs exist, and as stats enrichment (drive/idle
+minutes, avg/max speed) on polled trips whose start time matches.
 """
 from __future__ import annotations
 
@@ -31,10 +31,6 @@ logger = logging.getLogger(__name__)
 # Only Kia UVO and Hyundai Bluelink currently expose trip-info endpoints
 # in the EU region we target. Other brands stay on the ParkingEvent path.
 SDK_TRIP_BRANDS = {'kia', 'hyundai'}
-
-# How stale "today's" trip data may be before we re-fetch. One hour keeps
-# the log reasonably fresh while staying polite to the API quota.
-TODAY_REFRESH_AFTER_MIN = 60
 
 # Default backfill window when the user manually triggers one.
 DEFAULT_BACKFILL_DAYS = 30
@@ -175,52 +171,6 @@ def fetch_day_trip_info(target_date: date) -> dict:
         f"from server, +{out['added']} new / ~{out['updated']} updated"
     )
     return out
-
-
-def fetch_recent(days: int = 2) -> list[dict]:
-    """Refresh the last ``days`` days (including today).
-
-    Two calls per invocation covers the normal case — today (still in
-    flight, may gain trips) plus yesterday (finalised). Callers can pass
-    a larger ``days`` for initial backfill.
-    """
-    today = date.today()
-    results = []
-    for i in range(days):
-        d = today - timedelta(days=i)
-        results.append(fetch_day_trip_info(d))
-    return results
-
-
-def maybe_auto_fetch() -> Optional[dict]:
-    """Called from the background sync loop. Re-fetches today+yesterday
-    at most once per ``TODAY_REFRESH_AFTER_MIN``; otherwise a no-op.
-
-    Returns a summary dict of the fetch run, or None if skipped.
-    """
-    brand = AppConfig.get('vehicle_api_brand', '')
-    if brand not in SDK_TRIP_BRANDS:
-        return None
-
-    last = AppConfig.get('last_trip_fetch_at', '')
-    if last:
-        try:
-            last_dt = datetime.fromisoformat(last)
-            if (datetime.now() - last_dt) < timedelta(minutes=TODAY_REFRESH_AFTER_MIN):
-                return None
-        except ValueError:
-            pass
-
-    results = fetch_recent(days=2)
-    AppConfig.set('last_trip_fetch_at', datetime.now().isoformat())
-    total_added = sum(r['added'] for r in results)
-    total_updated = sum(r['updated'] for r in results)
-    return {
-        'days': len(results),
-        'added': total_added,
-        'updated': total_updated,
-        'results': results,
-    }
 
 
 def backfill(days: int = DEFAULT_BACKFILL_DAYS) -> dict:

@@ -106,9 +106,9 @@
                     <tr data-from-id="{{ tr.from.id }}" data-to-id="{{ tr.to.id }}" data-source="{{ tr.source or 'polled' }}">
                         <td class="small">
                             {% if tr.from.departed_at %}{{ tr.from.departed_at[:16] | replace('T', ' ') }}{% endif %}
-                            {% if tr.source == 'sdk' %}
+                            {% if tr.drive_min %}
                             <i class="bi bi-cloud-check text-info ms-1" style="font-size:.75rem"
-                               title="{{ t('trips.source_sdk') }}{% if tr.drive_min %} · {{ tr.drive_min }}min{% endif %}"></i>
+                               title="{{ t('trips.source_sdk') }} · {{ tr.drive_min }}min{% if tr.avg_speed_kmh %} · Ø {{ tr.avg_speed_kmh }}km/h{% endif %}{% if tr.max_speed_kmh %} · max {{ tr.max_speed_kmh }}km/h{% endif %}"></i>
                             {% endif %}
                         </td>
                         <td class="small trip-endpoint" data-evt-id="{{ tr.from.id }}" role="button"
