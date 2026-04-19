@@ -1,0 +1,16 @@
+# sudoers rules for the EV Charge Tracker service user.
+# Installed at /etc/sudoers.d/ev-tracker by deploy/install.sh.
+# Installer substitutes @@SERVICE_USER@@ with the configured user name.
+
+# Service restart from the in-app updater flow.
+@@SERVICE_USER@@ ALL=(root) NOPASSWD: /bin/systemctl restart ev-tracker.service
+
+# Security-updates flow (Settings → System Updates).
+@@SERVICE_USER@@ ALL=(root) NOPASSWD: /usr/bin/unattended-upgrade -v
+@@SERVICE_USER@@ ALL=(root) NOPASSWD: /usr/bin/unattended-upgrade --dry-run -v
+
+# Reboot button in the web UI.
+@@SERVICE_USER@@ ALL=(root) NOPASSWD: /sbin/shutdown -r now
+
+# Password change for the web-login user (not the OS user).
+@@SERVICE_USER@@ ALL=(root) NOPASSWD: /usr/sbin/chpasswd

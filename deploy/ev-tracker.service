@@ -1,0 +1,16 @@
+[Unit]
+Description=EV Charge Tracker
+After=network-online.target
+Wants=network-online.target
+ConditionPathExists=/srv/ev-data/app/venv/bin/python
+
+[Service]
+Type=simple
+User=ev-tracker
+WorkingDirectory=/srv/ev-data/app
+ExecStart=/srv/ev-data/app/venv/bin/python app.py
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

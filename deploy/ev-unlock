@@ -1,0 +1,68 @@
+#!/bin/bash
+# ev-unlock — open a second LUKS-encrypted disk and mount it at /srv/ev-data.
+#
+# Optional component: only install if you keep /srv/ev-data on its own
+# LUKS volume. The installer skips copying this file by default; copy
+# manually with: sudo install -m 755 deploy/ev-unlock /usr/local/bin/
+#
+# Flags:
+#   --stdin      Read passphrase from stdin instead of prompting (used by
+#                the web UI's unlock form so the passphrase never sits in
+#                a shell history or process-list argv).
+#   --no-start   Unlock + mount only; don't start ev-tracker.service. Use
+#                during boot before systemd is fully up.
+set -e
+
+STDIN_MODE=0
+NO_START=0
+for arg in "$@"; do
+    case "$arg" in
+        --stdin) STDIN_MODE=1 ;;
+        --no-start) NO_START=1 ;;
+    esac
+done
+
+maybe_start_service() {
+    if [ "$NO_START" = "0" ]; then
+        systemctl start ev-tracker.service
+    fi
+}
+
+if mountpoint -q /srv/ev-data; then
+    echo "bereits entsperrt und gemountet"
+    maybe_start_service
+    exit 0
+fi
+
+if cryptsetup status evdata >/dev/null 2>&1; then
+    mount /dev/mapper/evdata /srv/ev-data
+    maybe_start_service
+    exit 0
+fi
+
+# Auto-discover the data disk: the first non-root physical disk.
+ROOT_SRC=$(findmnt -n -o SOURCE / 2>/dev/null || echo "")
+ROOT_DEV=$(lsblk -no PKNAME "$ROOT_SRC" 2>/dev/null | head -1)
+DATA_DEV=""
+for d in $(lsblk -dno NAME,TYPE | awk '$2=="disk"{print $1}'); do
+    if [ "$d" != "$ROOT_DEV" ]; then
+        DATA_DEV="/dev/$d"
+        break
+    fi
+done
+if [ -z "$DATA_DEV" ]; then
+    echo "FEHLER: keine Daten-Disk gefunden" >&2
+    exit 1
+fi
+
+if [ "$STDIN_MODE" = "1" ]; then
+    PASSPHRASE=$(cat)
+    printf '%s' "$PASSPHRASE" | cryptsetup open "$DATA_DEV" evdata --key-file -
+else
+    cryptsetup open "$DATA_DEV" evdata
+fi
+
+mkdir -p /srv/ev-data
+mount /dev/mapper/evdata /srv/ev-data
+maybe_start_service
+echo "entsperrt (Data-Device: $DATA_DEV)"

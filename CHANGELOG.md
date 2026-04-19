@@ -1,5 +1,23 @@
 # Changelog
 
+## v2.28.0 (2026-04-19)
+
+### One-shot installer for new hosts
+
+Bringing up a new install used to mean manually stepping through: apt-get the right packages, create the `ev-tracker` user, clone the repo, build a venv, drop the systemd unit in place, write the sudoers file, enable and start the service. That's about 20 lines of shell and two or three things that are easy to get subtly wrong.
+
+Now it's one command. On any fresh Debian/Ubuntu host:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/robeertm/ev-charge-tracker/main/deploy/install.sh | sudo bash
+```
+
+The installer lives at `deploy/install.sh` and ships alongside three configuration artefacts (`deploy/ev-tracker.service`, `deploy/sudoers.ev-tracker`, `deploy/ev-unlock`) plus a README with env-var overrides, non-interactive usage, and LUKS setup notes. It's idempotent — rerunning it on an existing install pulls latest code and re-runs pip without touching the database.
+
+Tailscale install + `tailscale serve --https=443` is offered as an optional step at the end. Skip with `EV_WITH_TAILSCALE=0` or accept the interactive prompt.
+
+**What the installer does NOT do:** LUKS volume setup (the installer detects `/srv/ev-data` as an existing mount point and leaves the filesystem alone, but it won't create the encrypted volume for you), Debian base install, fail2ban rule tuning. Those are pre-install steps documented in `deploy/README.md` for the full-paranoia setup the reference installs use.
+
 ## v2.27.1 (2026-04-19)
 
 ### Translate `set.soh_baseline` / `set.soh_baseline_hint` into ES/FR/IT/NL
