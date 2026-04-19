@@ -1,5 +1,22 @@
 # Changelog
 
+## v2.27.0 (2026-04-19)
+
+### Battery SoH baseline — realistic percentage for Hyundai/Kia e-GMP
+
+On ev-dirk (Hyundai Ioniq 5 AWD LR, 800 V e-GMP platform) the dashboard has been showing SoH values around 125 % for the past months. Not a bug in our code — the Hyundai/Kia BMS on e-GMP vehicles reports `ev_battery_soh_percentage` against an internal warranty-floor reference (≈ 80 % of gross capacity), so a fresh battery reads ~125 % and degrades toward 100 % as it ages out of warranty. The vehicle_raw detail page already annotated this ("kia_soh_over_100" note), but the user-facing number was still the raw reading. Older 400 V platforms (Kia Niro EV — ev-robert) report against nominal capacity and show correct 100 %-ish values, so the quirk is specifically e-GMP.
+
+Added a user-configurable `battery_soh_baseline` setting (default 100; 125 for e-GMP). Scaling happens at display time (`scale_soh(raw) = raw / baseline * 100`) in `services/stats_service` — no DB migration, existing historical values in `vehicle_syncs.battery_soh_percent` stay raw and get rescaled on every render. Changing the baseline retroactively re-scales the whole history graph, so switching from 100 → 125 on an e-GMP install immediately makes the dashboard read ~100 % and the history curve shows the real degradation slope.
+
+Wired at:
+- `/api/vehicle/status` (`battery_soh` in the dashboard JSON)
+- `services.stats_service.get_vehicle_history` (`series.soh[]` and `summary.last.soh`)
+- `/vehicle/raw/<id>` (normalized panel now shows scaled + raw + baseline side-by-side)
+
+New Settings field in Vehicle section with a hint explaining the 100 vs 125 choice. Two new DE/EN translation keys (`set.soh_baseline`, `set.soh_baseline_hint`) — both keyspaces at 897 now.
+
+ev-dirk is pre-configured to `battery_soh_baseline=125` as part of this deploy.
+
 ## v2.26.0 (2026-04-18)
 
 ### Trip log: ParkingEvent-primary again, SDK demoted to manual backfill

@@ -1122,6 +1122,7 @@ def register_routes(app):
             elif action == 'save_car':
                 AppConfig.set('car_model', request.form.get('car_model', '').strip())
                 AppConfig.set('battery_kwh', request.form.get('battery_kwh', ''))
+                AppConfig.set('battery_soh_baseline', request.form.get('battery_soh_baseline', '100'))
                 AppConfig.set('max_ac_kw', request.form.get('max_ac_kw', ''))
                 AppConfig.set('battery_co2_per_kwh', request.form.get('battery_co2_per_kwh', ''))
                 AppConfig.set('fossil_co2_per_km', request.form.get('fossil_co2_per_km', ''))
@@ -1418,6 +1419,7 @@ def register_routes(app):
                                smart_active_interval_min=AppConfig.get('smart_active_interval_min', '10'),
                                last_vehicle_sync=last_sync,
                                battery_kwh=AppConfig.get('battery_kwh', str(Config.BATTERY_CAPACITY_KWH)),
+                               battery_soh_baseline=AppConfig.get('battery_soh_baseline', '100'),
                                max_ac_kw=AppConfig.get('max_ac_kw', ''),
                                battery_co2_per_kwh=AppConfig.get('battery_co2_per_kwh', '100'),
                                fossil_co2_per_km=AppConfig.get('fossil_co2_per_km', '164'),
@@ -1472,6 +1474,7 @@ def register_routes(app):
         VehicleSync row. Kia/Hyundai SoH >100% is annotated with a short
         explanation of the manufacturer's reserve-capacity quirk."""
         import json as _json
+        from services.stats_service import scale_soh, get_soh_baseline
         sync = VehicleSync.query.get_or_404(sync_id)
         raw_parsed = None
         raw_error = None
@@ -1484,7 +1487,9 @@ def register_routes(app):
             if raw_parsed is not None else (sync.raw_json or '')
         brand_key = AppConfig.get('vehicle_api_brand', '')
         # Normalized fields we already store in VehicleSync (for the
-        # info box above the JSON dump).
+        # info box above the JSON dump). battery_soh_percent is the
+        # scaled (user-facing) value; the raw BMS reading is kept in
+        # battery_soh_raw for reference.
         normalized = {
             'timestamp': sync.timestamp.isoformat(),
             'soc_percent': sync.soc_percent,
@@ -1493,7 +1498,9 @@ def register_routes(app):
             'charge_power_kw': sync.charge_power_kw,
             'estimated_range_km': sync.estimated_range_km,
             'battery_12v_percent': sync.battery_12v_percent,
-            'battery_soh_percent': sync.battery_soh_percent,
+            'battery_soh_percent': scale_soh(sync.battery_soh_percent),
+            'battery_soh_raw': sync.battery_soh_percent,
+            'battery_soh_baseline': get_soh_baseline(),
             'total_regenerated_kwh': sync.total_regenerated_kwh,
             'regen_cumulative_kwh': sync.regen_cumulative_kwh,
             'consumption_30d_kwh_per_100km': sync.consumption_30d_kwh_per_100km,
@@ -1502,6 +1509,7 @@ def register_routes(app):
         }
         soh_note = None
         if (sync.battery_soh_percent is not None and sync.battery_soh_percent > 100
+                and get_soh_baseline() == 100.0
                 and brand_key in ('kia', 'hyundai')):
             soh_note = 'kia_soh_over_100'
         return render_template('vehicle_raw.html',
@@ -1857,6 +1865,7 @@ def register_routes(app):
         try:
             from services.vehicle import get_connector
             from services.vehicle.sync_service import log_sync_result
+            from services.stats_service import scale_soh
             import json as _json
             creds = _get_vehicle_credentials()
             connector = get_connector(brand, creds)
@@ -1874,7 +1883,7 @@ def register_routes(app):
                 'is_locked': s.is_locked,
                 'range_km': s.estimated_range_km,
                 'battery_12v': s.battery_12v_percent,
-                'battery_soh': s.battery_soh_percent,
+                'battery_soh': scale_soh(s.battery_soh_percent),
                 'charge_limit_ac': s.charge_limit_ac,
                 'charge_limit_dc': s.charge_limit_dc,
                 'est_charge_min': s.est_charge_duration_min,

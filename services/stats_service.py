@@ -5,6 +5,33 @@ from sqlalchemy import func, extract
 from models.database import db, Charge, ThgQuota, AppConfig, VehicleSync
 
 
+def get_soh_baseline() -> float:
+    """Return the configured SoH baseline used to scale raw BMS readings.
+
+    Hyundai/Kia e-GMP vehicles (800 V platform — Ioniq 5/6, EV6, etc.)
+    report SoH against an internal warranty-floor reference rather than
+    the nominal pack capacity, yielding 120–130 % readings on fresh
+    batteries. Setting baseline=125 maps those back to a "100 % when new"
+    display. Older Kia/Hyundai 400 V models (e.g. Niro EV, Kona Electric)
+    report against nominal and need baseline=100 (the default)."""
+    try:
+        v = float(AppConfig.get('battery_soh_baseline', '100'))
+    except (ValueError, TypeError):
+        v = 100.0
+    return v if v > 0 else 100.0
+
+
+def scale_soh(raw):
+    """Apply the baseline scaling for display: raw / baseline * 100.
+    None pass-through. Output rounded to one decimal."""
+    if raw is None:
+        return None
+    try:
+        return round(float(raw) / get_soh_baseline() * 100.0, 1)
+    except (ValueError, TypeError):
+        return None
+
+
 def _measured_regen_rate_kwh_per_km():
     """Compute kWh recuperated per km from the last ~90 days of vehicle syncs.
 
@@ -338,7 +365,7 @@ def get_vehicle_history(days=None):
         'range_km': [r.estimated_range_km for r in rows],
         'odometer_km': [r.odometer_km for r in rows],
         'battery_12v': [r.battery_12v_percent for r in rows],
-        'soh': [r.battery_soh_percent for r in rows],
+        'soh': [scale_soh(r.battery_soh_percent) for r in rows],
         # Cumulative (monotonic) — real measured recup since tracking started
         'regen_kwh': [r.regen_cumulative_kwh for r in rows],
         # Raw rolling 3-month window value (kept for reference / tooltips)
@@ -358,7 +385,7 @@ def get_vehicle_history(days=None):
             'range_km': last.estimated_range_km,
             'odometer_km': last.odometer_km,
             'battery_12v': last.battery_12v_percent,
-            'soh': last.battery_soh_percent,
+            'soh': scale_soh(last.battery_soh_percent),
             'regen_kwh': last.regen_cumulative_kwh,
             'regen_3mo': last.total_regenerated_kwh,
             'consumption_30d': last.consumption_30d_kwh_per_100km,

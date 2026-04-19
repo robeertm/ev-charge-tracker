@@ -714,6 +714,8 @@
   "set.recup_measured": "Measured (90 days)",
   "set.recup_rate": "Recuperation (kWh/km)",
   "set.save": "Save",
+  "set.soh_baseline": "SoH baseline",
+  "set.soh_baseline_hint": "100 = show BMS reading as-is. For Hyundai/Kia e-GMP (800 V — Ioniq 5/6, EV6, EV9): 125 — the BMS reports against an internal warranty reference so fresh batteries read ≈ 125%.",
   "set.ssl_auto": "Self-signed (auto)",
   "set.ssl_cert_missing": "No certificate present.",
   "set.ssl_cert_path": "Cert path (PEM)",

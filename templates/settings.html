@@ -104,6 +104,12 @@
                                    value="{{ battery_kwh }}" step="0.1" min="0">
                         </div>
                         <div class="col-sm-6">
+                            <label for="battery_soh_baseline" class="form-label">{{ t('set.soh_baseline') }}</label>
+                            <input type="number" class="form-control" id="battery_soh_baseline" name="battery_soh_baseline"
+                                   value="{{ battery_soh_baseline }}" step="1" min="50" max="200" placeholder="100">
+                            <div class="form-text">{{ t('set.soh_baseline_hint') }}</div>
+                        </div>
+                        <div class="col-sm-6">
                             <label for="max_ac_kw" class="form-label">{{ t('set.max_ac_kw') }}</label>
                             <input type="number" class="form-control" id="max_ac_kw" name="max_ac_kw"
                                    value="{{ max_ac_kw }}" step="0.1" min="0">
