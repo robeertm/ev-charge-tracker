@@ -1,5 +1,11 @@
 # Changelog
 
+## v2.27.1 (2026-04-19)
+
+### Translate `set.soh_baseline` / `set.soh_baseline_hint` into ES/FR/IT/NL
+
+v2.27.0 only added the two new SoH-baseline strings to the DE and EN files. The i18n fallback chain in `services/i18n.py:t()` goes `current_lang → de → key`, so any install running in Spanish/French/Italian/Dutch ended up rendering the German hint text verbatim on the Settings page — the exact "hardcoded German leaking through" regression v2.25.3 was supposed to prevent. Added native translations for the remaining four languages; key counts now DE/EN = 897, ES/FR/IT/NL = 605.
+
 ## v2.27.0 (2026-04-19)
 
 ### Battery SoH baseline — realistic percentage for Hyundai/Kia e-GMP

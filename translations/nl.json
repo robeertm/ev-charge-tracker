@@ -471,6 +471,8 @@
   "set.recup_measured": "Gemeten (90 dagen)",
   "set.recup_rate": "Recuperatie (kWh/km)",
   "set.save": "Opslaan",
+  "set.soh_baseline": "SoH-referentiewaarde",
+  "set.soh_baseline_hint": "100 = BMS-waarde onveranderd tonen. Voor Hyundai/Kia e-GMP (800 V — Ioniq 5/6, EV6, EV9): 125 — het BMS rapporteert tegen een interne garantiereferentie, dus nieuwe accu's lezen ≈ 125%.",
   "set.ssl_auto": "Zelfondertekend (auto)",
   "set.ssl_cert_missing": "Geen certificaat aanwezig.",
   "set.ssl_cert_path": "Cert-pad (PEM)",
