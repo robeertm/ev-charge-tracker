@@ -1,5 +1,11 @@
 # Changelog
 
+## v2.28.1 (2026-04-19)
+
+### Installer: show pip progress instead of silent hang
+
+v2.28.0 passed `--quiet` to `pip install` in `deploy/install.sh`, which suppresses the download/build output entirely. On slow networks or ARM hardware where pandas/matplotlib/numpy take several minutes, the installer looked hung between `Baue Python-venv & installiere requirements.txt …` and the next line. Dropped `--quiet`, added `--progress-bar on`, and preceded the step with a "kann 2–5 min dauern" log line so expectations are set. Also split pip-upgrade and requirements install into two log blocks for clarity.
+
 ## v2.28.0 (2026-04-19)
 
 ### One-shot installer for new hosts

@@ -111,10 +111,11 @@ fi
 ok "Code synchronisiert."
 
 # ── Python venv + deps ────────────────────────────────────────────
-log "Baue Python-venv & installiere requirements.txt …"
+log "Baue Python-venv …"
 sudo -u "$SERVICE_USER" python3 -m venv "$APP_DIR/venv"
-sudo -u "$SERVICE_USER" "$APP_DIR/venv/bin/pip" install --quiet --upgrade pip
-sudo -u "$SERVICE_USER" "$APP_DIR/venv/bin/pip" install --quiet -r "$APP_DIR/requirements.txt"
+sudo -u "$SERVICE_USER" "$APP_DIR/venv/bin/pip" install --upgrade pip
+log "Installiere requirements.txt — kann 2–5 min dauern (pandas/matplotlib/numpy)."
+sudo -u "$SERVICE_USER" "$APP_DIR/venv/bin/pip" install --progress-bar on -r "$APP_DIR/requirements.txt"
 ok "Python-Abhängigkeiten installiert."
 
 # ── systemd unit ──────────────────────────────────────────────────
