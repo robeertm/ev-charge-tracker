@@ -1,5 +1,18 @@
 # Changelog
 
+## v2.28.2 (2026-04-19)
+
+### Installer auto-picks a free port; `APP_PORT` env var overrides
+
+Running the installer on a machine that already had something on port 7654 failed with `Address already in use` right after the file swap, because the systemd unit hardcoded the port and the installer had no fallback. Now:
+
+- `Config.APP_PORT` reads from the `APP_PORT` env var, falling back to `7654` (same for `APP_HOST`).
+- `deploy/install.sh` checks whether 7654 is free before writing the systemd unit. If it's taken, it walks 7655 → 7700 and picks the first open port. The chosen port is injected into the unit via `Environment=APP_PORT=<n>`.
+- `EV_APP_PORT=<n>` env override lets you pin a specific port for the installer (skip auto-discovery).
+- The Tailscale-serve step and the "fertig" banner at the end both use the actual chosen port, not a hardcoded 7654.
+
+`deploy/ev-tracker.service` was updated to include an `Environment=APP_PORT=7654` line as the default; the installer overwrites it with whatever port it picked.
+
 ## v2.28.1 (2026-04-19)
 
 ### Installer: show pip progress instead of silent hang

@@ -24,10 +24,10 @@ class Config:
     ENTSOE_API_KEY = os.environ.get('ENTSOE_API_KEY', '')
     ENTSOE_COUNTRY = 'DE'
 
-    APP_VERSION = '2.28.1'
+    APP_VERSION = '2.28.2'
     GITHUB_REPO = 'robeertm/ev-charge-tracker'
-    APP_HOST = '0.0.0.0'
-    APP_PORT = 7654
+    APP_HOST = os.environ.get('APP_HOST', '0.0.0.0')
+    APP_PORT = int(os.environ.get('APP_PORT', '7654'))
 
     BATTERY_CAPACITY_KWH = 64.0
     CAR_MODEL = 'Kia Niro EV 64kWh MY21'

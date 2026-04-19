@@ -47,6 +47,7 @@ curl -fsSL .../install.sh | sudo EV_WITH_TAILSCALE=1 bash
 | `EV_USER` | `ev-tracker` | OS service user |
 | `EV_WITH_TAILSCALE` | *(prompt)* | `1` to auto-install Tailscale, `0` to skip |
 | `EV_UNATTENDED` | `0` | `1` disables all interactive prompts |
+| `EV_APP_PORT` | *(auto)* | Pin the listen port. If unset, installer uses 7654 when free, otherwise walks up to 7700 looking for the next open port |
 
 ## Files installed by the script
 

@@ -8,6 +8,8 @@ ConditionPathExists=/srv/ev-data/app/venv/bin/python
 Type=simple
 User=ev-tracker
 WorkingDirectory=/srv/ev-data/app
+# APP_PORT is injected by deploy/install.sh based on what's free on the host.
+Environment=APP_PORT=7654
 ExecStart=/srv/ev-data/app/venv/bin/python app.py
 Restart=always
 RestartSec=5
