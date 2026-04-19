@@ -4,7 +4,7 @@
 
 ### Battery SoH baseline — realistic percentage for Hyundai/Kia e-GMP
 
-On ev-dirk (Hyundai Ioniq 5 AWD LR, 800 V e-GMP platform) the dashboard has been showing SoH values around 125 % for the past months. Not a bug in our code — the Hyundai/Kia BMS on e-GMP vehicles reports `ev_battery_soh_percentage` against an internal warranty-floor reference (≈ 80 % of gross capacity), so a fresh battery reads ~125 % and degrades toward 100 % as it ages out of warranty. The vehicle_raw detail page already annotated this ("kia_soh_over_100" note), but the user-facing number was still the raw reading. Older 400 V platforms (Kia Niro EV — ev-robert) report against nominal capacity and show correct 100 %-ish values, so the quirk is specifically e-GMP.
+On the Hyundai install (Ioniq 5 AWD LR, 800 V e-GMP platform) the dashboard has been showing SoH values around 125 % for the past months. Not a bug in our code — the Hyundai/Kia BMS on e-GMP vehicles reports `ev_battery_soh_percentage` against an internal warranty-floor reference (≈ 80 % of gross capacity), so a fresh battery reads ~125 % and degrades toward 100 % as it ages out of warranty. The vehicle_raw detail page already annotated this ("kia_soh_over_100" note), but the user-facing number was still the raw reading. Older 400 V platforms (Kia Niro EV) report against nominal capacity and show correct 100 %-ish values, so the quirk is specifically e-GMP.
 
 Added a user-configurable `battery_soh_baseline` setting (default 100; 125 for e-GMP). Scaling happens at display time (`scale_soh(raw) = raw / baseline * 100`) in `services/stats_service` — no DB migration, existing historical values in `vehicle_syncs.battery_soh_percent` stay raw and get rescaled on every render. Changing the baseline retroactively re-scales the whole history graph, so switching from 100 → 125 on an e-GMP install immediately makes the dashboard read ~100 % and the history curve shows the real degradation slope.
 
@@ -15,7 +15,7 @@ Wired at:
 
 New Settings field in Vehicle section with a hint explaining the 100 vs 125 choice. Two new DE/EN translation keys (`set.soh_baseline`, `set.soh_baseline_hint`) — both keyspaces at 897 now.
 
-ev-dirk is pre-configured to `battery_soh_baseline=125` as part of this deploy.
+The Hyundai install is pre-configured to `battery_soh_baseline=125` as part of this deploy.
 
 ## v2.26.0 (2026-04-18)
 
@@ -33,7 +33,7 @@ Back to ParkingEvent pairs as the source of truth. `services/trips_service.get_t
 
 **Template.** `templates/trips.html` used to show the cloud-check icon only on `source == 'sdk'` rows; now it shows whenever `drive_min` is present, i.e. on polled trips with SDK stats attached *and* on SDK-only historical rows. The tooltip also picks up `avg_speed_kmh` / `max_speed_kmh`.
 
-**User-observed effect.** On ev-robert today the log shows 2 PE-pair trips (home → Elbepark → home) instead of the 1 consolidated SDK round-trip — matches what polling actually captured. On ev-dirk where polling is sparser (smart-mode never got turned on explicitly), some days will now show fewer PE-pair trips than SDK had on record; user can enable smart-mode for denser polling, or manually backfill historical days if needed.
+**User-observed effect.** On the Kia install today the log shows 2 PE-pair trips (home → shopping → home) instead of the 1 consolidated SDK round-trip — matches what polling actually captured. On the Hyundai install where polling is sparser (smart-mode never got turned on explicitly), some days will now show fewer PE-pair trips than SDK had on record; user can enable smart-mode for denser polling, or manually backfill historical days if needed.
 
 ## v2.25.3 (2026-04-17)
 
@@ -112,7 +112,7 @@ The navbar icon flips from the misleading `bi-file-earmark-pdf` to `bi-bar-chart
 
 ### Trip log: sequential 2-pointer matcher fixes adjacent-trip cross-matches
 
-v2.24.2's enrichment looked up the nearest-by-abs-delta parking event for each SDK trip independently, which broke down when two short trips boundaried each other inside the 60-minute matching tolerance. Concrete case on ev-robert from 2026-04-17: the 15:47 trip latched onto the 15:32 `work.departed_at` (polling lag from the previous trip leaving work), pushing the 15:03 trip into the sync fallback and surfacing a visible "home/work" mismatch on consecutive rows.
+v2.24.2's enrichment looked up the nearest-by-abs-delta parking event for each SDK trip independently, which broke down when two short trips boundaried each other inside the 60-minute matching tolerance. Concrete case from 2026-04-17: the 15:47 trip latched onto the 15:32 `work.departed_at` (polling lag from the previous trip leaving work), pushing the 15:03 trip into the sync fallback and surfacing a visible "home/work" mismatch on consecutive rows.
 
 Replaced the independent per-trip search with an **ordinal two-pointer merge**:
 
@@ -122,19 +122,19 @@ Replaced the independent per-trip search with an **ordinal two-pointer merge**:
 
 Why this works: our parking-event timestamps always LAG the SDK's authoritative trip boundary (polling notices movement N minutes after it happened). That's an asymmetric relationship, not a symmetric one — a proper matcher has to respect the order. Each parking-event endpoint is consumed at most once per side, so adjacent trips can never fight over the same event.
 
-Verified on ev-robert: consecutive-pair label consistency jumped from 8/13 to 12/13 across the last 14 days. The remaining mismatch on 2026-04-16 is a legitimate data gap (the SDK doesn't report a trip between the "other" arrival at 15:52 and the "home" departure at 16:10 — which would imply a 3rd trip the server didn't record). That's a question for the Bluelink server, not the matcher.
+Verified against the Kia install: consecutive-pair label consistency jumped from 8/13 to 12/13 across the last 14 days. The remaining mismatch on 2026-04-16 is a legitimate data gap (the SDK doesn't report a trip between the "other" arrival at 15:52 and the "home" departure at 16:10 — which would imply a 3rd trip the server didn't record). That's a question for the Bluelink server, not the matcher.
 
 ## v2.24.2 (2026-04-17)
 
 ### Trip log: honest "unknown location" + VehicleSync fallback for SDK trips
 
-Backfilling 30 days of Bluelink/UVO trips on a host that had the background sync disabled (ev-dirk before v2.23.2) exposed a gap in the SDK-trip enrichment path: the only location data we store outside the SDK is `parking_events`, and that table was almost empty for the backfill window, so most historical SDK trips couldn't be matched. The UI then fell through to the "Adresse wird ermittelt" branch and sat there forever — not because geocoding was broken, but because there were no coordinates to geocode in the first place.
+Backfilling 30 days of Bluelink/UVO trips on a host that had the background sync disabled (the Hyundai install before v2.23.2) exposed a gap in the SDK-trip enrichment path: the only location data we store outside the SDK is `parking_events`, and that table was almost empty for the backfill window, so most historical SDK trips couldn't be matched. The UI then fell through to the "Adresse wird ermittelt" branch and sat there forever — not because geocoding was broken, but because there were no coordinates to geocode in the first place.
 
 Two fixes:
 
 **VehicleSync as the second-chance source.** When a SDK trip's start/end doesn't line up with any `parking_events` row (±30 min), we now look for a `vehicle_syncs` row with GPS within ±2 hours. For the "from" endpoint we prefer a sync at or before the trip start; for "to" we prefer one at or after the trip end. That avoids using a mid-trip sync (smart-mode polling at 10-min cadence inside a drive) as a trip endpoint. When we find one, we reverse-geocode via the existing Nominatim-backed address cache — essentially free after the first call per coordinate.
 
-**Explicit "unknown" label.** When neither a parking event nor a nearby sync exists, the endpoint stub now carries `label='unknown'` instead of the generic `'other'` the old code used. The template renders it as `bi-geo-alt-slash` + "Ort unbekannt" / "Unknown location" so users see an honest "we have no GPS for this trip" instead of a perpetual "resolving address". This shows up on ev-dirk's March-era backfill where the car was driven but no polling data was captured.
+**Explicit "unknown" label.** When neither a parking event nor a nearby sync exists, the endpoint stub now carries `label='unknown'` instead of the generic `'other'` the old code used. The template renders it as `bi-geo-alt-slash` + "Ort unbekannt" / "Unknown location" so users see an honest "we have no GPS for this trip" instead of a perpetual "resolving address". This shows up on the Hyundai install's March-era backfill where the car was driven but no polling data was captured.
 
 The SoC/regen columns continue to work whenever both endpoints match a parking event, which is the common recent case. Nothing changes for users on hosts with a fully populated parking-event history.
 
@@ -150,7 +150,7 @@ One-line fix: `reason = r.get('skipped_reason') or ''` before the `startswith` c
 
 ### Driving log: pull trips directly from the Kia/Hyundai server
 
-Until now the driving log was derived from our own GPS polling: every time the car changed location between two syncs, we closed the previous parking event and opened a new one. That works as long as polling is frequent enough to catch every stop. On a Hyundai install (ev-dirk) where the background sync was disabled, a week's worth of trips collapsed into four parking events, one of which claimed the car had driven 51 km while sitting at home. This release fixes that at the source.
+Until now the driving log was derived from our own GPS polling: every time the car changed location between two syncs, we closed the previous parking event and opened a new one. That works as long as polling is frequent enough to catch every stop. On a Hyundai install where the background sync was disabled, a week's worth of trips collapsed into four parking events, one of which claimed the car had driven 51 km while sitting at home. This release fixes that at the source.
 
 **What changed.** The `hyundai_kia_connect_api` SDK we already depend on exposes `update_day_trip_info(vehicle_id, yyyymmdd)`, which hits the same `/spa/vehicles/<id>/tripinfo` endpoint the Bluelink and UVO mobile apps use when you open the driving log. The car uploads a trip record at the end of every drive as part of its normal telemetry — that upload is independent of anything we do — and the manufacturer's server caches the list. Pulling it costs one API call per day requested (counted against the existing 200/vehicle daily budget) and **does not wake the car**: no cellular modem activation, no 12V battery drain. It's the same data the Bluelink app shows, just pulled from the server instead of the car.
 
@@ -162,7 +162,7 @@ Each trip comes back with a start time (HH:MM:SS), drive and idle minutes, dista
 
 **UI.** SDK-sourced trips get a small cloud-check icon next to the timestamp with a tooltip explaining the source. The trip edit button is suppressed for SDK trips whose end couldn't be matched to a parking event (the underlying parking-event edit flow doesn't apply). Everything else — the map, km/SoC/regen totals, CSV/GPX export — works unchanged.
 
-**Why this solves the Hyundai-merges-trips complaint.** Kia and Hyundai use the same SDK, so the same code path serves both. The merged-trip appearance on ev-dirk was caused by polling being disabled there combined with our polling-only trip derivation. With the SDK pull, the trip log becomes server-authoritative and matches what the Bluelink app shows, regardless of how often we poll for GPS.
+**Why this solves the Hyundai-merges-trips complaint.** Kia and Hyundai use the same SDK, so the same code path serves both. The merged-trip appearance on the Hyundai install was caused by polling being disabled there combined with our polling-only trip derivation. With the SDK pull, the trip log becomes server-authoritative and matches what the Bluelink app shows, regardless of how often we poll for GPS.
 
 ## v2.23.2 (2026-04-17)
 
@@ -210,13 +210,13 @@ The settings page had grown to fifteen cards stacked in a single long column. Fi
 
 Reference layout borrowed from the Shelly Energy Analyzer project's settings page, adapted to Bootstrap 5 / Jinja instead of the JS-rendered schema used there.
 
-**Deployment note.** This rolls out to `ev-robert` only for initial testing. `ev-dirk` and `ev-mike` stay on v2.22.2 until feedback comes back; GitHub release and tag are held until the bundle grows.
+**Deployment note.** This rolls out to the primary install only for initial testing. The other installs stay on v2.22.2 until feedback comes back; GitHub release and tag are held until the bundle grows.
 
 ## v2.22.2 (2026-04-17)
 
 ### Hotfix: Favorites invisible + add-button dead on Tailscale hosts
 
-Users on Tailscale peers (ev-robert, ev-dirk, ev-mike — all accessed via the internal VPN) reported existing favorites not rendering in Settings → Locations, and the "add favorite" flow doing nothing. Two separate-sounding symptoms, one root cause.
+Users on Tailscale peers (all three installs, accessed via the internal VPN) reported existing favorites not rendering in Settings → Locations, and the "add favorite" flow doing nothing. Two separate-sounding symptoms, one root cause.
 
 **Root cause:** The HTTPS/SSL controls card is intentionally hidden when the request comes from a Tailscale peer (the VPN already provides transport encryption, so the self-signed-cert UI is just clutter there). The SSL-setup JavaScript lives in an IIFE that is historically nested **inside** the Locations IIFE. When the SSL card is absent, every `document.getElementById('btnSslSave')` etc. returns null, and the first `addEventListener` call throws a TypeError. Because the SSL IIFE is nested, the throw escapes into the outer Locations IIFE and aborts it mid-flight — before `loadFavs()` is called and before the add-favorite click handler is wired up.
 
