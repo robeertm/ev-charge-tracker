@@ -1,5 +1,21 @@
 # Changelog
 
+## v2.28.3 (2026-04-20)
+
+### Trip edit modal: fix SoC/km on `departed` side + clearer labels
+
+Two closely related issues in the trip-edit modal:
+
+1. **`soc_departed` / `odometer_departed` captured the wrong sync.** `_maybe_update_parking_event` in `services/trips_service.py` only wrote these fields at the moment the car was detected at a new location — meaning the values came from the *first sync at the destination*, not the last sync while still at the origin. The trip's SoC drop and drive-km delta ended up attributed to the *origin parking event* instead of the trip. Example from the field: Elbepark showed arrival 81 % → departure 67 % (14 % "lost while parked"), while the subsequent drive to home showed 67 % → 67 % (zero SoC used for a 20 km trip).
+
+   Fix: update `soc_departed` / `odometer_departed` on every same-place sync so they continuously hold the last-known at-spot values. On move detection, don't overwrite — the fields already contain the correct pre-departure state. `_open_event` also initialises `*_departed = *_arrived` so single-sync events still have meaningful data.
+
+   The displayed trip consumption in the table was already correct (uses `_soc_before()` via `VehicleSync`), so only the edit modal and the raw `ParkingEvent` values needed the fix. Existing events can be repaired with the **"Aus Historie nachbauen"** button (wipe + replay).
+
+2. **Labels "Angekommen / Abgefahren" were ambiguous.** On the Startpunkt card, "Angekommen" means the previous trip's end, and "Abgefahren" is this trip's start — on the Zielpunkt card it's the opposite. Same label pair in both places, with the trip-relevant one flipping sides. Users had to infer from context which field mattered.
+
+   Added a coloured subheader on each card ("Fahrtbeginn — Abfahrt von diesem Ort" / "Fahrtende — Ankunft an diesem Ort") and a small `(Fahrtbeginn)` / `(Fahrtende)` suffix in the trip's primary colour on the trip-relevant field labels. The non-trip-relevant column stays neutral. Four new translation keys (`trips.edit_trip_start`, `trips.edit_trip_end`, plus `_hint` variants) in all six languages.
+
 ## v2.28.2 (2026-04-19)
 
 ### Installer auto-picks a free port; `APP_PORT` env var overrides

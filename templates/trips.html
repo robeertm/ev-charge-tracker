@@ -176,6 +176,17 @@
                     <i class="bi bi-bullseye"></i>
                 </button>
               </div>
+              <div class="small px-2 py-1 border-bottom bg-body-tertiary">
+                {% if side == 'from' %}
+                  <i class="bi bi-arrow-right-short text-{{ color_cls }}"></i>
+                  <span class="fw-semibold">{{ t('trips.edit_trip_start') }}</span>
+                  <span class="text-muted">— {{ t('trips.edit_trip_start_hint') }}</span>
+                {% else %}
+                  <i class="bi bi-flag-fill text-{{ color_cls }}"></i>
+                  <span class="fw-semibold">{{ t('trips.edit_trip_end') }}</span>
+                  <span class="text-muted">— {{ t('trips.edit_trip_end_hint') }}</span>
+                {% endif %}
+              </div>
               <div class="card-body p-2">
                 <div class="mb-2">
                   <label class="form-label small mb-0">{{ t('trips.edit_label') }}</label>
@@ -199,36 +210,54 @@
                 </div>
                 <div class="row g-1 mb-2">
                   <div class="col-6">
-                    <label class="form-label small mb-0">{{ t('trips.edit_arrived_at') }}</label>
+                    <label class="form-label small mb-0{% if side == 'to' %} fw-semibold{% endif %}">
+                      {{ t('trips.edit_arrived_at') }}
+                      {% if side == 'to' %}<span class="text-{{ color_cls }}">({{ t('trips.edit_trip_end') }})</span>{% endif %}
+                    </label>
                     <input type="datetime-local" class="form-control form-control-sm tripEditArrivedAt"
                            data-side="{{ side }}" step="60">
                   </div>
                   <div class="col-6">
-                    <label class="form-label small mb-0">{{ t('trips.edit_departed_at') }}</label>
+                    <label class="form-label small mb-0{% if side == 'from' %} fw-semibold{% endif %}">
+                      {{ t('trips.edit_departed_at') }}
+                      {% if side == 'from' %}<span class="text-{{ color_cls }}">({{ t('trips.edit_trip_start') }})</span>{% endif %}
+                    </label>
                     <input type="datetime-local" class="form-control form-control-sm tripEditDepartedAt"
                            data-side="{{ side }}" step="60">
                   </div>
                 </div>
                 <div class="row g-1 mb-2">
                   <div class="col-6">
-                    <label class="form-label small mb-0">{{ t('trips.edit_odometer_arrived') }}</label>
+                    <label class="form-label small mb-0{% if side == 'to' %} fw-semibold{% endif %}">
+                      {{ t('trips.edit_odometer_arrived') }}
+                      {% if side == 'to' %}<span class="text-{{ color_cls }}">({{ t('trips.edit_trip_end') }})</span>{% endif %}
+                    </label>
                     <input type="number" class="form-control form-control-sm tripEditOdoArrived"
                            data-side="{{ side }}" step="1" min="0">
                   </div>
                   <div class="col-6">
-                    <label class="form-label small mb-0">{{ t('trips.edit_odometer_departed') }}</label>
+                    <label class="form-label small mb-0{% if side == 'from' %} fw-semibold{% endif %}">
+                      {{ t('trips.edit_odometer_departed') }}
+                      {% if side == 'from' %}<span class="text-{{ color_cls }}">({{ t('trips.edit_trip_start') }})</span>{% endif %}
+                    </label>
                     <input type="number" class="form-control form-control-sm tripEditOdoDeparted"
                            data-side="{{ side }}" step="1" min="0">
                   </div>
                 </div>
                 <div class="row g-1 mb-2">
                   <div class="col-6">
-                    <label class="form-label small mb-0">{{ t('trips.edit_soc_arrived') }}</label>
+                    <label class="form-label small mb-0{% if side == 'to' %} fw-semibold{% endif %}">
+                      {{ t('trips.edit_soc_arrived') }}
+                      {% if side == 'to' %}<span class="text-{{ color_cls }}">({{ t('trips.edit_trip_end') }})</span>{% endif %}
+                    </label>
                     <input type="number" class="form-control form-control-sm tripEditSocArrived"
                            data-side="{{ side }}" step="1" min="0" max="100">
                   </div>
                   <div class="col-6">
-                    <label class="form-label small mb-0">{{ t('trips.edit_soc_departed') }}</label>
+                    <label class="form-label small mb-0{% if side == 'from' %} fw-semibold{% endif %}">
+                      {{ t('trips.edit_soc_departed') }}
+                      {% if side == 'from' %}<span class="text-{{ color_cls }}">({{ t('trips.edit_trip_start') }})</span>{% endif %}
+                    </label>
                     <input type="number" class="form-control form-control-sm tripEditSocDeparted"
                            data-side="{{ side }}" step="1" min="0" max="100">
                   </div>

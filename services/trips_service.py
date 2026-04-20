@@ -119,13 +119,19 @@ def update_parking_from_sync(sync) -> Optional[ParkingEvent]:
     distance = _haversine_m(open_evt.lat, open_evt.lon, lat, lon)
 
     if distance <= SAME_PLACE_M:
-        # Car still at the same spot. Update arrival data with the latest
-        # snapshot in case earlier values were missing, and bump last_seen_at
-        # so the trip-duration math has a tighter lower bound.
+        # Car still at the same spot. Top up arrival fields that were
+        # missing on open, continuously track the latest at-spot state
+        # in odometer_departed/soc_departed (so they reflect "last known
+        # while still here" when the move is later detected — not the
+        # first sync at the new location), and bump last_seen_at.
         if open_evt.odometer_arrived is None and sync.odometer_km:
             open_evt.odometer_arrived = sync.odometer_km
         if open_evt.soc_arrived is None and sync.soc_percent:
             open_evt.soc_arrived = sync.soc_percent
+        if sync.odometer_km is not None:
+            open_evt.odometer_departed = sync.odometer_km
+        if sync.soc_percent is not None:
+            open_evt.soc_departed = sync.soc_percent
         # Only advance last_seen_at forward, never backward (matters during backfill)
         if open_evt.last_seen_at is None or sync.timestamp > open_evt.last_seen_at:
             open_evt.last_seen_at = sync.timestamp
@@ -133,11 +139,16 @@ def update_parking_from_sync(sync) -> Optional[ParkingEvent]:
         return open_evt
 
     if distance >= MOVE_THRESHOLD_M:
-        # Car has moved away from the open spot → close it, open a new one.
+        # Car has moved away → close the event at the detection timestamp.
+        # Leave odometer_departed / soc_departed alone — they already hold
+        # the last at-spot values from same-place updates above, which is
+        # the semantically correct "state when leaving here". Only fill
+        # them from the new-location sync as a last-resort fallback when
+        # no same-place sync ever topped them up.
         open_evt.departed_at = sync.timestamp
-        if sync.odometer_km is not None:
+        if open_evt.odometer_departed is None and sync.odometer_km is not None:
             open_evt.odometer_departed = sync.odometer_km
-        if sync.soc_percent is not None:
+        if open_evt.soc_departed is None and sync.soc_percent is not None:
             open_evt.soc_departed = sync.soc_percent
         db.session.commit()
         return _open_event(sync, lat, lon)
@@ -147,6 +158,10 @@ def update_parking_from_sync(sync) -> Optional[ParkingEvent]:
 
 def _open_event(sync, lat: float, lon: float) -> ParkingEvent:
     label, fav_name = _classify_location(lat, lon)
+    # Initialize odometer_departed / soc_departed to the arrival values
+    # so even a one-sync parking event has meaningful "when-leaving" data.
+    # Same-place syncs will overwrite with newer at-spot values until the
+    # car moves.
     evt = ParkingEvent(
         arrived_at=sync.timestamp,
         last_seen_at=sync.timestamp,
@@ -155,7 +170,9 @@ def _open_event(sync, lat: float, lon: float) -> ParkingEvent:
         label=label,
         favorite_name=fav_name,
         odometer_arrived=sync.odometer_km,
+        odometer_departed=sync.odometer_km,
         soc_arrived=sync.soc_percent,
+        soc_departed=sync.soc_percent,
     )
     db.session.add(evt)
     db.session.commit()
