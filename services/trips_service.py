@@ -274,7 +274,34 @@ def _soc_before(lookup, ts):
     return lookup[idx][1]
 
 
+def _soc_min_in(lookup, start_ts, end_ts):
+    """Lowest SoC seen in the half-open window [start_ts, end_ts]. None
+    if no syncs in that window.
+
+    Used to find the real trip-end SoC when the first at-destination
+    sync is a stale cache echo carrying the pre-drive SoC. Kia e-GMP
+    and Hyundai Bluelink both exhibit this: after a drive ends, the
+    server's first response to our poll sometimes still reports the
+    SoC value it held before the drive (the ECU has uploaded fresh
+    GPS / odometer but not yet the fresh SoC). A minute or two later
+    the true post-drive SoC lands. Taking the minimum over a short
+    window after arrival catches the real value and ignores the echo.
+    Charging at the destination only pulls the minimum *lower* than
+    soc_arrived briefly — by the time SoC recovers above soc_arrived
+    the window is usually closed — so this stays safe there too.
+    """
+    if not lookup or start_ts is None or end_ts is None:
+        return None
+    keys = [r[0] for r in lookup]
+    lo = bisect.bisect_left(keys, start_ts)
+    hi = bisect.bisect_right(keys, end_ts)
+    if lo >= hi:
+        return None
+    return min(lookup[i][1] for i in range(lo, hi))
+
+
 _SDK_STATS_MATCH_TOLERANCE_MIN = 60
+_ARRIVAL_SOC_WINDOW_MIN = 30
 
 
 def _find_sdk_stats(sdk_rows, pe_departed_at):
@@ -378,7 +405,20 @@ def get_trips(limit: Optional[int] = None,
             start_soc = prev.soc_departed
         if start_soc is None:
             start_soc = prev.soc_arrived
-        end_soc = curr.soc_arrived
+        # Trip-end SoC: MIN over the first 30 min at destination, not
+        # just the arrival sync. First arrival sync often carries a
+        # stale cache-echo SoC (same value the car had before the drive)
+        # while the true post-drive SoC lands 1–10 min later. See
+        # _soc_min_in docstring. Fallback to curr.soc_arrived when the
+        # destination has no sync rows in the window (shouldn't happen
+        # in practice, but keeps the read resilient).
+        end_soc = _soc_min_in(
+            soc_lookup,
+            curr.arrived_at,
+            curr.arrived_at + timedelta(minutes=_ARRIVAL_SOC_WINDOW_MIN),
+        )
+        if end_soc is None:
+            end_soc = curr.soc_arrived
         soc_used = None
         if start_soc is not None and end_soc is not None:
             soc_used = max(start_soc - end_soc, 0)

@@ -1,5 +1,21 @@
 # Changelog
 
+## v2.28.14 (2026-04-20)
+
+### Fahrtenbuch trip-end SoC — ignore cache-echo on arrival
+
+v2.28.13 fixed the start-SoC side. Debugging the remaining "0 % consumption" trips on ev-robert (Kia) surfaced a mirror-image bug at the *other* end. Example: PE#28→#29 on 2026-04-16, 30 km drive, start SoC 51 %. The first at-destination sync (15:39:22) reported SoC = **51 %** — identical to the pre-drive value. The next sync (15:48, 9 min later) reported SoC = **43 %**. That's the real trip end. 51 − 43 = 8 % consumption (≈ 2.7 %/10 km, plausible for an e-GMP 64 kWh battery).
+
+### Cache-echo at arrival
+
+Both Kia UVO and Hyundai Bluelink sometimes upload fresh GPS / odometer but lag on SoC: the first sync at the destination carries the SoC value the ECU held *before* the drive, the true post-drive SoC lands a few minutes later. Taking `curr.soc_arrived` at face value on those trips produces `start_soc == end_soc` → `soc_used = 0`.
+
+### Fix
+
+Trip-end SoC now reads `min(soc) in [curr.arrived_at, curr.arrived_at + 30 min]` via a new helper `_soc_min_in()`. If any sync in that window has a lower SoC than the arrival echo, it's the real value. Safe under destination charging: charging only raises SoC, so the minimum window stays below the eventual at-destination SoC — but *is* the real trip-end. Fallback to `curr.soc_arrived` if the window is empty (edge case only).
+
+Combined with v2.28.13 (start-SoC from VehicleSync), the driving log now reports realistic consumption on both brands regardless of cache-echo quirks at either end of the trip. Read-only — no DB migration, no PE replay.
+
 ## v2.28.13 (2026-04-20)
 
 ### Fahrtenbuch SoC — read from VehicleSync, not from PE.soc_departed
