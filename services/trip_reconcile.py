@@ -126,15 +126,14 @@ def reconcile_day(target_date: date) -> dict:
     for delta_min, pi, si, prev, curr, t, km in scored:
         if pi in used_pair or si in used_sdk:
             continue
-        used_pair.add(pi)
-        used_sdk.add(si)
-        matches.append((prev, curr, t, km, delta_min))
-
-    # Apply — rewrite prev.departed_at only; curr.arrived_at is trusted
-    # (it came from a live at-destination sync). Skip if the new
-    # departed_at would violate adjacency (earlier than prev.arrived_at
-    # or later than curr.arrived_at).
-    for prev, curr, t, km, delta_min in matches:
+        # Reject conflicted matches HERE, before marking used. A conflict
+        # (new_dep < prev.arrived_at, typical for phantom Home→X→Home PE
+        # splits where a phantom pair would demand an impossibly-early
+        # departure) must not burn either the SDK trip or the PE pair —
+        # otherwise the valid alternative match can't claim them. Before
+        # v2.28.15 the conflict check lived in the apply-loop below, so
+        # both slots stayed used-marked and the real pair got no SDK
+        # stats and no departed_at correction.
         new_dep = t.start_time
         conflict = None
         if prev.arrived_at and new_dep < prev.arrived_at:
@@ -148,7 +147,15 @@ def reconcile_day(target_date: date) -> dict:
                 f"SDK#{t.id} skipped: {conflict}"
             )
             continue
+        used_pair.add(pi)
+        used_sdk.add(si)
+        matches.append((prev, curr, t, km, delta_min))
 
+    # Apply — rewrite prev.departed_at only; curr.arrived_at is trusted
+    # (it came from a live at-destination sync). Conflict checks already
+    # happened in the greedy allocator above.
+    for prev, curr, t, km, delta_min in matches:
+        new_dep = t.start_time
         old_dep = prev.departed_at
         if new_dep == old_dep:
             continue  # already aligned, no-op
@@ -156,7 +163,8 @@ def reconcile_day(target_date: date) -> dict:
         out['applied'] += 1
         out['changes'].append({
             'pe_from': prev.id, 'pe_to': curr.id, 'sdk_id': t.id,
-            'old_dep': old_dep.isoformat(), 'new_dep': new_dep.isoformat(),
+            'old_dep': old_dep.isoformat() if old_dep else None,
+            'new_dep': new_dep.isoformat(),
             'pe_arrived_at': curr.arrived_at.isoformat(),
             'sdk_km': float(t.distance_km) if t.distance_km is not None else None,
             'pe_km': km,

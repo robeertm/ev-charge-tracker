@@ -300,20 +300,34 @@ def _soc_min_in(lookup, start_ts, end_ts):
     return min(lookup[i][1] for i in range(lo, hi))
 
 
-_SDK_STATS_MATCH_TOLERANCE_MIN = 60
+_SDK_STATS_MATCH_TOLERANCE_MIN = 20
 _ARRIVAL_SOC_WINDOW_MIN = 30
 
 
-def _find_sdk_stats(sdk_rows, pe_departed_at):
-    """Find the SDK trip whose start_time is within 60 min of this
-    PE-pair's departure. Used purely to attach drive-minute / speed
-    stats to a polled trip. Returns the VehicleTrip row or None."""
+def _find_sdk_stats(sdk_rows, pe_departed_at, exclude_ids=None):
+    """Find the SDK trip whose start_time is closest to this PE-pair's
+    departure, within ±20 min, skipping any IDs in ``exclude_ids``.
+
+    Returns the matching VehicleTrip row or None.
+
+    The exclude_ids dedup prevents one SDK trip from attaching to two
+    PE pairs when a phantom PE (e.g. GPS jitter creating a spurious
+    home→elsewhere→home split) sits near the real trip. After v2.28.12
+    reconcile, real PE pairs have ``prev.departed_at`` == ``sdk.start_time``
+    exactly, so the phantom has no chance of outscoring the real pair
+    — it only wins when it's the only candidate. Tightened from the
+    pre-v2.28.15 60-min tolerance, which was routinely catching the
+    wrong SDK trip when drives were closely spaced.
+    """
     if not sdk_rows or pe_departed_at is None:
         return None
+    excluded = exclude_ids or set()
     tol = timedelta(minutes=_SDK_STATS_MATCH_TOLERANCE_MIN)
     best = None
     best_delta = tol + timedelta(seconds=1)
     for t in sdk_rows:
+        if t.id in excluded:
+            continue
         delta = abs(t.start_time - pe_departed_at)
         if delta <= tol and delta < best_delta:
             best, best_delta = t, delta
@@ -374,6 +388,7 @@ def get_trips(limit: Optional[int] = None,
 
     trips = []
     pe_covered_dates = set()
+    used_sdk_ids: set = set()
 
     # Primary: ParkingEvent pairs.
     for prev, curr in zip(events, events[1:]):
@@ -440,13 +455,17 @@ def get_trips(limit: Optional[int] = None,
         }
 
         # Best-effort SDK stats attach. Not required — a polled trip
-        # stands on its own.
-        sdk = _find_sdk_stats(sdk_rows, prev.departed_at)
+        # stands on its own. One SDK trip binds to at most one PE pair
+        # (see used_sdk_ids), so phantom PE pairs — e.g. GPS-jitter
+        # "trips" of 0 km on top of a real drive — no longer steal
+        # the real drive's stats.
+        sdk = _find_sdk_stats(sdk_rows, prev.departed_at, exclude_ids=used_sdk_ids)
         if sdk is not None:
             trip['drive_min'] = sdk.drive_minutes
             trip['idle_min'] = sdk.idle_minutes
             trip['avg_speed_kmh'] = sdk.avg_speed_kmh
             trip['max_speed_kmh'] = sdk.max_speed_kmh
+            used_sdk_ids.add(sdk.id)
 
         trips.append(trip)
 

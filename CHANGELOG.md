@@ -1,5 +1,34 @@
 # Changelog
 
+## v2.28.15 (2026-04-20)
+
+### SDK-stats dedup + reconcile conflict-check refactor
+
+Two related bugs surfaced on ev-dirk: a phantom Home→Work PE pair (GPS-jitter "trip" of 0 km right after a real Work→Home drive) was inheriting the *real* drive's SDK stats (drive_minutes / idle_minutes / avg_speed / max_speed all identical to the line above). Looked like a duplicate entry.
+
+### Bug 1 — `_find_sdk_stats` had no dedup, 60-min tolerance
+
+```text
+PE1 Work→Home  depart 16:23  → SDK trip X (drive 29, idle 11, max 83)
+PE2 Home→Work  depart 16:53  → SDK trip X (same!)
+```
+
+Both pairs' `departed_at` were within the old 60-min tolerance of the same SDK trip's start, and `_find_sdk_stats` took the closest for *each* pair independently. Two PE pairs, one SDK trip, stats duplicated on both.
+
+**Fix**: tightened tolerance to ±20 min (consistent with `trip_reconcile`), and `_find_sdk_stats` now accepts an `exclude_ids` set. `get_trips` maintains a `used_sdk_ids` set as it iterates, so each SDK trip binds to at most one PE pair. After v2.28.12 reconcile, real pairs have `prev.departed_at == sdk.start_time` exactly — delta 0, so they always outscore any phantom competitor. Phantoms now render with no stats attached, making them easy to spot.
+
+### Bug 2 — reconcile greedy-allocator burned SDK on conflicted matches
+
+While investigating, found a latent issue in `trip_reconcile.reconcile_day`: the greedy allocator marked `(pair, sdk)` as "used" before checking adjacency conflicts. If the best-delta candidate conflicted (e.g. the phantom pair won the score sort because its `curr.arrived_at ≈ sdk.end_time` was tighter, but applying `new_dep = sdk.start_time` violated `new_dep >= prev.arrived_at`), the SDK got marked used but never applied — and the valid alternative pair couldn't claim it on its next iteration.
+
+**Fix**: moved the conflict check *inside* the greedy allocator, before `used_sdk.add(si)`. Rejected candidates now leave the SDK / pair slots open for the next-best match.
+
+### Rollout
+
+- `services/trips_service.py` — tolerance tightened, `exclude_ids` plumbed through, `used_sdk_ids` in `get_trips`.
+- `services/trip_reconcile.py` — conflict check relocated; apply loop simplified (no longer re-checks).
+- Both changes read-only in data terms; rerun `reconcile_range(days=30)` on hosts so existing PE pairs that were previously blocked by the greedy-allocator bug get their `departed_at` corrected.
+
 ## v2.28.14 (2026-04-20)
 
 ### Fahrtenbuch trip-end SoC — ignore cache-echo on arrival
