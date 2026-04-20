@@ -1875,6 +1875,20 @@ def register_routes(app):
             log_sync_result(s,
                             mode_label='force' if force else 'cached',
                             source='dashboard')
+            # Hyundai/Kia only include battery_soh in force-refresh responses,
+            # not in cached ones. Fall back to the most recent DB row that
+            # has a non-null SoH so the dashboard never has to display "—"
+            # just because the current sync didn't happen to include it.
+            soh_raw = s.battery_soh_percent
+            if soh_raw is None:
+                from models.database import VehicleSync as _VS
+                _prev = (_VS.query
+                         .filter(_VS.battery_soh_percent.isnot(None))
+                         .order_by(_VS.timestamp.desc())
+                         .first())
+                if _prev is not None:
+                    soh_raw = _prev.battery_soh_percent
+
             return jsonify({
                 'soc': s.soc_percent,
                 'odometer': s.odometer_km,
@@ -1883,7 +1897,7 @@ def register_routes(app):
                 'is_locked': s.is_locked,
                 'range_km': s.estimated_range_km,
                 'battery_12v': s.battery_12v_percent,
-                'battery_soh': scale_soh(s.battery_soh_percent),
+                'battery_soh': scale_soh(soh_raw),
                 'charge_limit_ac': s.charge_limit_ac,
                 'charge_limit_dc': s.charge_limit_dc,
                 'est_charge_min': s.est_charge_duration_min,

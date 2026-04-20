@@ -1,5 +1,29 @@
 # Changelog
 
+## v2.28.8 (2026-04-20)
+
+### Dashboard SoH: kill the bogus consumption-based fallback that always showed ~125 % on e-GMP
+
+Root cause of the "SoH still shows 125 % after the v2.27.0 baseline fix" that survived even v2.28.7's localStorage cache bust:
+
+The dashboard JS has had, for a long time, a fallback path when `/api/vehicle/status` returns `battery_soh = null`:
+
+```js
+const soh = (consumedKwh / 1000 / battKwh * 100).toFixed(1);
+```
+
+This is *not* SoH — it's "lifetime energy drawn / nominal pack capacity × 100", i.e. how many nominal-full-batteries-worth the car has consumed over its life. For an Ioniq 5 with ~904 kWh lifetime consumption and a 72.6 kWh pack, that's `904.6 / 72.6 ≈ 12.46`, scaled to a percent somehow lands at ~125 %. Total coincidence that it looks like a plausible SoH; it has nothing to do with battery health.
+
+It fires whenever the connector returns `battery_soh_percent = None`, which on Kia/Hyundai is the common case — the API only includes SoH on force-refresh responses, not on cached ones. So every non-force dashboard poll silently rewrote the SoH card with this fake number.
+
+### Fix
+
+1. **Backend** (`/api/vehicle/status` in `app.py`): when the connector's fresh `s.battery_soh_percent` is `None`, fall back to the most recent `VehicleSync` row that carries a non-null SoH. This means cached polls still surface the last-known SoH (via `scale_soh()`) instead of sending `null` downstream.
+
+2. **Frontend** (`templates/dashboard.html`): remove the consumption-based fallback branch entirely. If the backend can't provide a SoH even from DB history, we show `—` instead of inventing one.
+
+Force-refresh behaviour is unchanged: when the API does return a fresh SoH, that's what surfaces.
+
 ## v2.28.7 (2026-04-20)
 
 ### Dashboard: version-key the vehicle localStorage cache

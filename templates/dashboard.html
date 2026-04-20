@@ -194,11 +194,14 @@
         document.getElementById('vFastChargeTime').textContent = d.est_fast_charge_min != null ? d.est_fast_charge_min + ' min' : '—';
         if (d.battery_soh != null) {
             document.getElementById('vSoH').textContent = d.battery_soh + ' %';
-        } else if (d.total_consumed_kwh != null) {
-            const consumedKwh = d.total_consumed_kwh / 10;
-            const battKwh = {{ battery_kwh }};
-            const soh = (consumedKwh / 1000 / battKwh * 100).toFixed(1);
-            document.getElementById('vSoH').textContent = soh + ' %';
+        } else {
+            // Backend already falls back to the most recent DB row with a
+            // non-null SoH (app.py /api/vehicle/status), so reaching here
+            // means we truly have no usable reading. Do NOT synthesise
+            // anything from total_consumed_kwh — that old fallback treated
+            // lifetime energy throughput as SoH and produced bogus values
+            // (e.g. 125 % on Hyundai e-GMP). Show a neutral placeholder.
+            document.getElementById('vSoH').textContent = '—';
         }
         document.getElementById('vRegen').textContent = d.total_regenerated_kwh != null ? d.total_regenerated_kwh.toFixed(1) + ' kWh' : '—';
         if (d.doors) {
