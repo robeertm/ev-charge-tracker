@@ -1,5 +1,17 @@
 # Changelog
 
+## v2.28.16 (2026-04-20)
+
+### Hide phantom trips from the driving log
+
+v2.28.15 made phantom trips visually identifiable (0 km + no SDK stats). User's follow-up: "phantom fahrten gleich entfernen, die braucht keiner." Done.
+
+`get_trips` now drops any PE pair that has **both** `km ∈ {0, None}` **and** no matching SDK trip. A real drive always either moves the odometer or produces a `/tripinfo` record (usually both) — anything satisfying neither is GPS-jitter noise: the car briefly appearing at a distant spot for a handful of seconds, then going back where it actually was. The underlying `ParkingEvent` rows stay in the database (useful for diagnostics and for any future reconcile heuristics that want to fix rather than hide); only the `/trips` rendering filters them out.
+
+Also: `pe_covered_dates` now gets filled *after* the phantom filter, so days where the only PE pair was a phantom cleanly fall through to the SDK-only fallback path — rare, but keeps the driving log honest on "polling missed everything, only SDK trips exist" days.
+
+Read-only — no DB migration, no replay.
+
 ## v2.28.15 (2026-04-20)
 
 ### SDK-stats dedup + reconcile conflict-check refactor

@@ -394,7 +394,6 @@ def get_trips(limit: Optional[int] = None,
     for prev, curr in zip(events, events[1:]):
         if prev.departed_at is None:
             continue
-        pe_covered_dates.add(prev.departed_at.date())
 
         # Trip km: prefer odometer_departed (last at-spot reading) as the
         # origin km — it's the reading we're most confident reflects the
@@ -467,6 +466,17 @@ def get_trips(limit: Optional[int] = None,
             trip['max_speed_kmh'] = sdk.max_speed_kmh
             used_sdk_ids.add(sdk.id)
 
+        # Phantom filter: drop 0-km "trips" that no SDK trip confirms.
+        # These are GPS-jitter artefacts (the car briefly appearing at a
+        # distant spot for a handful of seconds, then back where it
+        # actually was) that leave behind a spurious PE pair. Underlying
+        # PE rows stay in the database — only the driving-log rendering
+        # hides them. A real drive would either move the odometer OR get
+        # a matching SDK trip-info record, usually both.
+        if (km in (0, None)) and trip.get('drive_min') is None:
+            continue
+
+        pe_covered_dates.add(prev.departed_at.date())
         trips.append(trip)
 
     # Fallback: show SDK-only trips on days where polling produced no
