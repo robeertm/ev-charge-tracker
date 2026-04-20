@@ -252,7 +252,8 @@ def _maybe_daily_trip_reconcile(app) -> None:
             r = reconcile_range(days=3)
             logger.info(
                 f"Daily trip reconcile done: "
-                f"applied={r.get('total_applied', 0)} "
+                f"dep={r.get('total_applied', 0)} "
+                f"arr={r.get('total_arr_applied', 0)} "
                 f"conflicts={r.get('total_conflicts', 0)}"
             )
     except Exception as e:
