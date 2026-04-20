@@ -1,5 +1,25 @@
 # Changelog
 
+## v2.28.13 (2026-04-20)
+
+### Fahrtenbuch SoC — read from VehicleSync, not from PE.soc_departed
+
+Follow-up to v2.28.11/v2.28.12: one more blind spot became visible once the timestamps were correct. The `soc_used` column in the driving log was showing 0 % for trips that obviously consumed energy. Example: park at home Fri 34 %, PV-charge to 100 % over the weekend, drive out Sun with 100 %, arrive 85 %. Expected: 15 % used. Shown: 0 %.
+
+Root cause: `PE.soc_departed` only advances when `update_parking_from_sync` decides the sync is an at-spot sync. Since v2.28.11 the staleness filter discards cached-echo Hyundai syncs before they reach that branch — and Kia behaves similarly because deep-sleep responses return `location = null`. Net effect on both brands: no at-spot sync advances `soc_departed`, so it stays frozen at `soc_arrived` for the entire parking spell. Meanwhile the SoC on those same filtered syncs is perfectly fresh (the ECU reports SoC correctly even when it doesn't re-broadcast GPS), and every one of those SoC readings lives in the `VehicleSync` table regardless of whether the PE hook used it.
+
+### Fix
+
+`get_trips` now uses `_soc_before(prev.departed_at)` as the *primary* source for trip start SoC, with `prev.soc_departed` and `prev.soc_arrived` as fallbacks only when no earlier sync exists at all. `_soc_before` reads directly from `VehicleSync` and picks up every SoC update, including ones from syncs that the PE hook correctly ignored on GPS grounds.
+
+After v2.28.12, `prev.departed_at ≈ sdk.start_time` (the ECU's own record of when the drive began), so "last SoC strictly before departed_at" is a clean anchor: any charging session that ended before the drive gets reflected, any ongoing session up to the moment of departure gets reflected, and nothing from the drive itself leaks in.
+
+### Effect
+
+- Both brands (same read-path) — PV-charge scenarios now show correct consumption.
+- Drives with no mid-park charging are unchanged (VehicleSync's last SoC before departure equals the arrival SoC in that case).
+- Read-only fix — no DB migration, no PE replay; just redeploy and restart.
+
 ## v2.28.12 (2026-04-20)
 
 ### Correct `departed_at` on **both** Kia and Hyundai — "car sleeps at origin" fix

@@ -364,15 +364,18 @@ def get_trips(limit: Optional[int] = None,
         if start_km is not None and curr.odometer_arrived is not None:
             km = max(curr.odometer_arrived - start_km, 0)
 
-        # Trip SoC consumption: prev.soc_departed is now the last at-spot
-        # SoC (post v2.28.3 capture fix), so we can use it directly.
-        # For legacy events where soc_departed still holds the old post-
-        # drive value (bug before v2.28.3), _soc_before gives us the
-        # right answer. Pick whichever is available and most trustworthy;
-        # if both are, the live at-spot value wins.
-        start_soc = prev.soc_departed
+        # Trip SoC consumption: _soc_before(departed_at) is primary.
+        # Reads from VehicleSync directly — catches SoC updates that the
+        # v2.28.11 staleness filter blocked from advancing PE.soc_departed
+        # (e.g. PV-charging the car while it sleeps at home: the SoC on
+        # every cached-echo sync is fresh even though the GPS is stale,
+        # so it's in VehicleSync but never made it into PE). Without this,
+        # start_soc would be stuck on the arrival SoC and a 100→85 %
+        # drive after overnight charge would render as 0 % consumption.
+        # Fallbacks kick in only when no earlier sync row exists at all.
+        start_soc = _soc_before(soc_lookup, prev.departed_at)
         if start_soc is None:
-            start_soc = _soc_before(soc_lookup, prev.departed_at)
+            start_soc = prev.soc_departed
         if start_soc is None:
             start_soc = prev.soc_arrived
         end_soc = curr.soc_arrived
