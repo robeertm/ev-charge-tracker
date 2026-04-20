@@ -1,5 +1,21 @@
 # Changelog
 
+## v2.28.20 (2026-04-20)
+
+### Reconcile arrival timestamps from SDK trip data (Kia + Hyundai)
+
+Until now, `ParkingEvent.arrived_at` was the timestamp of the first at-destination poll — up to ~10 minutes after the car actually stopped (sync cadence in smart mode). Only `departed_at` was being snapped to the SDK start-time; the PE arrival kept the poll-lag error, so Fahrtenbuch drive durations looked a few minutes too long.
+
+SDK `day_trip_info` has minute-accurate `start_time + drive_minutes + idle_minutes` per trip, which gives the real end-of-drive timestamp. `services/trip_reconcile.py` now additionally sets:
+
+```
+curr.arrived_at = sdk.start_time + drive + idle
+```
+
+Guarded by `new_arr < old_arr`: first-parked-sync is by definition at-or-after the physical arrival, so we only ever shift EARLIER — never later (that would be spurious clock noise). Same logic and tolerance window (`±20 min`) as the existing `departed_at` correction; runs for both Kia UVO and Hyundai Bluelink since both brands ship the endpoint.
+
+Summary dict gains `arr_applied` / `total_arr_applied`; log line now reports both counters (`N departed_at + M arrived_at corrected`).
+
 ## v2.28.19 (2026-04-20)
 
 ### Fahrtenbuch table: drop redundant edit-button column (iPhone 17 Air fits without scrollbar again)

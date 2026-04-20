@@ -13,11 +13,14 @@ actual drive-off moment).
 v2.28.12 anchors the match on ``curr.arrived_at`` ≈ SDK trip end-time
 rather than on ``prev.departed_at`` ≈ SDK start-time, because
 ``arrived_at`` is the reliable end of a PE pair and ``departed_at`` may
-be days off before reconciliation. We overwrite **only**
-``prev.departed_at = sdk.start_time``; the PE arrival stays untouched
-(it came from a live at-destination sync and is the best signal we
-have). This applies to both brands: both exhibit the "sleep at origin →
-stale departed_at" failure mode regardless of platform (400 V or e-GMP).
+be days off before reconciliation. We overwrite
+``prev.departed_at = sdk.start_time`` plus — added in v2.28.20 —
+``curr.arrived_at = sdk.start_time + drive + idle`` whenever that
+shifts the timestamp EARLIER (first-parked-sync is by definition ≥
+actual arrival; any shift the other way is nonsense). This applies to
+both brands: both exhibit the "sleep at origin → stale departed_at"
+failure mode regardless of platform (400 V or e-GMP), and both suffer
+the poll-lag on arrivals.
 """
 from __future__ import annotations
 
@@ -58,6 +61,7 @@ def reconcile_day(target_date: date) -> dict:
     out = {
         'date': target_date.isoformat(),
         'applied': 0,
+        'arr_applied': 0,
         'skipped_conflict': 0,
         'unmatched_pe': 0,
         'unmatched_sdk': 0,
@@ -151,27 +155,52 @@ def reconcile_day(target_date: date) -> dict:
         used_sdk.add(si)
         matches.append((prev, curr, t, km, delta_min))
 
-    # Apply — rewrite prev.departed_at only; curr.arrived_at is trusted
-    # (it came from a live at-destination sync). Conflict checks already
-    # happened in the greedy allocator above.
+    # Apply — rewrite prev.departed_at (always when the SDK start_time
+    # differs) and curr.arrived_at (only when the SDK-derived end-time
+    # is EARLIER than the stored arrival — first-parked-sync cannot
+    # happen before the actual arrival, so shifts later would be
+    # spurious). Conflict checks already happened in the greedy
+    # allocator above.
     for prev, curr, t, km, delta_min in matches:
+        change = None
         new_dep = t.start_time
         old_dep = prev.departed_at
-        if new_dep == old_dep:
-            continue  # already aligned, no-op
-        prev.departed_at = new_dep
-        out['applied'] += 1
-        out['changes'].append({
-            'pe_from': prev.id, 'pe_to': curr.id, 'sdk_id': t.id,
-            'old_dep': old_dep.isoformat() if old_dep else None,
-            'new_dep': new_dep.isoformat(),
-            'pe_arrived_at': curr.arrived_at.isoformat(),
-            'sdk_km': float(t.distance_km) if t.distance_km is not None else None,
-            'pe_km': km,
-            'delta_min': round(delta_min, 1),
-        })
+        if new_dep != old_dep:
+            prev.departed_at = new_dep
+            out['applied'] += 1
+            change = {
+                'pe_from': prev.id, 'pe_to': curr.id, 'sdk_id': t.id,
+                'old_dep': old_dep.isoformat() if old_dep else None,
+                'new_dep': new_dep.isoformat(),
+                'pe_arrived_at': curr.arrived_at.isoformat(),
+                'sdk_km': float(t.distance_km) if t.distance_km is not None else None,
+                'pe_km': km,
+                'delta_min': round(delta_min, 1),
+            }
 
-    if out['applied']:
+        total_min = (t.drive_minutes or 0) + (t.idle_minutes or 0)
+        new_arr = t.start_time + timedelta(minutes=total_min)
+        old_arr = curr.arrived_at
+        if new_arr < old_arr:
+            arr_delta_s = (old_arr - new_arr).total_seconds()
+            if arr_delta_s >= 1:
+                curr.arrived_at = new_arr
+                out['arr_applied'] += 1
+                if change is None:
+                    change = {
+                        'pe_from': prev.id, 'pe_to': curr.id, 'sdk_id': t.id,
+                        'sdk_km': float(t.distance_km) if t.distance_km is not None else None,
+                        'pe_km': km,
+                        'delta_min': round(delta_min, 1),
+                    }
+                change['old_arr'] = old_arr.isoformat()
+                change['new_arr'] = new_arr.isoformat()
+                change['arr_delta_min'] = round(arr_delta_s / 60.0, 2)
+
+        if change is not None:
+            out['changes'].append(change)
+
+    if out['applied'] or out['arr_applied']:
         db.session.commit()
 
     out['unmatched_pe'] = len(pairs) - len(matches)
@@ -182,8 +211,8 @@ def reconcile_day(target_date: date) -> dict:
 def reconcile_range(days: int = 7) -> dict:
     """Reconcile the last ``days`` calendar days, newest first. Returns
     a shape-stable dict even when the active brand is unsupported."""
-    out = {'days_attempted': 0, 'total_applied': 0, 'total_conflicts': 0,
-           'per_day': []}
+    out = {'days_attempted': 0, 'total_applied': 0, 'total_arr_applied': 0,
+           'total_conflicts': 0, 'per_day': []}
     if not _brand_supports_trip_info():
         out['skipped_reason'] = 'brand_unsupported'
         return out
@@ -193,12 +222,14 @@ def reconcile_range(days: int = 7) -> dict:
         r = reconcile_day(d)
         out['per_day'].append(r)
         out['total_applied'] += r.get('applied', 0)
+        out['total_arr_applied'] += r.get('arr_applied', 0)
         out['total_conflicts'] += r.get('skipped_conflict', 0)
         out['days_attempted'] += 1
     AppConfig.set('last_reconcile_at', datetime.now().isoformat())
     logger.info(
         f"trip_reconcile: {days}d walk, "
-        f"{out['total_applied']} PE pairs corrected, "
+        f"{out['total_applied']} departed_at + "
+        f"{out['total_arr_applied']} arrived_at corrected, "
         f"{out['total_conflicts']} conflicts skipped"
     )
     return out
