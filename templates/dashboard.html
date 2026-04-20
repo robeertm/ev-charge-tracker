@@ -1219,7 +1219,11 @@ makeExpandableChart('chartCumulativeCo2', {
 (function() {
     const banner = document.getElementById('updateBanner');
     const verEl  = document.getElementById('updBannerVer');
-    const CACHE_KEY = 'ev_update_check_cache_v1';
+    // Keying the cache on the running APP_VERSION means an applied update
+    // automatically busts the cache — otherwise the banner lingers up to
+    // 30 min after a successful update because the stale sessionStorage
+    // entry still says "update_available: true".
+    const CACHE_KEY = 'ev_update_check_cache_v2_{{ config.APP_VERSION }}';
     const CACHE_TTL_MS = 30 * 60 * 1000; // 30 min
 
     async function fetchUpdateInfo() {

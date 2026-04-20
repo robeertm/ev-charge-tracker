@@ -1,5 +1,13 @@
 # Changelog
 
+## v2.28.5 (2026-04-20)
+
+### Dashboard update-banner: bust cache after an applied update
+
+The dashboard's update-check banner (`templates/dashboard.html`) caches the `/api/update/check` response in `sessionStorage` for 30 minutes to avoid spamming GitHub. The cache key was just `ev_update_check_cache_v1` — version-agnostic — so after a successful update, the stale cache entry (with `update_available: true`) kept showing the banner until either the TTL expired or the user closed the tab. A plain page reload does NOT clear `sessionStorage`, so reloading didn't help the confused user.
+
+Keying the cache on `{{ config.APP_VERSION }}` makes every version see its own cache slot: the moment the app restarts on a new version, the old key is orphaned and a fresh fetch happens on the first dashboard load.
+
 ## v2.28.4 (2026-04-20)
 
 ### Trip log: decouple `departed_at` from next `arrived_at` + motion-triggered force-refresh
