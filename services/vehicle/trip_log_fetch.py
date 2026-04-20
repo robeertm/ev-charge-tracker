@@ -171,16 +171,15 @@ def fetch_day_trip_info(target_date: date) -> dict:
         f"from server, +{out['added']} new / ~{out['updated']} updated"
     )
 
-    # Hyundai-only: now that we have fresh SDK rows for this day, realign
-    # the PE-pair timestamps for the same day where we find clean 1:1
-    # matches. No-op on Kia (trip_reconcile brand-gates itself). Wrapped
-    # so a reconcile failure never blocks the fetch result.
+    # Now that we have fresh SDK rows for this day, realign the PE-pair
+    # departed_at for the same day where a clean 1:1 match exists.
+    # trip_reconcile brand-gates itself to Kia + Hyundai, so other brands
+    # safely no-op. Wrapped so a reconcile failure never blocks the fetch.
     try:
-        from services.trip_reconcile import reconcile_day, _is_hyundai
-        if _is_hyundai():
-            r = reconcile_day(target_date)
-            out['reconciled_applied'] = r.get('applied', 0)
-            out['reconciled_skipped'] = r.get('skipped_conflict', 0)
+        from services.trip_reconcile import reconcile_day
+        r = reconcile_day(target_date)
+        out['reconciled_applied'] = r.get('applied', 0)
+        out['reconciled_skipped'] = r.get('skipped_conflict', 0)
     except Exception as e:
         logger.warning(f"trip_reconcile inline after {target_date}: {e}")
 

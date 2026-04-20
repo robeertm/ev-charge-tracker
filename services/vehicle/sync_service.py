@@ -234,11 +234,12 @@ def _do_sync(app):
         return sync
 
 
-def _maybe_daily_hyundai_reconcile(app) -> None:
-    """Once per calendar day on Hyundai installs, pull the last 3 days of
-    SDK trip-info and realign PE-pair timestamps against them. No-op on
-    non-Hyundai installs and on same-day re-entry. Wrapped wide: a
-    reconcile failure must never take the sync loop down.
+def _maybe_daily_trip_reconcile(app) -> None:
+    """Once per calendar day on brands that expose day_trip_info (Kia +
+    Hyundai), pull the last 3 days of SDK trip-info and realign PE-pair
+    ``departed_at`` against them. No-op on unsupported brands and on
+    same-day re-entry. Wrapped wide: a reconcile failure must never
+    take the sync loop down.
     """
     try:
         with app.app_context():
@@ -246,16 +247,16 @@ def _maybe_daily_hyundai_reconcile(app) -> None:
             from services.vehicle.trip_log_fetch import backfill
             if not should_run_daily():
                 return
-            logger.info("Daily Hyundai reconcile: fetching last 3 days of SDK trips")
+            logger.info("Daily trip reconcile: fetching last 3 days of SDK trips")
             backfill(days=3)  # populate today + yesterday + day-before
             r = reconcile_range(days=3)
             logger.info(
-                f"Daily Hyundai reconcile done: "
+                f"Daily trip reconcile done: "
                 f"applied={r.get('total_applied', 0)} "
                 f"conflicts={r.get('total_conflicts', 0)}"
             )
     except Exception as e:
-        logger.warning(f"Daily Hyundai reconcile failed: {e}")
+        logger.warning(f"Daily trip reconcile failed: {e}")
 
 
 def _sync_loop(app):
@@ -275,7 +276,7 @@ def _sync_loop(app):
                 _do_sync(app)
             except Exception as e:
                 logger.error(f"Vehicle sync error: {e}")
-            # Daily Hyundai reconcile no longer rides on the sync tick —
+            # Daily trip reconcile no longer rides on the sync tick —
             # it has a dedicated 03:00 thread (_nightly_maintenance_loop)
             # so it fires at a predictable time instead of "whenever the
             # smart window opens".
@@ -297,14 +298,14 @@ def _sync_loop(app):
 
 
 def _nightly_maintenance_loop(app):
-    """Dedicated thread that fires Hyundai SDK-backfill + PE-reconcile
-    once per calendar day at ~03:00 local.
+    """Dedicated thread that fires SDK-backfill + PE-reconcile once per
+    calendar day at ~03:00 local.
 
     Independent of the main sync loop's smart-window schedule so it
     runs regardless of when smart mode's active window starts. The
-    Hyundai brand gate still applies inside
-    :func:`_maybe_daily_hyundai_reconcile`, so non-Hyundai installs
-    just no-op each wake-up.
+    brand gate inside :func:`_maybe_daily_trip_reconcile` ensures only
+    brands with a day_trip_info endpoint (Kia + Hyundai) actually
+    perform work; other brands no-op each wake-up.
 
     Startup catch-up: if we come up after 03:00 on a day where the
     reconcile hasn't run yet, fire once immediately instead of waiting
@@ -318,7 +319,7 @@ def _nightly_maintenance_loop(app):
             from services.trip_reconcile import should_run_daily
             if should_run_daily():
                 logger.info("Nightly maintenance: startup catch-up")
-                _maybe_daily_hyundai_reconcile(app)
+                _maybe_daily_trip_reconcile(app)
     except Exception as e:
         logger.warning(f"Nightly maintenance startup catch-up failed: {e}")
 
@@ -337,7 +338,7 @@ def _nightly_maintenance_loop(app):
             break
         logger.info(f"Nightly maintenance fired at {datetime.now().isoformat(timespec='seconds')}")
         try:
-            _maybe_daily_hyundai_reconcile(app)
+            _maybe_daily_trip_reconcile(app)
         except Exception as e:
             logger.warning(f"Nightly maintenance error: {e}")
 

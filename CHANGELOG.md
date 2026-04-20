@@ -1,5 +1,31 @@
 # Changelog
 
+## v2.28.12 (2026-04-20)
+
+### Correct `departed_at` on **both** Kia and Hyundai — "car sleeps at origin" fix
+
+Even after v2.28.11 killed the GPS cache-echo artefacts, one structural problem remained on *both* brands: the PE `departed_at` column is set to `last_seen_at` — the last sync that confirmed the car was still at the origin. When the car sleeps at the origin through the entire smart-window (user parks at home 18.04 12:42, drives away 20.04 06:30), there are zero intermediate at-spot syncs, so `last_seen_at = arrived_at` and closing the PE records `departed_at = 18.04 12:42` — a full 42 h before the actual departure. Both brands exhibit this: Kia returns `location = null` during deep-sleep, Hyundai returns a stale cache echo (which v2.28.11 now filters out) — in *both* cases there are no real at-spot syncs to advance `last_seen_at`.
+
+The live-polling side has no way to observe an actual drive-off moment: by the time the car pings fresh GPS, it has already been moving for a while. But the SDK's `/tripinfo` endpoint reports the exact minute the car's ECU started the trip. We already pull it nightly (v2.28.10). v2.28.12 rewires `trip_reconcile` to use it.
+
+### What changed
+
+**Anchor flipped: match by arrival, not departure.** Before v2.28.12 the reconcile matched an SDK trip to a PE pair by comparing `sdk.start_time` with `prev.departed_at` (±20 min). Since `prev.departed_at` can be days off, matches were getting lost exactly when they were most needed. Now the anchor is `sdk.start_time + drive + idle ≈ curr.arrived_at` (±20 min) — `arrived_at` is the reliable end of a PE pair (set by the first live at-destination sync, typically within ~10 min of actual arrival).
+
+**Write semantics: correct `departed_at` only, never touch `arrived_at`.** The PE arrival came from a real sync; it's the best signal we have. v2.28.11 was overwriting *both* ends with SDK-derived values, which could subtly shift a correct arrival timestamp in either direction. v2.28.12 rewrites only `prev.departed_at = sdk.start_time`.
+
+**Brand gate: Kia + Hyundai both qualify.** Previously guarded by `_is_hyundai()`. Both brands expose `update_day_trip_info`; both exhibit the "sleep at origin → stale departed_at" failure mode. The gate is now `_brand_supports_trip_info()` and admits both.
+
+**Pair selection widened.** Old code only considered PE pairs whose `prev.departed_at.date() == target_date`. With stale departed_at values that excluded the exact pairs that needed the most correction. Now: pair qualifies if either end (`prev.departed_at` OR `curr.arrived_at`) falls on the target date.
+
+### Rollout
+
+- `services/trip_reconcile.py` — new matching logic, new brand gate, reduced write scope
+- `services/vehicle/trip_log_fetch.py` — inline reconcile after each fetch runs for both brands (no more Hyundai-only `_is_hyundai` check)
+- `services/vehicle/sync_service.py` — renamed `_maybe_daily_hyundai_reconcile → _maybe_daily_trip_reconcile`, comments updated
+
+All three production hosts: wipe + replay ParkingEvents under v2.28.11's staleness filter, then `reconcile_range(days=30)` with the new anchor. Both the Kia install and the Hyundai installs benefit — same code path, same correction.
+
 ## v2.28.11 (2026-04-20)
 
 ### GPS staleness filter for ParkingEvent — fixes phantom transitions on Hyundai
