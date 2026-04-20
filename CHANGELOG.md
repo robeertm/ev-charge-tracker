@@ -1,5 +1,29 @@
 # Changelog
 
+## v2.28.9 (2026-04-20)
+
+### Daily PE ↔ SDK trip reconcile (Hyundai only)
+
+On Hyundai e-GMP installs, ParkingEvent timestamps (`departed_at` = last at-spot sync, `arrived_at` = first sync at new spot) run several minutes to several hours off real drive start / end — the polling cadence is coarse and smart-mode syncs can be 10 min apart. Meanwhile the Hyundai server's `/tripinfo` endpoint returns minute-accurate start / drive-time / idle-time / distance per trip (we already store this in `VehicleTrip`).
+
+New module **`services/trip_reconcile.py`** greedy-matches PE pairs to SDK trips — strict tolerances (±20 min on start_time, km delta within 25% or ≤3 km absolute), each SDK trip binds to at most one PE pair, and matches that would cross adjacent-event boundaries are skipped. When a clean 1:1 match lands, we overwrite `prev.departed_at = sdk.start_time` and `curr.arrived_at = sdk.start + drive + idle`.
+
+**What this does NOT do:** merge PE pairs that split across a single SDK trip (GPS-jitter artefacts), split PE pairs that merged several short SDK trips (below-threshold stops), or backfill missed trips. Those represent different views of the same journey and can't be reconciled without data loss.
+
+**Brand gate:** runs only when `vehicle_api_brand == 'hyundai'`. Kia (ev-robert reference install, 400 V platform) is untouched — the `_is_hyundai()` check short-circuits every entry point. Tested both branches locally.
+
+### Trigger points
+
+1. **Inline after SDK fetch** (`trip_log_fetch.fetch_day_trip_info`): whenever a day's SDK trips are pulled fresh, the same day's PE pairs are reconciled immediately. Wrapped so a reconcile failure never blocks the fetch result.
+
+2. **Daily from the sync loop** (`sync_service._maybe_daily_hyundai_reconcile`): once per calendar day, after a normal sync tick, backfill the last 3 days of SDK trips and reconcile. `last_reconcile_at` in `AppConfig` prevents same-day re-runs. The gate `should_run_daily()` is Hyundai-only.
+
+### What a typical run looks like on ev-dirk
+
+Runs recorded (2026-04-20): 17 PE pairs on the last 5 days, 2 applied (PE#3→#4 arrived_at 12:48 → 10:45, PE#5→#6 overnight arrival 06:01 → 00:16), 1 skipped conflict, 14 unmatched. The unmatched cases are legitimate structural mismatches — PE merging multiple short SDK trips or PE splitting via GPS jitter — not cases we should be touching.
+
+Daily API budget impact: +3 calls/day (three days of `backfill`) on Hyundai hosts. Kia hosts: zero extra calls.
+
 ## v2.28.8 (2026-04-20)
 
 ### Dashboard SoH: kill the bogus consumption-based fallback that always showed ~125 % on e-GMP

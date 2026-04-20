@@ -225,6 +225,30 @@ def _do_sync(app):
         return sync
 
 
+def _maybe_daily_hyundai_reconcile(app) -> None:
+    """Once per calendar day on Hyundai installs, pull the last 3 days of
+    SDK trip-info and realign PE-pair timestamps against them. No-op on
+    non-Hyundai installs and on same-day re-entry. Wrapped wide: a
+    reconcile failure must never take the sync loop down.
+    """
+    try:
+        with app.app_context():
+            from services.trip_reconcile import should_run_daily, reconcile_range
+            from services.vehicle.trip_log_fetch import backfill
+            if not should_run_daily():
+                return
+            logger.info("Daily Hyundai reconcile: fetching last 3 days of SDK trips")
+            backfill(days=3)  # populate today + yesterday + day-before
+            r = reconcile_range(days=3)
+            logger.info(
+                f"Daily Hyundai reconcile done: "
+                f"applied={r.get('total_applied', 0)} "
+                f"conflicts={r.get('total_conflicts', 0)}"
+            )
+    except Exception as e:
+        logger.warning(f"Daily Hyundai reconcile failed: {e}")
+
+
 def _sync_loop(app):
     """Background loop that syncs at configured interval.
 
@@ -242,6 +266,11 @@ def _sync_loop(app):
                 _do_sync(app)
             except Exception as e:
                 logger.error(f"Vehicle sync error: {e}")
+            # Piggy-back the once-per-day Hyundai reconcile here. Runs
+            # AFTER the normal sync completes, so API budget accounting
+            # is already current and the brand check is in a fresh app
+            # context.
+            _maybe_daily_hyundai_reconcile(app)
         else:
             logger.info(
                 f"Vehicle sync: outside smart-mode active window, "
