@@ -1,5 +1,13 @@
 # Changelog
 
+## v2.28.19 (2026-04-20)
+
+### Fahrtenbuch-Tabelle: Edit-Button-Spalte raus (iPhone 17 Air passt wieder ohne Scrollbar)
+
+User-Report mit Screenshot: auf iPhone 17 Air (~400 px Viewport) reichte die Fahrtenbuch-Tabelle nicht auf den Screen — die rechte Edit-Button-Spalte wurde abgeschnitten, `table-responsive` zeigte horizontale Scrollbar.
+
+Lösung: Die Edit-Button-Spalte komplett entfernt. Der Button war ohnehin redundant — die Von- und Nach-Zellen hatten bereits `role="button"` + identische `openTripEditor(fid, tid)`-Bindung, klickten auf dieselbe Funktion. 6 Spalten statt 7 → Tabelle passt ohne Horizontal-Scroll.
+
 ## v2.28.18 (2026-04-20)
 
 ### Background-Maintenance für Langformat-Adressen

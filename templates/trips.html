@@ -98,7 +98,6 @@
                         <th class="text-end">km</th>
                         <th class="text-end">SoC</th>
                         <th class="text-end">{{ t('trips.col_regen') }}</th>
-                        <th class="text-end"></th>
                     </tr>
                 </thead>
                 <tbody>
@@ -132,17 +131,9 @@
                         <td class="text-end">{% if tr.km %}{{ tr.km }}{% endif %}</td>
                         <td class="text-end">{% if tr.soc_used %}−{{ tr.soc_used }}%{% endif %}</td>
                         <td class="text-end text-success">{% if tr.regen_kwh %}+{{ "%.1f"|format(tr.regen_kwh) }}{% endif %}</td>
-                        <td class="text-end">
-                            {% if tr.to.id %}
-                            <button type="button" class="btn btn-sm btn-outline-secondary btn-edit-trip"
-                                    data-evt-id="{{ tr.to.id }}" title="{{ t('trips.edit_title') }}">
-                                <i class="bi bi-pencil"></i>
-                            </button>
-                            {% endif %}
-                        </td>
                     </tr>
                 {% else %}
-                    <tr><td colspan="7" class="text-center text-muted py-4">{{ t('trips.empty') }}</td></tr>
+                    <tr><td colspan="6" class="text-center text-muted py-4">{{ t('trips.empty') }}</td></tr>
                 {% endfor %}
                 </tbody>
             </table>
