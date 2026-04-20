@@ -787,6 +787,8 @@
   "trips.edit_trip_end": "Fahrtende",
   "trips.edit_trip_start_hint": "Abfahrt von diesem Ort",
   "trips.edit_trip_end_hint": "Ankunft an diesem Ort",
+  "trips.edit_gap_short": "Fahrt: ca. {min} min",
+  "trips.edit_gap_hint": "Abfahrt {from} → Ankunft {to}. Während dieser Zeit keine Sync-Daten (Fahrt-Intervall).",
   "trips.edit_odometer_arrived": "km bei Ankunft",
   "trips.edit_odometer_departed": "km bei Abfahrt",
   "trips.edit_soc_arrived": "SoC % Ankunft",

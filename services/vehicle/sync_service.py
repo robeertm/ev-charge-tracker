@@ -9,6 +9,22 @@ logger = logging.getLogger(__name__)
 
 _sync_thread = None
 _sync_running = False
+_force_refresh_pending = None  # Optional[str] — reason set by request_force_refresh()
+
+
+def request_force_refresh(reason: str = 'manual') -> None:
+    """Queue an immediate force-refresh on the next sync-loop tick.
+
+    Called from the parking hook when motion is detected: the sync that
+    detected motion may have been cached (stale), so this asks the next
+    tick to wake the car for a fresh GPS/SoC/odometer snapshot at the
+    new location. The sleep loop polls this flag in 10s increments, so
+    the refresh happens within ~10 seconds of the request even if the
+    smart-mode interval is 10 min.
+    """
+    global _force_refresh_pending
+    _force_refresh_pending = reason
+    logger.info(f"Force-refresh queued: {reason}")
 
 MIN_INTERVAL_HOURS = 1  # cached/force modes: 1 hour minimum
 DEFAULT_INTERVAL_HOURS = 4
@@ -144,7 +160,17 @@ def _do_sync(app):
         force = (mode == 'force')
         mode_label = mode  # 'cached' | 'force' | 'smart' (overridden below)
 
-        if mode == 'smart':
+        # A queued request_force_refresh() overrides the mode's normal
+        # decision and upgrades this tick to a force-refresh.
+        global _force_refresh_pending
+        triggered_reason = _force_refresh_pending
+        if triggered_reason:
+            _force_refresh_pending = None
+            force = True
+            mode_label = f'triggered:{triggered_reason}'
+            logger.info(f"Smart sync: triggered force-refresh ({triggered_reason})")
+
+        if not triggered_reason and mode == 'smart':
             mode_label = 'smart->cached'
             try:
                 from datetime import datetime, timedelta
@@ -222,9 +248,10 @@ def _sync_loop(app):
                 f"sleeping {sleep_secs // 60} min"
             )
 
-        # Sleep in small increments so we can stop quickly
+        # Sleep in small increments so we can stop quickly and react to
+        # a queued force-refresh request within ~10 seconds.
         slept = 0
-        while slept < sleep_secs and _sync_running:
+        while slept < sleep_secs and _sync_running and _force_refresh_pending is None:
             time.sleep(min(10, sleep_secs - slept))
             slept += 10
 

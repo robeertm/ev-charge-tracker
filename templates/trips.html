@@ -274,6 +274,11 @@
           {% endfor %}
         </div>
 
+        <div id="tripEditGapHint" class="alert alert-info small py-2 mt-3 mb-0" style="display:none">
+          <i class="bi bi-hourglass-split"></i>
+          <span id="tripEditGapHintText"></span>
+        </div>
+
         <div class="mt-3">
           <div id="tripEditPickStatus" class="small text-muted mb-1">{{ t('trips.edit_map_hint') }}</div>
           <div id="tripEditMap" style="height:320px; border-radius:4px;"></div>
@@ -467,6 +472,8 @@
         click_map_from:  {{ t('trips.edit_click_map_from')|tojson }},
         click_map_to:    {{ t('trips.edit_click_map_to')|tojson }},
         map_hint:        {{ t('trips.edit_map_hint')|tojson }},
+        gap_short:       {{ t('trips.edit_gap_short')|tojson }},
+        gap_hint:        {{ t('trips.edit_gap_hint')|tojson }},
     };
     let _modal = null;
     function getModal() {
@@ -662,6 +669,28 @@
                 ageText.textContent = T_EDIT.age_note.replace('{days}', maxAgeDays);
                 ageWarn.style.display = '';
                 confirmWrap.style.display = '';
+            }
+            // Data-gap hint: time between Abfahrt (from.departed_at) and
+            // Ankunft (to.arrived_at) — this is the "blind window" where
+            // no sync landed. With the v2.28.4 fix, prev.departed_at =
+            // last_seen_at, so this gap reflects actual drive time plus
+            // any poll-interval slack. Show if >= 1 min.
+            const gapHintEl = document.getElementById('tripEditGapHint');
+            const gapHintTextEl = document.getElementById('tripEditGapHintText');
+            if (gapHintEl) gapHintEl.style.display = 'none';
+            if (results.from && results.to && results.from.departed_at && results.to.arrived_at) {
+                const t1 = new Date(results.from.departed_at);
+                const t2 = new Date(results.to.arrived_at);
+                const gapMin = Math.round((t2 - t1) / 60000);
+                if (gapHintEl && gapHintTextEl && gapMin >= 1) {
+                    const fmt = (d) => d.toTimeString().slice(0, 5);
+                    const short = T_EDIT.gap_short.replace('{min}', gapMin);
+                    const hint = T_EDIT.gap_hint
+                        .replace('{from}', fmt(t1))
+                        .replace('{to}', fmt(t2));
+                    gapHintTextEl.innerHTML = '<strong>' + short + '</strong> — ' + hint;
+                    gapHintEl.style.display = '';
+                }
             }
             setStatus('');
         } catch (e) {

@@ -139,18 +139,31 @@ def update_parking_from_sync(sync) -> Optional[ParkingEvent]:
         return open_evt
 
     if distance >= MOVE_THRESHOLD_M:
-        # Car has moved away → close the event at the detection timestamp.
-        # Leave odometer_departed / soc_departed alone — they already hold
-        # the last at-spot values from same-place updates above, which is
-        # the semantically correct "state when leaving here". Only fill
-        # them from the new-location sync as a last-resort fallback when
-        # no same-place sync ever topped them up.
-        open_evt.departed_at = sync.timestamp
+        # Car has moved away. Close the event using last_seen_at (the last
+        # sync while still at this spot) as departed_at — NOT sync.timestamp,
+        # which is the first sync at the NEW location. Using sync.timestamp
+        # would make prev.departed_at == curr.arrived_at (both the same sync)
+        # and misattribute the trip's km/SoC drop to the origin parking.
+        # odometer_departed / soc_departed already hold last-at-spot values
+        # from same-place updates above (the semantically correct "state
+        # when leaving"). Fallbacks: if we somehow never got a same-place
+        # sync (car arrived and left between two syncs), fall back to
+        # sync.timestamp / sync values — imperfect but better than NULL.
+        open_evt.departed_at = open_evt.last_seen_at or sync.timestamp
         if open_evt.odometer_departed is None and sync.odometer_km is not None:
             open_evt.odometer_departed = sync.odometer_km
         if open_evt.soc_departed is None and sync.soc_percent is not None:
             open_evt.soc_departed = sync.soc_percent
         db.session.commit()
+        # Ask the sync service to schedule an immediate force-refresh on
+        # the next tick so curr.arrived_at / soc_arrived / odometer_arrived
+        # at the new location reflect a fresh reading, not whatever stale
+        # cached state the periodic sync happened to pull.
+        try:
+            from services.vehicle.sync_service import request_force_refresh
+            request_force_refresh(reason='motion_detected')
+        except Exception:
+            pass
         return _open_event(sync, lat, lon)
 
     return open_evt
@@ -318,21 +331,25 @@ def get_trips(limit: Optional[int] = None,
             continue
         pe_covered_dates.add(prev.departed_at.date())
 
+        # Trip km: prefer odometer_departed (last at-spot reading) as the
+        # origin km — it's the reading we're most confident reflects the
+        # actual pre-drive odometer. Fall back to odometer_arrived for
+        # events written before v2.28.3, which may still have stale
+        # *_departed columns from the v2.24–v2.28.2 capture bug.
         km = None
-        if prev.odometer_arrived is not None and curr.odometer_arrived is not None:
-            km = max(curr.odometer_arrived - prev.odometer_arrived, 0)
+        start_km = prev.odometer_departed if prev.odometer_departed is not None else prev.odometer_arrived
+        if start_km is not None and curr.odometer_arrived is not None:
+            km = max(curr.odometer_arrived - start_km, 0)
 
-        # SoC "used". The two ParkingEvent columns (soc_arrived /
-        # soc_departed) are both captured by the first sync at the
-        # origin / at the *next* location respectively — neither
-        # actually represents SoC at the moment the car drove off.
-        # Recovering that properly requires querying vehicle_syncs for
-        # the last known SoC strictly before prev.departed_at: in smart
-        # mode that's ≤ 10 min pre-move, which is accurate enough. End
-        # SoC is curr.soc_arrived (first sync at destination = true
-        # post-trip state). Falls back to prev.soc_arrived only when no
-        # earlier sync with SoC exists (initial-setup edge case).
-        start_soc = _soc_before(soc_lookup, prev.departed_at)
+        # Trip SoC consumption: prev.soc_departed is now the last at-spot
+        # SoC (post v2.28.3 capture fix), so we can use it directly.
+        # For legacy events where soc_departed still holds the old post-
+        # drive value (bug before v2.28.3), _soc_before gives us the
+        # right answer. Pick whichever is available and most trustworthy;
+        # if both are, the live at-spot value wins.
+        start_soc = prev.soc_departed
+        if start_soc is None:
+            start_soc = _soc_before(soc_lookup, prev.departed_at)
         if start_soc is None:
             start_soc = prev.soc_arrived
         end_soc = curr.soc_arrived

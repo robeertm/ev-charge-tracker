@@ -533,6 +533,8 @@
   "trips.col_regen": "Récup",
   "trips.col_to": "Vers",
   "trips.col_when": "Quand",
+  "trips.edit_gap_hint": "Départ {from} → arrivée {to}. Aucune donnée de sync durant cette fenêtre (intervalle de trajet).",
+  "trips.edit_gap_short": "Trajet : ~{min} min",
   "trips.edit_trip_end": "Fin du trajet",
   "trips.edit_trip_end_hint": "Arrivée à cet endroit",
   "trips.edit_trip_start": "Début du trajet",

@@ -787,6 +787,8 @@
   "trips.edit_trip_end": "Trip end",
   "trips.edit_trip_start_hint": "Departure from this place",
   "trips.edit_trip_end_hint": "Arrival at this place",
+  "trips.edit_gap_short": "Drive: ~{min} min",
+  "trips.edit_gap_hint": "Departed {from} → arrived {to}. No sync data during this window (drive interval).",
   "trips.edit_odometer_arrived": "km on arrival",
   "trips.edit_odometer_departed": "km on departure",
   "trips.edit_soc_arrived": "SoC % arrival",

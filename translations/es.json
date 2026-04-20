@@ -533,6 +533,8 @@
   "trips.col_regen": "Recup",
   "trips.col_to": "Hasta",
   "trips.col_when": "Cuándo",
+  "trips.edit_gap_hint": "Salida {from} → llegada {to}. Sin datos de sync durante esta ventana (intervalo de viaje).",
+  "trips.edit_gap_short": "Viaje: ~{min} min",
   "trips.edit_trip_end": "Fin del viaje",
   "trips.edit_trip_end_hint": "Llegada a este lugar",
   "trips.edit_trip_start": "Inicio del viaje",

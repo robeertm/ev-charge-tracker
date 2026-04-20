@@ -1,5 +1,29 @@
 # Changelog
 
+## v2.28.4 (2026-04-20)
+
+### Trip log: decouple `departed_at` from next `arrived_at` + motion-triggered force-refresh
+
+v2.28.3 fixed *what* `soc_departed` / `odometer_departed` contained, but their **timestamp** — `prev.departed_at` — was still `sync.timestamp` of the *first sync at the new location*. Because that's the same sync that opens the next ParkingEvent, `prev.departed_at == curr.arrived_at` in every case: the trip-edit modal showed identical timestamps on both sides, and the "time the car spent driving" was structurally 0 min.
+
+**Fix:** when closing the event on move detection, set `departed_at = last_seen_at` (the last sync while still at the old spot), not the post-drive sync timestamp. Now `prev.departed_at < curr.arrived_at`, and the gap reflects the actual blind window between "last known at origin" and "first known at destination" — i.e. drive time plus any poll-interval slack.
+
+### Trip-list SoC/km calc simplified
+
+`get_trips()` now uses `prev.soc_departed` and `prev.odometer_departed` directly as the origin values (post v2.28.3 they hold the last at-spot readings). `_soc_before()` drops to fallback status for legacy events that still hold pre-v2.28.3 capture data. Kilometrage similarly prefers `prev.odometer_departed` over `prev.odometer_arrived`.
+
+### Motion-triggered force-refresh
+
+The original user concern — "the system should get a fresh SoC before I drive" — can't literally be met: we can't predict departure. But we *can* make the **arrival** side fresh. When `update_parking_from_sync()` detects a move (GPS jump ≥ 100 m), it now calls `sync_service.request_force_refresh('motion_detected')`, which queues a force-refresh on the next sync-loop tick. The sleep loop breaks out within ~10 s so the follow-up wake happens quickly. This ensures `curr.arrived_at` / `soc_arrived` / `odometer_arrived` reflect a fresh reading even if the sync that detected motion was cached.
+
+### Data-gap hint in the trip-edit modal
+
+Between the Startpunkt / Zielpunkt cards there's now an info banner showing the drive window: "Fahrt: ca. 34 min — Abfahrt 11:56 → Ankunft 12:30. Während dieser Zeit keine Sync-Daten (Fahrt-Intervall)." Makes the polling-interval uncertainty explicit so the user knows how fresh the endpoint data is. Two new i18n keys (`trips.edit_gap_short`, `trips.edit_gap_hint`) in all six languages.
+
+### Migration
+
+Existing ParkingEvents still have `departed_at = post-drive sync timestamp`. Run **Fahrtenbuch → "Aus Historie nachbauen"** (with wipe) once after updating to rebuild the event chain with the new logic. New events captured from this release onward are already correct.
+
 ## v2.28.3 (2026-04-20)
 
 ### Trip edit modal: fix SoC/km on `departed` side + clearer labels

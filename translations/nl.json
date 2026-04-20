@@ -533,6 +533,8 @@
   "trips.col_regen": "Recup",
   "trips.col_to": "Naar",
   "trips.col_when": "Wanneer",
+  "trips.edit_gap_hint": "Vertrek {from} → aankomst {to}. Geen sync-gegevens in dit venster (ritinterval).",
+  "trips.edit_gap_short": "Rit: ~{min} min",
   "trips.edit_trip_end": "Einde van de rit",
   "trips.edit_trip_end_hint": "Aankomst op deze plek",
   "trips.edit_trip_start": "Begin van de rit",
