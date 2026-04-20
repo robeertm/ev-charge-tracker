@@ -1,5 +1,11 @@
 # Changelog
 
+## v2.28.21 (2026-04-20)
+
+### Log daily reconcile: include arr_applied counter
+
+v2.28.20 added arrival-timestamp correction but the daily-loop log line still only reported the `departed_at` counter. Now emits `dep=N arr=M conflicts=K` so the new counter is visible in journal logs.
+
 ## v2.28.20 (2026-04-20)
 
 ### Reconcile arrival timestamps from SDK trip data (Kia + Hyundai)
