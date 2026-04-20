@@ -2,51 +2,51 @@
 
 ## v2.28.19 (2026-04-20)
 
-### Fahrtenbuch-Tabelle: Edit-Button-Spalte raus (iPhone 17 Air passt wieder ohne Scrollbar)
+### Fahrtenbuch table: drop redundant edit-button column (iPhone 17 Air fits without scrollbar again)
 
-User-Report mit Screenshot: auf iPhone 17 Air (~400 px Viewport) reichte die Fahrtenbuch-Tabelle nicht auf den Screen — die rechte Edit-Button-Spalte wurde abgeschnitten, `table-responsive` zeigte horizontale Scrollbar.
+User report with screenshot: on iPhone 17 Air (~400 px viewport) the Fahrtenbuch table overflowed the screen — the right-most edit-button column got cut off and `table-responsive` showed a horizontal scrollbar.
 
-Lösung: Die Edit-Button-Spalte komplett entfernt. Der Button war ohnehin redundant — die Von- und Nach-Zellen hatten bereits `role="button"` + identische `openTripEditor(fid, tid)`-Bindung, klickten auf dieselbe Funktion. 6 Spalten statt 7 → Tabelle passt ohne Horizontal-Scroll.
+Fix: removed the edit-button column entirely. The button was redundant — Von/Nach cells already had `role="button"` plus an identical `openTripEditor(fid, tid)` binding, i.e. they triggered the exact same modal. 6 columns instead of 7 → table fits without horizontal scroll.
 
 ## v2.28.18 (2026-04-20)
 
-### Background-Maintenance für Langformat-Adressen
+### Background maintenance for long-form geocode cache entries
 
-v2.28.17 brachte das Kurzformat, aber die Bestandsmigration (44 PE auf ev-robert, 16 auf ev-dirk) triggerte einen Nominatim-429-Rate-Limit-Bann — vermutlich weil 3 Hosts parallel in Bursts hämmerten. Einzelne Hosts im Nachlauf fingen sich denselben Block über Stunden ein.
+v2.28.17 introduced the short-address format, but the bulk post-deploy migration (44 PE on the Kia install, 16 on the Hyundai install) triggered a Nominatim 429 rate-limit block — three hosts in parallel bursts hammered past the 1 req/s policy. Individual hosts retrying afterwards inherited the same block for hours.
 
-v2.28.18 übernimmt die Migration im Hintergrund, ohne Spike:
+v2.28.18 shifts the migration into a background thread so it can never spike:
 
-- Neuer Thread `geocode-maintenance` startet in `create_app()` zusammen mit dem Vehicle-Sync-Thread.
-- **Idle**: wenn keine Legacy-Einträge (`raw_json IS NULL`) im Cache stehen → 10 min Sleep, nächster Probe-Cycle.
-- **Pending**: rebuild *einer* Row, 2 s Sleep, nächste Row. Fest-langsam — Nominatim kann nicht überreizt werden.
-- **Nominatim-Error** (z. B. 429 beim initialen Bann): 60 s Backoff, dann neuer Versuch. Heilt sich selbst sobald der Bann freigibt.
-- Nach erfolgreichem Rebuild kaskadiert das neue Kurzformat auf alle `ParkingEvent.address` mit passenden gerundeten Koordinaten — keine manuelle `geocode_missing_events`-Runde mehr nötig.
+- New thread `geocode-maintenance` starts inside `create_app()` alongside the vehicle-sync thread.
+- **Idle**: no legacy entries (`raw_json IS NULL`) in the cache → 10 min sleep, next probe.
+- **Pending**: rebuild *one* row, 2 s sleep, next row. Fixed-slow — Nominatim can't be overloaded.
+- **Nominatim error** (e.g. the initial 429 block): 60 s backoff, retry. Self-heals when the block lifts.
+- After each successful rebuild, cascades the new short address onto every `ParkingEvent.address` whose rounded coords match — no manual `geocode_missing_events` pass needed.
 
-Über 20–30 Min laufen die jeweils ~10 verbliebenen Legacy-Einträge durch, ohne weiteres User-Zutun. Future-proof: jeder transiente Nominatim-Ausfall (timeout → `raw_json IS NULL` beibehalten) wird beim nächsten Wake-Up retryed.
+The remaining ~10 legacy entries per host trickle through in 20–30 min without further user action. Future-proof: any transient Nominatim failure (timeout → `raw_json IS NULL` stays) gets retried on the next wake-up.
 
 ## v2.28.17 (2026-04-20)
 
-### Kurze, lesbare Adressen im Fahrtenbuch (POI + Straße + PLZ + Stadt)
+### Short, readable addresses in Fahrtenbuch (POI / street / postcode / city)
 
-Bislang speicherte der Geocoding-Cache Nominatims `display_name` in Langform (`"1, Straße, Ortsteil, Stadt, Bundesland, PLZ, Deutschland"`). In der /trips-Tabelle gefressen das die Spaltenbreite und ließ den Schnellblick nach "wo war das?" scheitern.
+Until now the geocoding cache stored Nominatim's verbose `display_name` (`"1, Street, Suburb, City, State, Postcode, Country"`). On /trips that column ate most of the width and the at-a-glance "where was that?" failed.
 
-### Kurzformat
+### Short format
 
-`services/geocode_service._format_short()` parst die strukturierte `address` aus der Nominatim-Antwort und baut:
+`services/geocode_service._format_short()` parses Nominatim's structured `address` object and builds:
 
-- **POI** (Shop / Amenity / Leisure / Tourism): `"Lidl, 12345 Stadt"`, `"IKEA, 12345 Stadt"`, `"Kirche St. Anna, 12345 Stadt"`
-- **Straße**: `"Hauptstraße 42, 12345 Stadt"`
-- **Fallback**: `"12345 Stadt"` wenn nichts weiter bekannt ist.
+- **POI** (shop / amenity / leisure / tourism): `"Lidl, 12345 City"`, `"IKEA, 12345 City"`, `"Kirche St. Anna, 12345 City"`
+- **Street**: `"Hauptstraße 42, 12345 City"`
+- **Fallback**: `"12345 City"` when nothing more specific is known.
 
-Der komplette Nominatim-Response wird jetzt in einer neuen Spalte `geocode_cache.raw_json` persistiert — das Kurzformat kann jederzeit neu aus den Rohdaten abgeleitet werden, ohne einen weiteren API-Call an Nominatim (der ohnehin per 1-req/s rate-limited ist).
+The full Nominatim response now persists in a new `geocode_cache.raw_json` column — the short format can be re-derived any time from the raw data without another API call (rate-limited to 1 req/s anyway).
 
-### Favoriten, home/work bleiben
+### Favorites / home / work preserved
 
-Das Kurzformat ersetzt nur `ParkingEvent.address`. Die Felder `label` (`home` / `work` / `favorite` / `other`) und `favorite_name` bleiben unberührt — die UI rendert Favoriten weiter mit ihrem benutzerdefinierten Namen; Adresse ist nur das Fallback für `label == 'other'`.
+The short format only replaces `ParkingEvent.address`. The `label` field (`home` / `work` / `favorite` / `other`) and `favorite_name` are untouched — the UI still renders favorites with their user-assigned name; the address only falls back in for `label == 'other'`.
 
 ### Migration
 
-`rebuild_legacy_entries()` fetcht alle Cache-Einträge ohne `raw_json` einmalig neu von Nominatim (rate-limited). Danach wird `PE.address` gelöscht und `geocode_missing_events()` aufgerufen — das kopiert die jetzt kurzen Adressen aus dem frisch befüllten Cache in die PE-Zeilen, ohne einen weiteren API-Call. Einmalig nach Deploy auf allen drei Hosts.
+`rebuild_legacy_entries()` re-fetches every cache row without `raw_json` once via Nominatim (rate-limited). Then `PE.address` gets cleared and `geocode_missing_events()` runs — that copies the now-short addresses out of the freshly filled cache into the PE rows, without another API call. One-shot after deploy across all three hosts.
 
 ## v2.28.16 (2026-04-20)
 
