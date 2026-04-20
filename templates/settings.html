@@ -53,6 +53,7 @@
     ('sysupd',    'bi-arrow-up-circle', t('set.sysupd_title')),
     ('backup',    'bi-archive',     t('set.backup_title')),
     ('app',       'bi-info-circle', t('set.app_title')),
+    ('danger',    'bi-exclamation-octagon', t('set.danger_title')),
 ] %}
 <div class="settings-wrap">
     <nav class="settings-sidebar" id="settingsNav" aria-label="{{ t('set.title') }}">
@@ -1678,7 +1679,65 @@
                 <div id="restartResult" class="mt-2"></div>
             </div>
         </div>
+
+        <!-- Gefahrenzone / Danger Zone -->
+        <div class="card mb-4 settings-card border-danger" id="sec-danger">
+            <div class="card-header bg-danger-subtle fw-bold text-danger">
+                <i class="bi bi-exclamation-octagon"></i> {{ t('set.danger_title') }}
+            </div>
+            <div class="card-body">
+                <h6 class="mb-1">{{ t('set.danger_reset_heading') }}</h6>
+                <p class="small text-muted mb-2">{{ t('set.danger_reset_desc') }}</p>
+                <ul class="small text-muted mb-3">
+                    <li>{{ t('set.danger_reset_bullet_db') }}</li>
+                    <li>{{ t('set.danger_reset_bullet_creds') }}</li>
+                    <li>{{ t('set.danger_reset_bullet_cars') }}</li>
+                    <li>{{ t('set.danger_reset_bullet_settings') }}</li>
+                </ul>
+                <div class="alert alert-warning small mb-3">
+                    <i class="bi bi-info-circle"></i> {{ t('set.danger_reset_backup_hint') }}
+                </div>
+                <button type="button" class="btn btn-outline-danger" data-bs-toggle="modal" data-bs-target="#factoryResetModal">
+                    <i class="bi bi-trash3"></i> {{ t('set.danger_reset_btn') }}
+                </button>
+            </div>
+        </div>
     </div>
+</div>
+
+<!-- Factory-Reset Modal -->
+<div class="modal fade" id="factoryResetModal" tabindex="-1" aria-hidden="true">
+  <div class="modal-dialog">
+    <div class="modal-content border-danger">
+      <div class="modal-header bg-danger text-white">
+        <h5 class="modal-title"><i class="bi bi-exclamation-octagon"></i> {{ t('set.danger_modal_title') }}</h5>
+        <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="Close"></button>
+      </div>
+      <div class="modal-body">
+        <div class="alert alert-danger small">
+          <strong>{{ t('set.danger_modal_irreversible') }}</strong><br>
+          {{ t('set.danger_modal_body') }}
+        </div>
+        {% if auth_enabled %}
+        <div class="mb-3">
+          <label for="factoryResetPw" class="form-label small">{{ t('set.danger_modal_password_label') }}</label>
+          <input type="password" class="form-control" id="factoryResetPw" autocomplete="current-password">
+        </div>
+        {% endif %}
+        <div class="mb-1">
+          <label for="factoryResetConfirm" class="form-label small">{{ t('set.danger_modal_confirm_label') }}</label>
+          <input type="text" class="form-control" id="factoryResetConfirm" autocomplete="off" placeholder="RESET">
+        </div>
+        <div id="factoryResetStatus" class="small mt-2"></div>
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn btn-outline-secondary btn-sm" data-bs-dismiss="modal">{{ t('set.danger_modal_cancel') }}</button>
+        <button type="button" class="btn btn-danger btn-sm" id="factoryResetGo" disabled>
+          <i class="bi bi-trash3"></i> {{ t('set.danger_modal_go') }}
+        </button>
+      </div>
+    </div>
+  </div>
 </div>
 {% endblock %}
 
@@ -2551,6 +2610,78 @@
 
 // Notify IIFE moved to its own <script> block at the end of the template
 // (isolated so any earlier JS error can't break it).
+
+// ── Factory Reset ──────────────────────────────────────────
+(function() {
+    const modal = document.getElementById('factoryResetModal');
+    const goBtn = document.getElementById('factoryResetGo');
+    const pwInput = document.getElementById('factoryResetPw');
+    const confirmInput = document.getElementById('factoryResetConfirm');
+    const statusEl = document.getElementById('factoryResetStatus');
+    if (!modal || !goBtn || !confirmInput) return;
+
+    const T_FR = {
+        wrong_password:        {{ t('set.danger_err_wrong_password') | tojson }},
+        confirmation_mismatch: {{ t('set.danger_err_confirmation') | tojson }},
+        network:               {{ t('set.danger_err_network') | tojson }},
+        restarting:            {{ t('set.danger_restarting') | tojson }},
+    };
+    const authEnabled = {{ 'true' if auth_enabled else 'false' }};
+
+    function setStatus(msg, cls) {
+        statusEl.className = 'small mt-2 text-' + (cls || 'muted');
+        statusEl.textContent = msg || '';
+    }
+    function recomputeEnabled() {
+        const confirmOK = confirmInput.value.trim() === 'RESET';
+        const pwOK = !authEnabled || (pwInput && pwInput.value.length > 0);
+        goBtn.disabled = !(confirmOK && pwOK);
+    }
+    confirmInput.addEventListener('input', recomputeEnabled);
+    if (pwInput) pwInput.addEventListener('input', recomputeEnabled);
+    modal.addEventListener('shown.bs.modal', () => {
+        setStatus('');
+        confirmInput.value = '';
+        if (pwInput) pwInput.value = '';
+        goBtn.disabled = true;
+        (pwInput || confirmInput).focus();
+    });
+
+    goBtn.addEventListener('click', async () => {
+        goBtn.disabled = true;
+        setStatus('…');
+        try {
+            const body = { confirmation: confirmInput.value.trim() };
+            if (pwInput) body.password = pwInput.value;
+            const r = await fetch('/api/factory-reset', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify(body),
+            });
+            const data = await r.json().catch(() => ({}));
+            if (r.ok && data.ok) {
+                setStatus(T_FR.restarting, 'success');
+                // App is about to die + systemd restarts it. Clear
+                // sessionStorage so any cached state is gone, then land
+                // on "/" where the newly-empty install will render.
+                try { sessionStorage.clear(); } catch(e) {}
+                setTimeout(() => { location.href = '/'; }, 6000);
+                return;
+            }
+            if (data.error === 'wrong_password') {
+                setStatus(T_FR.wrong_password, 'danger');
+            } else if (data.error === 'confirmation_mismatch') {
+                setStatus(T_FR.confirmation_mismatch, 'danger');
+            } else {
+                setStatus((data.error || 'Fehler'), 'danger');
+            }
+            goBtn.disabled = false;
+        } catch (e) {
+            setStatus(T_FR.network + ': ' + e.message, 'danger');
+            goBtn.disabled = false;
+        }
+    });
+})();
 
 // ── Backup / Restore Form ──────────────────────────────────
 (function() {

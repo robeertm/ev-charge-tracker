@@ -2063,6 +2063,101 @@ def register_routes(app):
         threading.Thread(target=_shutdown, daemon=True).start()
         return jsonify({'ok': True})
 
+    @app.route('/api/factory-reset', methods=['POST'])
+    def api_factory_reset():
+        """Wipe all app data and restart so the next boot looks like a
+        fresh install (no password, no DB, no settings, no credentials).
+
+        Requires the current password — even when auth is disabled, we
+        demand a type-to-confirm string so a single accidental POST can
+        never nuke the DB. Keeps the Settings-page entry harmless.
+        """
+        from services.auth_service import (
+            is_auth_enabled, is_logged_in, verify_credentials, get_username,
+        )
+
+        # Gate 1: must be logged in if auth is on. (The auth guard
+        # already enforces this before we reach here, but being
+        # explicit protects against future refactors.)
+        if is_auth_enabled() and not is_logged_in():
+            return jsonify({'error': 'auth_required'}), 401
+
+        data = request.get_json(silent=True) or {}
+        confirmation = (data.get('confirmation') or '').strip()
+        password = data.get('password') or ''
+
+        # Gate 2: literal typed confirmation — prevents CSRF-style one-click
+        # damage and aligns with the UI's "type RESET to confirm" field.
+        if confirmation != 'RESET':
+            return jsonify({'error': 'confirmation_mismatch'}), 400
+
+        # Gate 3: if auth is configured, verify the password again. If
+        # auth is not configured we still accept the request — an install
+        # with no password has already opted out of that protection layer.
+        if is_auth_enabled():
+            if not verify_credentials(get_username(), password):
+                return jsonify({'error': 'wrong_password'}), 401
+
+        db_path = Path(DATA_DIR) / 'ev_tracker.db'
+        notify_path = Path(DATA_DIR) / 'notify.json'
+        safety_backup = None
+        try:
+            # Dispose SQLAlchemy before touching the file — open fds keep
+            # the old inode alive on POSIX, so the restarted process
+            # would come up on the stale DB without this.
+            try:
+                db.session.close()
+                db.engine.dispose()
+            except Exception:
+                pass
+
+            # Last-resort safety backup so a panicked user can restore
+            # manually from the filesystem. Not surfaced in the UI — this
+            # really is supposed to be a wipe.
+            if db_path.is_file():
+                backup_dir = Path(DATA_DIR) / 'backups'
+                backup_dir.mkdir(parents=True, exist_ok=True)
+                ts = datetime.now().strftime('%Y%m%d-%H%M%S')
+                safety_backup = backup_dir / f'ev_tracker-pre-factory-reset-{ts}.db'
+                shutil.copy2(db_path, safety_backup)
+                db_path.unlink()
+            if notify_path.is_file():
+                notify_path.unlink()
+        except Exception as e:
+            logger.error(f"Factory reset: file wipe failed: {e}")
+            return jsonify({'error': f'wipe_failed: {e}'}), 500
+
+        logger.warning(
+            f"FACTORY RESET triggered — DB wiped, safety backup at {safety_backup}. "
+            "Restarting service."
+        )
+
+        # Restart via systemd in a short-delayed background thread so
+        # this response flushes to the browser first. Same pattern as
+        # /api/backup/import.
+        def _delayed_restart():
+            import time as _t
+            _t.sleep(0.7)
+            try:
+                subprocess.run(
+                    ['sudo', '-n', '/bin/systemctl', 'restart', 'ev-tracker.service'],
+                    timeout=10,
+                )
+            except Exception:
+                pass
+            # Belt and suspenders — if sudo restart didn't take (e.g. no
+            # systemd on this host, or the sudoers rule is missing), fall
+            # back to os._exit so a supervisor still restarts us.
+            os._exit(0)
+
+        import threading as _th
+        _th.Thread(target=_delayed_restart, daemon=True).start()
+
+        return jsonify({
+            'ok': True,
+            'safety_backup': str(safety_backup) if safety_backup else None,
+        })
+
     @app.route('/api/update/install', methods=['POST'])
     def api_update_install():
         """Stage an update and trigger a graceful shutdown so the helper

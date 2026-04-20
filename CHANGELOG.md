@@ -1,5 +1,34 @@
 # Changelog
 
+## v2.28.6 (2026-04-20)
+
+### Settings → Gefahrenzone: "Komplett zurücksetzen" Button
+
+Until now, repurposing an install (getting it back to a freshly-provisioned state — no password, no DB, no credentials, no settings) meant shell access: `rm data/ev_tracker.db && systemctl restart ev-tracker.service`, or a full reinstall. Convenient for admins, not for the actual user. New UI path:
+
+**Settings → Gefahrenzone → "Komplett zurücksetzen …"** opens a modal that asks for the current web-UI password (if auth is enabled) and a typed `RESET` confirmation, then wipes:
+
+- `data/ev_tracker.db` entirely (all tables, including `AppConfig`, so password + API credentials go with it)
+- `data/notify.json` if it exists
+
+Before wiping, the server writes a timestamped copy to `data/backups/ev_tracker-pre-factory-reset-YYYYMMDD-HHMMSS.db` — not surfaced in the UI, just sitting on disk as an "oh shit" rescue. After the wipe, the backend disposes the SQLAlchemy engine, schedules a systemd restart (same mechanism as backup-import), and `os._exit(0)`s as a belt-and-suspenders so a supervisor still brings us back if the sudo-restart fails.
+
+On the restart, the app comes up with an empty DB, `is_auth_enabled()` returns False (the flag was in `AppConfig`), and the user lands on `/` with an unlocked dashboard — exactly the state of a fresh install right after the first visit, before any password has been set.
+
+**This does not touch LUKS, the venv, or the repo** — it's purely an app-data wipe. Anything outside `data/` (updates/, logs/, /srv/ev-data's mountpoint setup) is untouched. If you need to reset the *LUKS volume* because you've forgotten the passphrase, that remains a shell-only operation (documented in `deploy/README.md`).
+
+Twenty new translation keys (`set.danger_*`) in all six languages.
+
+### Safety gates
+
+Three gates prevent accidental / drive-by resets:
+
+1. **Login required** when auth is on (standard auth guard already handles this)
+2. **Typed confirmation**: the request body must contain `confirmation: "RESET"` verbatim — no variations, no checkboxes. Any JSON submission that skips this gets a 400 `confirmation_mismatch` before any file is touched.
+3. **Password re-verification**: if auth is enabled, the current password is re-checked server-side via `verify_credentials()`. Wrong password → 401 `wrong_password`, no wipe happens.
+
+Installs without auth (opt-out configurations) skip the password step but still require the typed confirmation.
+
 ## v2.28.5 (2026-04-20)
 
 ### Dashboard update-banner: bust cache after an applied update
