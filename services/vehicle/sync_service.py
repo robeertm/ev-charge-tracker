@@ -9,7 +9,16 @@ logger = logging.getLogger(__name__)
 
 _sync_thread = None
 _sync_running = False
+_nightly_thread = None
 _force_refresh_pending = None  # Optional[str] — reason set by request_force_refresh()
+
+# Hour-of-day the nightly maintenance task fires. 03:00 local is chosen
+# because (a) Hyundai has the previous day's /tripinfo fully populated
+# by then, (b) the car is almost certainly parked / asleep so a passive
+# SDK fetch doesn't collide with live polling, and (c) it's well before
+# the smart-window start hour so the sync loop's main cadence is not
+# disturbed.
+NIGHTLY_HOUR = 3
 
 
 def request_force_refresh(reason: str = 'manual') -> None:
@@ -266,11 +275,10 @@ def _sync_loop(app):
                 _do_sync(app)
             except Exception as e:
                 logger.error(f"Vehicle sync error: {e}")
-            # Piggy-back the once-per-day Hyundai reconcile here. Runs
-            # AFTER the normal sync completes, so API budget accounting
-            # is already current and the brand check is in a fresh app
-            # context.
-            _maybe_daily_hyundai_reconcile(app)
+            # Daily Hyundai reconcile no longer rides on the sync tick —
+            # it has a dedicated 03:00 thread (_nightly_maintenance_loop)
+            # so it fires at a predictable time instead of "whenever the
+            # smart window opens".
         else:
             logger.info(
                 f"Vehicle sync: outside smart-mode active window, "
@@ -288,9 +296,57 @@ def _sync_loop(app):
     logger.info("Vehicle sync service stopped")
 
 
+def _nightly_maintenance_loop(app):
+    """Dedicated thread that fires Hyundai SDK-backfill + PE-reconcile
+    once per calendar day at ~03:00 local.
+
+    Independent of the main sync loop's smart-window schedule so it
+    runs regardless of when smart mode's active window starts. The
+    Hyundai brand gate still applies inside
+    :func:`_maybe_daily_hyundai_reconcile`, so non-Hyundai installs
+    just no-op each wake-up.
+
+    Startup catch-up: if we come up after 03:00 on a day where the
+    reconcile hasn't run yet, fire once immediately instead of waiting
+    until 03:00 the next morning.
+    """
+    global _sync_running
+
+    # Startup catch-up
+    try:
+        with app.app_context():
+            from services.trip_reconcile import should_run_daily
+            if should_run_daily():
+                logger.info("Nightly maintenance: startup catch-up")
+                _maybe_daily_hyundai_reconcile(app)
+    except Exception as e:
+        logger.warning(f"Nightly maintenance startup catch-up failed: {e}")
+
+    while _sync_running:
+        now = datetime.now()
+        target = now.replace(hour=NIGHTLY_HOUR, minute=0, second=0, microsecond=0)
+        if target <= now:
+            target += timedelta(days=1)
+        sleep_secs = int((target - now).total_seconds())
+        slept = 0
+        # Sleep in small increments so stop_sync() is responsive.
+        while slept < sleep_secs and _sync_running:
+            time.sleep(min(30, sleep_secs - slept))
+            slept += 30
+        if not _sync_running:
+            break
+        logger.info(f"Nightly maintenance fired at {datetime.now().isoformat(timespec='seconds')}")
+        try:
+            _maybe_daily_hyundai_reconcile(app)
+        except Exception as e:
+            logger.warning(f"Nightly maintenance error: {e}")
+
+    logger.info("Nightly maintenance thread stopped")
+
+
 def start_sync(app):
     """Start periodic vehicle sync in a background thread."""
-    global _sync_thread, _sync_running
+    global _sync_thread, _nightly_thread, _sync_running
 
     if _sync_running:
         logger.info("Vehicle sync already running")
@@ -304,8 +360,11 @@ def start_sync(app):
             return False
 
     logger.info("Starting vehicle sync service")
+    _sync_running = True  # set before threads start so they see True immediately
     _sync_thread = threading.Thread(target=_sync_loop, args=(app,), daemon=True)
     _sync_thread.start()
+    _nightly_thread = threading.Thread(target=_nightly_maintenance_loop, args=(app,), daemon=True)
+    _nightly_thread.start()
     return True
 
 

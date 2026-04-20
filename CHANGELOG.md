@@ -1,5 +1,24 @@
 # Changelog
 
+## v2.28.10 (2026-04-20)
+
+### Nightly reconcile fires at 03:00 local instead of "first sync tick"
+
+v2.28.9 hung the daily Hyundai PE↔SDK reconcile off the main sync loop: it ran on the first sync tick of a new calendar day, which in smart mode means 06:00 at the earliest (whenever the active window opens), later on cached/force modes. That's "sometime in the morning," not a deterministic time.
+
+Moved to a dedicated thread (`_nightly_maintenance_loop`) that wakes at **03:00 local** regardless of sync mode or smart-window settings:
+- Hyundai has yesterday's `/tripinfo` fully populated by then (the car uploads trip records within minutes of engine-off).
+- The car is almost certainly parked / asleep, so the passive SDK pull doesn't collide with live polling.
+- Well before smart-window start → main sync cadence is undisturbed.
+
+Startup catch-up: if the service comes up past 03:00 on a day where the reconcile hasn't run yet, it fires once immediately instead of waiting until 03:00 the next morning.
+
+Brand gate (`_is_hyundai()`) is still checked inside `_maybe_daily_hyundai_reconcile`, so Kia installs just no-op each wake-up. The thread itself runs everywhere — there's no point gating the wake, because the cost of a wake + no-op is effectively free (one AppConfig read per day).
+
+### Confirming both sources in the DB
+
+Side-note for anyone reading this via the settings UI: this repo *always* stores both the polling-based view (`ParkingEvent` table — GPS, time, SoC, odometer, labels) and the Hyundai server view (`VehicleTrip` table — `/tripinfo` rows with minute-accurate start / drive / idle / distance). Neither replaces the other. The reconcile just aligns the PE timestamps to SDK where a clean 1:1 match is found — it does not merge, split, or delete PE rows.
+
 ## v2.28.9 (2026-04-20)
 
 ### Daily PE ↔ SDK trip reconcile (Hyundai only)
