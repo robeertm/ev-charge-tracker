@@ -152,7 +152,22 @@
     };
     const btn = document.getElementById('btnRefreshVehicle');
     const btnForce = document.getElementById('btnForceVehicle');
-    const CACHE_KEY = 'ev_vehicle_data';
+    // Version-keyed so an applied update (which may change SoH scaling,
+    // field semantics, or the payload shape) automatically orphans the old
+    // entry instead of showing stale pre-update values on page load. Without
+    // this, users saw e.g. a raw 125 % e-GMP SoH lingering after v2.27.0
+    // introduced display-time baseline scaling.
+    const CACHE_KEY = 'ev_vehicle_data_v2_{{ config.APP_VERSION }}';
+    // One-shot cleanup: drop the legacy unkeyed entry and any older version
+    // slots so localStorage doesn't grow a slot per release over time.
+    try {
+        for (let i = localStorage.length - 1; i >= 0; i--) {
+            const k = localStorage.key(i);
+            if (k === 'ev_vehicle_data' || (k && k.startsWith('ev_vehicle_data_v2_') && k !== CACHE_KEY)) {
+                localStorage.removeItem(k);
+            }
+        }
+    } catch(e) {}
 
     function renderVehicle(d) {
         document.getElementById('vehicleData').style.display = '';

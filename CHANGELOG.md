@@ -1,5 +1,15 @@
 # Changelog
 
+## v2.28.7 (2026-04-20)
+
+### Dashboard: version-key the vehicle localStorage cache
+
+Companion to v2.28.5's update-banner cache fix. The dashboard's live-vehicle card caches the full `/api/vehicle/status` response in `localStorage['ev_vehicle_data']` so page loads render instantly from the previous fetch. Key was fixed (no version suffix), so any semantic change to the payload survived across versions: after v2.27.0 introduced display-time SoH baseline scaling, users on the Hyundai install kept seeing the pre-scaling raw 125 % because the old cached value was rendered on page load and — depending on polling state — never got replaced.
+
+Keying the cache on `Config.APP_VERSION` (same approach as `ev_update_check_cache_v2_…` in v2.28.5) means every deployed version sees its own slot. An applied update auto-orphans the prior slot. One-shot cleanup on load removes the legacy unkeyed entry and any previous-version slots so `localStorage` doesn't grow one entry per release.
+
+After deploying, **a single browser reload** is enough — the new version's JS starts writing to the new key immediately, the old key gets removed on first visit.
+
 ## v2.28.6 (2026-04-20)
 
 ### Settings → Gefahrenzone: "Komplett zurücksetzen" Button
