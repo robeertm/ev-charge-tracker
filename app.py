@@ -109,6 +109,16 @@ def create_app(config_class=Config):
         except Exception:
             pass  # table might not exist yet on a fresh install — create_all() will handle it
 
+        # Migrate: add raw_json to geocode_cache (v2.28.17, stores full
+        # Nominatim response so short address format can evolve without
+        # forcing another API round-trip)
+        try:
+            geocode_columns = [c['name'] for c in inspector.get_columns('geocode_cache')]
+            if 'raw_json' not in geocode_columns:
+                db.session.execute(text('ALTER TABLE geocode_cache ADD COLUMN raw_json TEXT'))
+        except Exception:
+            pass  # table might not exist yet on a fresh install
+
         db.session.commit()
 
         # Scale fix v1 (shipped in v2.5.4): the pre-v2.5.4 code stored

@@ -1,5 +1,29 @@
 # Changelog
 
+## v2.28.17 (2026-04-20)
+
+### Kurze, lesbare Adressen im Fahrtenbuch (POI + Straße + PLZ + Stadt)
+
+Bislang speicherte der Geocoding-Cache Nominatims `display_name` in Langform (`"1, Straße, Ortsteil, Stadt, Bundesland, PLZ, Deutschland"`). In der /trips-Tabelle gefressen das die Spaltenbreite und ließ den Schnellblick nach "wo war das?" scheitern.
+
+### Kurzformat
+
+`services/geocode_service._format_short()` parst die strukturierte `address` aus der Nominatim-Antwort und baut:
+
+- **POI** (Shop / Amenity / Leisure / Tourism): `"Lidl, 12345 Stadt"`, `"IKEA, 12345 Stadt"`, `"Kirche St. Anna, 12345 Stadt"`
+- **Straße**: `"Hauptstraße 42, 12345 Stadt"`
+- **Fallback**: `"12345 Stadt"` wenn nichts weiter bekannt ist.
+
+Der komplette Nominatim-Response wird jetzt in einer neuen Spalte `geocode_cache.raw_json` persistiert — das Kurzformat kann jederzeit neu aus den Rohdaten abgeleitet werden, ohne einen weiteren API-Call an Nominatim (der ohnehin per 1-req/s rate-limited ist).
+
+### Favoriten, home/work bleiben
+
+Das Kurzformat ersetzt nur `ParkingEvent.address`. Die Felder `label` (`home` / `work` / `favorite` / `other`) und `favorite_name` bleiben unberührt — die UI rendert Favoriten weiter mit ihrem benutzerdefinierten Namen; Adresse ist nur das Fallback für `label == 'other'`.
+
+### Migration
+
+`rebuild_legacy_entries()` fetcht alle Cache-Einträge ohne `raw_json` einmalig neu von Nominatim (rate-limited). Danach wird `PE.address` gelöscht und `geocode_missing_events()` aufgerufen — das kopiert die jetzt kurzen Adressen aus dem frisch befüllten Cache in die PE-Zeilen, ohne einen weiteren API-Call. Einmalig nach Deploy auf allen drei Hosts.
+
 ## v2.28.16 (2026-04-20)
 
 ### Hide phantom trips from the driving log

@@ -229,7 +229,8 @@ class GeocodeCache(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     lat_key = db.Column(db.String(20), nullable=False, index=True)
     lon_key = db.Column(db.String(20), nullable=False, index=True)
-    address = db.Column(db.Text)
+    address = db.Column(db.Text)       # short form: "POI, PLZ Stadt" or "Straße Nr, PLZ Stadt"
+    raw_json = db.Column(db.Text)      # full Nominatim response, lets us re-derive short form if format evolves
     fetched_at = db.Column(db.DateTime, default=datetime.now)
 
 
