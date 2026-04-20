@@ -8,11 +8,20 @@ table readable without truncating country/state padding on every row.
 
 The full API response is stored alongside in ``raw_json`` so the short
 format can be re-derived later without another API call.
+
+v2.28.18 added a background-maintenance thread that slowly rebuilds
+legacy cache entries (and retries transient Nominatim failures) one
+row at a time, with a conservative 2 s spacing. It sleeps 10 min
+between probes when nothing's pending, and backs off 60 s after a
+Nominatim error (typically 429). This spreads Nominatim load out over
+time so bulk migration after a v2.28.17-style upgrade can't re-trigger
+the block we hit during the initial rollout.
 """
 from __future__ import annotations
 
 import json
 import logging
+import threading
 import time
 import urllib.parse
 import urllib.request
@@ -162,24 +171,147 @@ def reverse(lat: float, lon: float, language: str = 'de') -> Optional[str]:
 def rebuild_legacy_entries(limit: int = 100, language: str = 'de') -> int:
     """Re-fetch cache rows that predate v2.28.17 (raw_json IS NULL) so
     they get the new short-form address. Rate-limited; returns the
-    number of rows updated in this pass. Intended to be called once
-    after a v2.28.17 deploy — successive calls handle any remainder."""
+    number of rows updated in this pass. Intended for CLI / one-shot
+    use — the background maintenance loop does the same job trickle-
+    fed in production."""
     rows = (GeocodeCache.query
             .filter(GeocodeCache.raw_json.is_(None))
             .limit(limit)
             .all())
     updated = 0
     for row in rows:
-        try:
-            lat = float(row.lat_key)
-            lon = float(row.lon_key)
-        except (TypeError, ValueError):
-            continue
-        data = _fetch_nominatim(lat, lon, language)
-        if data is None:
-            continue
-        row.address = _format_short(data)
-        row.raw_json = json.dumps(data, ensure_ascii=False)
-        db.session.commit()
-        updated += 1
+        ok = _rebuild_one_legacy_row(row, language=language)
+        if ok:
+            updated += 1
     return updated
+
+
+# ── Background maintenance loop ───────────────────────────────────────
+
+_maintenance_thread: Optional[threading.Thread] = None
+_maintenance_running: bool = False
+
+_IDLE_SLEEP_S = 600       # 10 min when no legacy entries are pending
+_RATE_LIMIT_S = 2.0       # between successful rebuilds (2 s > Nominatim's 1 req/s policy)
+_BACKOFF_S = 60           # after Nominatim error (typically 429 — block usually clears in minutes)
+
+
+def _cascade_pe_addresses(lat_key: str, lon_key: str, short: Optional[str]) -> int:
+    """Copy the new short address onto every ParkingEvent whose rounded
+    coords match this cache key. Returns the number of rows updated.
+
+    Without this, PE.address only refreshes when
+    ``services.trips_service.geocode_missing_events`` happens to run and
+    the PE row has ``address IS NULL`` — i.e. never, for existing rows.
+    The maintenance loop calls this after each successful cache rebuild
+    so the UI actually sees the new short form without a manual reset.
+    """
+    from models.database import ParkingEvent
+    updated = 0
+    # Approach: filter PE by a coarse bounding box, then confirm the
+    # rounded key matches. Avoids a full-table scan when the repo grows.
+    try:
+        lat_f = float(lat_key)
+        lon_f = float(lon_key)
+    except (TypeError, ValueError):
+        return 0
+    eps = 0.0002  # 4-decimal key rounds to ~11m; this box is ~22m each side
+    candidates = (ParkingEvent.query
+                  .filter(ParkingEvent.lat >= lat_f - eps,
+                          ParkingEvent.lat <= lat_f + eps,
+                          ParkingEvent.lon >= lon_f - eps,
+                          ParkingEvent.lon <= lon_f + eps)
+                  .all())
+    for pe in candidates:
+        if _key(pe.lat) != lat_key or _key(pe.lon) != lon_key:
+            continue
+        if pe.address != short:
+            pe.address = short
+            updated += 1
+    if updated:
+        db.session.commit()
+    return updated
+
+
+def _rebuild_one_legacy_row(row: GeocodeCache, language: str = 'de') -> bool:
+    """Fetch Nominatim for one cache row and persist short form +
+    raw_json. Also cascades the new short address onto matching PE
+    rows. Returns True on success, False on Nominatim error (which
+    leaves the row untouched for the next pass)."""
+    try:
+        lat = float(row.lat_key)
+        lon = float(row.lon_key)
+    except (TypeError, ValueError):
+        # Malformed key — drop the row so the loop doesn't spin on it.
+        db.session.delete(row)
+        db.session.commit()
+        return False
+    data = _fetch_nominatim(lat, lon, language)
+    if data is None:
+        return False
+    short = _format_short(data)
+    row.address = short
+    row.raw_json = json.dumps(data, ensure_ascii=False)
+    db.session.commit()
+    _cascade_pe_addresses(row.lat_key, row.lon_key, short)
+    return True
+
+
+def _maintenance_loop(app) -> None:
+    """Trickle-fed background rebuild of legacy cache entries.
+
+    Runs forever while the service is up. Picks up new legacy rows on
+    each probe — this handles both (a) the one-time v2.28.17 migration
+    and (b) future transient Nominatim failures whose raw_json-NULL
+    rows sit in the cache until the service comes back and we can
+    retry.
+    """
+    global _maintenance_running
+    _maintenance_running = True
+    logger.info('Geocode address-maintenance loop started')
+    while _maintenance_running:
+        try:
+            with app.app_context():
+                row = (GeocodeCache.query
+                       .filter(GeocodeCache.raw_json.is_(None))
+                       .order_by(GeocodeCache.id.asc())
+                       .first())
+                if row is None:
+                    sleep_s = _IDLE_SLEEP_S
+                else:
+                    ok = _rebuild_one_legacy_row(row)
+                    sleep_s = _RATE_LIMIT_S if ok else _BACKOFF_S
+                    if ok:
+                        logger.info(
+                            f'Geocode maintenance: rebuilt cache#{row.id} '
+                            f'({row.lat_key},{row.lon_key}) → {row.address!r}'
+                        )
+        except Exception as e:
+            logger.warning(f'Geocode maintenance error: {e}')
+            sleep_s = _BACKOFF_S
+
+        # Interruptible sleep so stop_address_maintenance() is responsive.
+        slept = 0
+        while slept < sleep_s and _maintenance_running:
+            time.sleep(min(5, sleep_s - slept))
+            slept += 5
+    logger.info('Geocode address-maintenance loop stopped')
+
+
+def start_address_maintenance(app) -> bool:
+    """Start the background maintenance thread. No-op if already running."""
+    global _maintenance_thread, _maintenance_running
+    if _maintenance_running:
+        return False
+    _maintenance_thread = threading.Thread(
+        target=_maintenance_loop, args=(app,), daemon=True,
+        name='geocode-maintenance',
+    )
+    _maintenance_thread.start()
+    return True
+
+
+def stop_address_maintenance() -> None:
+    """Signal the maintenance thread to stop at its next sleep boundary."""
+    global _maintenance_running
+    _maintenance_running = False

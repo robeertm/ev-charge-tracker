@@ -1,5 +1,21 @@
 # Changelog
 
+## v2.28.18 (2026-04-20)
+
+### Background-Maintenance für Langformat-Adressen
+
+v2.28.17 brachte das Kurzformat, aber die Bestandsmigration (44 PE auf ev-robert, 16 auf ev-dirk) triggerte einen Nominatim-429-Rate-Limit-Bann — vermutlich weil 3 Hosts parallel in Bursts hämmerten. Einzelne Hosts im Nachlauf fingen sich denselben Block über Stunden ein.
+
+v2.28.18 übernimmt die Migration im Hintergrund, ohne Spike:
+
+- Neuer Thread `geocode-maintenance` startet in `create_app()` zusammen mit dem Vehicle-Sync-Thread.
+- **Idle**: wenn keine Legacy-Einträge (`raw_json IS NULL`) im Cache stehen → 10 min Sleep, nächster Probe-Cycle.
+- **Pending**: rebuild *einer* Row, 2 s Sleep, nächste Row. Fest-langsam — Nominatim kann nicht überreizt werden.
+- **Nominatim-Error** (z. B. 429 beim initialen Bann): 60 s Backoff, dann neuer Versuch. Heilt sich selbst sobald der Bann freigibt.
+- Nach erfolgreichem Rebuild kaskadiert das neue Kurzformat auf alle `ParkingEvent.address` mit passenden gerundeten Koordinaten — keine manuelle `geocode_missing_events`-Runde mehr nötig.
+
+Über 20–30 Min laufen die jeweils ~10 verbliebenen Legacy-Einträge durch, ohne weiteres User-Zutun. Future-proof: jeder transiente Nominatim-Ausfall (timeout → `raw_json IS NULL` beibehalten) wird beim nächsten Wake-Up retryed.
+
 ## v2.28.17 (2026-04-20)
 
 ### Kurze, lesbare Adressen im Fahrtenbuch (POI + Straße + PLZ + Stadt)

@@ -194,6 +194,15 @@ def create_app(config_class=Config):
     except Exception:
         pass
 
+    # Background maintenance for legacy geocode cache entries (v2.28.18).
+    # Trickle-converts pre-short-format addresses at ~1 per 2 s, backing
+    # off to 60 s when Nominatim returns 429. Fire-and-forget.
+    try:
+        from services.geocode_service import start_address_maintenance
+        start_address_maintenance(app)
+    except Exception:
+        pass
+
     # Honor persisted request-log toggle
     try:
         with app.app_context():
