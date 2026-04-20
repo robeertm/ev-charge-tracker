@@ -110,6 +110,12 @@ class VehicleSync(db.Model):
     consumption_30d_kwh_per_100km = db.Column(db.Float)
     location_lat = db.Column(db.Float)
     location_lon = db.Column(db.Float)
+    # ECU timestamp from the payload's vehicleLocation.time — when the car
+    # actually reported this GPS fix. Different from `timestamp` (which is
+    # just when we polled). On Hyundai, cached-mode responses often echo
+    # the last-known GPS long after the car last pinged; this field is
+    # how the parking-event state machine detects stale echoes.
+    location_last_updated_at = db.Column(db.DateTime)
     raw_json = db.Column(db.Text)
 
     # Fields used for change detection (any difference triggers a new row).

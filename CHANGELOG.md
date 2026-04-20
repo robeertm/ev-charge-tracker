@@ -1,5 +1,44 @@
 # Changelog
 
+## v2.28.11 (2026-04-20)
+
+### GPS staleness filter for ParkingEvent — fixes phantom transitions on Hyundai
+
+Two cars feeding into the same parking-event state machine were producing wildly different trip logs: Kia was clean, Hyundai e-GMP full of phantom stops and 0-km trips. Forensics on the raw responses revealed the root cause is **not** in our processing of the data but in what each brand actually sends:
+
+- **Kia UVO** returns `vehicleLocation.coord = null` when the car is deep-sleeping (35 % of syncs over a 3-day window had no lat/lon).
+- **Hyundai Bluelink** *always* returns a lat/lon — but when the car is asleep, it's the cached last-known position, sometimes hours old (observed: 40 min, 229 min, 344 min, 404 min GPS ages on otherwise-healthy syncs).
+
+The existing PE guard `if sync.location_lat is None: return None` was meant to catch the "no GPS" case. It did its job on Kia (which honestly signals "no fix"), but on Hyundai it never triggered because Hyundai lied about having a fresh fix. PE accepted every cached echo as if it were live and built a fantasy timeline out of them.
+
+### The fix
+
+**New column** `vehicle_syncs.location_last_updated_at` (DateTime, nullable). Captures the ECU-side GPS timestamp — i.e. when the car last actually reported a position, as opposed to when we polled. Populated by a new parser `_extract_location_last_updated(status, raw_json)` that prefers the SDK's `Vehicle.location_last_updated_at` attribute (already datetime-typed) and falls back to `data.vehicleLocation.time` (`YYYYMMDDHHMMSS` string) in the raw payload.
+
+**New staleness gate** in `services.trips_service.update_parking_from_sync()` — added right after the existing `location_lat is None` guard:
+
+```python
+if sync.location_last_updated_at is not None:
+    age_min = (sync.timestamp - sync.location_last_updated_at).total_seconds() / 60.0
+    if age_min > STALE_GPS_MAX_MIN:   # 30.0 by default
+        return None
+```
+
+30 min is generous — smart-mode polls run every 10 min so legitimate fresh data is typically 0–20 min old. Anything older has a very high prior of being a cache echo. Legacy rows with `location_last_updated_at = NULL` fall through to the old behaviour (trust the GPS), which keeps things working during the backfill transition.
+
+**Migration** follows the existing `_new_sync_cols` idiom in `app.py`. Column addition is idempotent on every boot.
+
+**Dedup unchanged:** `VehicleSync.TRACKED_FIELDS` is deliberately *not* extended with the new column. Staleness should never drive "a new sync row must be persisted" — only actual movement of the tracked fields (lat, lon, soc, odo, etc.) should.
+
+### Effect on the two brands
+
+| | Kia | Hyundai |
+|---|---|---|
+| Syncs where column would help | ~1–2 per week | ~4 per day |
+| Expected impact on PE | near-zero | dramatic reduction in phantom events |
+
+Post-deploy: one-time backfill populates `location_last_updated_at` from existing `raw_json` rows, and a PE replay (wipe + `backfill_parking_events`) on Hyundai-heavy installs rebuilds the trip log under the new filter. Kia hosts get the column filled but are expected to produce the same PE set as before.
+
 ## v2.28.10 (2026-04-20)
 
 ### Nightly reconcile fires at 03:00 local instead of "first sync tick"

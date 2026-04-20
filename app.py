@@ -81,6 +81,10 @@ def create_app(config_class=Config):
             ('consumption_30d_kwh_per_100km', 'REAL'),
             ('location_lat', 'REAL'),
             ('location_lon', 'REAL'),
+            # v2.28.11: ECU-side GPS timestamp for PE staleness filter.
+            # Without this, Hyundai's cached "echo" of last-known GPS
+            # pollutes the ParkingEvent state machine with phantom moves.
+            ('location_last_updated_at', 'DATETIME'),
         ]
         for col_name, col_type in _new_sync_cols:
             if col_name not in sync_columns:
@@ -378,6 +382,39 @@ def _backfill_regen_cumulative():
     db.session.commit()
 
 
+def _extract_location_last_updated(status, raw_json):
+    """Return the ECU-side GPS timestamp as a naive local datetime, or None.
+
+    Preferred source is ``status.location_last_updated_at`` which the SDK
+    already parses (tz-aware or naive datetime). Falls back to the raw
+    payload's ``data.vehicleLocation.time`` (``YYYYMMDDHHMMSS`` format,
+    local time per the payload's ``offset`` field) when the SDK attribute
+    is absent or unparsable. Kia UVO's response sometimes omits the field
+    entirely when the car is deep-sleeping — we return None in that case
+    and the parking-event hook treats the sync like "no usable GPS".
+    """
+    ts = getattr(status, 'location_last_updated_at', None)
+    if isinstance(ts, datetime):
+        # Strip tzinfo — all downstream datetimes in this app are naive local.
+        return ts.replace(tzinfo=None) if ts.tzinfo else ts
+    if isinstance(ts, str) and ts:
+        try:
+            dt = datetime.fromisoformat(ts.replace('Z', '+00:00'))
+            return dt.replace(tzinfo=None) if dt.tzinfo else dt
+        except ValueError:
+            pass
+    # Fallback: parse raw JSON
+    try:
+        import json as _json
+        raw = _json.loads(raw_json) if raw_json else {}
+        t = (((raw.get('data') or {}).get('vehicleLocation') or {}).get('time') or '')
+        if len(t) >= 14:
+            return datetime.strptime(t[:14], '%Y%m%d%H%M%S')
+    except (ValueError, KeyError, AttributeError, TypeError):
+        pass
+    return None
+
+
 def _build_vehicle_sync(status, battery_kwh, raw_json=''):
     """Build a VehicleSync row from a connector VehicleStatus."""
     regen_kwh = None
@@ -407,6 +444,7 @@ def _build_vehicle_sync(status, battery_kwh, raw_json=''):
         consumption_30d_kwh_per_100km=cons_30d,
         location_lat=status.location_lat,
         location_lon=status.location_lon,
+        location_last_updated_at=_extract_location_last_updated(status, raw_json),
         raw_json=raw_json,
     )
 

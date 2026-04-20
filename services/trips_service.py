@@ -34,6 +34,15 @@ from models.database import db, ParkingEvent, AppConfig, VehicleTrip
 MOVE_THRESHOLD_M = 100.0
 SAME_PLACE_M = 80.0  # within this radius we consider it "the same spot"
 
+# Maximum age (minutes) of the ECU-side GPS timestamp before we treat a
+# sync as "no reliable location". Hyundai/Bluelink cached responses often
+# echo the last-known GPS for hours after the car went to sleep — without
+# this filter the parking-event state machine reacts to those echoes as
+# if they were live reports. 30 min is a generous upper bound: smart-mode
+# polling runs every 10 min, so legitimate fresh data is typically 0–20
+# min old. Anything older has a very high prior of being a cache echo.
+STALE_GPS_MAX_MIN = 30.0
+
 
 def _haversine_m(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
     """Great-circle distance in meters between two coordinates."""
@@ -105,6 +114,20 @@ def update_parking_from_sync(sync) -> Optional[ParkingEvent]:
     """
     if sync is None or sync.location_lat is None or sync.location_lon is None:
         return None
+
+    # Staleness gate (v2.28.11). When the sync's own GPS timestamp is
+    # significantly older than the sync request, the lat/lon is almost
+    # certainly a cloud-cache echo of the last known position — not a
+    # fresh fix. Treat it exactly like Kia's "None" GPS behaviour: ignore
+    # entirely, so PE doesn't build phantom transitions out of echoes.
+    # location_last_updated_at can be None on:
+    #   - Legacy rows written before v2.28.11 (backfill populates them).
+    #   - Payloads where the backend omits vehicleLocation.time.
+    # In either case the old behaviour applies (trust the lat/lon).
+    if sync.location_last_updated_at is not None:
+        age_min = (sync.timestamp - sync.location_last_updated_at).total_seconds() / 60.0
+        if age_min > STALE_GPS_MAX_MIN:
+            return None
 
     lat, lon = float(sync.location_lat), float(sync.location_lon)
     open_evt = (ParkingEvent.query
