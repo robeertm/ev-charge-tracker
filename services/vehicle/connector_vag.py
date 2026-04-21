@@ -155,13 +155,32 @@ class VAGConnector(VehicleConnector):
         charge_power = None
         is_charging = False
 
-        # Electric drive info
-        if hasattr(vehicle, 'drives') and vehicle.drives:
-            ed = vehicle.drives[0]
-            if hasattr(ed, 'level') and ed.level and hasattr(ed.level, 'value'):
-                soc = int(ed.level.value) if ed.level.value is not None else None
-            if hasattr(ed, 'range') and ed.range and hasattr(ed.range, 'value'):
-                estimated_range = int(ed.range.value) if ed.range.value is not None else None
+        # Electric drive info.
+        # carconnectivity >= 0.11 changed ``vehicle.drives`` from a
+        # subscriptable list to a ``Drives`` container object whose real
+        # payload lives in ``.drives: Dict[str, GenericDrive]``. Older
+        # code did ``vehicle.drives[0]`` which now raises
+        # ``'Drives' object is not subscriptable``. Pull the dict, pick
+        # the explicit ELECTRIC drive if present (hybrids expose both),
+        # otherwise fall back to the first entry.
+        drives_container = getattr(vehicle, 'drives', None)
+        drives_dict = getattr(drives_container, 'drives', None) if drives_container is not None else None
+        ed = None
+        if drives_dict:
+            for d in drives_dict.values():
+                t = getattr(getattr(d, 'type', None), 'value', None)
+                if t is not None and str(t).upper().endswith('ELECTRIC'):
+                    ed = d
+                    break
+            if ed is None:
+                ed = next(iter(drives_dict.values()), None)
+        if ed is not None:
+            level = getattr(ed, 'level', None)
+            if level is not None and getattr(level, 'value', None) is not None:
+                soc = int(level.value)
+            rng = getattr(ed, 'range', None)
+            if rng is not None and getattr(rng, 'value', None) is not None:
+                estimated_range = int(rng.value)
 
         # Charging info
         if hasattr(vehicle, 'charging') and vehicle.charging:

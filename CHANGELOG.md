@@ -1,5 +1,17 @@
 # Changelog
 
+## v2.28.24 (2026-04-21)
+
+### Skoda (and all VAG brands): fix `'Drives' object is not subscriptable`
+
+`carconnectivity >= 0.11` changed `vehicle.drives` from a subscriptable list to a `Drives` container object whose payload lives in `.drives: Dict[str, GenericDrive]`. Our connector still did `vehicle.drives[0]`, which raised `'Drives' object is not subscriptable` and turned every Skoda/VW/Seat/Cupra/Audi status call into a settings-page error banner.
+
+`connector_vag.get_status()` now pulls `vehicle.drives.drives`, prefers the drive whose `type.value` ends in `ELECTRIC` (matters for hybrids), and falls back to the first drive otherwise.
+
+### Silence CarConnectivity MQTT push-channel noise
+
+The Skoda/VW/Seat/Cupra/Audi MQTT connectors log `Could not connect (Not authorized)` at ERROR level every ~2 s when the MQTT broker rejects the push token. We poll via HTTPS and don't rely on MQTT push, so the failure doesn't affect data — but the spam flooded the `/live-logs` page. All four brand-MQTT loggers are now pinned to CRITICAL in `app.py`.
+
 ## v2.28.23 (2026-04-21)
 
 ### Two Fahrtenbuch-correctness fixes (Kia + Hyundai)

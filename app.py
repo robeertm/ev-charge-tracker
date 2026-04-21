@@ -34,6 +34,16 @@ _install_log_ring(level=logging.INFO)
 # Werkzeug access logging defaults to OFF (user can toggle on /logs page)
 _set_req_log(False)
 
+# CarConnectivity's Skoda MQTT connector repeatedly logs
+# "Could not connect (Not authorized)" at ERROR level when the MQTT
+# token channel is blocked by MySkoda. We poll via HTTPS and do not
+# rely on MQTT push, so the failures are harmless — silence them to
+# keep the live-logs page readable.
+logging.getLogger('carconnectivity.connectors.skoda.mqtt').setLevel(logging.CRITICAL)
+logging.getLogger('carconnectivity.connectors.volkswagen.mqtt').setLevel(logging.CRITICAL)
+logging.getLogger('carconnectivity.connectors.seatcupra.mqtt').setLevel(logging.CRITICAL)
+logging.getLogger('carconnectivity.connectors.audi.mqtt').setLevel(logging.CRITICAL)
+
 
 def create_app(config_class=Config):
     # ── Update safety net (must run BEFORE anything else) ─────────
