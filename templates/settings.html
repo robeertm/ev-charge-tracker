@@ -1941,7 +1941,7 @@
                     '<a href="' + data.release_url + '" target="_blank" class="btn btn-sm btn-outline-secondary"><i class="bi bi-github"></i> ' + T.app_release_notes + '</a>' +
                     '</div>' +
                     '</div>';
-                document.getElementById('btnInstallUpdate').addEventListener('click', doInstall);
+                document.getElementById('btnInstallUpdate').addEventListener('click', () => doInstall(false));
             } else if (data.latest === null) {
                 result.innerHTML = '<div class="alert alert-success">' + T.app_up_to_date + '</div>';
             } else {
@@ -1953,16 +1953,30 @@
         setIdle();
     }
 
-    async function doInstall() {
-        if (!confirm(T.app_install_confirm)) return;
+    async function doInstall(force) {
+        if (!force && !confirm(T.app_install_confirm)) return;
         const installBtn = document.getElementById('btnInstallUpdate');
         if (installBtn) {
             installBtn.disabled = true;
             installBtn.innerHTML = '<span class="spinner-border spinner-border-sm"></span> ' + T.app_installing;
         }
         try {
-            const r = await fetch('/api/update/install', { method: 'POST' });
+            const url = '/api/update/install' + (force ? '?force=1' : '');
+            const r = await fetch(url, { method: 'POST' });
             const data = await r.json();
+            if (r.status === 409 && data.error === 'vehicle_charging') {
+                // Charging safety gate — offer override.
+                result.innerHTML =
+                    '<div class="alert alert-warning">' +
+                    '<i class="bi bi-lightning-charge-fill"></i> ' + (data.message || 'Fahrzeug lädt gerade') +
+                    '<div class="mt-2"><button class="btn btn-sm btn-outline-danger" id="btnForceInstall">' +
+                    '<i class="bi bi-exclamation-triangle"></i> Trotzdem installieren</button></div>' +
+                    '</div>';
+                const fbtn = document.getElementById('btnForceInstall');
+                if (fbtn) fbtn.addEventListener('click', () => doInstall(true));
+                if (installBtn) { installBtn.disabled = false; installBtn.innerHTML = T.app_install_now || 'Update installieren'; }
+                return;
+            }
             if (data.staged) {
                 result.innerHTML =
                     '<div class="alert alert-success">' +

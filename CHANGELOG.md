@@ -1,5 +1,11 @@
 # Changelog
 
+## v2.28.28 (2026-04-21)
+
+### Update install refuses while the vehicle is charging
+
+Applying an update restarts the Flask app (and the background sync loop) for a few seconds. If that happens mid-charge, the automatic charge-end detection can miss the transition. `/api/update/install` now checks the latest `VehicleSync.is_charging` and responds `409 vehicle_charging` when active. The settings-page updater button surfaces the message and exposes a "Trotzdem installieren" button that re-submits with `?force=1` to bypass the gate.
+
 ## v2.28.27 (2026-04-21)
 
 ### PE same-place updates: trust only freshly-timestamped GPS

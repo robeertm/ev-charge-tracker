@@ -2242,8 +2242,33 @@ def register_routes(app):
     @app.route('/api/update/install', methods=['POST'])
     def api_update_install():
         """Stage an update and trigger a graceful shutdown so the helper
-        can swap files and restart the app."""
+        can swap files and restart the app.
+
+        Safety gate: refuses while the vehicle is actively charging
+        (latest VehicleSync.is_charging=True) unless the caller passes
+        ``?force=1``. Restarting mid-charge interrupts the background
+        sync loop for a few seconds and can miss the charge-end
+        transition the app otherwise logs automatically.
+        """
         from updater import check_for_update, apply_update
+        from models.database import VehicleSync
+
+        force = request.args.get('force') in ('1', 'true', 'yes')
+        if not force:
+            last_sync = (VehicleSync.query
+                         .order_by(VehicleSync.timestamp.desc())
+                         .first())
+            if last_sync is not None and last_sync.is_charging:
+                return jsonify({
+                    'error': 'vehicle_charging',
+                    'message': (
+                        'Das Fahrzeug lädt gerade — Update abgebrochen. '
+                        'Nach Ende des Ladevorgangs erneut versuchen '
+                        'oder mit „Trotzdem installieren" erzwingen.'
+                    ),
+                    'last_sync_at': last_sync.timestamp.isoformat(),
+                }), 409
+
         new_version, zip_url = check_for_update()
         if not new_version or not zip_url:
             return jsonify({'error': 'no_update_available'}), 400
