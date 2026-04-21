@@ -1,5 +1,16 @@
 # Changelog
 
+## v2.28.25 (2026-04-21)
+
+### Widen reconcile arrival-tolerance from 20 min to 4 h (fixes Hyundai 14-hour phantom trips)
+
+When Hyundai Bluelink stops returning GPS for a sleeping car, our PE state machine correctly ignores those syncs — but the car then gets detected at B only on the next GPS-bearing poll, which can be many hours after the physical arrival. Result: a PE pair whose `arrived_at` was 2 h+ later than the SDK-reported trip end. The old 20-min reconcile tolerance couldn't match that, so the trip double-rendered as:
+
+- A polled PE pair with grossly wrong timestamps (e.g. `17:03 yesterday → 10:39 today`, 14 h for 9 km).
+- A duplicate SDK-only row with correct times but no location.
+
+Tolerance is now 240 min. The physical conflict check (`sdk.start_time ∈ (prev.arrived_at, curr.arrived_at]`) plus the km-matching guard keep cross-pairing from happening; the greedy allocator scores by closest time-delta so the right SDK trip still wins when multiple fall in the window.
+
 ## v2.28.24 (2026-04-21)
 
 ### Skoda (and all VAG brands): fix `'Drives' object is not subscriptable`

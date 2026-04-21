@@ -33,9 +33,25 @@ from models.database import db, AppConfig, ParkingEvent, VehicleTrip
 logger = logging.getLogger(__name__)
 
 # Matching tolerances — tight enough that we don't cross-pair adjacent
-# trips, loose enough to absorb normal polling-interval slack between
-# actual arrival and the first-at-new-spot sync.
-_ARRIVAL_TOL_MIN = 20    # sdk.end_time must be within ±20 min of curr.arrived_at
+# trips, loose enough to absorb sparse polling on Hyundai Bluelink.
+#
+# Hyundai's cloud cache can go 10+ hours between GPS-bearing syncs
+# when the car is sleeping at the origin (our state machine correctly
+# ignores GPS-less syncs, but then detects the arrival at B only on
+# the NEXT GPS-bearing poll — which can be hours after the car physically
+# arrived). The old 20-min window misses these cases entirely: PE
+# arrival is 2 h+ later than the SDK-reported drive end, so no match,
+# so the trip renders as BOTH a polled "14-hour drive" PE pair and a
+# duplicate SDK-only fallback.
+#
+# 4 h covers the observed worst case (overnight → morning commute).
+# Safe because:
+#  1. The physical conflict check in the apply loop still requires
+#     ``sdk.start_time ∈ (prev.arrived_at, curr.arrived_at]``.
+#  2. The ``km`` check (REL/ABS below) rejects mismatched distances.
+#  3. The greedy allocator scores by closest time-delta, so even when
+#     multiple SDK trips fall in the window the best pairing wins.
+_ARRIVAL_TOL_MIN = 240   # sdk.end_time must be within ±4 h of curr.arrived_at
 _KM_TOL_REL = 0.25       # distance may differ by ≤ 25 %…
 _KM_TOL_ABS = 3.0        # …or ≤ 3 km absolute (helps very short trips)
 
