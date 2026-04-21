@@ -161,6 +161,30 @@ def update_parking_from_sync(sync) -> Optional[ParkingEvent]:
         if not gps_fresh:
             return open_evt
 
+        # Odometer-jump split: if a fresh-GPS sync lands on the same
+        # spot but the odometer has advanced ≥ 1 km since the last
+        # at-spot reading, the car took an invisible round trip (left
+        # and returned before any move was observed). Close the current
+        # PE at its last confirmed at-spot timestamp and open a fresh
+        # one at the same coord. The in-between window becomes a
+        # clearly-marked PE gap that SDK trip-reconcile can bind a
+        # matching trip to.
+        last_odo = open_evt.odometer_departed or open_evt.odometer_arrived
+        if (last_odo is not None
+                and sync.odometer_km is not None
+                and sync.odometer_km - last_odo >= 1):
+            open_evt.departed_at = open_evt.last_seen_at or open_evt.arrived_at
+            db.session.commit()
+            try:
+                from services.vehicle.sync_service import (
+                    request_force_refresh, request_post_move_reconcile,
+                )
+                request_force_refresh(reason='odo_jump_split')
+                request_post_move_reconcile()
+            except Exception:
+                pass
+            return _open_event(sync, lat, lon)
+
         # Car still at the same spot. Top up arrival fields that were
         # missing on open, continuously track the latest at-spot state
         # in odometer_departed/soc_departed (so they reflect "last known
@@ -195,7 +219,14 @@ def update_parking_from_sync(sync) -> Optional[ParkingEvent]:
                 and sync.odometer_km is not None
                 and abs(sync.odometer_km - last_odo) < 1):
             return open_evt
-        open_evt.departed_at = open_evt.last_seen_at or sync.timestamp
+        # Close the PE at this sync's timestamp — the first sync at the
+        # NEW location. That over-estimates drive-time (real departure
+        # was earlier) but is never poisoned by a cache-echo that
+        # advanced ``last_seen_at`` past the true leave moment. For
+        # Kia/Hyundai the reconciler snaps ``departed_at`` to the SDK
+        # trip start shortly afterwards anyway; for brands without
+        # tripinfo this is the safest single-sync-sourced anchor.
+        open_evt.departed_at = sync.timestamp
         if open_evt.odometer_departed is None and sync.odometer_km is not None:
             open_evt.odometer_departed = sync.odometer_km
         if open_evt.soc_departed is None and sync.soc_percent is not None:
@@ -515,15 +546,16 @@ def get_trips(limit: Optional[int] = None,
             soc_used = max(start_soc - end_soc, 0)
 
         regen_kwh = None
-        # Prefer departed_at (SDK-snapped after reconcile = real drive
-        # start moment). last_seen_at is unreliable for regen because
-        # Kia/Hyundai server cache can update cumulative counters BEFORE
-        # refreshing GPS — the first post-drive sync then reports "still
-        # at home" but with post-drive regen totals, poisoning the
-        # departure reading. strict=True ensures we always look at the
-        # LAST sync STRICTLY BEFORE the drive began, never the ambiguous
-        # transitional sync at dep_ts itself.
-        dep_ts = prev.departed_at or prev.last_seen_at
+        # Anchor regen lookup on ``prev.departed_at`` only — never
+        # ``last_seen_at``. The pair-iteration loop already skips
+        # pairs where ``prev.departed_at is None`` (see earlier
+        # ``if prev.departed_at is None: continue``), so the old
+        # ``or prev.last_seen_at`` fallback was never reached in
+        # practice. Explicit now that this lookup path doesn't touch
+        # last_seen_at — the field is allowed to drift without
+        # affecting Fahrtenbuch arithmetic. ``strict=True`` picks the
+        # last sync STRICTLY BEFORE the drive began.
+        dep_ts = prev.departed_at
         cum_dep = _cum_regen_at(regen_lookup, dep_ts, strict=True)
         cum_arr = _cum_regen_at_or_after(regen_lookup, curr.arrived_at)
         if cum_dep is not None and cum_arr is not None:

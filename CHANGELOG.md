@@ -1,5 +1,15 @@
 # Changelog
 
+## v2.28.33 (2026-04-21)
+
+### Three tightenings of the PE state machine around `last_seen_at`
+
+**(A) Regen lookup no longer reads `last_seen_at`.** The departure-side regen lookup in `get_trips` used `prev.departed_at or prev.last_seen_at`. The surrounding pair-iteration loop already skips pairs where `prev.departed_at is None`, so the fallback branch was never actually reached — dead code. Removed to make it explicit that Fahrtenbuch arithmetic never touches `last_seen_at`.
+
+**(B) State-machine close path uses `sync.timestamp`, not `last_seen_at`.** Previously a detected move closed the current PE with `departed_at = last_seen_at or sync.timestamp`. Under the Hyundai cache-echo pattern (same-place updates from a sync whose GPS timestamp had been advanced past the real leave-moment), `last_seen_at` could poison the departure time. Kia/Hyundai trip reconcile immediately snaps this to `sdk.start_time` anyway; for brands without tripinfo, the first-at-new-location sync timestamp is a safer single-source anchor (slightly overestimates drive time rather than silently using possibly-corrupted data).
+
+**(C) Odometer-jump PE split.** When a fresh-GPS sync lands on the same spot as the open PE but `odometer_km` has advanced ≥ 1 km since the last at-spot reading, the car took an invisible round trip (left and returned before any move could be observed — e.g. ev-dirk 19.04. PE#10 where `odometer_arrived=50648` / `odometer_departed=50663` collapsed a 15-km round trip into a single "Home" entry). The state machine now closes the current PE at its prior `last_seen_at` / `arrived_at` and opens a fresh one at the same coord. The gap between the two PEs becomes a visible slot that the SDK trip reconciler can bind a matching trip to, and the Fahrtenbuch endpoint inference (v2.28.30) surfaces it as a `Home → Home` loop with correct km. Queues a post-move reconcile immediately.
+
 ## v2.28.32 (2026-04-21)
 
 ### Retroactive GPS backfill from delayed-fix syncs
