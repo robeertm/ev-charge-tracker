@@ -1,5 +1,13 @@
 # Changelog
 
+## v2.28.22 (2026-04-21)
+
+### Fix: regen values collapsed to 0 after v2.28.20 arrived_at snap
+
+v2.28.20 moved `curr.arrived_at` EARLIER (to the SDK-derived physical arrival moment, typically 3–7 min before the first at-destination sync). `trips_service._cum_regen_at(lookup, arrived_at)` still used `bisect_right - 1`, which now landed on the last PRE-drive sync — the car was still at origin, so `cum_regen` at that point equaled `cum_regen` at departure, and the diff was zero. Every reconciled trip's regen dropped to `0.00 kWh` overnight.
+
+Fix: new helper `_cum_regen_at_or_after(lookup, ts)` picks the first sync at-or-after `arrived_at` (i.e. the first at-destination regen reading). Departure side unchanged — `prev.last_seen_at` is still a real poll timestamp, not touched by reconcile. Affects Kia UVO and Hyundai Bluelink trips (anywhere reconcile runs).
+
 ## v2.28.21 (2026-04-20)
 
 ### Log daily reconcile: include arr_applied counter

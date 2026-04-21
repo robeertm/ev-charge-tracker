@@ -249,6 +249,24 @@ def _cum_regen_at(lookup, ts, strict=False):
     return lookup[idx][1]
 
 
+def _cum_regen_at_or_after(lookup, ts):
+    """Return cumulative regen at the first sync with ts >= ``ts``.
+
+    Used for trip-end regen after v2.28.20 started snapping
+    ``curr.arrived_at`` to the SDK-derived physical arrival moment
+    (which is typically EARLIER than the first at-destination sync).
+    ``_cum_regen_at`` would then return the last pre-drive sync's
+    cumulative value — making regen look like zero. We want the first
+    post-arrival regen reading instead."""
+    if not lookup or ts is None:
+        return None
+    keys = [r[0] for r in lookup]
+    idx = bisect.bisect_left(keys, ts)
+    if idx >= len(lookup):
+        return None
+    return lookup[idx][1]
+
+
 def _load_soc_lookup():
     """Return (ts, soc_percent) for every VehicleSync that carries SoC,
     sorted ascending. Used to find the last known SoC strictly before a
@@ -440,7 +458,7 @@ def get_trips(limit: Optional[int] = None,
         regen_kwh = None
         dep_ts = prev.last_seen_at or prev.departed_at
         cum_dep = _cum_regen_at(regen_lookup, dep_ts, strict=(prev.last_seen_at is None))
-        cum_arr = _cum_regen_at(regen_lookup, curr.arrived_at)
+        cum_arr = _cum_regen_at_or_after(regen_lookup, curr.arrived_at)
         if cum_dep is not None and cum_arr is not None:
             regen_kwh = round(max(cum_arr - cum_dep, 0), 2)
 
