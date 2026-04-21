@@ -112,7 +112,95 @@ def update_parking_from_sync(sync) -> Optional[ParkingEvent]:
     - Close the currently open event (car has moved)
     - Do nothing (car is moving / no GPS data / same spot)
     """
-    if sync is None or sync.location_lat is None or sync.location_lon is None:
+    if sync is None:
+        return None
+
+    open_evt = (ParkingEvent.query
+                .filter(ParkingEvent.departed_at.is_(None))
+                .order_by(ParkingEvent.arrived_at.desc())
+                .first())
+
+    brand = (AppConfig.get('vehicle_api_brand', '') or '').lower()
+
+    # Fresh-GPS shortcut (used for upgrade and odo-advance branches).
+    # Strict: requires ``location_last_updated_at`` to be present AND
+    # within the staleness threshold. A missing gps_ts is treated as
+    # not-fresh — observed on Hyundai where secondary cache-echo syncs
+    # (the same cached coord re-served a minute after a stale-gps-ts
+    # primary) come back with no ts at all. Accepting them as fresh
+    # would cause phantom upgrades of Unknown PEs to echo coords.
+    def _is_fresh_gps() -> bool:
+        if sync.location_lat is None or sync.location_lon is None:
+            return False
+        if sync.location_last_updated_at is None:
+            return False
+        age = (sync.timestamp - sync.location_last_updated_at).total_seconds() / 60.0
+        return age <= STALE_GPS_MAX_MIN
+
+    # Odometer-advance is ground truth: as soon as the odo reading shows
+    # the car drove somewhere, close the open PE — regardless of whether
+    # the reported GPS coordinate can be trusted. Runs BEFORE the stale-GPS
+    # gate so Hyundai-style "odo jumped, GPS still cached at origin" syncs
+    # don't get silently dropped. Polling cadence is ≤ 10 min in smart mode,
+    # so sync.timestamp is within ≤ 10 min of the car's true arrival — a
+    # good-enough arrived_at anchor until SDK reconcile snaps it to the
+    # real trip-end moment. Hyundai-only: Kia pushes fresh GPS with every
+    # update, so it never hits the "odo advanced while GPS still stale"
+    # data shape that this path exists to rescue.
+    if (brand == 'hyundai'
+            and open_evt is not None
+            and sync.odometer_km is not None):
+        last_odo = open_evt.odometer_departed or open_evt.odometer_arrived
+        if last_odo is not None and sync.odometer_km - last_odo >= 1:
+            open_evt.departed_at = open_evt.last_seen_at or open_evt.arrived_at
+            db.session.commit()
+            try:
+                from services.vehicle.sync_service import (
+                    request_force_refresh, request_post_move_reconcile,
+                )
+                request_force_refresh(reason='odo_advance')
+                request_post_move_reconcile()
+            except Exception:
+                pass
+            # Open the successor PE immediately. If the sync has fresh
+            # GPS, anchor at those real coords; otherwise open an
+            # "Unknown" placeholder PE that will be upgraded as soon as
+            # a fresh-GPS sync lands while the car is still parked there.
+            if _is_fresh_gps():
+                return _open_event(sync, float(sync.location_lat),
+                                   float(sync.location_lon))
+            return _open_unknown(sync)
+
+    # Upgrade path: if the currently open PE is an Unknown placeholder
+    # (opened from an odo-advance with stale-or-missing GPS) and this
+    # sync finally carries a fresh GPS fix, stamp the real location onto
+    # the existing PE instead of creating a new one. The arrived_at
+    # timestamp stays at the odo-advance moment (our best estimate of
+    # when the car actually arrived); SDK reconcile can still snap it.
+    if (open_evt is not None
+            and open_evt.label == 'unknown'
+            and _is_fresh_gps()):
+        _upgrade_unknown(open_evt, sync)
+        return open_evt
+
+    # Unknown PE still unknown: we can't upgrade without fresh GPS, but
+    # we can still extend last_seen_at (and soc_departed) on any sync
+    # whose odometer matches — the car is demonstrably still parked at
+    # the unknown spot. Lets the next drive's departed_at reflect the
+    # actual leave time rather than the PE-open moment.
+    if (open_evt is not None
+            and open_evt.label == 'unknown'
+            and sync.odometer_km is not None):
+        last_odo = open_evt.odometer_departed or open_evt.odometer_arrived
+        if last_odo is not None and sync.odometer_km == last_odo:
+            if open_evt.last_seen_at is None or sync.timestamp > open_evt.last_seen_at:
+                open_evt.last_seen_at = sync.timestamp
+            if sync.soc_percent is not None:
+                open_evt.soc_departed = sync.soc_percent
+            db.session.commit()
+            return open_evt
+
+    if sync.location_lat is None or sync.location_lon is None:
         return None
 
     # Staleness gate (v2.28.11). When the sync's own GPS timestamp is
@@ -120,20 +208,12 @@ def update_parking_from_sync(sync) -> Optional[ParkingEvent]:
     # certainly a cloud-cache echo of the last known position — not a
     # fresh fix. Treat it exactly like Kia's "None" GPS behaviour: ignore
     # entirely, so PE doesn't build phantom transitions out of echoes.
-    # location_last_updated_at can be None on:
-    #   - Legacy rows written before v2.28.11 (backfill populates them).
-    #   - Payloads where the backend omits vehicleLocation.time.
-    # In either case the old behaviour applies (trust the lat/lon).
     if sync.location_last_updated_at is not None:
         age_min = (sync.timestamp - sync.location_last_updated_at).total_seconds() / 60.0
         if age_min > STALE_GPS_MAX_MIN:
             return None
 
     lat, lon = float(sync.location_lat), float(sync.location_lon)
-    open_evt = (ParkingEvent.query
-                .filter(ParkingEvent.departed_at.is_(None))
-                .order_by(ParkingEvent.arrived_at.desc())
-                .first())
 
     if open_evt is None:
         # No open event → open one at the current location
@@ -274,6 +354,47 @@ def _open_event(sync, lat: float, lon: float) -> ParkingEvent:
     db.session.add(evt)
     db.session.commit()
     return evt
+
+
+def _open_unknown(sync) -> ParkingEvent:
+    """Open a placeholder PE when an odo-advance closed the previous one
+    but no fresh GPS is available to anchor the new location. Coords are
+    sentinel (0,0) and label is 'unknown'. A later fresh-GPS sync
+    upgrades it via ``_upgrade_unknown``."""
+    evt = ParkingEvent(
+        arrived_at=sync.timestamp,
+        last_seen_at=sync.timestamp,
+        lat=0.0,
+        lon=0.0,
+        label='unknown',
+        favorite_name=None,
+        odometer_arrived=sync.odometer_km,
+        odometer_departed=sync.odometer_km,
+        soc_arrived=sync.soc_percent,
+        soc_departed=sync.soc_percent,
+    )
+    db.session.add(evt)
+    db.session.commit()
+    return evt
+
+
+def _upgrade_unknown(evt: ParkingEvent, sync) -> None:
+    """Fill in real coords and label on an Unknown PE from a fresh-GPS
+    sync. Keeps ``arrived_at`` (the odo-advance anchor) — the fresh-GPS
+    sync may be many minutes after actual arrival. SDK reconcile can
+    still snap arrived_at to the true trip-end moment."""
+    lat, lon = float(sync.location_lat), float(sync.location_lon)
+    label, fav_name = _classify_location(lat, lon)
+    evt.lat = lat
+    evt.lon = lon
+    evt.label = label
+    evt.favorite_name = fav_name
+    evt.address = None  # will be populated by geocode loop
+    if evt.last_seen_at is None or sync.timestamp > evt.last_seen_at:
+        evt.last_seen_at = sync.timestamp
+    if sync.soc_percent is not None:
+        evt.soc_departed = sync.soc_percent
+    db.session.commit()
 
 
 def get_parking_events(limit: Optional[int] = None,
@@ -735,6 +856,7 @@ def geocode_missing_events(limit: int = 50) -> int:
 
     pending = (ParkingEvent.query
                .filter(ParkingEvent.address.is_(None))
+               .filter(ParkingEvent.label != 'unknown')
                .order_by(ParkingEvent.arrived_at.desc())
                .limit(limit)
                .all())

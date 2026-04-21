@@ -2399,6 +2399,7 @@ def register_routes(app):
                                     'odo_in': e.odometer_arrived, 'odo_out': e.odometer_departed,
                                     'soc_in': e.soc_arrived, 'soc_out': e.soc_departed}
                                    for e in events
+                                   if e.label != 'unknown'
                                ], summary=summary, locations=locations)
 
     @app.route('/api/trips/export.csv')
@@ -2428,7 +2429,8 @@ def register_routes(app):
     @app.route('/api/trips/export.gpx')
     def trips_export_gpx():
         from services.trips_service import get_parking_events
-        events = list(reversed(get_parking_events()))  # chronological
+        events = [e for e in reversed(get_parking_events())
+                  if e.label != 'unknown']  # chronological, drop sentinel 0,0
         from flask import Response
         from xml.sax.saxutils import escape
         out = ['<?xml version="1.0" encoding="UTF-8"?>']

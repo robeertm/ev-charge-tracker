@@ -581,6 +581,7 @@
   "trips.total_hours": "Tiempo conducción",
   "trips.total_km": "km total",
   "trips.total_trips": "Viajes",
+  "trips.unknown_location": "Ubicación desconocida",
   "trips.work": "Trabajo",
   "wiz.done": "¡Listo!",
   "wiz.done_desc": "Tu frase y tu contraseña están establecidas. Tu instancia de EV Tracker ahora es tuya.",

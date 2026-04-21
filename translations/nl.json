@@ -581,6 +581,7 @@
   "trips.total_hours": "Rijtijd",
   "trips.total_km": "Totaal km",
   "trips.total_trips": "Ritten",
+  "trips.unknown_location": "Onbekende locatie",
   "trips.work": "Werk",
   "wiz.done": "Klaar!",
   "wiz.done_desc": "Je wachtwoord en passphrase zijn ingesteld. Je EV Tracker-instantie is nu volledig van jou.",

@@ -1,5 +1,19 @@
 # Changelog
 
+## v2.28.36 (2026-04-21)
+
+### Hyundai: odometer-advance + Unknown PE placeholder
+
+Hyundai Bluelink's cloud keeps serving a cached origin-GPS fix with an hours-old ``gps_ts`` long after the car has driven somewhere. The odometer update lands first, GPS catches up later. The PE state machine's top-level stale-GPS gate was bailing on exactly this sync, and the same-place odo-jump split (v2.28.33) was never reached because its own ``gps_fresh`` precondition excluded that path. Result: the morning round trip's ``departed_at`` on the origin PE was never set from the sync stream — Fahrtenbuch relied on the nightly SDK reconcile and nothing during the day.
+
+The state machine now promotes odometer-advance to a top-level check that runs before the stale-GPS gate. When an open PE's ``last_odo + 1 km`` is met, the PE closes at its ``last_seen_at`` and a successor PE opens: at the sync's real coords if the sync has fresh GPS, otherwise as an "Unknown" placeholder PE (sentinel lat/lon ``0.0``, label ``'unknown'``). Should a fresh GPS fix arrive while the Unknown PE is still open, the coords and label are stamped onto the existing PE in-place (``_upgrade_unknown``) — no new PE is created, ``arrived_at`` stays at the odo-advance moment. Same-odo syncs on an Unknown PE still extend ``last_seen_at`` / ``soc_departed`` so the next drive's departure time reflects the actual leave moment, not when the PE opened. Gated to ``brand == 'hyundai'`` — Kia pushes fresh GPS with every update and never hits this data shape.
+
+Why not just anchor the successor PE at the stale-GPS cache-echo coords? Because the echo often still points at the origin while the car is actually somewhere else, producing phantom ``Home → Home`` round trips when the real trip was ``Home → Unknown → Work``. The Unknown label is an honest "we don't know yet" that SDK reconcile can time-snap without lying about location.
+
+``_is_fresh_gps`` is strict: a missing ``location_last_updated_at`` is treated as not-fresh. Secondary Hyundai cache-echo syncs (the same cached coord re-served a minute after a stale-gps-ts primary) come back with no ts at all, so trusting them would re-introduce the echo-upgrade bug.
+
+UI: the ``/trips`` map marker feed and ``/api/trips/export.gpx`` now drop ``label == 'unknown'`` entries (no ``0, 0`` pin in the Atlantic). Nominatim reverse geocode queue also skips them. Fahrtenbuch text row already rendered ``trips.unknown_location`` via the existing template branch; the translation key was present in de/en and has been added to es/fr/it/nl.
+
 ## v2.28.34 (2026-04-21)
 
 ### Endpoint inference walks the full PE timeline, not the since-filtered slice

@@ -581,6 +581,7 @@
   "trips.total_hours": "Temps de route",
   "trips.total_km": "km total",
   "trips.total_trips": "Trajets",
+  "trips.unknown_location": "Lieu inconnu",
   "trips.work": "Travail",
   "wiz.done": "Terminé!",
   "wiz.done_desc": "Votre phrase secrète et votre mot de passe sont définis. Votre instance EV Tracker n'appartient plus qu'à vous.",
