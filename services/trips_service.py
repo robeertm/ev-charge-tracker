@@ -142,6 +142,25 @@ def update_parking_from_sync(sync) -> Optional[ParkingEvent]:
     distance = _haversine_m(open_evt.lat, open_evt.lon, lat, lon)
 
     if distance <= SAME_PLACE_M:
+        # Trust gate for same-place updates: only advance PE state from
+        # syncs whose GPS fix is KNOWN-FRESH (gps_ts present AND within
+        # the staleness threshold). A missing gps_ts is the Kia/Hyundai
+        # cache-echo fingerprint: the cloud returns the origin's GPS
+        # (matching this PE's coords by chance) while the car is already
+        # driving, with partially-fresh telemetry (e.g. post-drive SoC)
+        # riding along. Advancing soc_departed from such a sync captured
+        # mid-drive SoC drops as if they happened at the origin —
+        # e.g. a 50 % → 45 % Home arrival that was actually the SoC
+        # drop across the commute itself. Without a fresh gps_ts we
+        # cannot distinguish the two.
+        gps_fresh = (
+            sync.location_last_updated_at is not None
+            and (sync.timestamp - sync.location_last_updated_at).total_seconds() / 60.0
+                <= STALE_GPS_MAX_MIN
+        )
+        if not gps_fresh:
+            return open_evt
+
         # Car still at the same spot. Top up arrival fields that were
         # missing on open, continuously track the latest at-spot state
         # in odometer_departed/soc_departed (so they reflect "last known

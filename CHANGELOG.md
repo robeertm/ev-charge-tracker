@@ -1,5 +1,13 @@
 # Changelog
 
+## v2.28.27 (2026-04-21)
+
+### PE same-place updates: trust only freshly-timestamped GPS
+
+Observed on ev-robert (Kia): the first sync after the overnight smart-window re-opens sometimes carries `gps_ts=None` with the **origin's GPS** (home coords) while the car has already started the morning commute. Because the coords match the open Home PE, the same-place path happily overwrote `soc_departed` with the mid-drive SoC reading (50 % → 45 %, where 50 % was the true pre-drive value and 45 % the in-progress drive value). The Fahrtenbuch then showed the trip as "left Home at 45 %", which is just the Work-arrival SoC bleeding backward.
+
+The odometer is unchanged across these echo syncs (origin's cached odo), so they can't be distinguished by coord alone — but the missing `gps_ts` is the tell. v2.28.27 gates the same-place update on `location_last_updated_at` being present AND within the 30-min staleness window. If not: the function returns the open PE unchanged, skipping the `soc_departed` / `odometer_departed` / `last_seen_at` writes. Missing-ts syncs are still written to the VehicleSync table (so regen / SoC lookups can find them), just not allowed to rewrite PE state.
+
 ## v2.28.26 (2026-04-21)
 
 ### PE state machine: reject GPS moves when odometer hasn't advanced (Hyundai cache-echo fix)
