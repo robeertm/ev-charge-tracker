@@ -1,5 +1,18 @@
 # Changelog
 
+## v2.28.30 (2026-04-21)
+
+### SDK-only trips infer endpoints from surrounding PE context
+
+When an SDK trip has no matching PE pair (typical Hyundai Bluelink morning: GPS unavailable across the commute), the Fahrtenbuch used to render both endpoints as `unknown → unknown`. We now walk the PE timeline around `sdk.start_time` / `sdk.end_time`:
+
+- The PE whose `[arrived_at, departed_at or now]` window contains the trip start → origin.
+- The PE whose window contains the trip end, or the first PE opened after it → destination.
+
+If both resolve to the same PE (round trip that left and returned before any new PE was opened), origin = destination = that PE's label — e.g. `Home → Home` instead of `unknown → unknown`. Later arriving GPS data (car reaches a new location, opening a new PE) automatically surfaces as the destination of earlier unattached SDK trips without any migration or re-reconcile. Falls back to the old `unknown` rendering only when no PE covers the trip's time window at all.
+
+Trip row gains an `inferred_endpoints` flag the UI can use to distinguish PE-anchored rows from inferred ones.
+
 ## v2.28.29 (2026-04-21)
 
 ### Charging gate now also covers CLI / SSH deploys

@@ -395,18 +395,47 @@ def _unknown_endpoint_dict(include_departed: bool = False,
     }
 
 
-def _event_to_dict(evt, include_departed: bool = False):
-    """Shape a ParkingEvent into the dict the trips UI expects."""
+def _event_to_dict(evt, include_departed: bool = False,
+                   time_override: Optional[datetime] = None):
+    """Shape a ParkingEvent into the dict the trips UI expects.
+
+    ``time_override`` is used when an SDK-only trip borrows this PE's
+    location label/address but the actual departure/arrival time comes
+    from the SDK trip, not the PE (e.g. a round trip within one Home
+    PE where the car left and returned without generating a new PE).
+    """
     out = {
         'id': evt.id,
         'lat': evt.lat, 'lon': evt.lon,
         'label': evt.label, 'name': evt.favorite_name,
         'address': evt.address,
-        'arrived_at': evt.arrived_at.isoformat() if evt.arrived_at else None,
+        'arrived_at': (time_override.isoformat() if time_override is not None
+                       else (evt.arrived_at.isoformat() if evt.arrived_at else None)),
     }
     if include_departed:
-        out['departed_at'] = evt.departed_at.isoformat() if evt.departed_at else None
+        out['departed_at'] = (time_override.isoformat() if time_override is not None
+                              else (evt.departed_at.isoformat() if evt.departed_at else None))
     return out
+
+
+def _find_pe_containing(events, ts):
+    """First PE whose [arrived_at, departed_at or +infinity] contains
+    ``ts`` (inclusive on both ends). Returns None when no PE covers ts."""
+    for pe in events:
+        if pe.arrived_at is None:
+            continue
+        if pe.arrived_at <= ts and (pe.departed_at is None or ts <= pe.departed_at):
+            return pe
+    return None
+
+
+def _find_pe_after(events, ts):
+    """First PE whose ``arrived_at`` is at or after ``ts``. Returns None
+    when none exists (i.e. no later confirmed location)."""
+    for pe in events:
+        if pe.arrived_at is not None and pe.arrived_at >= ts:
+            return pe
+    return None
 
 
 def get_trips(limit: Optional[int] = None,
@@ -536,18 +565,42 @@ def get_trips(limit: Optional[int] = None,
         trips.append(trip)
 
     # Fallback: show SDK-only trips on days where polling produced no
-    # pairs at all (historical backfill). Locations are 'unknown' —
-    # we honestly have no GPS data for those dates.
+    # pairs at all (historical backfill or Hyundai's sparse-GPS
+    # mornings). Endpoints are inferred from the surrounding PE
+    # context when possible:
+    #
+    #   - The PE containing ``sdk.start_time`` supplies the origin
+    #     (car was confirmed parked there when the drive began).
+    #   - The PE containing ``sdk.end_time``, or the first PE opened
+    #     after it, supplies the destination.
+    #
+    # If both anchors resolve to the SAME PE (e.g. a round trip that
+    # left and returned to Home before any new PE was opened), we
+    # render origin = destination = that PE's location — the trip is
+    # visually a "Home → Home" loop, which is more informative than
+    # "unknown → unknown". Falls back to unknown when no PE covers the
+    # time window at all.
     for row in sdk_rows:
         if row.trip_date in pe_covered_dates:
             continue
         start = row.start_time
         total_min = (row.drive_minutes or 0) + (row.idle_minutes or 0)
         end = start + timedelta(minutes=total_min) if total_min > 0 else start
+
+        origin_pe = _find_pe_containing(events, start)
+        dest_pe = _find_pe_containing(events, end) or _find_pe_after(events, end)
+
+        from_dict = (_event_to_dict(origin_pe, include_departed=True, time_override=start)
+                     if origin_pe is not None
+                     else _unknown_endpoint_dict(include_departed=True, time_override=start))
+        to_time = end if total_min > 0 else None
+        to_dict = (_event_to_dict(dest_pe, time_override=to_time)
+                   if dest_pe is not None
+                   else _unknown_endpoint_dict(include_departed=False, time_override=to_time))
+
         trips.append({
-            'from': _unknown_endpoint_dict(include_departed=True, time_override=start),
-            'to':   _unknown_endpoint_dict(include_departed=False,
-                                            time_override=end if total_min > 0 else None),
+            'from': from_dict,
+            'to':   to_dict,
             'km': round(row.distance_km, 1) if row.distance_km is not None else None,
             'soc_used': None,
             'regen_kwh': None,
@@ -556,6 +609,7 @@ def get_trips(limit: Optional[int] = None,
             'idle_min': row.idle_minutes,
             'avg_speed_kmh': row.avg_speed_kmh,
             'max_speed_kmh': row.max_speed_kmh,
+            'inferred_endpoints': (origin_pe is not None or dest_pe is not None),
         })
 
     def _sort_key(t):
