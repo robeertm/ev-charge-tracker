@@ -2273,7 +2273,11 @@ def register_routes(app):
         if not new_version or not zip_url:
             return jsonify({'error': 'no_update_available'}), 400
 
-        ok = apply_update(zip_url, new_version)
+        # Pass force through so apply_update's own charging gate doesn't
+        # second-guess the endpoint. The endpoint already decided it's
+        # okay to proceed (either vehicle not charging, or user clicked
+        # "Trotzdem installieren").
+        ok = apply_update(zip_url, new_version, force=True)
         if not ok:
             return jsonify({'error': 'update_failed', 'version': new_version}), 500
 

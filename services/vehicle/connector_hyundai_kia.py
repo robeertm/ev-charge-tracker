@@ -175,6 +175,13 @@ class _HyundaiKiaBase(VehicleConnector):
         mgr = self._get_manager()
         vehicle = self._get_vehicle()
         if force:
+            # WARNING-level log so the /live-logs page highlights it:
+            # a force refresh wakes the car's telematics unit (AVN) and
+            # drains the 12 V aux battery. The cached path (the else
+            # branch below) only reads the cloud's copy — no car contact.
+            logger.warning(
+                "Direct vehicle fetch (force_refresh) — waking car, 12 V battery used"
+            )
             # Save cached values before force refresh (some may be missing after wake)
             cached_odometer = vehicle.odometer
             cached_range = vehicle.ev_driving_range

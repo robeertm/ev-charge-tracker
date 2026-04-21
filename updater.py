@@ -277,13 +277,49 @@ def _spawn_helper(staging_root: Path, new_version: str = '') -> None:
         )
 
 
-def apply_update(zip_url: str, new_version: str) -> bool:
+def _vehicle_is_charging_from_sqlite() -> bool:
+    """Best-effort check: read latest VehicleSync.is_charging directly
+    from SQLite, without needing a Flask app context. Returns False on
+    any error (missing DB, unknown schema) so the gate defaults to
+    *allow update* — a read failure must never brick a release.
+    """
+    try:
+        import sqlite3
+        from config import DATA_DIR
+        db_path = os.path.join(DATA_DIR, 'ev_tracker.db')
+        if not os.path.exists(db_path):
+            return False
+        conn = sqlite3.connect(db_path)
+        try:
+            row = conn.execute(
+                "SELECT is_charging FROM vehicle_sync ORDER BY id DESC LIMIT 1"
+            ).fetchone()
+        finally:
+            conn.close()
+        return bool(row and row[0])
+    except Exception:
+        return False
+
+
+def apply_update(zip_url: str, new_version: str, force: bool = False) -> bool:
     """Download a release ZIP, stage it, then hand off to ``updater_helper``.
 
     Returns True if the helper was successfully spawned. The caller is
     responsible for shutting down the Flask process shortly afterwards
     so the helper can swap files.
+
+    Charging gate: when ``force`` is False (default), refuses to apply
+    the update while the vehicle is actively charging. Restarting
+    mid-charge breaks the sync loop briefly and can miss the
+    charge-end transition the app normally logs automatically. Pass
+    ``force=True`` to bypass (emergency path).
     """
+    if not force and _vehicle_is_charging_from_sqlite():
+        logger.warning(
+            f"apply_update(v{new_version}) refused: vehicle is currently charging. "
+            "Pass force=True to bypass."
+        )
+        return False
     try:
         app_dir = _app_dir()
         upd_dir = app_dir / 'updates'

@@ -1,5 +1,15 @@
 # Changelog
 
+## v2.28.29 (2026-04-21)
+
+### Charging gate now also covers CLI / SSH deploys
+
+v2.28.28 gated the HTTP endpoint `/api/update/install` against mid-charge rollout. Dev-side SSH/CLI calls that invoke `apply_update()` directly (bypassing the endpoint) still went through. `apply_update(zip_url, new_version, force=False)` now performs the same check itself by reading the latest `vehicle_sync.is_charging` row from SQLite directly — no Flask app context required. Caller passes `force=True` to bypass (emergency path). The HTTP endpoint keeps its own gate + UI override and passes `force=True` down because it's already authorised by that point.
+
+### `/live-logs` highlights direct-to-vehicle fetches
+
+Kia UVO / Hyundai Bluelink force-refresh (`force_refresh_vehicle_state`) **wakes the telematics unit** and drains the 12 V aux battery. Cached polls don't touch the car. The connector now emits a WARNING-level log line every time a force refresh runs — the `/live-logs` page styles WARNING prominently so it's immediately obvious which syncs cost battery energy.
+
 ## v2.28.28 (2026-04-21)
 
 ### Update install refuses while the vehicle is charging
