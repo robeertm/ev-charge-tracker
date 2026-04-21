@@ -162,16 +162,20 @@ def update_parking_from_sync(sync) -> Optional[ParkingEvent]:
         return open_evt
 
     if distance >= MOVE_THRESHOLD_M:
-        # Car has moved away. Close the event using last_seen_at (the last
-        # sync while still at this spot) as departed_at — NOT sync.timestamp,
-        # which is the first sync at the NEW location. Using sync.timestamp
-        # would make prev.departed_at == curr.arrived_at (both the same sync)
-        # and misattribute the trip's km/SoC drop to the origin parking.
-        # odometer_departed / soc_departed already hold last-at-spot values
-        # from same-place updates above (the semantically correct "state
-        # when leaving"). Fallbacks: if we somehow never got a same-place
-        # sync (car arrived and left between two syncs), fall back to
-        # sync.timestamp / sync values — imperfect but better than NULL.
+        # Odometer guard: if the car's odometer hasn't advanced since the
+        # last at-spot sync, the GPS "move" is a cache echo, not a real
+        # relocation. Seen on Hyundai Bluelink: cloud occasionally serves
+        # a stale GPS fix with a deceptively fresh timestamp (e.g. 4 min
+        # old, below the 30-min staleness gate) pointing at an earlier
+        # location (morning's Work coord). The odometer is the ground
+        # truth — if it hasn't moved, the car hasn't moved. Ignoring the
+        # sync here keeps the current PE intact and prevents a phantom
+        # PE-pair from appearing in Fahrtenbuch.
+        last_odo = open_evt.odometer_departed or open_evt.odometer_arrived
+        if (last_odo is not None
+                and sync.odometer_km is not None
+                and abs(sync.odometer_km - last_odo) < 1):
+            return open_evt
         open_evt.departed_at = open_evt.last_seen_at or sync.timestamp
         if open_evt.odometer_departed is None and sync.odometer_km is not None:
             open_evt.odometer_departed = sync.odometer_km

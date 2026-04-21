@@ -1,5 +1,13 @@
 # Changelog
 
+## v2.28.26 (2026-04-21)
+
+### PE state machine: reject GPS moves when odometer hasn't advanced (Hyundai cache-echo fix)
+
+Observed on ev-dirk (Hyundai Bluelink): cloud occasionally serves a stale GPS reading with a deceptively fresh timestamp (4 min old, below the 30-min staleness gate) that points at an earlier location (e.g. the morning's Work coord after the car has long since been Home). The PE state machine would interpret this as a real move — closing the current Home PE and opening a phantom Work PE — even though the car never physically moved. Once reconcile ran, the phantom PE paired with the next morning's genuine Home sync to render as a bizarre multi-hour `work → home` "trip".
+
+Ground truth is the odometer. Every legitimate move must advance it. `update_parking_from_sync` now requires `sync.odometer_km` to differ from the open PE's last-known odometer (`odometer_departed or odometer_arrived`) by ≥ 1 km before accepting the GPS-based move; otherwise it ignores the sync and keeps the current PE intact. No impact on Kia — its cache echoes haven't shown this pattern; the guard is just a belt-and-suspenders check.
+
 ## v2.28.25 (2026-04-21)
 
 ### Widen reconcile arrival-tolerance from 20 min to 4 h (fixes Hyundai 14-hour phantom trips)
