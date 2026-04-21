@@ -1,5 +1,13 @@
 # Changelog
 
+## v2.28.32 (2026-04-21)
+
+### Retroactive GPS backfill from delayed-fix syncs
+
+Hyundai Bluelink (and occasionally Kia UVO) ships cached GPS fixes whose `location_last_updated_at` is minutes or hours BEFORE the sync's own timestamp — the cloud's last good position, replayed on the next poll after a sleep window. Earlier syncs during that sleep window often have `location_lat = NULL` because the cloud didn't have fresh GPS at the time.
+
+`_save_vehicle_sync` now retroactively stamps the incoming fix onto any earlier VehicleSync row within ± 5 min of the fix's `location_last_updated_at` whose own `location_lat` is NULL. Tight window prevents attributing a stationary fix to in-flight drive moments. Fahrtenbuch's endpoint-inference (v2.28.30) then surfaces the filled-in position automatically.
+
 ## v2.28.31 (2026-04-21)
 
 ### Remove /trips page auto-force-refresh (stop draining 12 V on every visit)

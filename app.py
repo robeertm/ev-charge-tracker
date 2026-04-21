@@ -512,6 +512,39 @@ def _save_vehicle_sync(status, battery_kwh, raw_json=''):
     else:
         result = last
 
+    # Retroactive GPS backfill: when the sync we just saved carries a
+    # GPS fix whose own timestamp (``location_last_updated_at``) is in
+    # the past — common on Hyundai Bluelink after a sleep window where
+    # the cloud stored the last-known-good position and replays it on
+    # the next poll — stamp that position onto any earlier GPS-less
+    # syncs within ± 5 min of the fix time. This fills in the
+    # Fahrtenbuch for periods the cloud was too slow to report GPS
+    # live. Tight window: we don't attribute a stationary fix to syncs
+    # that fell during an in-progress drive.
+    try:
+        if result.location_lat is not None and result.location_last_updated_at is not None:
+            from datetime import timedelta
+            fix_ts = result.location_last_updated_at
+            window = timedelta(minutes=5)
+            affected = (VehicleSync.query
+                        .filter(VehicleSync.id != result.id)
+                        .filter(VehicleSync.location_lat.is_(None))
+                        .filter(VehicleSync.timestamp >= fix_ts - window)
+                        .filter(VehicleSync.timestamp <= fix_ts + window)
+                        .all())
+            if affected:
+                for r in affected:
+                    r.location_lat = result.location_lat
+                    r.location_lon = result.location_lon
+                    r.location_last_updated_at = fix_ts
+                db.session.commit()
+                logger.info(
+                    f"GPS backfill: stamped fix @ {fix_ts.isoformat()} onto "
+                    f"{len(affected)} earlier GPS-less sync(s)"
+                )
+    except Exception as e:
+        logger.warning(f"GPS backfill failed: {e}")
+
     # Always run parking detection on the latest snapshot.
     try:
         from services.trips_service import update_parking_from_sync
