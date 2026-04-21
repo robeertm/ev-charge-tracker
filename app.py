@@ -2305,70 +2305,17 @@ def register_routes(app):
             is_brand_supports_location,
         )
 
-        # Auto-fresh runs in a BACKGROUND thread so the page renders
-        # immediately with whatever GPS data we already have. The user can
-        # see freshness in the header and hit "Jetzt synchronisieren" if
-        # they want to wait for fresh data right now.
-        #
-        # Conditions: brand configured, brand supports GPS, auto-sync on,
-        # last GPS sync >2h old, daily API counter <180/200, and not already
-        # currently in a background fresh from a recent visit.
-        try:
-            brand = AppConfig.get('vehicle_api_brand', '')
-            auto_sync_enabled = AppConfig.get('vehicle_sync_enabled', 'false') == 'true'
-            if brand and auto_sync_enabled and is_brand_supports_location(brand):
-                from datetime import datetime as _dt, timedelta as _td
-                last_with_gps = (VehicleSync.query
-                                 .filter(VehicleSync.location_lat.isnot(None))
-                                 .order_by(VehicleSync.timestamp.desc())
-                                 .first())
-                stale = True
-                if last_with_gps:
-                    stale = (_dt.now() - last_with_gps.timestamp) > _td(hours=2)
-                today_str = date.today().isoformat()
-                counter_date = AppConfig.get('vehicle_api_counter_date', '')
-                if counter_date != today_str:
-                    AppConfig.set('vehicle_api_counter_date', today_str)
-                    AppConfig.set('vehicle_api_counter', '0')
-                api_count = int(AppConfig.get('vehicle_api_counter', '0'))
-
-                # De-bounce: don't fire if a previous /trips visit kicked one
-                # off in the last 5 minutes (the request might still be in
-                # flight; the Kia API takes 5-10 s).
-                last_bg_str = AppConfig.get('trips_last_bg_fresh_at', '')
-                bg_in_progress = False
-                if last_bg_str:
-                    try:
-                        last_bg = _dt.fromisoformat(last_bg_str)
-                        bg_in_progress = (_dt.now() - last_bg) < _td(minutes=5)
-                    except ValueError:
-                        pass
-
-                if stale and api_count < 180 and not bg_in_progress:
-                    AppConfig.set('trips_last_bg_fresh_at', _dt.now().isoformat())
-                    AppConfig.set('vehicle_api_counter', str(api_count + 1))
-
-                    def _bg_fresh(captured_app, captured_brand):
-                        with captured_app.app_context():
-                            try:
-                                from services.vehicle import get_connector
-                                from services.vehicle.sync_service import log_sync_result
-                                import json as _json
-                                creds = _get_vehicle_credentials()
-                                connector = get_connector(captured_brand, creds)
-                                status = connector.get_status(force=True)
-                                _save_vehicle_sync(status, _get_battery_kwh(),
-                                                   raw_json=_json.dumps(status.raw_data, default=str))
-                                log_sync_result(status, mode_label='force',
-                                                source='trips-auto')
-                            except Exception as e:
-                                logger.warning(f"trips_page background auto-fresh failed: {e}")
-
-                    import threading as _th
-                    _th.Thread(target=_bg_fresh, args=(app, brand), daemon=True).start()
-                    logger.info("trips_page: background auto-fresh started")
-        except Exception as e:
-            logger.warning(f"trips_page auto-fresh dispatch failed: {e}")
+        # v2.28.31: the /trips page used to kick off a background
+        # ``get_status(force=True)`` when the last GPS sync was > 2 h
+        # old. That worked out to 5+ car-wakeup events per day on
+        # ev-robert alone (user opens Fahrtenbuch repeatedly from the
+        # phone, each visit >2 h after the previous GPS fix in the
+        # morning), draining the 12 V aux battery for no real benefit
+        # — Fahrtenbuch is a history view, not a live view. Removed:
+        # fresh data arrives naturally through the background sync
+        # loop (smart mode wakes the car at most once per
+        # ``smart_force_max_hours`` window), and the "Jetzt
+        # synchronisieren" button remains for on-demand pulls.
 
         # Kick off a background worker that fills in missing addresses for
         # parking events. Uses Nominatim (1 req/s, permanent DB cache), so

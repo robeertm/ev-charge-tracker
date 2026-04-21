@@ -1,5 +1,13 @@
 # Changelog
 
+## v2.28.31 (2026-04-21)
+
+### Remove /trips page auto-force-refresh (stop draining 12 V on every visit)
+
+The `/trips` route used to kick off a background `get_status(force=True)` whenever the last GPS sync was > 2 h old. With the user opening Fahrtenbuch repeatedly from the phone during the day, each visit that passed the 5-min debounce turned into a car wakeup and a 12 V aux battery hit — five wakeups on ev-robert today alone (log source `trips-auto`). Fahrtenbuch is a history view; fresh GPS isn't needed to render it.
+
+The background sync loop (smart mode) already wakes the car at most once per `smart_force_max_hours` window (default 6 h) and on explicit state transitions (motion detected). The manual "Jetzt synchronisieren" button is unchanged for on-demand pulls.
+
 ## v2.28.30 (2026-04-21)
 
 ### SDK-only trips infer endpoints from surrounding PE context
