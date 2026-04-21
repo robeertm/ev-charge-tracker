@@ -1,5 +1,11 @@
 # Changelog
 
+## v2.28.34 (2026-04-21)
+
+### Endpoint inference walks the full PE timeline, not the since-filtered slice
+
+`get_trips(since=…)` filters its `events` list to PEs that arrived within the since window. The v2.28.30 endpoint inference walked that same filtered list, which meant a PE that opened BEFORE the window but still covered an SDK trip's timestamp was invisible — rendering the trip as `unknown → other` instead of the correct `home → other`. The inference now loads the full PE timeline from the DB when `since` is set, using the filtered `events` otherwise.
+
 ## v2.28.33 (2026-04-21)
 
 ### Three tightenings of the PE state machine around `last_seen_at`

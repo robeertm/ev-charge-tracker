@@ -619,8 +619,16 @@ def get_trips(limit: Optional[int] = None,
         total_min = (row.drive_minutes or 0) + (row.idle_minutes or 0)
         end = start + timedelta(minutes=total_min) if total_min > 0 else start
 
-        origin_pe = _find_pe_containing(events, start)
-        dest_pe = _find_pe_containing(events, end) or _find_pe_after(events, end)
+        # Inference walks the FULL PE timeline (not the since-filtered
+        # ``events`` list), otherwise a PE that opened before ``since``
+        # but still covers the SDK trip's timestamp would be invisible
+        # to the inference and the trip would degrade to
+        # "unknown → other" even though its origin PE exists.
+        all_events = (ParkingEvent.query
+                      .order_by(ParkingEvent.arrived_at.asc())
+                      .all()) if since else events
+        origin_pe = _find_pe_containing(all_events, start)
+        dest_pe = _find_pe_containing(all_events, end) or _find_pe_after(all_events, end)
 
         from_dict = (_event_to_dict(origin_pe, include_departed=True, time_override=start)
                      if origin_pe is not None
