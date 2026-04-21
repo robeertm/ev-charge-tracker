@@ -11,6 +11,7 @@ _sync_thread = None
 _sync_running = False
 _nightly_thread = None
 _force_refresh_pending = None  # Optional[str] — reason set by request_force_refresh()
+_post_move_reconcile_pending = False  # set after a PE transition; triggers a one-shot backfill+reconcile
 
 # Hour-of-day the nightly maintenance task fires. 03:00 local is chosen
 # because (a) Hyundai has the previous day's /tripinfo fully populated
@@ -34,6 +35,20 @@ def request_force_refresh(reason: str = 'manual') -> None:
     global _force_refresh_pending
     _force_refresh_pending = reason
     logger.info(f"Force-refresh queued: {reason}")
+
+
+def request_post_move_reconcile() -> None:
+    """Queue a one-shot SDK backfill + trip reconcile for today.
+
+    Called from the parking hook after a PE transition: the car just
+    arrived somewhere new and the SDK trip-info endpoint should have
+    fresh data within a minute or two. Running backfill + reconcile
+    immediately (instead of waiting for the 03:00 nightly task) snaps
+    departed_at/arrived_at to SDK timestamps today and lets the regen
+    lookup find the correct pre/post-drive values."""
+    global _post_move_reconcile_pending
+    _post_move_reconcile_pending = True
+    logger.info("Post-move reconcile queued")
 
 MIN_INTERVAL_HOURS = 1  # cached/force modes: 1 hour minimum
 DEFAULT_INTERVAL_HOURS = 4
@@ -234,6 +249,30 @@ def _do_sync(app):
         return sync
 
 
+def _maybe_post_move_reconcile(app) -> None:
+    """If a PE transition queued a one-shot reconcile, run backfill +
+    reconcile for today. Pure observability-free path — failures log a
+    warning but never interrupt the sync loop. The flag self-clears so
+    multiple transitions within one sync window coalesce into a single
+    reconcile call."""
+    global _post_move_reconcile_pending
+    if not _post_move_reconcile_pending:
+        return
+    _post_move_reconcile_pending = False
+    try:
+        with app.app_context():
+            from services.trip_reconcile import _brand_supports_trip_info
+            if not _brand_supports_trip_info():
+                return
+            from services.vehicle.trip_log_fetch import backfill
+            logger.info("Post-move trip reconcile: fetching today's SDK trips")
+            r = backfill(days=1)
+            total = sum(d.get('added', 0) + d.get('updated', 0) for d in r.get('results', []))
+            logger.info(f"Post-move trip reconcile done: {total} SDK trip(s) touched")
+    except Exception as e:
+        logger.warning(f"Post-move reconcile failed: {e}")
+
+
 def _maybe_daily_trip_reconcile(app) -> None:
     """Once per calendar day on brands that expose day_trip_info (Kia +
     Hyundai), pull the last 3 days of SDK trip-info and realign PE-pair
@@ -281,6 +320,7 @@ def _sync_loop(app):
             # it has a dedicated 03:00 thread (_nightly_maintenance_loop)
             # so it fires at a predictable time instead of "whenever the
             # smart window opens".
+            _maybe_post_move_reconcile(app)
         else:
             logger.info(
                 f"Vehicle sync: outside smart-mode active window, "
@@ -290,7 +330,7 @@ def _sync_loop(app):
         # Sleep in small increments so we can stop quickly and react to
         # a queued force-refresh request within ~10 seconds.
         slept = 0
-        while slept < sleep_secs and _sync_running and _force_refresh_pending is None:
+        while slept < sleep_secs and _sync_running and _force_refresh_pending is None and not _post_move_reconcile_pending:
             time.sleep(min(10, sleep_secs - slept))
             slept += 10
 

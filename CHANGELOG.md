@@ -1,5 +1,15 @@
 # Changelog
 
+## v2.28.23 (2026-04-21)
+
+### Two Fahrtenbuch-correctness fixes (Kia + Hyundai)
+
+**1) Regen correctly anchors on SDK-reconciled departure.**
+The v2.28.22 fix handled the arrival side but regen still read zero whenever the first post-drive sync hit `prev.last_seen_at` with fresh cumulative counters and stale GPS — both brands ship those transitional syncs where position says "still at home" but odo/regen already reflect the finished drive. Departure lookup now prefers `prev.departed_at` (which the reconciler snaps to the real SDK drive-start) and always uses `strict=True`, so the regen reading is always a sync strictly BEFORE the drive — never the ambiguous transitional one.
+
+**2) Trip reconcile no longer waits for 03:00.**
+New `request_post_move_reconcile()` flag in sync_service. The PE state machine sets it the moment a new parking event is opened (car arrived somewhere new). The sync loop picks the flag up within ~10 s, runs a one-shot `backfill(days=1)` (which internally reconciles the day), and clears it. Before this patch the just-ended trip would show its pre-reconcile state — often a 19-second "trip" at 07:05:19 → 07:05:38 if the force-refresh burst pulled departure and arrival in the same window — until the 03:00 nightly task realigned it. Now departed_at/arrived_at snap to the SDK timestamps minutes after the drive, not hours.
+
 ## v2.28.22 (2026-04-21)
 
 ### Fix: regen values collapsed to 0 after v2.28.20 arrived_at snap

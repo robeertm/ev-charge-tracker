@@ -183,8 +183,15 @@ def update_parking_from_sync(sync) -> Optional[ParkingEvent]:
         # at the new location reflect a fresh reading, not whatever stale
         # cached state the periodic sync happened to pull.
         try:
-            from services.vehicle.sync_service import request_force_refresh
+            from services.vehicle.sync_service import (
+                request_force_refresh, request_post_move_reconcile,
+            )
             request_force_refresh(reason='motion_detected')
+            # Kick off a one-shot SDK backfill + reconcile so the
+            # finished trip's departed_at/arrived_at snap to SDK times
+            # immediately instead of waiting until the 03:00 nightly
+            # task. Regen/SoC lookups then see the correct timestamps.
+            request_post_move_reconcile()
         except Exception:
             pass
         return _open_event(sync, lat, lon)
@@ -456,8 +463,16 @@ def get_trips(limit: Optional[int] = None,
             soc_used = max(start_soc - end_soc, 0)
 
         regen_kwh = None
-        dep_ts = prev.last_seen_at or prev.departed_at
-        cum_dep = _cum_regen_at(regen_lookup, dep_ts, strict=(prev.last_seen_at is None))
+        # Prefer departed_at (SDK-snapped after reconcile = real drive
+        # start moment). last_seen_at is unreliable for regen because
+        # Kia/Hyundai server cache can update cumulative counters BEFORE
+        # refreshing GPS — the first post-drive sync then reports "still
+        # at home" but with post-drive regen totals, poisoning the
+        # departure reading. strict=True ensures we always look at the
+        # LAST sync STRICTLY BEFORE the drive began, never the ambiguous
+        # transitional sync at dep_ts itself.
+        dep_ts = prev.departed_at or prev.last_seen_at
+        cum_dep = _cum_regen_at(regen_lookup, dep_ts, strict=True)
         cum_arr = _cum_regen_at_or_after(regen_lookup, curr.arrived_at)
         if cum_dep is not None and cum_arr is not None:
             regen_kwh = round(max(cum_arr - cum_dep, 0), 2)
