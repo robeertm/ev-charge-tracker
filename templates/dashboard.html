@@ -51,6 +51,11 @@
                 </button>
             </span>
         </div>
+        {# All dashboard tiles in a single wrapping row. Each tile is
+           gated by the brand's feature matrix — tiles the connector
+           doesn't populate for the active brand are not rendered, so
+           a permanent "—" placeholder never appears. Mandatory tiles
+           (SoC, range, odometer, status, registration) have no gate. #}
         <div class="row g-2 text-center" id="vehicleData" style="display:none">
             <div class="col-4 col-md-2">
                 <div class="small text-muted">{{ t('dash.battery') }}</div>
@@ -69,16 +74,19 @@
                 <div class="small text-muted">{{ t('dash.status') }}</div>
                 <div class="fw-bold" id="vStatus">—</div>
             </div>
+            {% if vehicle_features.get('battery_12v') != 'no' %}
             <div class="col-4 col-md-2">
                 <div class="small text-muted">{{ t('dash.v12') }}</div>
                 <div class="fw-bold" id="v12v">—</div>
             </div>
+            {% endif %}
+            {% if vehicle_features.get('climate') != 'no' %}
             <div class="col-4 col-md-2">
                 <div class="small text-muted">{{ t('dash.climate') }}</div>
                 <div class="fw-bold" id="vClimate">—</div>
             </div>
-        </div>
-        <div class="row g-2 text-center mt-1" id="vehicleData2" style="display:none">
+            {% endif %}
+            {% if vehicle_features.get('charge_limits') != 'no' %}
             <div class="col-4 col-md-2">
                 <div class="small text-muted">{{ t('dash.charge_limit_ac') }}</div>
                 <div class="fw-bold" id="vLimitAC">—</div>
@@ -87,6 +95,8 @@
                 <div class="small text-muted">{{ t('dash.charge_limit_dc') }}</div>
                 <div class="fw-bold" id="vLimitDC">—</div>
             </div>
+            {% endif %}
+            {% if vehicle_features.get('charge_eta') != 'no' %}
             <div class="col-4 col-md-2">
                 <div class="small text-muted">{{ t('dash.charge_time_ac') }}</div>
                 <div class="fw-bold" id="vChargeTime">—</div>
@@ -95,40 +105,53 @@
                 <div class="small text-muted">{{ t('dash.charge_time_dc') }}</div>
                 <div class="fw-bold" id="vFastChargeTime">—</div>
             </div>
+            {% endif %}
+            {% if vehicle_features.get('soh') != 'no' %}
             <div class="col-4 col-md-2">
                 <div class="small text-muted">{{ t('dash.soh') }}</div>
                 <div class="fw-bold" id="vSoH">—</div>
             </div>
+            {% endif %}
+            {% if vehicle_features.get('regenerated') != 'no' %}
             <div class="col-4 col-md-2">
                 <div class="small text-muted">{{ t('dash.regenerated') }} <small>{{ t('dash.regen_window_short') }}</small></div>
                 <div class="fw-bold" id="vRegen">—</div>
             </div>
-        </div>
-        <div class="row g-2 text-center mt-1" id="vehicleData3" style="display:none">
+            {% endif %}
+            {% if vehicle_features.get('doors_locks') != 'no' %}
             <div class="col-4 col-md-2">
                 <div class="small text-muted">{{ t('dash.doors') }}</div>
                 <div class="fw-bold" id="vDoors">—</div>
             </div>
+            {% endif %}
+            {% if vehicle_features.get('tires') != 'no' %}
             <div class="col-4 col-md-2">
                 <div class="small text-muted">{{ t('dash.tires') }}</div>
                 <div class="fw-bold" id="vTires">—</div>
             </div>
+            {% endif %}
+            {% if vehicle_features.get('consumption_30d') != 'no' %}
             <div class="col-4 col-md-2">
                 <div class="small text-muted">{{ t('dash.avg_30d') }}</div>
                 <div class="fw-bold" id="vConsumption30d">—</div>
             </div>
+            {% endif %}
+            {% if vehicle_features.get('portable_charge') != 'no' %}
             <div class="col-4 col-md-2">
                 <div class="small text-muted">{{ t('dash.portable_charge') }}</div>
                 <div class="fw-bold" id="vPortableCharge">—</div>
             </div>
+            {% endif %}
             <div class="col-4 col-md-2">
                 <div class="small text-muted">{{ t('dash.registration') }}</div>
                 <div class="fw-bold" id="vRegDate">—</div>
             </div>
+            {% if vehicle_features.get('location') != 'no' %}
             <div class="col-4 col-md-2">
                 <div class="small text-muted">{{ t('dash.location') }}</div>
                 <div class="fw-bold" id="vLocation">—</div>
             </div>
+            {% endif %}
         </div>
         <div class="text-end mt-1" style="font-size:0.7rem" id="vUpdated"></div>
     </div>
@@ -169,41 +192,48 @@
         }
     } catch(e) {}
 
+    // Safe setters: no-op when the tile is gated out by the feature
+    // matrix (getElementById returns null for those IDs). Lets the
+    // same render code run for every brand without per-brand branching.
+    function setText(id, value) {
+        const el = document.getElementById(id);
+        if (el) el.textContent = value;
+    }
+    function setHtml(id, html) {
+        const el = document.getElementById(id);
+        if (el) el.innerHTML = html;
+    }
     function renderVehicle(d) {
         document.getElementById('vehicleData').style.display = '';
-        document.getElementById('vehicleData2').style.display = '';
-        document.getElementById('vehicleData3').style.display = '';
-        if (d.vehicle_name) document.getElementById('vName').textContent = d.vehicle_model || d.vehicle_name;
+        if (d.vehicle_name) setText('vName', d.vehicle_model || d.vehicle_name);
         if (d.soc != null) {
-            document.getElementById('vSoc').textContent = d.soc + '%';
-            document.getElementById('vSocBar').style.width = d.soc + '%';
+            setText('vSoc', d.soc + '%');
             const bar = document.getElementById('vSocBar');
-            bar.className = 'progress-bar ' + (d.soc > 50 ? 'bg-success' : d.soc > 20 ? 'bg-warning' : 'bg-danger');
+            if (bar) {
+                bar.style.width = d.soc + '%';
+                bar.className = 'progress-bar ' + (d.soc > 50 ? 'bg-success' : d.soc > 20 ? 'bg-warning' : 'bg-danger');
+            }
         }
-        if (d.range_km != null) document.getElementById('vRange').textContent = d.range_km + ' km';
-        if (d.odometer != null) document.getElementById('vOdo').textContent = d.odometer.toLocaleString('de') + ' km';
+        if (d.range_km != null) setText('vRange', d.range_km + ' km');
+        if (d.odometer != null) setText('vOdo', d.odometer.toLocaleString('de') + ' km');
         let status = d.is_charging ? '<span class="text-success">' + T.charging + '</span>' :
                      d.is_plugged_in ? '<span class="text-info">' + T.plugged_in + '</span>' :
                      d.is_locked ? '<span class="text-secondary">' + T.locked + '</span>' : '<span class="text-warning">' + T.open + '</span>';
-        document.getElementById('vStatus').innerHTML = status;
-        if (d.battery_12v != null) document.getElementById('v12v').textContent = d.battery_12v + '%';
-        document.getElementById('vClimate').innerHTML = d.climate_on ? '<span class="text-success">' + (d.climate_temp || '') + '°C</span>' : T.climate_off;
-        document.getElementById('vLimitAC').textContent = d.charge_limit_ac != null ? d.charge_limit_ac + '%' : '—';
-        document.getElementById('vLimitDC').textContent = d.charge_limit_dc != null ? d.charge_limit_dc + '%' : '—';
-        document.getElementById('vChargeTime').textContent = d.est_charge_min != null ? d.est_charge_min + ' min' : '—';
-        document.getElementById('vFastChargeTime').textContent = d.est_fast_charge_min != null ? d.est_fast_charge_min + ' min' : '—';
-        if (d.battery_soh != null) {
-            document.getElementById('vSoH').textContent = d.battery_soh + ' %';
-        } else {
-            // Backend already falls back to the most recent DB row with a
-            // non-null SoH (app.py /api/vehicle/status), so reaching here
-            // means we truly have no usable reading. Do NOT synthesise
-            // anything from total_consumed_kwh — that old fallback treated
-            // lifetime energy throughput as SoH and produced bogus values
-            // (e.g. 125 % on Hyundai e-GMP). Show a neutral placeholder.
-            document.getElementById('vSoH').textContent = '—';
-        }
-        document.getElementById('vRegen').textContent = d.total_regenerated_kwh != null ? d.total_regenerated_kwh.toFixed(1) + ' kWh' : '—';
+        setHtml('vStatus', status);
+        if (d.battery_12v != null) setText('v12v', d.battery_12v + '%');
+        setHtml('vClimate', d.climate_on ? '<span class="text-success">' + (d.climate_temp || '') + '°C</span>' : T.climate_off);
+        setText('vLimitAC', d.charge_limit_ac != null ? d.charge_limit_ac + '%' : '—');
+        setText('vLimitDC', d.charge_limit_dc != null ? d.charge_limit_dc + '%' : '—');
+        setText('vChargeTime', d.est_charge_min != null ? d.est_charge_min + ' min' : '—');
+        setText('vFastChargeTime', d.est_fast_charge_min != null ? d.est_fast_charge_min + ' min' : '—');
+        // Backend already falls back to the most recent DB row with a
+        // non-null SoH (app.py /api/vehicle/status), so an empty reading
+        // here means we truly have no data. Do NOT synthesise from
+        // total_consumed_kwh — that old fallback treated lifetime energy
+        // throughput as SoH and produced bogus values (e.g. 125 % on
+        // Hyundai e-GMP). Show a neutral placeholder instead.
+        setText('vSoH', d.battery_soh != null ? d.battery_soh + ' %' : '—');
+        setText('vRegen', d.total_regenerated_kwh != null ? d.total_regenerated_kwh.toFixed(1) + ' kWh' : '—');
         if (d.doors) {
             const dr = d.doors;
             const anyOpen = dr.fl || dr.fr || dr.bl || dr.br || dr.trunk || dr.hood;
@@ -212,9 +242,9 @@
                 if (dr.fl) open.push('VL'); if (dr.fr) open.push('VR');
                 if (dr.bl) open.push('HL'); if (dr.br) open.push('HR');
                 if (dr.trunk) open.push(T.trunk); if (dr.hood) open.push(T.hood);
-                document.getElementById('vDoors').innerHTML = '<span class="text-danger"><i class="bi bi-exclamation-triangle"></i> ' + open.join(', ') + '</span>';
+                setHtml('vDoors', '<span class="text-danger"><i class="bi bi-exclamation-triangle"></i> ' + open.join(', ') + '</span>');
             } else {
-                document.getElementById('vDoors').innerHTML = '<span class="text-success"><i class="bi bi-check-circle"></i> ' + T.all_closed + '</span>';
+                setHtml('vDoors', '<span class="text-success"><i class="bi bi-check-circle"></i> ' + T.all_closed + '</span>');
             }
         }
         if (d.tires) {
@@ -222,16 +252,16 @@
                 let warn = [];
                 if (d.tires.fl) warn.push('VL'); if (d.tires.fr) warn.push('VR');
                 if (d.tires.rl) warn.push('HL'); if (d.tires.rr) warn.push('HR');
-                document.getElementById('vTires').innerHTML = '<span class="text-danger"><i class="bi bi-exclamation-triangle"></i> ' + (warn.length ? warn.join(', ') : T.tire_warning) + '</span>';
+                setHtml('vTires', '<span class="text-danger"><i class="bi bi-exclamation-triangle"></i> ' + (warn.length ? warn.join(', ') : T.tire_warning) + '</span>');
             } else {
-                document.getElementById('vTires').innerHTML = '<span class="text-success"><i class="bi bi-check-circle"></i> ' + T.tire_ok + '</span>';
+                setHtml('vTires', '<span class="text-success"><i class="bi bi-check-circle"></i> ' + T.tire_ok + '</span>');
             }
         }
-        if (d.consumption_30d) document.getElementById('vConsumption30d').textContent = (d.consumption_30d / 10).toFixed(1) + ' kWh/100km';  // Wh/km → kWh/100km = /10
-        document.getElementById('vPortableCharge').textContent = d.est_portable_charge_min != null ? Math.round(d.est_portable_charge_min / 60) + 'h ' + (d.est_portable_charge_min % 60) + 'min' : '—';
-        if (d.registration_date) document.getElementById('vRegDate').textContent = new Date(d.registration_date).toLocaleDateString('de');
+        if (d.consumption_30d) setText('vConsumption30d', (d.consumption_30d / 10).toFixed(1) + ' kWh/100km');  // Wh/km → kWh/100km = /10
+        setText('vPortableCharge', d.est_portable_charge_min != null ? Math.round(d.est_portable_charge_min / 60) + 'h ' + (d.est_portable_charge_min % 60) + 'min' : '—');
+        if (d.registration_date) setText('vRegDate', new Date(d.registration_date).toLocaleDateString('de'));
         if (d.location_lat && d.location_lon) {
-            document.getElementById('vLocation').innerHTML = '<a href="https://www.google.com/maps?q=' + d.location_lat + ',' + d.location_lon + '" target="_blank" class="text-decoration-none"><i class="bi bi-geo-alt"></i> ' + T.map + '</a>';
+            setHtml('vLocation', '<a href="https://www.google.com/maps?q=' + d.location_lat + ',' + d.location_lon + '" target="_blank" class="text-decoration-none"><i class="bi bi-geo-alt"></i> ' + T.map + '</a>');
         }
         let updParts = [];
         if (d.last_updated) updParts.push(T.vehicle_prefix + ' ' + new Date(d.last_updated).toLocaleString('de'));

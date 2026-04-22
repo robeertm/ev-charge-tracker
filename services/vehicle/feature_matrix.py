@@ -22,6 +22,9 @@ FEATURE_KEYS = [
     'doors_locks',
     'climate',
     'tires',
+    'charge_limits',   # AC/DC SoC limit display (Bluelink/UVO only)
+    'charge_eta',      # AC/DC time-to-full estimate (Bluelink/UVO + Tesla)
+    'portable_charge', # Portable charger time-to-full (Bluelink/UVO only)
 ]
 
 
@@ -39,6 +42,9 @@ MATRIX = {
         'doors_locks':     'yes',
         'climate':         'yes',
         'tires':           'yes',
+        'charge_limits':   'yes',
+        'charge_eta':      'yes',
+        'portable_charge': 'yes',
     },
     'hyundai': {
         'soc_range_odo':   'yes',
@@ -51,6 +57,9 @@ MATRIX = {
         'doors_locks':     'yes',
         'climate':         'yes',
         'tires':           'yes',
+        'charge_limits':   'yes',
+        'charge_eta':      'yes',
+        'portable_charge': 'yes',
     },
 
     # Tesla — second-best after the v2.3.5 connector expansion
@@ -65,6 +74,9 @@ MATRIX = {
         'doors_locks':     'yes',
         'climate':         'yes',
         'tires':           'yes',    # via tpms_pressure_*
+        'charge_limits':   'partial',
+        'charge_eta':      'yes',
+        'portable_charge': 'no',
     },
 
     # Renault / Dacia — has location, basic live data
@@ -169,8 +181,12 @@ MATRIX = {
 
 
 def get_features(brand_key: str) -> dict:
-    """Return the feature support dict for a brand, or an empty 'unknown' fallback."""
-    return MATRIX.get(brand_key, {k: 'no' for k in FEATURE_KEYS})
+    """Return the feature support dict for a brand. Missing keys default
+    to 'no' so callers can treat the dict as complete — a brand whose
+    entry predates a new FEATURE_KEYS addition still reports the new
+    feature as unsupported instead of None."""
+    defaults = {k: 'no' for k in FEATURE_KEYS}
+    return {**defaults, **MATRIX.get(brand_key, {})}
 
 
 def features_supported(brand_key: str, *required_keys) -> bool:

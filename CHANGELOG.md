@@ -1,5 +1,13 @@
 # Changelog
 
+## v2.28.39 (2026-04-22)
+
+### Dashboard: hide tiles the brand connector doesn't populate
+
+Skoda (and the rest of the VAG connector family — VW/SEAT/Cupra/Audi) only exposes SoC, odometer, charging state, charge power and estimated range. Every other dashboard tile — 12 V battery, climate, AC/DC charge limits, charge-ETA, SoH, regenerated kWh, doors, tires, 30-day consumption, portable charger, location — was previously rendered with a permanent ``—`` placeholder for these brands because the template had no brand-awareness.
+
+The dashboard's vehicle-live-status card now consults ``services.vehicle.feature_matrix.get_features(brand)`` and wraps each optional tile in ``{% if vehicle_features.get('key') != 'no' %}``, so tiles for fields the connector doesn't populate are not rendered at all. The three fixed ``.row``s became a single wrapping row — hidden tiles no longer leave empty row remnants. Mandatory tiles (SoC, range, odometer, status, registration date) are always shown. The feature matrix gained three new keys (``charge_limits``, ``charge_eta``, ``portable_charge``) so the Bluelink/UVO-specific tiles can be gated precisely; ``get_features`` now merges with a defaults dict so brands whose entry predates a new key report the new feature as unsupported by default. JS renderer uses safe ``setText`` / ``setHtml`` wrappers that no-op when the tile was gated out, so the same render code works for every brand.
+
 ## v2.28.38 (2026-04-22)
 
 ### iOS Safari CSV picker: overlay the input on the button, drop ``d-none``

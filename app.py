@@ -1023,10 +1023,18 @@ def register_routes(app):
                     'stale': last_idx < len(lats) - 1,
                     'at': stamps[last_idx] if last_idx < len(stamps) else None,
                 }
+        # Feature-matrix-aware tile gating: hide dashboard widgets for
+        # fields the brand connector doesn't populate, instead of
+        # showing a permanent "—" placeholder.
+        from services.vehicle.feature_matrix import get_features
+        vehicle_features = get_features(
+            (AppConfig.get('vehicle_api_brand', '') or '').lower()
+        )
         return render_template('dashboard.html',
                                stats=stats, chart_data=chart_data,
                                acdc=acdc, yearly=yearly,
                                vehicle_configured=vehicle_configured,
+                               vehicle_features=vehicle_features,
                                vehicle_history=vehicle_history,
                                vehicle_history_days=default_days,
                                vehicle_history_last_gps=last_gps,
