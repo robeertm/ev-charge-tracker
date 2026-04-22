@@ -176,12 +176,34 @@ def update_parking_from_sync(sync) -> Optional[ParkingEvent]:
             except Exception:
                 pass
             # Open the successor PE immediately. If the sync has fresh
-            # GPS, anchor at those real coords; otherwise open an
-            # "Unknown" placeholder PE that will be upgraded as soon as
-            # a fresh-GPS sync lands while the car is still parked there.
+            # GPS, anchor at those real coords — UNLESS the fresh coord
+            # equals the just-closed PE's coord. That pattern is a
+            # Hyundai Bluelink quirk: when the car leaves a spot, the
+            # server keeps echoing the just-departed coord with a
+            # fabricated-fresh gps_ts. The odo already jumped (drive
+            # happened), but Hyundai hasn't updated the coord yet. The
+            # "arrival" we'd be reading is in reality the past
+            # departure from that spot; the car is already somewhere
+            # else. Open as Unknown and let the next truly fresh GPS
+            # sync reveal the real location via ``_upgrade_unknown``.
+            # Kia never hits this path (brand gate above), so the
+            # echo-detect cost only applies to Hyundai.
             if _is_fresh_gps():
-                return _open_event(sync, float(sync.location_lat),
-                                   float(sync.location_lon))
+                new_lat = float(sync.location_lat)
+                new_lon = float(sync.location_lon)
+                prev_lat = open_evt.lat
+                prev_lon = open_evt.lon
+                # open_evt may itself be an Unknown placeholder (0,0) —
+                # in that case we can't compute a meaningful distance,
+                # so accept the fresh GPS as a genuine new fix.
+                has_real_prev = (prev_lat is not None
+                                 and prev_lon is not None
+                                 and (prev_lat != 0.0 or prev_lon != 0.0))
+                if has_real_prev:
+                    echo_m = _haversine_m(prev_lat, prev_lon, new_lat, new_lon)
+                    if echo_m <= SAME_PLACE_M:
+                        return _open_unknown(sync)
+                return _open_event(sync, new_lat, new_lon)
             return _open_unknown(sync)
 
     # Upgrade path: if the currently open PE is an Unknown placeholder

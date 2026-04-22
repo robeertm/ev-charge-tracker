@@ -1,5 +1,15 @@
 # Changelog
 
+## v2.28.44 (2026-04-22)
+
+### Hyundai: detect departure-echo fresh GPS at odo-advance
+
+Hyundai Bluelink has a subtle pattern observed across every install's history: when the car leaves a spot, the server keeps echoing the just-departed coord with a fabricated-fresh ``gps_ts`` for a while. The odometer already reflects the completed drive, so our state machine saw ``odo-advance + fresh-GPS at spot-X`` and opened a new PE at spot-X — but the car had actually LEFT spot-X and was somewhere else. The "arrival" we were reading was in reality the past departure from that spot.
+
+The odo-advance branch now compares the purportedly-fresh GPS coord against the just-closed PE's coord. If the distance is within ``SAME_PLACE_M`` (80 m), the fresh fix is treated as a departure echo and the successor PE opens as Unknown instead. The existing ``_upgrade_unknown`` path then handles the real arrival: when a later fresh-GPS sync lands with a *different* coord (the actual destination), it stamps coords + label in place on the Unknown PE. Kia is unaffected (Hyundai-only brand gate).
+
+In Fahrtenbuch: a 17:41 Home → Home (9 km) rendering on ev-dirk today — the classic same-spot-echo artefact after a Home → Work drive whose arrival GPS hadn't caught up yet — now resolves to Home → Work as soon as sync #72 delivers the real Work coord. Overnight same-spot echoes (``Ponytruppe → Ponytruppe`` 1 km, the shopping-round-trip artefact from yesterday) similarly resolve to ``Ponytruppe → Unknown``, honestly reflecting that we don't actually know the shopping destination.
+
 ## v2.28.43 (2026-04-22)
 
 ### Hyundai Fahrtenbuch: trip origin degrades to Unknown after long GPS silence
