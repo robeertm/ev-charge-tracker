@@ -1,5 +1,13 @@
 # Changelog
 
+## v2.28.45 (2026-04-22)
+
+### Hyundai silence degradation: skip when odometer is stable
+
+v2.28.43's silence degradation masked the origin label of a trip when the origin PE had no fresh-GPS contact for > 60 min before departure. This over-triggered when the car sat parked at a labelled spot for hours — odometer was demonstrably constant during the PE lifetime (car didn't move) but the label still got replaced with Unknown at render time. Today's example on ev-dirk: 17:41 Home → Work rendered as "unknown → Work" because PE#22 (Home) had its last fresh GPS fix at 08:30 while the actual departure was at 17:41, 9 h of silence — but ``odometer_arrived == odometer_departed == 50792`` proved the car never moved.
+
+The silence degradation now checks odometer stability first: if ``odometer_arrived == odometer_departed`` on the origin PE, the car provably didn't leave, so the label stays. Otherwise (e.g. the car moved but we never got a fresh coord for the new spot), the Unknown mask still applies.
+
 ## v2.28.44 (2026-04-22)
 
 ### Hyundai: detect departure-echo fresh GPS at odo-advance

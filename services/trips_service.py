@@ -738,11 +738,22 @@ def get_trips(limit: Optional[int] = None,
         # from. At render time, honestly surface that ambiguity as Unknown
         # instead of carrying the label forward. Only applies to Hyundai;
         # Kia/UVO's GPS is always fresh.
+        #
+        # Exception: if the odometer is stable (odometer_arrived ==
+        # odometer_departed) across the full PE lifetime, the car
+        # demonstrably didn't move even though we had no fresh-GPS
+        # contact. Odo is monotonic and accurate once reported — a
+        # stable reading over hours is strong evidence the car stayed
+        # put, so keep the original label instead of pretending we
+        # don't know where the car was.
         if brand == 'hyundai' and prev.departed_at:
             last_ok = prev.last_seen_at or prev.arrived_at
             if last_ok:
                 silence_min = (prev.departed_at - last_ok).total_seconds() / 60.0
-                if silence_min > ORIGIN_SILENCE_MAX_MIN:
+                odo_stable = (prev.odometer_arrived is not None
+                              and prev.odometer_departed is not None
+                              and prev.odometer_arrived == prev.odometer_departed)
+                if silence_min > ORIGIN_SILENCE_MAX_MIN and not odo_stable:
                     # Preserve timestamps/id; mask label + coords + name.
                     trip['from'] = {
                         **trip['from'],
