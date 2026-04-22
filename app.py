@@ -1741,6 +1741,56 @@ def register_routes(app):
         db.session.commit()
         return jsonify({'ok': True, 'odometer': charge.odometer})
 
+    @app.route('/api/charges/bulk_type', methods=['POST'])
+    def api_charges_bulk_type():
+        """Change charge_type on multiple rows in one request. CO2 is
+        adjusted when crossing the PV boundary: switching to PV overwrites
+        ``co2_g_per_kwh`` with the configured PV intensity; switching from
+        PV to AC/DC clears it so the ENTSO-E backfill loop refills it with
+        the correct grid value. AC↔DC transitions keep the existing CO2
+        (both use the grid, so the value is unchanged)."""
+        data = request.get_json(silent=True) or {}
+        ids = data.get('ids') or []
+        new_type = (data.get('charge_type') or '').upper()
+        if new_type not in ('AC', 'DC', 'PV'):
+            return jsonify({'error': 'invalid charge_type'}), 400
+        if not isinstance(ids, list) or not ids:
+            return jsonify({'error': 'no ids provided'}), 400
+        try:
+            ids = [int(i) for i in ids]
+        except (TypeError, ValueError):
+            return jsonify({'error': 'ids must be integers'}), 400
+
+        rows = Charge.query.filter(Charge.id.in_(ids)).all()
+        pv_co2 = _get_pv_co2()
+        battery_kwh = _get_battery_kwh()
+        updated = 0
+        for c in rows:
+            old = c.charge_type
+            if old == new_type:
+                continue
+            c.charge_type = new_type
+            if new_type == 'PV':
+                c.co2_g_per_kwh = pv_co2
+            elif old == 'PV':
+                # Leaving PV → clear CO2 so the ENTSO-E backfill re-populates
+                # with the proper grid intensity for the charge's date/hour.
+                c.co2_g_per_kwh = None
+                c.co2_kg = None
+            c.calculate_fields(battery_kwh)
+            updated += 1
+        db.session.commit()
+
+        # Kick off CO2 backfill for any rows whose CO2 was just cleared.
+        if updated:
+            try:
+                from services.co2_backfill import start_backfill
+                start_backfill(app)
+            except Exception:
+                pass
+
+        return jsonify({'ok': True, 'updated': updated})
+
     @app.route('/api/co2/backfill/status')
     def api_backfill_status():
         from services.co2_backfill import is_running, get_missing_count

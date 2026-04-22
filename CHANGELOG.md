@@ -1,5 +1,15 @@
 # Changelog
 
+## v2.28.40 (2026-04-22)
+
+### History: filter-preserving pagination + multi-select bulk type change
+
+Pagination links on ``/history`` now carry the current filter through a single ``history_url`` Jinja macro that URL-encodes values and skips empty ones, instead of the old inline ``?page=N&type={{charge_type}}&year={{year}}`` concat (which on some edge cases left filter params in a shape the dropdown re-render logic didn't recognise). One source of truth for pagination URLs means every link — prev, next, numbered pages — stays on the same filter.
+
+Every row now has a checkbox plus a header "select all", and a bulk-action bar appears above the table once at least one row is selected: pick a target charge type (AC / DC / PV) and hit Apply to change every selected row in one call. Typical case: reclassify a batch of miscategorized AC rows to PV.
+
+New endpoint ``POST /api/charges/bulk_type`` accepts ``{ids: [...], charge_type: "PV"}``. CO2 adjusts at the PV boundary: switching to PV overwrites ``co2_g_per_kwh`` with the configured PV intensity from the Anlagen-Settings (``_get_pv_co2``); switching away from PV clears ``co2_g_per_kwh`` so the ENTSO-E backfill loop refills it with the correct grid value for the charge's date/hour. AC↔DC transitions leave CO2 unchanged (both already use grid intensity). The backfill starts automatically when any row was cleared.
+
 ## v2.28.39 (2026-04-22)
 
 ### Dashboard: hide tiles the brand connector doesn't populate

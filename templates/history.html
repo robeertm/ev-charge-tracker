@@ -1,6 +1,18 @@
 {% extends "base.html" %}
 {% block title %}{{ t('hist.title') }} — EV Charge Tracker{% endblock %}
 
+{#
+    URL helper for pagination + filter preservation. Skips empty values so
+    the query string stays clean, and uses ``urlencode`` so user-entered
+    values are escaped properly. Used by every link on this page that must
+    carry current filter state across navigation.
+#}
+{% macro history_url(page=None) -%}
+    ?{%- if page %}page={{ page }}{% endif -%}
+    {%- if charge_type %}{% if page %}&{% endif %}type={{ charge_type|urlencode }}{% endif -%}
+    {%- if year %}{% if page or charge_type %}&{% endif %}year={{ year|urlencode }}{% endif -%}
+{%- endmacro %}
+
 {% block content %}
 <div class="d-flex justify-content-between align-items-center mb-3">
     <h4 class="mb-0"><i class="bi bi-clock-history"></i> {{ t('hist.title') }}</h4>
@@ -45,11 +57,28 @@
     </div>
 </div>
 
+<!-- Bulk-action bar (shown when rows are selected) -->
+<div class="card mb-3 border-primary" id="bulkBar" style="display:none">
+    <div class="card-body py-2 d-flex flex-wrap align-items-center gap-2">
+        <span class="fw-bold"><i class="bi bi-check2-square"></i> <span id="bulkCount">0</span></span>
+        <span class="text-muted small">{{ t('hist.bulk_change_type_to') }}:</span>
+        <select id="bulkType" class="form-select form-select-sm" style="width:auto">
+            <option value="AC">AC</option>
+            <option value="DC">DC</option>
+            <option value="PV">PV</option>
+        </select>
+        <button type="button" id="bulkApply" class="btn btn-sm btn-primary">
+            <i class="bi bi-check2"></i> {{ t('hist.bulk_apply') }}
+        </button>
+    </div>
+</div>
+
 <!-- Table -->
 <div class="table-responsive">
     <table class="table table-sm table-hover align-middle">
         <thead class="table-dark">
             <tr>
+                <th style="width:1%"><input type="checkbox" class="form-check-input" id="selectAll"></th>
                 <th>{{ t('hist.date') }}</th>
                 <th>{{ t('hist.type') }}</th>
                 <th class="text-end">{{ t('hist.kwh') }}</th>
@@ -66,6 +95,7 @@
             {% for c in charges.items %}
             <tr class="{{ 'table-success' if c.charge_type == 'AC' else ('table-info' if c.charge_type == 'PV' else 'table-warning') }}"
                 style="--bs-table-bg-factor: 0.15;">
+                <td><input type="checkbox" class="form-check-input row-select" data-id="{{ c.id }}"></td>
                 <td>
                     {{ c.date.strftime('%d.%m.%Y') }}
                     {% if c.operator or c.location_name %}
@@ -120,13 +150,13 @@
     <ul class="pagination pagination-sm justify-content-center">
         {% if charges.has_prev %}
         <li class="page-item">
-            <a class="page-link" href="?page={{ charges.prev_num }}&type={{ charge_type }}&year={{ year }}">‹</a>
+            <a class="page-link" href="{{ history_url(page=charges.prev_num) }}">‹</a>
         </li>
         {% endif %}
         {% for p in charges.iter_pages(left_edge=1, right_edge=1, left_current=2, right_current=2) %}
             {% if p %}
             <li class="page-item {% if p == charges.page %}active{% endif %}">
-                <a class="page-link" href="?page={{ p }}&type={{ charge_type }}&year={{ year }}">{{ p }}</a>
+                <a class="page-link" href="{{ history_url(page=p) }}">{{ p }}</a>
             </li>
             {% else %}
             <li class="page-item disabled"><span class="page-link">…</span></li>
@@ -134,7 +164,7 @@
         {% endfor %}
         {% if charges.has_next %}
         <li class="page-item">
-            <a class="page-link" href="?page={{ charges.next_num }}&type={{ charge_type }}&year={{ year }}">›</a>
+            <a class="page-link" href="{{ history_url(page=charges.next_num) }}">›</a>
         </li>
         {% endif %}
     </ul>
@@ -149,10 +179,13 @@
 {% block scripts %}
 <script>
 const T = {
-    confirm_delete: "{{ t('hist.confirm_delete') }}",
-    error_prefix: "{{ t('hist.error_prefix') }}"
+    confirm_delete: {{ t('hist.confirm_delete')|tojson }},
+    error_prefix:   {{ t('hist.error_prefix')|tojson }},
+    bulk_selected:  {{ t('hist.bulk_selected')|tojson }},
+    bulk_confirm:   {{ t('hist.bulk_confirm')|tojson }},
 };
 
+// ── Odometer inline edit ─────────────────────────────────────────
 document.querySelectorAll('.editable-km').forEach(span => {
     span.addEventListener('click', function() {
         const id = this.dataset.id;
@@ -186,5 +219,71 @@ document.querySelectorAll('.editable-km').forEach(span => {
         input.addEventListener('keydown', e => { if (e.key === 'Enter') input.blur(); });
     });
 });
+
+// ── Multi-select + bulk type change ──────────────────────────────
+(function() {
+    const bar       = document.getElementById('bulkBar');
+    const count     = document.getElementById('bulkCount');
+    const selAll    = document.getElementById('selectAll');
+    const bulkType  = document.getElementById('bulkType');
+    const bulkApply = document.getElementById('bulkApply');
+    const rowBoxes  = () => document.querySelectorAll('.row-select');
+
+    function selectedIds() {
+        return Array.from(rowBoxes())
+            .filter(cb => cb.checked)
+            .map(cb => parseInt(cb.dataset.id, 10))
+            .filter(n => !Number.isNaN(n));
+    }
+
+    function updateBar() {
+        const ids = selectedIds();
+        const n = ids.length;
+        if (n > 0) {
+            count.textContent = T.bulk_selected.replace('{count}', n);
+            bar.style.display = '';
+        } else {
+            bar.style.display = 'none';
+        }
+        // Header "select all" reflects the aggregate state.
+        const all = rowBoxes();
+        if (selAll) {
+            selAll.checked = (n > 0 && n === all.length);
+            selAll.indeterminate = (n > 0 && n < all.length);
+        }
+    }
+
+    rowBoxes().forEach(cb => cb.addEventListener('change', updateBar));
+
+    if (selAll) {
+        selAll.addEventListener('change', () => {
+            rowBoxes().forEach(cb => cb.checked = selAll.checked);
+            updateBar();
+        });
+    }
+
+    bulkApply.addEventListener('click', async () => {
+        const ids = selectedIds();
+        if (!ids.length) return;
+        const newType = bulkType.value;
+        const msg = T.bulk_confirm
+            .replace('{count}', ids.length)
+            .replace('{type}', newType);
+        if (!confirm(msg)) return;
+        bulkApply.disabled = true;
+        try {
+            const r = await fetch('/api/charges/bulk_type', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({ids: ids, charge_type: newType}),
+            });
+            if (!r.ok) throw new Error('HTTP ' + r.status);
+            location.reload();
+        } catch(e) {
+            alert(T.error_prefix + ' ' + e.message);
+            bulkApply.disabled = false;
+        }
+    });
+})();
 </script>
 {% endblock %}
