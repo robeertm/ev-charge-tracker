@@ -8,9 +8,12 @@
     carry current filter state across navigation.
 #}
 {% macro history_url(page=None) -%}
-    ?{%- if page %}page={{ page }}{% endif -%}
-    {%- if charge_type %}{% if page %}&{% endif %}type={{ charge_type|urlencode }}{% endif -%}
-    {%- if year %}{% if page or charge_type %}&{% endif %}year={{ year|urlencode }}{% endif -%}
+    {%- set parts = [] -%}
+    {%- if page %}{%- set _ = parts.append('page=' ~ page) %}{% endif -%}
+    {%- if charge_type %}{%- set _ = parts.append('type=' ~ charge_type|urlencode) %}{% endif -%}
+    {%- if year %}{%- set _ = parts.append('year=' ~ year|urlencode) %}{% endif -%}
+    {%- if per_page and per_page != '50' %}{%- set _ = parts.append('per_page=' ~ per_page|urlencode) %}{% endif -%}
+    {%- if parts %}?{{ parts|join('&') }}{% endif -%}
 {%- endmacro %}
 
 {% block content %}
@@ -43,6 +46,14 @@
                     {% for y in years %}
                     <option value="{{ y }}" {% if year == y %}selected{% endif %}>{{ y }}</option>
                     {% endfor %}
+                </select>
+            </div>
+            <div class="col-auto">
+                <select name="per_page" class="form-select form-select-sm" onchange="this.form.submit()" title="{{ t('hist.per_page') }}">
+                    <option value="50"  {% if per_page == '50'  %}selected{% endif %}>50</option>
+                    <option value="100" {% if per_page == '100' %}selected{% endif %}>100</option>
+                    <option value="200" {% if per_page == '200' %}selected{% endif %}>200</option>
+                    <option value="all" {% if per_page == 'all' %}selected{% endif %}>{{ t('hist.per_page_all') }}</option>
                 </select>
             </div>
             <div class="col-auto">

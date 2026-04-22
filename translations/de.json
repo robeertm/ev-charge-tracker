@@ -219,6 +219,8 @@
   "hist.km": "km",
   "hist.kwh": "kWh",
   "hist.loss": "Verluste",
+  "hist.per_page": "Einträge pro Seite",
+  "hist.per_page_all": "Alle",
   "hist.reset": "Reset",
   "hist.soc": "SoC",
   "hist.title": "Ladeverlauf",

@@ -1115,7 +1115,7 @@ def register_routes(app):
     @app.route('/history')
     def history():
         page = request.args.get('page', 1, type=int)
-        per_page = request.args.get('per_page', 50, type=int)
+        per_page_raw = (request.args.get('per_page', '50') or '50').strip().lower()
         charge_type = request.args.get('type', '')
         year = request.args.get('year', '', type=str)
 
@@ -1126,8 +1126,22 @@ def register_routes(app):
             from sqlalchemy import extract
             query = query.filter(extract('year', Charge.date) == int(year))
 
+        # "all" → single page containing every match; a sentinel size of
+        # max(total, 1) keeps the Pagination object's math (has_prev/next,
+        # iter_pages) consistent with the rest of the page.
+        if per_page_raw == 'all':
+            total = query.count()
+            effective_per_page = max(total, 1)
+        else:
+            try:
+                effective_per_page = int(per_page_raw)
+            except ValueError:
+                effective_per_page = 50
+            if effective_per_page not in (50, 100, 200):
+                effective_per_page = 50
+
         charges = query.order_by(Charge.date.desc()).paginate(
-            page=page, per_page=per_page, error_out=False)
+            page=page, per_page=effective_per_page, error_out=False)
 
         years = db.session.query(
             db.func.distinct(db.func.strftime('%Y', Charge.date))
@@ -1135,7 +1149,8 @@ def register_routes(app):
         years = [y[0] for y in years if y[0]]
 
         return render_template('history.html', charges=charges,
-                               charge_type=charge_type, year=year, years=years)
+                               charge_type=charge_type, year=year, years=years,
+                               per_page=per_page_raw)
 
     # ── EDIT / DELETE ──────────────────────────────────────────
     @app.route('/edit/<int:charge_id>', methods=['GET', 'POST'])

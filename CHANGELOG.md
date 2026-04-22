@@ -1,5 +1,11 @@
 # Changelog
 
+## v2.28.41 (2026-04-22)
+
+### History: per-page selector (50/100/200/All)
+
+The ``/history`` filter row gained a per-page dropdown with fixed choices 50, 100, 200 and All. Changing it auto-submits the form so the new page size takes effect immediately. ``all`` is handled server-side by sizing the paginator to ``max(total, 1)``, so the standard ``has_prev``/``has_next``/``iter_pages`` machinery keeps working without a special code path. The selection flows through the same ``history_url`` macro as the other filters, so it rides along with every pagination link and stays in effect while the user moves between pages.
+
 ## v2.28.40 (2026-04-22)
 
 ### History: filter-preserving pagination + multi-select bulk type change
