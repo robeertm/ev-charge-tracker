@@ -43,6 +43,19 @@ SAME_PLACE_M = 80.0  # within this radius we consider it "the same spot"
 # min old. Anything older has a very high prior of being a cache echo.
 STALE_GPS_MAX_MIN = 30.0
 
+# How long an origin PE may sit without a fresh-GPS confirmation before its
+# trip-render origin label degrades to ``'unknown'``. Hyundai Bluelink
+# returns cache-echoed GPS with a stale ``gps_ts`` for hours while the car
+# is parked, so the PE's ``last_seen_at`` is only advanced on truly fresh
+# syncs. When the last fresh-GPS confirmation for the origin PE is more
+# than this many minutes before ``departed_at``, we don't actually know
+# whether the car was still at the labelled spot at drive start — the
+# odometer being unchanged is strong circumstantial evidence, but the
+# user's rule is "honest over clever": without a fresh GPS lock, render
+# the origin as Unknown. Kia/UVO bumps ``last_seen_at`` on every cached
+# read (its GPS is always fresh), so this never fires for Kia.
+ORIGIN_SILENCE_MAX_MIN = 60.0
+
 
 def _haversine_m(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
     """Great-circle distance in meters between two coordinates."""
@@ -615,6 +628,8 @@ def get_trips(limit: Optional[int] = None,
     regen_lookup = _load_regen_lookup()
     soc_lookup = _load_soc_lookup()
 
+    brand = (AppConfig.get('vehicle_api_brand', '') or '').lower()
+
     trips = []
     pe_covered_dates = set()
     used_sdk_ids: set = set()
@@ -690,6 +705,31 @@ def get_trips(limit: Optional[int] = None,
             'regen_kwh': regen_kwh,
             'source': 'polled',
         }
+
+        # Hyundai silence degradation: if the origin PE's last fresh-GPS
+        # confirmation is more than ORIGIN_SILENCE_MAX_MIN before the trip's
+        # departure, the stored label ("Ponytruppe" / "Home" / …) reflects
+        # where the car was at its *last confirmed* GPS fix — not
+        # necessarily where it is now. Hyundai Bluelink routinely echoes
+        # the last GPS for 8+ hours overnight with a stale ``gps_ts`` that
+        # our state machine correctly refuses to advance ``last_seen_at``
+        # from. At render time, honestly surface that ambiguity as Unknown
+        # instead of carrying the label forward. Only applies to Hyundai;
+        # Kia/UVO's GPS is always fresh.
+        if brand == 'hyundai' and prev.departed_at:
+            last_ok = prev.last_seen_at or prev.arrived_at
+            if last_ok:
+                silence_min = (prev.departed_at - last_ok).total_seconds() / 60.0
+                if silence_min > ORIGIN_SILENCE_MAX_MIN:
+                    # Preserve timestamps/id; mask label + coords + name.
+                    trip['from'] = {
+                        **trip['from'],
+                        'label': 'unknown',
+                        'name': None,
+                        'address': None,
+                        'lat': None,
+                        'lon': None,
+                    }
 
         # Best-effort SDK stats attach. Not required — a polled trip
         # stands on its own. One SDK trip binds to at most one PE pair

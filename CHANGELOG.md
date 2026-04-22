@@ -1,5 +1,13 @@
 # Changelog
 
+## v2.28.43 (2026-04-22)
+
+### Hyundai Fahrtenbuch: trip origin degrades to Unknown after long GPS silence
+
+When a Hyundai PE was open for hours without a fresh-GPS confirmation — the ``last_seen_at`` stayed frozen at the last legitimate fix while every subsequent Bluelink read echoed the cached coord with a stale ``gps_ts`` — the trip origin still rendered with the stored label (e.g. "Ponytruppe → Home" after a 12 h overnight parking spell). The label reflected what the car was at *last confirmed GPS contact*, not necessarily where it was at drive start. Per the user's rule "without a fresh GPS lock, render origin as Unknown".
+
+``get_trips`` now measures the silence window ``departed_at − last_seen_at`` and, for ``brand == 'hyundai'`` only, masks the origin's label / name / coords to Unknown when the silence exceeds 60 min. Timestamps and the km/SoC/regen figures are unchanged — only the rendered origin label degrades. Kia is not affected: UVO updates its GPS on every cached read, so ``last_seen_at`` stays current and the silence window is always small.
+
 ## v2.28.42 (2026-04-22)
 
 ### Fix: VAG ``is_charging`` was permanently stuck at True (substring bug)
