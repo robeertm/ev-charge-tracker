@@ -1147,13 +1147,15 @@
                 <p class="text-muted small">{{ t('set.db_import_desc') }}</p>
                 <form method="POST" enctype="multipart/form-data" id="csvImportForm">
                     <div class="mb-2">
-                        <label for="csvFileInput" class="btn btn-outline-secondary w-100 text-start d-flex align-items-center gap-2" style="min-height:2.5rem">
+                        <label class="btn btn-outline-secondary w-100 text-start d-flex align-items-center gap-2 position-relative mb-0" style="min-height:2.5rem">
                             <i class="bi bi-folder2-open"></i>
                             <span id="csvFileName" class="text-truncate">{{ t('set.db_import_choose_file') }}</span>
+                            <input type="file" id="csvFileInput" name="csv_file"
+                                   accept=".csv,text/csv,text/plain,application/csv,application/vnd.ms-excel"
+                                   required
+                                   class="position-absolute top-0 start-0 w-100 h-100"
+                                   style="opacity:0;cursor:pointer;font-size:0">
                         </label>
-                        <input type="file" id="csvFileInput" name="csv_file"
-                               accept=".csv,text/csv,text/plain,application/csv,application/vnd.ms-excel"
-                               required class="d-none">
                     </div>
                     <div class="mb-2">
                         <label class="form-label small mb-1 fw-bold">{{ t('set.db_import_mode') }}</label>

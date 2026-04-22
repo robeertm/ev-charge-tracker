@@ -1,5 +1,11 @@
 # Changelog
 
+## v2.28.38 (2026-04-22)
+
+### iOS Safari CSV picker: overlay the input on the button, drop ``d-none``
+
+v2.28.37 moved the file input inside a ``<label>`` button and hid the input with Bootstrap's ``d-none`` (``display: none !important``). iOS Safari has a long-standing quirk: a ``<input type="file">`` that is ``display: none`` doesn't open the native picker even when its associated label is tapped — the tap highlights the button (field turns gray) and then nothing happens. The reliable fix is to keep the input in the layout but transparent. The input now sits inside the label as a ``position-absolute``, ``opacity:0`` overlay filling the whole button, so the tap lands directly on the file input itself.
+
 ## v2.28.37 (2026-04-22)
 
 ### CSV import on mobile + hide export buttons on empty DB
