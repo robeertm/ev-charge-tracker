@@ -182,14 +182,29 @@ class VAGConnector(VehicleConnector):
             if rng is not None and getattr(rng, 'value', None) is not None:
                 estimated_range = int(rng.value)
 
-        # Charging info
+        # Charging info. ``ch.state.value`` is the carconnectivity
+        # EnumAttribute's inner enum member, not a plain string. A naive
+        # ``'CHARGING' in str(ch.state.value).upper()`` matches every
+        # state because ``str(ChargingState.OFF)`` renders as
+        # ``'ChargingState.OFF'`` — and ``'CHARGING'`` is a substring
+        # of ``'CHARGINGSTATE'``. Extract the enum's underlying value
+        # (or the raw string if it's already a string), then compare
+        # exactly. Fall back to ``charge_power > 0`` when the state is
+        # missing or unknown: power flowing is the ground truth.
         if hasattr(vehicle, 'charging') and vehicle.charging:
             ch = vehicle.charging
-            if hasattr(ch, 'state') and ch.state and hasattr(ch.state, 'value'):
-                state_val = str(ch.state.value).upper()
-                is_charging = 'CHARGING' in state_val
             if hasattr(ch, 'power') and ch.power and hasattr(ch.power, 'value'):
                 charge_power = float(ch.power.value) if ch.power.value is not None else None
+            state_attr = getattr(ch, 'state', None)
+            raw = getattr(state_attr, 'value', None) if state_attr is not None else None
+            # EnumAttribute → enum member → underlying string
+            inner = getattr(raw, 'value', None)
+            state_str = str(inner if inner is not None else (raw or '')).strip().lower()
+            if state_str == 'charging':
+                is_charging = True
+            elif not state_str and charge_power and charge_power > 0.1:
+                # State unknown but power flowing — trust power.
+                is_charging = True
 
         # Odometer
         odometer = None

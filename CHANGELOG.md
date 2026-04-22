@@ -1,5 +1,13 @@
 # Changelog
 
+## v2.28.42 (2026-04-22)
+
+### Fix: VAG ``is_charging`` was permanently stuck at True (substring bug)
+
+``connector_vag.py`` decided whether the car was charging with ``'CHARGING' in str(ch.state.value).upper()``. The carconnectivity ``ch.state.value`` is an ``EnumAttribute``-wrapped enum member, not a plain string; ``str(ChargingState.OFF)`` renders as ``'ChargingState.OFF'``, and ``'CHARGING'`` is a substring of ``'CHARGINGSTATE'``. Every Skoda/VW/SEAT/Cupra/Audi sync whose ``charging`` object existed at all was stored with ``is_charging = 1`` regardless of actual state — the dashboard on ev-mike showed "lädt" while the car sat parked with ``charging.state = 'off'`` and ``charging.power = 0.0 kW``.
+
+The check now reads the enum's underlying string via ``state.value.value`` and compares exactly to ``'charging'``. When the state field is missing or unknown the code falls back to ``charge_power > 0.1`` — power flowing is ground truth. Applied to every existing VAG sync on deploy so the dashboard reflects reality without waiting for the next poll.
+
 ## v2.28.41 (2026-04-22)
 
 ### History: per-page selector (50/100/200/All)
