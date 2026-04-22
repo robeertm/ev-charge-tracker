@@ -1,5 +1,15 @@
 # Changelog
 
+## v2.28.48 (2026-04-22)
+
+### Hyundai 1-step-behind: drive-distance discriminator instead of in-lifetime fresh check
+
+v2.28.47's in-lifetime fresh-GPS check had a subtle bug: the sync that TRIGGERS the odo-advance of the following PE falls inside the newly-opened PE's window after SDK reconcile snaps ``arrived_at`` backwards (trip end) — so the opening sync's own fresh-GPS counted as in-lifetime confirmation, and the repeat-echo guard never actually fired. The result: PE#20 still got stamped as Ponytruppe on ev-dirk.
+
+Replaced the in-lifetime check with a much simpler discriminator: the odometer distance of the drive that triggered this odo-advance. A same-coord stamp candidate is skipped only when the preceding drive was shorter than 2 km (Hyundai's cache occasionally returns the previous coord a second time on in-area hops of a few hundred meters to a kilometre; legitimate same-coord round trips — overnight parking at Home with a real out-and-back during the day — are always longer). Picked from ev-dirk's observed data: trip#137 at 1 km was the artefact, trip#138 at 9 km was the real round trip, so 2 km splits them cleanly.
+
+Also removed the now-unused ``_has_in_lifetime_fresh_at`` helper.
+
 ## v2.28.47 (2026-04-22)
 
 ### Hyundai 1-step-behind: repeat-echo guard on retroactive stamping

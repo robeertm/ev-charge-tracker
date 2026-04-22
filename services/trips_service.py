@@ -209,11 +209,33 @@ def update_parking_from_sync(sync) -> Optional[ParkingEvent]:
                     d = _haversine_m(prev_labeled.lat, prev_labeled.lon,
                                      new_lat, new_lon)
                     if d <= SAME_PLACE_M:
-                        # Coord matches the previous labelled PE.
-                        # Only stamp if an in-lifetime fresh-GPS
-                        # sync confirmed this coord too.
-                        should_stamp = _has_in_lifetime_fresh_at(
-                            open_evt, new_lat, new_lon)
+                        # Coord repeats the previous labelled PE.
+                        # Two reasons this can happen:
+                        #   (a) Hyundai second-level echo — cache
+                        #       returns the previous coord AGAIN
+                        #       after the car has moved to a third
+                        #       location. The drive we just saw was
+                        #       short (an in-area hop from A to B,
+                        #       both near A's coord).
+                        #   (b) Legitimate return to the same spot
+                        #       via a substantial round trip (drive
+                        #       out and back to Home overnight stays,
+                        #       morning round trips, etc.).
+                        # Discriminator: the odometer distance of
+                        # the just-detected drive. Short drives
+                        # (< 2 km) are almost certainly (a) — a real
+                        # "from same spot to same spot" round trip
+                        # of < 2 km is very rare and almost always
+                        # a cache-echo artefact in practice. Longer
+                        # drives indicate (b) — the car was really
+                        # elsewhere and came back, so keep the
+                        # label. 2 km hand-picked from observed
+                        # ev-dirk data where trip#137 at 1 km was
+                        # the artefact and trip#138 at 9 km was a
+                        # real round trip.
+                        drive_km = sync.odometer_km - last_odo
+                        if drive_km < 2:
+                            should_stamp = False
                 if should_stamp:
                     _stamp_closed_pe(open_evt, sync)
                     db.session.commit()
@@ -479,30 +501,6 @@ def _previous_labelled_pe(evt: ParkingEvent) -> Optional[ParkingEvent]:
             .first())
 
 
-def _has_in_lifetime_fresh_at(evt: ParkingEvent, lat: float, lon: float) -> bool:
-    """True if at least one VehicleSync with fresh GPS (gps_ts within
-    ``STALE_GPS_MAX_MIN``) during ``evt``'s [arrived_at, departed_at]
-    lifetime reported a coord within ``SAME_PLACE_M`` of (lat, lon).
-    Used to decide whether a coord that matches the previous labelled
-    PE was actually sustained during THIS PE's life (legit = stamp)
-    or only arrived on the post-close odo-advance sync (echo = skip)."""
-    from models.database import VehicleSync
-    if evt.arrived_at is None or evt.departed_at is None:
-        return False
-    rows = (VehicleSync.query
-            .filter(VehicleSync.timestamp >= evt.arrived_at)
-            .filter(VehicleSync.timestamp <= evt.departed_at)
-            .filter(VehicleSync.location_lat.isnot(None))
-            .filter(VehicleSync.location_lon.isnot(None))
-            .filter(VehicleSync.location_last_updated_at.isnot(None))
-            .all())
-    for s in rows:
-        age_min = (s.timestamp - s.location_last_updated_at).total_seconds() / 60.0
-        if age_min > STALE_GPS_MAX_MIN:
-            continue
-        if _haversine_m(s.location_lat, s.location_lon, lat, lon) <= SAME_PLACE_M:
-            return True
-    return False
 
 
 def get_parking_events(limit: Optional[int] = None,
