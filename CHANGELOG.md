@@ -1,5 +1,21 @@
 # Changelog
 
+## v2.28.49 (2026-04-22)
+
+### Hyundai Fahrtenbuch — teleport guards on the PE-upgrade path
+
+Observed on 22.04: the morning 9 km commute rendered as ``Home → Home`` — a physically impossible teleport. Root cause: when the new PE opened Unknown at the odo-advance, a subsequent fresh-GPS sync echoed the origin coord (Home), and ``_upgrade_unknown`` naively stamped it without checking whether the car could plausibly have gotten there.
+
+Two new guards on the upgrade path — both apply only when the open PE is Unknown:
+
+1. **Teleport guard** — if the fresh-GPS coord matches the most recent labelled PE within ``SAME_PLACE_M`` AND the odometer advanced between them, the car cannot have returned to the spot it just left. Coord is a cache echo; reject the upgrade, stay Unknown.
+
+2. **Same-odometer flip guard** — if an EARLIER fresh-GPS sync in this Unknown PE's own lifetime reported a different coord at the same odometer reading, two disagreeing fresh fixes without any movement mean at least one is an echo. Refuse to pick either one; stay Unknown.
+
+Also tightened the 1-step-behind ``_stamp_closed_pe`` rule at the odo-advance: dropped the ``drive_km < 2`` discriminator that let longer same-coord stamps through as "legitimate round trips". The car can't teleport regardless of drive length — Unknown is better than a wrong guess.
+
+Consequence: when Hyundai Bluelink fails to ever deliver a fresh-GPS for a drive's true destination, the destination renders as Unknown instead of whatever coord the cloud happens to echo. Two consecutive Unknowns for a day's commute are accepted as the cost of honesty.
+
 ## v2.28.48 (2026-04-22)
 
 ### Hyundai 1-step-behind: drive-distance discriminator instead of in-lifetime fresh check

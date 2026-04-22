@@ -175,31 +175,19 @@ def update_parking_from_sync(sync) -> Optional[ParkingEvent]:
                 request_post_move_reconcile()
             except Exception:
                 pass
-            # Hyundai 1-step-behind rule with repeat-echo guard.
-            # Observed on every install: the fresh-GPS coord that
-            # arrives AT an odo-advance sync represents the car's
-            # LAST known location = where it was DURING the just-
-            # closed PE's lifetime, not the drive's new destination.
-            # So we retroactively stamp the closed PE — UNLESS the
-            # coord just repeats the immediately-previous labelled
-            # PE's coord. That pattern is a second-level echo:
-            # Hyundai keeps returning the last-confirmed coord for
-            # two (or more) successive syncs after a drive, not just
-            # one. The second time that same coord arrives, the car
-            # has actually moved on to ANOTHER location — we just
-            # don't have a fresh fix for it yet. Leave the PE as
-            # Unknown so the trip Fahrtenbuch renders
-            # ``Ponytruppe → Unknown`` instead of the nonsensical
-            # ``Ponytruppe → Ponytruppe``.
-            #
-            # Exception: if an in-lifetime fresh-GPS sync already
-            # confirmed the same coord during this PE's life, the
-            # match is legitimate (car really did stay put at the
-            # spot) and we stamp normally. Common case: overnight
-            # parking at Home — fresh-GPS on arrival + fresh-GPS at
-            # odo-advance both confirm Home. Without this exception
-            # we'd leave PE#22 (morning stay at Home before an
-            # afternoon drive) Unknown.
+            # Hyundai 1-step-behind rule: the fresh-GPS coord that
+            # arrives AT an odo-advance sync often represents the
+            # car's LAST location — where it was DURING the just-
+            # closed PE's lifetime. When the just-closed PE was an
+            # Unknown placeholder this is our chance to retroactively
+            # reveal its actual spot. BUT: when that coord matches
+            # the LAST known labelled PE (one step further back), the
+            # car would have to teleport back to a spot it already
+            # left for a drive — impossible. That pattern is either a
+            # Hyundai second-level cache echo (most common) or would
+            # require a full round-trip to the same spot in between
+            # (which this user doesn't do). Strict rule per user:
+            # reject on any same-coord match, regardless of drive km.
             if _is_fresh_gps() and open_evt.label == 'unknown':
                 new_lat = float(sync.location_lat)
                 new_lon = float(sync.location_lon)
@@ -209,33 +197,7 @@ def update_parking_from_sync(sync) -> Optional[ParkingEvent]:
                     d = _haversine_m(prev_labeled.lat, prev_labeled.lon,
                                      new_lat, new_lon)
                     if d <= SAME_PLACE_M:
-                        # Coord repeats the previous labelled PE.
-                        # Two reasons this can happen:
-                        #   (a) Hyundai second-level echo — cache
-                        #       returns the previous coord AGAIN
-                        #       after the car has moved to a third
-                        #       location. The drive we just saw was
-                        #       short (an in-area hop from A to B,
-                        #       both near A's coord).
-                        #   (b) Legitimate return to the same spot
-                        #       via a substantial round trip (drive
-                        #       out and back to Home overnight stays,
-                        #       morning round trips, etc.).
-                        # Discriminator: the odometer distance of
-                        # the just-detected drive. Short drives
-                        # (< 2 km) are almost certainly (a) — a real
-                        # "from same spot to same spot" round trip
-                        # of < 2 km is very rare and almost always
-                        # a cache-echo artefact in practice. Longer
-                        # drives indicate (b) — the car was really
-                        # elsewhere and came back, so keep the
-                        # label. 2 km hand-picked from observed
-                        # ev-dirk data where trip#137 at 1 km was
-                        # the artefact and trip#138 at 9 km was a
-                        # real round trip.
-                        drive_km = sync.odometer_km - last_odo
-                        if drive_km < 2:
-                            should_stamp = False
+                        should_stamp = False
                 if should_stamp:
                     _stamp_closed_pe(open_evt, sync)
                     db.session.commit()
@@ -247,9 +209,55 @@ def update_parking_from_sync(sync) -> Optional[ParkingEvent]:
     # the existing PE instead of creating a new one. The arrived_at
     # timestamp stays at the odo-advance moment (our best estimate of
     # when the car actually arrived); SDK reconcile can still snap it.
+    #
+    # Two echo guards ensure we don't upgrade to a Hyundai cache echo:
+    #   (a) Teleport guard — fresh-GPS coord matches the most recent
+    #       labelled PE (where we just came from) AND the odometer
+    #       advanced between them. The car cannot have returned to a
+    #       spot it already left; the coord is a stale echo.
+    #   (b) Same-odo flip guard — an earlier fresh-GPS sync within
+    #       this Unknown PE's own lifetime reported a DIFFERENT coord
+    #       at the same odometer reading. Two disagreeing fresh-GPS
+    #       fixes without any movement: at least one is an echo;
+    #       refuse to pick either over the other.
+    # User principle: "wenn die logik sich unsicher ist, das auto
+    # kann sich ja nicht wegbeamen" — prefer Unknown over a guess.
     if (open_evt is not None
             and open_evt.label == 'unknown'
             and _is_fresh_gps()):
+        new_lat = float(sync.location_lat)
+        new_lon = float(sync.location_lon)
+        prev_labelled = _previous_labelled_pe(open_evt)
+        teleport = False
+        if prev_labelled is not None:
+            d = _haversine_m(prev_labelled.lat, prev_labelled.lon,
+                             new_lat, new_lon)
+            if d <= SAME_PLACE_M:
+                this_odo = open_evt.odometer_arrived or sync.odometer_km
+                prev_odo = prev_labelled.odometer_departed or prev_labelled.odometer_arrived
+                if (this_odo is not None and prev_odo is not None
+                        and this_odo - prev_odo >= 1):
+                    teleport = True
+        flip = False
+        if not teleport:
+            from models.database import VehicleSync
+            earlier = VehicleSync.query.filter(
+                VehicleSync.timestamp >= open_evt.arrived_at,
+                VehicleSync.timestamp < sync.timestamp,
+                VehicleSync.location_lat.isnot(None),
+                VehicleSync.location_last_updated_at.isnot(None),
+            ).all()
+            for es in earlier:
+                age = (es.timestamp - es.location_last_updated_at).total_seconds() / 60.0
+                if age > STALE_GPS_MAX_MIN:
+                    continue
+                d = _haversine_m(float(es.location_lat), float(es.location_lon),
+                                 new_lat, new_lon)
+                if d > SAME_PLACE_M:
+                    flip = True
+                    break
+        if teleport or flip:
+            return open_evt
         _upgrade_unknown(open_evt, sync)
         return open_evt
 
