@@ -175,31 +175,48 @@ def update_parking_from_sync(sync) -> Optional[ParkingEvent]:
                 request_post_move_reconcile()
             except Exception:
                 pass
-            # Hyundai 1-step-behind rule. Observed on every install:
-            # the fresh-GPS coord that arrives AT an odo-advance sync
-            # represents the car's LAST known location = where it was
-            # DURING the just-closed PE's lifetime, not the drive's
-            # new destination. So:
+            # Hyundai 1-step-behind rule with repeat-echo guard.
+            # Observed on every install: the fresh-GPS coord that
+            # arrives AT an odo-advance sync represents the car's
+            # LAST known location = where it was DURING the just-
+            # closed PE's lifetime, not the drive's new destination.
+            # So we retroactively stamp the closed PE — UNLESS the
+            # coord just repeats the immediately-previous labelled
+            # PE's coord. That pattern is a second-level echo:
+            # Hyundai keeps returning the last-confirmed coord for
+            # two (or more) successive syncs after a drive, not just
+            # one. The second time that same coord arrives, the car
+            # has actually moved on to ANOTHER location — we just
+            # don't have a fresh fix for it yet. Leave the PE as
+            # Unknown so the trip Fahrtenbuch renders
+            # ``Ponytruppe → Unknown`` instead of the nonsensical
+            # ``Ponytruppe → Ponytruppe``.
             #
-            #   1. If the just-closed PE was still Unknown (opened
-            #      from an earlier odo-advance with stale/no GPS),
-            #      use THIS sync's fresh-GPS to stamp its real coord
-            #      and label retroactively. The car's time at that
-            #      PE is now honestly labelled.
-            #   2. Always open the new PE as Unknown. The actual
-            #      destination of the drive we just detected will be
-            #      revealed either by the NEXT odo-advance's fresh
-            #      GPS (again representing the previous = this PE's
-            #      location) or by an in-place arrival confirmation
-            #      via ``_upgrade_unknown`` while the car sits parked.
-            #
-            # This produces the chain the user actually drove —
-            # ``Home → Unknown → Ponytruppe → Einkaufen → Home`` —
-            # instead of our prior one-step-shifted rendering where
-            # every label belonged to the next PE.
+            # Exception: if an in-lifetime fresh-GPS sync already
+            # confirmed the same coord during this PE's life, the
+            # match is legitimate (car really did stay put at the
+            # spot) and we stamp normally. Common case: overnight
+            # parking at Home — fresh-GPS on arrival + fresh-GPS at
+            # odo-advance both confirm Home. Without this exception
+            # we'd leave PE#22 (morning stay at Home before an
+            # afternoon drive) Unknown.
             if _is_fresh_gps() and open_evt.label == 'unknown':
-                _stamp_closed_pe(open_evt, sync)
-                db.session.commit()
+                new_lat = float(sync.location_lat)
+                new_lon = float(sync.location_lon)
+                should_stamp = True
+                prev_labeled = _previous_labelled_pe(open_evt)
+                if prev_labeled is not None:
+                    d = _haversine_m(prev_labeled.lat, prev_labeled.lon,
+                                     new_lat, new_lon)
+                    if d <= SAME_PLACE_M:
+                        # Coord matches the previous labelled PE.
+                        # Only stamp if an in-lifetime fresh-GPS
+                        # sync confirmed this coord too.
+                        should_stamp = _has_in_lifetime_fresh_at(
+                            open_evt, new_lat, new_lon)
+                if should_stamp:
+                    _stamp_closed_pe(open_evt, sync)
+                    db.session.commit()
             return _open_unknown(sync)
 
     # Upgrade path: if the currently open PE is an Unknown placeholder
@@ -445,6 +462,47 @@ def _stamp_closed_pe(evt: ParkingEvent, sync) -> None:
     evt.label = label
     evt.favorite_name = fav_name
     evt.address = None
+
+
+def _previous_labelled_pe(evt: ParkingEvent) -> Optional[ParkingEvent]:
+    """Most recent ParkingEvent ending before ``evt`` that has a real
+    label (not ``'unknown'``, not ``None``) and real coords. Used by
+    the 1-step-behind repeat-echo guard to compare a candidate stamp
+    coord against the last confirmed location."""
+    return (ParkingEvent.query
+            .filter(ParkingEvent.id != evt.id)
+            .filter(ParkingEvent.departed_at.isnot(None))
+            .filter(ParkingEvent.label.isnot(None))
+            .filter(ParkingEvent.label != 'unknown')
+            .filter(ParkingEvent.arrived_at < evt.arrived_at)
+            .order_by(ParkingEvent.arrived_at.desc())
+            .first())
+
+
+def _has_in_lifetime_fresh_at(evt: ParkingEvent, lat: float, lon: float) -> bool:
+    """True if at least one VehicleSync with fresh GPS (gps_ts within
+    ``STALE_GPS_MAX_MIN``) during ``evt``'s [arrived_at, departed_at]
+    lifetime reported a coord within ``SAME_PLACE_M`` of (lat, lon).
+    Used to decide whether a coord that matches the previous labelled
+    PE was actually sustained during THIS PE's life (legit = stamp)
+    or only arrived on the post-close odo-advance sync (echo = skip)."""
+    from models.database import VehicleSync
+    if evt.arrived_at is None or evt.departed_at is None:
+        return False
+    rows = (VehicleSync.query
+            .filter(VehicleSync.timestamp >= evt.arrived_at)
+            .filter(VehicleSync.timestamp <= evt.departed_at)
+            .filter(VehicleSync.location_lat.isnot(None))
+            .filter(VehicleSync.location_lon.isnot(None))
+            .filter(VehicleSync.location_last_updated_at.isnot(None))
+            .all())
+    for s in rows:
+        age_min = (s.timestamp - s.location_last_updated_at).total_seconds() / 60.0
+        if age_min > STALE_GPS_MAX_MIN:
+            continue
+        if _haversine_m(s.location_lat, s.location_lon, lat, lon) <= SAME_PLACE_M:
+            return True
+    return False
 
 
 def get_parking_events(limit: Optional[int] = None,

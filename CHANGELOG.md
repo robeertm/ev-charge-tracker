@@ -1,5 +1,15 @@
 # Changelog
 
+## v2.28.47 (2026-04-22)
+
+### Hyundai 1-step-behind: repeat-echo guard on retroactive stamping
+
+v2.28.46's stamp rule always wrote the odo-advance sync's fresh-GPS coord onto the just-closed Unknown PE. That worked when Hyundai Bluelink served a different coord than last time, but when Hyundai returned the SAME coord twice in a row — a second-level echo where the cache still holds the previous location after the car has moved to yet another spot — the rule stamped PE#20 as Ponytruppe when it was actually Einkaufen, producing a nonsense ``Ponytruppe → Ponytruppe`` trip.
+
+The stamp call now checks the previous labelled PE's coord. If the incoming fresh-GPS matches within ``SAME_PLACE_M`` and no in-lifetime fresh-GPS during THIS PE's life confirmed that coord, the stamp is skipped and the PE stays Unknown. Legit same-coord PEs (e.g. morning stay at Home after overnight stay at Home) are preserved because the in-lifetime fresh-GPS check confirms the car genuinely was at that spot, not just Hyundai re-serving the old cache.
+
+Two new helpers in ``trips_service``: ``_previous_labelled_pe`` (finds the most recent non-Unknown PE before a given PE) and ``_has_in_lifetime_fresh_at`` (checks whether any ``VehicleSync`` row inside the PE's lifetime had a fresh-GPS fix at the candidate coord).
+
 ## v2.28.46 (2026-04-22)
 
 ### Hyundai 1-step-behind rule: stamp closed PE retroactively at odo-advance
