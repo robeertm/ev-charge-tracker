@@ -1135,17 +1135,25 @@
             </div>
             <div class="card-body">
                 <p><strong>{{ t('set.db_entries') }}</strong> {{ total_charges }} {{ t('set.db_charges') }}</p>
+                {% if total_charges > 0 %}
                 <div class="d-flex gap-2 flex-wrap mb-3">
                     <a href="/api/export/csv" class="btn btn-outline-success">
                         <i class="bi bi-download"></i> {{ t('set.db_export') }}
                     </a>
                 </div>
+                {% endif %}
                 <hr>
                 <h6><i class="bi bi-upload"></i> {{ t('set.db_import_title') }}</h6>
                 <p class="text-muted small">{{ t('set.db_import_desc') }}</p>
                 <form method="POST" enctype="multipart/form-data" id="csvImportForm">
                     <div class="mb-2">
-                        <input type="file" class="form-control form-control-sm" name="csv_file" accept=".csv" required>
+                        <label for="csvFileInput" class="btn btn-outline-secondary w-100 text-start d-flex align-items-center gap-2" style="min-height:2.5rem">
+                            <i class="bi bi-folder2-open"></i>
+                            <span id="csvFileName" class="text-truncate">{{ t('set.db_import_choose_file') }}</span>
+                        </label>
+                        <input type="file" id="csvFileInput" name="csv_file"
+                               accept=".csv,text/csv,text/plain,application/csv,application/vnd.ms-excel"
+                               required class="d-none">
                     </div>
                     <div class="mb-2">
                         <label class="form-label small mb-1 fw-bold">{{ t('set.db_import_mode') }}</label>
@@ -1179,6 +1187,21 @@
                     <div id="importPreviewBox" class="mt-3" style="display:none"></div>
                 </form>
                 <script>
+                (function() {
+                    // Reflect chosen filename in the label, and reset to the
+                    // placeholder text when no file is selected (e.g. after
+                    // a failed submit re-renders the form).
+                    const fileInput = document.getElementById('csvFileInput');
+                    const nameSpan  = document.getElementById('csvFileName');
+                    const defaultText = {{ t('set.db_import_choose_file')|tojson }};
+                    if (fileInput && nameSpan) {
+                        fileInput.addEventListener('change', () => {
+                            const f = fileInput.files && fileInput.files[0];
+                            nameSpan.textContent = f ? f.name : defaultText;
+                        });
+                    }
+                })();
+
                 (function() {
                     const hints = {
                         skip:    {{ t('set.db_import_mode_skip_desc')|tojson }},

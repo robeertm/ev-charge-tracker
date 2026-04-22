@@ -5,9 +5,11 @@
 <div class="d-flex justify-content-between align-items-center mb-3">
     <h4 class="mb-0"><i class="bi bi-clock-history"></i> {{ t('hist.title') }}</h4>
     <div class="d-flex gap-2">
+        {% if charges.total > 0 %}
         <a href="/api/export/csv" class="btn btn-sm btn-outline-secondary">
             <i class="bi bi-download"></i> {{ t('hist.csv_export') }}
         </a>
+        {% endif %}
     </div>
 </div>
 

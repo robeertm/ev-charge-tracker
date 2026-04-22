@@ -1,5 +1,17 @@
 # Changelog
 
+## v2.28.37 (2026-04-22)
+
+### CSV import on mobile + hide export buttons on empty DB
+
+Two fixes to the Settings → Database card and related export entry points.
+
+**Mobile CSV picker didn't open.** The ``<input type="file" class="form-control form-control-sm">`` inside a form didn't reliably launch the native file picker on iOS Safari (the small-sized Bootstrap control renders the tap target inconsistently) and ``accept=".csv"`` alone is too restrictive — iOS filters by MIME type and grays out the Files picker when only an extension is specified. The input is now visually wrapped in a ``<label class="btn btn-outline-secondary">`` button, with the actual ``<input type="file">`` hidden via ``d-none``. The whole button becomes the tap target, which iOS handles consistently. The ``accept`` attribute was broadened to ``.csv,text/csv,text/plain,application/csv,application/vnd.ms-excel``. A tiny JS listener reflects the chosen filename in the label.
+
+**Export on empty DB.** Both the Settings "CSV Export" button and History's "CSV Export" link returned a valid but near-empty CSV (just the header row); the Report's "PDF Export" redirected to ``/report`` with a flash error when there was nothing to export. On a freshly-installed instance this looked like a broken button. The three export buttons are now gated server-side by the relevant data check — ``total_charges > 0`` for Settings, ``charges.total > 0`` for History, ``has_any_data`` for Report — so the entry point disappears while there is nothing to export.
+
+Added ``set.db_import_choose_file`` translation key to all six language files (de/en/es/fr/it/nl).
+
 ## v2.28.36 (2026-04-21)
 
 ### Hyundai: odometer-advance + Unknown PE placeholder

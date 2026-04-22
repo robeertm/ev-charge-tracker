@@ -415,6 +415,7 @@
   "set.db_entries": "Entradas",
   "set.db_export": "Exportar CSV",
   "set.db_import": "Importar CSV",
+  "set.db_import_choose_file": "Elegir archivo CSV …",
   "set.db_import_desc": "Exporta tu Google Sheet como CSV (Archivo → Descargar → .csv) y súbelo aquí.",
   "set.db_import_title": "Importar Google Sheet",
   "set.db_title": "Base de datos",
