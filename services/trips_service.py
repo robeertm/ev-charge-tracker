@@ -175,35 +175,31 @@ def update_parking_from_sync(sync) -> Optional[ParkingEvent]:
                 request_post_move_reconcile()
             except Exception:
                 pass
-            # Open the successor PE immediately. If the sync has fresh
-            # GPS, anchor at those real coords — UNLESS the fresh coord
-            # equals the just-closed PE's coord. That pattern is a
-            # Hyundai Bluelink quirk: when the car leaves a spot, the
-            # server keeps echoing the just-departed coord with a
-            # fabricated-fresh gps_ts. The odo already jumped (drive
-            # happened), but Hyundai hasn't updated the coord yet. The
-            # "arrival" we'd be reading is in reality the past
-            # departure from that spot; the car is already somewhere
-            # else. Open as Unknown and let the next truly fresh GPS
-            # sync reveal the real location via ``_upgrade_unknown``.
-            # Kia never hits this path (brand gate above), so the
-            # echo-detect cost only applies to Hyundai.
-            if _is_fresh_gps():
-                new_lat = float(sync.location_lat)
-                new_lon = float(sync.location_lon)
-                prev_lat = open_evt.lat
-                prev_lon = open_evt.lon
-                # open_evt may itself be an Unknown placeholder (0,0) —
-                # in that case we can't compute a meaningful distance,
-                # so accept the fresh GPS as a genuine new fix.
-                has_real_prev = (prev_lat is not None
-                                 and prev_lon is not None
-                                 and (prev_lat != 0.0 or prev_lon != 0.0))
-                if has_real_prev:
-                    echo_m = _haversine_m(prev_lat, prev_lon, new_lat, new_lon)
-                    if echo_m <= SAME_PLACE_M:
-                        return _open_unknown(sync)
-                return _open_event(sync, new_lat, new_lon)
+            # Hyundai 1-step-behind rule. Observed on every install:
+            # the fresh-GPS coord that arrives AT an odo-advance sync
+            # represents the car's LAST known location = where it was
+            # DURING the just-closed PE's lifetime, not the drive's
+            # new destination. So:
+            #
+            #   1. If the just-closed PE was still Unknown (opened
+            #      from an earlier odo-advance with stale/no GPS),
+            #      use THIS sync's fresh-GPS to stamp its real coord
+            #      and label retroactively. The car's time at that
+            #      PE is now honestly labelled.
+            #   2. Always open the new PE as Unknown. The actual
+            #      destination of the drive we just detected will be
+            #      revealed either by the NEXT odo-advance's fresh
+            #      GPS (again representing the previous = this PE's
+            #      location) or by an in-place arrival confirmation
+            #      via ``_upgrade_unknown`` while the car sits parked.
+            #
+            # This produces the chain the user actually drove —
+            # ``Home → Unknown → Ponytruppe → Einkaufen → Home`` —
+            # instead of our prior one-step-shifted rendering where
+            # every label belonged to the next PE.
+            if _is_fresh_gps() and open_evt.label == 'unknown':
+                _stamp_closed_pe(open_evt, sync)
+                db.session.commit()
             return _open_unknown(sync)
 
     # Upgrade path: if the currently open PE is an Unknown placeholder
@@ -430,6 +426,25 @@ def _upgrade_unknown(evt: ParkingEvent, sync) -> None:
     if sync.soc_percent is not None:
         evt.soc_departed = sync.soc_percent
     db.session.commit()
+
+
+def _stamp_closed_pe(evt: ParkingEvent, sync) -> None:
+    """Retroactively stamp the fresh-GPS coord + classified label onto
+    a just-closed Unknown PE. Used by the Hyundai 1-step-behind rule
+    at odo-advance: Hyundai Bluelink's fresh-GPS at the moment of a
+    detected drive represents the car's LAST known location (where it
+    was DURING the closing PE's lifetime), not the drive's destination.
+    So when the open PE was Unknown — opened because its own arrival
+    sync had no fresh GPS — this later odo-advance is our chance to
+    reveal what spot it actually was. Only timestamps stay untouched;
+    the whole identity (coord/label/name) gets written in place."""
+    lat, lon = float(sync.location_lat), float(sync.location_lon)
+    label, fav_name = _classify_location(lat, lon)
+    evt.lat = lat
+    evt.lon = lon
+    evt.label = label
+    evt.favorite_name = fav_name
+    evt.address = None
 
 
 def get_parking_events(limit: Optional[int] = None,

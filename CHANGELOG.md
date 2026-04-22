@@ -1,5 +1,15 @@
 # Changelog
 
+## v2.28.46 (2026-04-22)
+
+### Hyundai 1-step-behind rule: stamp closed PE retroactively at odo-advance
+
+Each Hyundai Bluelink sync's fresh-GPS represents the car's LAST KNOWN location — i.e. where the car was DURING the now-ending PE, not where it arrived after the current drive. Every previous PE-labelling strategy we tried was one step off: opening the new PE with the fresh-GPS coord labelled the drive's destination as the drive's origin. User's Fahrtenbuch read like ``Home → Work → Ponytruppe → Ponytruppe → Unknown → Home`` instead of the actually-driven ``Home → Unknown → Ponytruppe → Einkaufen → Home``.
+
+The odo-advance block now treats the arriving fresh-GPS as the *retroactive* identity of the just-closing Unknown PE: ``_stamp_closed_pe`` writes the fresh coord/label/favorite onto the closed PE. The new PE always opens as Unknown — its real destination will be stamped at the NEXT odo-advance (when the next sync's fresh-GPS becomes THIS PE's retroactive identity) or in-place via ``_upgrade_unknown`` if the car sits parked with subsequent fresh-GPS syncs. Applies only to Hyundai.
+
+The v2.28.44 echo-distance heuristic (< 80 m → Unknown) is subsumed by this: under the new rule the new PE is always Unknown regardless of coord match, so the echo check is redundant and removed.
+
 ## v2.28.45 (2026-04-22)
 
 ### Hyundai silence degradation: skip when odometer is stable
