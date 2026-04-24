@@ -1,5 +1,19 @@
 # Changelog
 
+## v2.28.53 (2026-04-24)
+
+### Hyundai Fahrtenbuch — stamp the newly opened PE, not the closing one
+
+Observed on ev-dirk for 23.04: a short Home → Micktner → Ponytruppe → Dohnaer → Work chain rendered with every destination label shifted one PE upstream — Micktner became Ponytruppe, Ponytruppe became Dohnaer, Dohnaer became Unknown, and all downstream arrivals were equally off by one. Hyundai had delivered one extra SDK trip (the 4-minute Home → Micktner hop) but the GPS-side state machine was assigning each PE the *next* PE's coord.
+
+Root cause: ``_stamp_closed_pe`` was built around Hyundai's 1-step-behind cache pattern — at odo-advance, write the freshly-arrived GPS onto the *closing* PE as its retroactive identity. That's correct when the fresh coord is an origin echo (cloud still returning the previous location for a few minutes after a move). When the cloud actually delivers the new destination coord promptly — which Hyundai does more often than we assumed — the same logic silently mis-assigns every label down the chain.
+
+**Fix**: stamp the newly-opened PE with the fresh-GPS, not the just-closed one. The echo check stays, but its role flips: if the fresh coord matches the closing PE's coord (when labelled) or its most recent labelled predecessor (when Unknown), the stamp is skipped and the new PE opens Unknown — destination will be stamped later via the upgrade path once Hyundai catches up. No-match cases skip the upgrade-path wait and open a labelled PE directly.
+
+Trade-off: the "close PE retroactively identifies its own location" pathway is gone, so when Hyundai stays stuck in echo mode for an entire short hop (origin coord both at arrival AND at the next departure), the PE stays Unknown instead of being guessed from the following odo-advance. Accepted because the previous behaviour silently shifted whole evenings of driving to the wrong destinations.
+
+Existing wrongly-labelled PEs on ev-dirk (PE 26/27/28 for 23.04) were corrected in place via direct SQL — no replay, so the user's manual edits on pre-yesterday PEs are preserved.
+
 ## v2.28.52 (2026-04-24)
 
 ### Report — donut chart labels in-place, trip-edit buttons wrap on narrow screens

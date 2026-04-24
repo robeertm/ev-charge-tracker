@@ -175,32 +175,39 @@ def update_parking_from_sync(sync) -> Optional[ParkingEvent]:
                 request_post_move_reconcile()
             except Exception:
                 pass
-            # Hyundai 1-step-behind rule: the fresh-GPS coord that
-            # arrives AT an odo-advance sync often represents the
-            # car's LAST location — where it was DURING the just-
-            # closed PE's lifetime. When the just-closed PE was an
-            # Unknown placeholder this is our chance to retroactively
-            # reveal its actual spot. BUT: when that coord matches
-            # the LAST known labelled PE (one step further back), the
-            # car would have to teleport back to a spot it already
-            # left for a drive — impossible. That pattern is either a
-            # Hyundai second-level cache echo (most common) or would
-            # require a full round-trip to the same spot in between
-            # (which this user doesn't do). Strict rule per user:
-            # reject on any same-coord match, regardless of drive km.
-            if _is_fresh_gps() and open_evt.label == 'unknown':
+            # Hyundai at odo-advance: the fresh-GPS sync either carries
+            # (a) a CACHE ECHO of the origin coord (cloud hasn't caught
+            # up with the move yet) or (b) the TRUE destination coord
+            # (cloud just delivered the new fix). Before v2.28.52 we
+            # assumed (a) universally and stamped the closing PE —
+            # which was correct for the Home-echo morning commute case
+            # but silently shifted labels by one whenever Hyundai
+            # actually returned (b). The 23.04 ev-dirk chain had a
+            # short Home → Micktner hop followed by Micktner → Ponytruppe
+            # where the fresh-GPS at every odo-advance was the TRUE
+            # destination; the closing-side stamp wrote each PE with
+            # the NEXT PE's coord, shifting Micktner/Ponytruppe/Dohnaer
+            # one step down the chain.
+            #
+            # New rule: stamp the NEW (just-opened) PE with the fresh
+            # coord whenever it doesn't look like an echo of the spot
+            # we just left. "Echo" means the fresh coord matches the
+            # closing PE's own coord (if that PE is labelled) or,
+            # when the closing PE is Unknown, its most recent labelled
+            # predecessor. On match → open Unknown; the destination
+            # will be stamped later, when Hyundai catches up, via the
+            # upgrade path. No match → open a labelled PE directly.
+            if _is_fresh_gps():
                 new_lat = float(sync.location_lat)
                 new_lon = float(sync.location_lon)
-                should_stamp = True
-                prev_labeled = _previous_labelled_pe(open_evt)
-                if prev_labeled is not None:
-                    d = _haversine_m(prev_labeled.lat, prev_labeled.lon,
-                                     new_lat, new_lon)
-                    if d <= SAME_PLACE_M:
-                        should_stamp = False
-                if should_stamp:
-                    _stamp_closed_pe(open_evt, sync)
-                    db.session.commit()
+                ref_pe = open_evt if (open_evt.label and open_evt.label != 'unknown') \
+                         else _previous_labelled_pe(open_evt)
+                is_echo = False
+                if ref_pe is not None:
+                    d = _haversine_m(ref_pe.lat, ref_pe.lon, new_lat, new_lon)
+                    is_echo = d <= SAME_PLACE_M
+                if not is_echo:
+                    return _open_event(sync, new_lat, new_lon)
             return _open_unknown(sync)
 
     # Upgrade path: if the currently open PE is an Unknown placeholder
