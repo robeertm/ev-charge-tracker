@@ -643,5 +643,7 @@
   "wiz.welcome_step1": "Establecer la frase de contraseña LUKS (la que protege el cifrado)",
   "wiz.welcome_step1_luks": "Eliges una nueva contraseña LUKS para el cifrado de tus datos.",
   "wiz.welcome_step2": "Establecer la contraseña de inicio de sesión SSH",
-  "wiz.welcome_step2_weblogin": "Creas un nombre de usuario + contraseña para el acceso web."
+  "wiz.welcome_step2_weblogin": "Creas un nombre de usuario + contraseña para el acceso web.",
+  "trips.edit_pick_from_here": "Elegir inicio en el mapa",
+  "trips.edit_pick_to_here": "Elegir destino en el mapa"
 }

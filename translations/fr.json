@@ -643,5 +643,7 @@
   "wiz.welcome_step1": "Définir la phrase secrète LUKS du disque (celle qui protège le chiffrement)",
   "wiz.welcome_step1_luks": "Choisissez une nouvelle phrase secrète LUKS pour le chiffrement de vos données.",
   "wiz.welcome_step2": "Définir le mot de passe de connexion SSH",
-  "wiz.welcome_step2_weblogin": "Créez un nom d'utilisateur + mot de passe pour l'accès web."
+  "wiz.welcome_step2_weblogin": "Créez un nom d'utilisateur + mot de passe pour l'accès web.",
+  "trips.edit_pick_from_here": "Choisir le départ sur la carte",
+  "trips.edit_pick_to_here": "Choisir l'arrivée sur la carte"
 }

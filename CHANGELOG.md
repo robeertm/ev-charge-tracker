@@ -1,5 +1,19 @@
 # Changelog
 
+## v2.28.51 (2026-04-24)
+
+### Fahrtenbuch edit modal — mobile-friendly layout
+
+Three fixes for the trip-edit modal on small screens:
+
+**1. Save button is now sticky** at the bottom of the modal, with an iOS safe-area inset so the button stays clickable even when the browser's own bottom chrome (address bar, gesture hint) overlays the page. Previously it was at the very end of a long-scrolling body and disappeared under the browser bar on short displays.
+
+**2. Pick-on-map buttons are now prominent and full-label** instead of a tiny bullseye icon hidden in the card header. Each card's header shows a proper "Auf Karte wählen" button with sufficient tap-target height (≥38px). The card-header button stays as a secondary option.
+
+**3. A dedicated pick-side button pair now sits directly above the map itself**, so when the user scrolls down to the map they can tap "Startpunkt auf Karte wählen" or "Zielpunkt auf Karte wählen" without scrolling all the way back up to the card header. Both button pairs (card headers + above-map) are visually synchronized — clicking either arms the map for that side and highlights the active state on both.
+
+New translation keys in all six language files: ``trips.edit_pick_from_here``, ``trips.edit_pick_to_here``.
+
 ## v2.28.50 (2026-04-24)
 
 ### Intermediate save + start retry on vehicle communication failure

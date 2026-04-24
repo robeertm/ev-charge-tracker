@@ -643,5 +643,7 @@
   "wiz.welcome_step1": "Imposta la passphrase LUKS del disco (quella che protegge la cifratura)",
   "wiz.welcome_step1_luks": "Scegli una nuova passphrase LUKS per la cifratura dei tuoi dati.",
   "wiz.welcome_step2": "Imposta la password di accesso SSH",
-  "wiz.welcome_step2_weblogin": "Crei un nome utente + password per l'accesso web."
+  "wiz.welcome_step2_weblogin": "Crei un nome utente + password per l'accesso web.",
+  "trips.edit_pick_from_here": "Scegli inizio sulla mappa",
+  "trips.edit_pick_to_here": "Scegli destinazione sulla mappa"
 }

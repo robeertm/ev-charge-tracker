@@ -827,6 +827,8 @@
   "trips.edit_soc_arrived": "SoC % arrival",
   "trips.edit_soc_departed": "SoC % departure",
   "trips.edit_pick_on_map": "Pick on map",
+  "trips.edit_pick_from_here": "Pick start on map",
+  "trips.edit_pick_to_here": "Pick end on map",
   "trips.edit_click_map_from": "Click the map now — position for start.",
   "trips.edit_click_map_to": "Click the map now — position for end.",
   "trips.edit_picked": "Picked for",

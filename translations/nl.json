@@ -643,5 +643,7 @@
   "wiz.welcome_step1": "LUKS-schijfwachtwoord instellen (dat de encryptie beschermt)",
   "wiz.welcome_step1_luks": "Je kiest een nieuwe LUKS-wachtwoordzin voor de versleuteling van je gegevens.",
   "wiz.welcome_step2": "Het SSH-aanmeldwachtwoord instellen",
-  "wiz.welcome_step2_weblogin": "Je maakt een gebruikersnaam + wachtwoord voor de webtoegang aan."
+  "wiz.welcome_step2_weblogin": "Je maakt een gebruikersnaam + wachtwoord voor de webtoegang aan.",
+  "trips.edit_pick_from_here": "Startpunt op kaart kiezen",
+  "trips.edit_pick_to_here": "Eindpunt op kaart kiezen"
 }
