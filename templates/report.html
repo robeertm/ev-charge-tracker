@@ -287,6 +287,51 @@
         // Charge type pie (counts + kWh in tooltip)
         const ct = data.charge_type || {labels:[], counts:[], kwh:[]};
         if (ct.labels.length) {
+            // Custom label plugin: write the segment name (AC/DC/PV) on every
+            // arc, and if the arc is big enough also write the kWh value
+            // underneath. Falls back to legend alone when an arc is too
+            // narrow to fit readable text.
+            const donutLabels = {
+                id: 'donutLabels',
+                afterDatasetsDraw(chart) {
+                    const {ctx} = chart;
+                    const meta = chart.getDatasetMeta(0);
+                    if (!meta || !meta.data) return;
+                    meta.data.forEach((arc, i) => {
+                        const props = arc.getProps(['startAngle','endAngle','innerRadius','outerRadius','x','y'], true);
+                        const sweep = props.endAngle - props.startAngle;
+                        const midAngle = (props.startAngle + props.endAngle) / 2;
+                        const midRadius = (props.innerRadius + props.outerRadius) / 2;
+                        const lx = props.x + Math.cos(midAngle) * midRadius;
+                        const ly = props.y + Math.sin(midAngle) * midRadius;
+                        const arcLen = sweep * midRadius;
+                        const thickness = props.outerRadius - props.innerRadius;
+                        // Skip label if the slice is so thin that text would
+                        // just overflow (arc length below ~20 px).
+                        if (arcLen < 20) return;
+                        const label = ct.labels[i];
+                        const kwh = ct.kwh[i];
+                        const bigEnough = arcLen >= 42 && thickness >= 34;
+                        ctx.save();
+                        ctx.fillStyle = '#fff';
+                        ctx.strokeStyle = 'rgba(0,0,0,0.5)';
+                        ctx.lineWidth = 2;
+                        ctx.textAlign = 'center';
+                        ctx.textBaseline = 'middle';
+                        ctx.font = 'bold 12px sans-serif';
+                        const dy = bigEnough ? -7 : 0;
+                        ctx.strokeText(label, lx, ly + dy);
+                        ctx.fillText(label, lx, ly + dy);
+                        if (bigEnough) {
+                            ctx.font = '10px sans-serif';
+                            const kwhStr = fmtNum(kwh, 1) + ' kWh';
+                            ctx.strokeText(kwhStr, lx, ly + 7);
+                            ctx.fillText(kwhStr, lx, ly + 7);
+                        }
+                        ctx.restore();
+                    });
+                }
+            };
             charts.plotChargeTypes = new Chart(document.getElementById('plotChargeTypes'), {
                 type: 'doughnut',
                 data: {
@@ -305,7 +350,8 @@
                             return `${ct.labels[i]}: ${fmtNum(ct.kwh[i],1)} kWh · ${ct.counts[i]} ×`;
                         }}}
                     }
-                }
+                },
+                plugins: [donutLabels]
             });
         }
 

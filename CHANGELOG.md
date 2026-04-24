@@ -1,5 +1,13 @@
 # Changelog
 
+## v2.28.52 (2026-04-24)
+
+### Report — donut chart labels in-place, trip-edit buttons wrap on narrow screens
+
+**Report page**: the AC/DC/PV charge-type doughnut now writes each segment's label (AC/DC/PV) directly onto the arc with a contrasting outline, and the kWh total appears underneath the label when the arc is large enough (≥42 px arc length and ≥34 px thickness). Narrow segments show just the label; very thin segments fall back to the legend alone. Custom Chart.js plugin — no extra dependency.
+
+**Trip-edit modal**: the new above-map pick buttons were getting clipped on narrow phone widths (≤340 px) because they stayed side-by-side. Switched to `flex-wrap` with a `160 px` minimum basis so they stack vertically on small viewports instead of being cut off, and added `white-space: normal` so long translations wrap inside the button rather than overflowing.
+
 ## v2.28.51 (2026-04-24)
 
 ### Fahrtenbuch edit modal — mobile-friendly layout

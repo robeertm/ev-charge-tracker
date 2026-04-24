@@ -26,13 +26,18 @@
 }
 #tripEditMapPick {
     display: flex;
+    flex-wrap: wrap;
     gap: .5rem;
     margin-bottom: .5rem;
 }
 #tripEditMapPick .btn {
-    flex: 1;
-    min-height: 44px;  /* iOS recommended tap-target minimum */
+    /* Min 160 px per button means both fit side-by-side on screens
+       >= 340 px (typical phone in portrait including padding) and
+       stack on narrower viewports instead of being clipped. */
+    flex: 1 1 160px;
+    min-height: 44px;
     font-weight: 600;
+    white-space: normal;
 }
 </style>
 {% endblock %}
