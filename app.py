@@ -1045,23 +1045,32 @@ def register_routes(app):
     def input_charge():
         if request.method == 'POST':
             try:
-                charge = Charge(
-                    date=datetime.strptime(request.form['date'], '%Y-%m-%d').date(),
-                    charge_hour=_int(request.form.get('charge_hour')),
-                    odometer=_int(request.form.get('odometer')),
-                    eur_per_kwh=_float(request.form.get('eur_per_kwh')),
-                    kwh_loaded=_float(request.form.get('kwh_loaded')),
-                    charge_type=request.form.get('charge_type', 'AC').upper(),
-                    soc_from=_int(request.form.get('soc_from')),
-                    soc_to=_int(request.form.get('soc_to')),
-                    loss_kwh=_float(request.form.get('loss_kwh')),
-                    co2_g_per_kwh=_int(request.form.get('co2_g_per_kwh')),
-                    notes=request.form.get('notes', '').strip() or None,
-                    location_lat=_float(request.form.get('location_lat')),
-                    location_lon=_float(request.form.get('location_lon')),
-                    location_name=request.form.get('location_name', '').strip() or None,
-                    operator=request.form.get('operator', '').strip() or None,
-                )
+                # Intermediate-save handshake: when a charge session is still
+                # active and the user clicks Speichern, the form carries the
+                # previously-saved row's id so we update in place instead of
+                # inserting a new row. Prevents duplicate rows per session
+                # and keeps the running timer intact after the redirect.
+                existing_id = _int(request.form.get('charge_id'))
+                charge = Charge.query.get(existing_id) if existing_id else None
+                is_update = charge is not None
+                if not is_update:
+                    charge = Charge()
+
+                charge.date = datetime.strptime(request.form['date'], '%Y-%m-%d').date()
+                charge.charge_hour = _int(request.form.get('charge_hour'))
+                charge.odometer = _int(request.form.get('odometer'))
+                charge.eur_per_kwh = _float(request.form.get('eur_per_kwh'))
+                charge.kwh_loaded = _float(request.form.get('kwh_loaded'))
+                charge.charge_type = request.form.get('charge_type', 'AC').upper()
+                charge.soc_from = _int(request.form.get('soc_from'))
+                charge.soc_to = _int(request.form.get('soc_to'))
+                charge.loss_kwh = _float(request.form.get('loss_kwh'))
+                charge.co2_g_per_kwh = _int(request.form.get('co2_g_per_kwh'))
+                charge.notes = request.form.get('notes', '').strip() or None
+                charge.location_lat = _float(request.form.get('location_lat'))
+                charge.location_lon = _float(request.form.get('location_lon'))
+                charge.location_name = request.form.get('location_name', '').strip() or None
+                charge.operator = request.form.get('operator', '').strip() or None
                 charge.calculate_fields(_get_battery_kwh())
 
                 # If no CO2 provided, set automatically
@@ -1081,9 +1090,14 @@ def register_routes(app):
                                 hour_label = f" ({charge.charge_hour}:00 Uhr)" if charge.charge_hour is not None else ""
                                 flash(t('flash.co2_fetched', value=co2, hour=hour_label), 'info')
 
-                db.session.add(charge)
+                if not is_update:
+                    db.session.add(charge)
                 db.session.commit()
                 cost_str = f'€{charge.total_cost:.2f}' if charge.total_cost is not None else '€—'
+                session_active = request.form.get('session_active') == '1'
+                if session_active:
+                    flash(t('flash.charge_intermediate_saved'), 'info')
+                    return redirect(url_for('input_charge', saved_id=charge.id, active=1))
                 flash(t('flash.charge_saved', date=charge.date.strftime("%d.%m.%Y"), kwh=charge.kwh_loaded or 0, cost=cost_str), 'success')
                 return redirect(url_for('input_charge'))
 
@@ -1094,9 +1108,17 @@ def register_routes(app):
         # Pre-fill date with today
         last_charge = Charge.query.order_by(Charge.date.desc()).first()
         vehicle_configured = bool(AppConfig.get('vehicle_api_brand', ''))
+        pre_charge = None
+        active_session = False
+        saved_id = _int(request.args.get('saved_id'))
+        if saved_id:
+            pre_charge = Charge.query.get(saved_id)
+            active_session = request.args.get('active') == '1'
         return render_template('input.html',
                                today=date.today().isoformat(),
                                last_charge=last_charge,
+                               pre_charge=pre_charge,
+                               active_session=active_session,
                                pv_co2=_get_pv_co2(),
                                pv_price=AppConfig.get('pv_price_eur_per_kwh', '0.00'),
                                max_ac_kw=AppConfig.get('max_ac_kw', '11'),

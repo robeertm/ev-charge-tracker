@@ -1,5 +1,17 @@
 # Changelog
 
+## v2.28.50 (2026-04-24)
+
+### Intermediate save + start retry on vehicle communication failure
+
+Two input-page robustness fixes observed in the field:
+
+**1. Save no longer cancels an active charge session.** Previously, clicking Speichern while a charge was running cleared the session timer and the next page load started fresh — so mid-charge annotations (operator, location, price) required choosing between "save now and lose the timer" or "remember to come back and save later". Now a save performed during an active session is an *intermediate save*: the charge row is written (or updated, if saved once before in the same session), the session timer keeps running, the redirected page pre-fills every field from the saved row, and the Speichern button relabels to "Zwischenspeichern" with a "Ladung läuft" badge in the card header. The session only ends when the user clicks Stop. Backend tracks this via an optional ``charge_id`` form field — subsequent saves within the same session update the same row instead of creating duplicates.
+
+**2. Start button now retries when the car is temporarily unreachable.** Both Kia and Hyundai cloud APIs regularly return transient errors immediately after the car has reported new state (the cloud is busy ingesting the update and locks the status endpoint for a few seconds to a few minutes). Clicking Laden during that window used to hard-fail with an alert. Now the click timestamp is stored as the charge start time up-front and a retry loop polls ``/api/vehicle/status?force=1`` every 30 s for up to 20 minutes. The button shows "Warte auf Fahrzeug… (Nm)". On eventual success the form fields are filled as normal and an alert confirms "Kommunikation wiederhergestellt — Ladung rückwirkend ab HH:MM gestartet" so the user knows the timer is anchored at the click moment, not the successful-fetch moment. After 20 min the loop gives up with a retry-manually message.
+
+New translation keys in all six language files: ``input.save_intermediate``, ``input.active_session``, ``input.waiting_for_car``, ``input.started_retroactively``, ``input.retry_failed``, ``flash.charge_intermediate_saved``.
+
 ## v2.28.49 (2026-04-22)
 
 ### Hyundai Fahrtenbuch — teleport guards on the PE-upgrade path

@@ -5,8 +5,13 @@
 <div class="row justify-content-center">
     <div class="col-lg-6 col-md-8">
         <div class="card shadow-sm">
-            <div class="card-header bg-success text-white">
+            <div class="card-header bg-success text-white d-flex justify-content-between align-items-center">
                 <h5 class="mb-0"><i class="bi bi-plus-circle"></i> {{ t('input.title') }}</h5>
+                {% if active_session %}
+                <span class="badge bg-warning text-dark" id="activeSessionBadge">
+                    <i class="bi bi-hourglass-split"></i> {{ t('input.active_session') }}
+                </span>
+                {% endif %}
             </div>
             <div class="card-body">
 
@@ -15,16 +20,17 @@
                     <label class="form-label fw-bold">
                         <i class="bi bi-lightning-charge"></i> {{ t('input.charge_type') }}
                     </label>
+                    {% set pre_ct = (pre_charge.charge_type if pre_charge else 'AC') %}
                     <div class="btn-group w-100" role="group">
-                        <input type="radio" class="btn-check" name="charge_type_select" id="typeAC" value="AC" checked>
+                        <input type="radio" class="btn-check" name="charge_type_select" id="typeAC" value="AC" {% if pre_ct == 'AC' %}checked{% endif %}>
                         <label class="btn btn-outline-success btn-lg" for="typeAC">
                             <i class="bi bi-plug"></i> AC
                         </label>
-                        <input type="radio" class="btn-check" name="charge_type_select" id="typeDC" value="DC">
+                        <input type="radio" class="btn-check" name="charge_type_select" id="typeDC" value="DC" {% if pre_ct == 'DC' %}checked{% endif %}>
                         <label class="btn btn-outline-warning btn-lg" for="typeDC">
                             <i class="bi bi-lightning"></i> DC
                         </label>
-                        <input type="radio" class="btn-check" name="charge_type_select" id="typePV" value="PV">
+                        <input type="radio" class="btn-check" name="charge_type_select" id="typePV" value="PV" {% if pre_ct == 'PV' %}checked{% endif %}>
                         <label class="btn btn-outline-info btn-lg" for="typePV">
                             <i class="bi bi-sun"></i> PV
                         </label>
@@ -48,7 +54,9 @@
 
                 <!-- Formular (alle Felder änderbar) -->
                 <form method="POST" id="chargeForm">
-                    <input type="hidden" name="charge_type" id="chargeTypeHidden" value="AC">
+                    <input type="hidden" name="charge_type" id="chargeTypeHidden" value="{{ pre_charge.charge_type if pre_charge else 'AC' }}">
+                    <input type="hidden" name="charge_id" id="chargeIdHidden" value="{{ pre_charge.id if pre_charge else '' }}">
+                    <input type="hidden" name="session_active" id="sessionActiveHidden" value="">
 
                     <!-- Datum & Uhrzeit -->
                     <div class="row g-3 mb-3">
@@ -57,7 +65,7 @@
                                 <i class="bi bi-calendar3"></i> {{ t('input.date') }}
                             </label>
                             <input type="date" class="form-control form-control-lg" id="date" name="date"
-                                   value="{{ today }}" required>
+                                   value="{{ pre_charge.date.isoformat() if pre_charge else today }}" required>
                         </div>
                         <div class="col-5">
                             <label for="charge_hour" class="form-label fw-bold">
@@ -66,7 +74,7 @@
                             <select class="form-select form-select-lg" id="charge_hour" name="charge_hour">
                                 <option value="">–</option>
                                 {% for h in range(24) %}
-                                <option value="{{ h }}">{{ "%02d"|format(h) }}:00</option>
+                                <option value="{{ h }}" {% if pre_charge and pre_charge.charge_hour == h %}selected{% endif %}>{{ "%02d"|format(h) }}:00</option>
                                 {% endfor %}
                             </select>
                         </div>
@@ -80,6 +88,7 @@
                         </label>
                         <input type="number" class="form-control form-control-lg" id="odometer"
                                name="odometer" min="0" max="999999"
+                               value="{{ pre_charge.odometer if pre_charge and pre_charge.odometer else '' }}"
                                placeholder="{{ last_charge.odometer if last_charge and last_charge.odometer else '' }}"
                                inputmode="numeric">
                     </div>
@@ -89,12 +98,14 @@
                         <div class="col-6">
                             <label for="soc_from" class="form-label fw-bold">{{ t('input.soc_from') }}</label>
                             <input type="number" class="form-control form-control-lg" id="soc_from" name="soc_from"
-                                   min="0" max="100" placeholder="20" inputmode="numeric">
+                                   min="0" max="100" placeholder="20" inputmode="numeric"
+                                   value="{{ pre_charge.soc_from if pre_charge and pre_charge.soc_from is not none else '' }}">
                         </div>
                         <div class="col-6">
                             <label for="soc_to" class="form-label fw-bold">{{ t('input.soc_to') }}</label>
                             <input type="number" class="form-control form-control-lg" id="soc_to" name="soc_to"
-                                   min="0" max="100" placeholder="80" inputmode="numeric">
+                                   min="0" max="100" placeholder="80" inputmode="numeric"
+                                   value="{{ pre_charge.soc_to if pre_charge and pre_charge.soc_to is not none else '' }}">
                         </div>
                     </div>
 
@@ -104,7 +115,8 @@
                             <label for="eur_per_kwh" class="form-label fw-bold">{{ t('input.eur_kwh') }}</label>
                             <input type="number" class="form-control form-control-lg" id="eur_per_kwh"
                                    name="eur_per_kwh" step="0.01" min="0" max="2"
-                                   placeholder="0.30" inputmode="decimal">
+                                   placeholder="0.30" inputmode="decimal"
+                                   value="{{ pre_charge.eur_per_kwh if pre_charge and pre_charge.eur_per_kwh is not none else '' }}">
                         </div>
                         <div class="col-6">
                             <label for="kwh_loaded" class="form-label fw-bold">
@@ -112,7 +124,8 @@
                             </label>
                             <input type="number" class="form-control form-control-lg" id="kwh_loaded"
                                    name="kwh_loaded" step="0.001" min="0" max="200"
-                                   placeholder="45.000" required inputmode="decimal">
+                                   placeholder="45.000" required inputmode="decimal"
+                                   value="{{ pre_charge.kwh_loaded if pre_charge and pre_charge.kwh_loaded is not none else '' }}">
                         </div>
                     </div>
 
@@ -128,7 +141,8 @@
                             <small class="text-muted">{{ t('input.optional') }}</small>
                         </label>
                         <input type="number" class="form-control" id="loss_kwh" name="loss_kwh"
-                               step="0.001" min="0" placeholder="5.200" inputmode="decimal">
+                               step="0.001" min="0" placeholder="5.200" inputmode="decimal"
+                               value="{{ pre_charge.loss_kwh if pre_charge and pre_charge.loss_kwh is not none else '' }}">
                     </div>
 
                     <!-- CO2 -->
@@ -138,7 +152,8 @@
                         </label>
                         <div class="input-group">
                             <input type="number" class="form-control" id="co2_g_per_kwh" name="co2_g_per_kwh"
-                                   min="0" max="1500" placeholder="automatisch" inputmode="numeric">
+                                   min="0" max="1500" placeholder="automatisch" inputmode="numeric"
+                                   value="{{ pre_charge.co2_g_per_kwh if pre_charge and pre_charge.co2_g_per_kwh is not none else '' }}">
                             <button type="button" class="btn btn-outline-secondary" id="btnFetchCo2"
                                     title="{{ t('input.co2_fetch') }}">
                                 <i class="bi bi-cloud-download"></i>
@@ -152,20 +167,20 @@
                             <i class="bi bi-building"></i> {{ t('input.operator') }}
                             <small class="text-muted">{{ t('input.optional') }}</small>
                         </label>
+                        {% set pre_op = (pre_charge.operator if pre_charge else '') or '' %}
+                        {% set pre_op_in_list = pre_op and pre_op in operators %}
                         <select class="form-select" id="operatorSelect">
-                            <option value="">{{ t('input.operator_none') }}</option>
+                            <option value="" {% if not pre_op %}selected{% endif %}>{{ t('input.operator_none') }}</option>
                             {% for op in operators %}
-                            <option value="{{ op }}">{{ op }}</option>
+                            <option value="{{ op }}" {% if pre_op == op %}selected{% endif %}>{{ op }}</option>
                             {% endfor %}
-                            <option value="__custom">{{ t('input.operator_custom_option') }}</option>
+                            <option value="__custom" {% if pre_op and not pre_op_in_list %}selected{% endif %}>{{ t('input.operator_custom_option') }}</option>
                         </select>
                         <input type="text" class="form-control mt-2" id="operatorCustom"
-                               style="display:none" placeholder="{{ t('input.operator_ph') }}"
-                               autocomplete="off">
-                        <!-- Hidden field is what actually gets submitted.
-                             Kept in sync by JS below so the backend doesn't care
-                             whether the value came from the select or free text. -->
-                        <input type="hidden" name="operator" id="operator">
+                               style="{% if pre_op and not pre_op_in_list %}{% else %}display:none{% endif %}"
+                               value="{% if pre_op and not pre_op_in_list %}{{ pre_op }}{% endif %}"
+                               placeholder="{{ t('input.operator_ph') }}" autocomplete="off">
+                        <input type="hidden" name="operator" id="operator" value="{{ pre_op }}">
                     </div>
 
                     <!-- Standort der Ladung -->
@@ -175,12 +190,15 @@
                             <small class="text-muted">{{ t('input.optional') }}</small>
                         </label>
                         <input type="text" class="form-control mb-1" id="location_name"
-                               name="location_name" placeholder="{{ t('input.location_name_ph') }}">
+                               name="location_name" placeholder="{{ t('input.location_name_ph') }}"
+                               value="{{ pre_charge.location_name if pre_charge and pre_charge.location_name else '' }}">
                         <div class="input-group input-group-sm mb-1">
                             <span class="input-group-text">Lat</span>
-                            <input type="number" step="0.000001" id="location_lat" name="location_lat" class="form-control">
+                            <input type="number" step="0.000001" id="location_lat" name="location_lat" class="form-control"
+                                   value="{{ '%.6f'|format(pre_charge.location_lat) if pre_charge and pre_charge.location_lat is not none else '' }}">
                             <span class="input-group-text">Lon</span>
-                            <input type="number" step="0.000001" id="location_lon" name="location_lon" class="form-control">
+                            <input type="number" step="0.000001" id="location_lon" name="location_lon" class="form-control"
+                                   value="{{ '%.6f'|format(pre_charge.location_lon) if pre_charge and pre_charge.location_lon is not none else '' }}">
                         </div>
                         <div class="d-flex gap-1 flex-wrap">
                             <button type="button" class="btn btn-sm btn-outline-info" id="btnGpsLocation"
@@ -208,12 +226,13 @@
                     <div class="mb-3">
                         <label for="notes" class="form-label">{{ t('input.notes') }} <small class="text-muted">{{ t('input.optional') }}</small></label>
                         <input type="text" class="form-control" id="notes" name="notes"
-                               placeholder="{{ t('input.notes_placeholder') }}">
+                               placeholder="{{ t('input.notes_placeholder') }}"
+                               value="{{ pre_charge.notes if pre_charge and pre_charge.notes else '' }}">
                     </div>
 
                     <div class="d-flex gap-2">
-                        <button type="submit" class="btn btn-success btn-lg flex-fill">
-                            <i class="bi bi-check-circle"></i> {{ t('input.save') }}
+                        <button type="submit" class="btn btn-success btn-lg flex-fill" id="btnSave">
+                            <i class="bi bi-check-circle"></i> <span id="btnSaveLabel">{{ t('input.save') }}</span>
                         </button>
                         <button type="button" class="btn btn-outline-secondary btn-lg" id="btnCancelCharge"
                                 title="{{ t('input.cancel_title') }}">
@@ -257,6 +276,12 @@ const T = {
     from_time: {{ t('input.from_time')|tojson }},
     hours_covered: {{ t('input.hours_covered')|tojson }},
     confirm_delete: {{ t('input.confirm_delete')|tojson }},
+    save: {{ t('input.save')|tojson }},
+    save_intermediate: {{ t('input.save_intermediate')|tojson }},
+    waiting_for_car: {{ t('input.waiting_for_car')|tojson }},
+    start: {{ t('input.start')|tojson }},
+    started_retroactively: {{ t('input.started_retroactively')|tojson }},
+    retry_failed: {{ t('input.retry_failed')|tojson }},
 };
 
 // Sync charge_type radio to hidden input
@@ -338,19 +363,49 @@ const timerEl = document.getElementById('chargeTimer');
 const timerDisplay = document.getElementById('timerDisplay');
 const CHARGE_KEY = 'ev_charge_session';
 
+// Post-intermediate-save pickup: when /input?saved_id=X&active=1 renders,
+// capture the freshly-assigned charge id into the running session so the
+// next submit updates the same row instead of creating a duplicate.
+(function ingestSavedId() {
+    try {
+        const url = new URL(window.location.href);
+        const savedId = url.searchParams.get('saved_id');
+        const activeFlag = url.searchParams.get('active');
+        if (!savedId) return;
+        if (activeFlag === '1') {
+            const s = JSON.parse(localStorage.getItem(CHARGE_KEY) || '{}');
+            s.chargeId = savedId;
+            localStorage.setItem(CHARGE_KEY, JSON.stringify(s));
+        }
+        // Strip the params from the URL so a reload doesn't re-trigger.
+        url.searchParams.delete('saved_id');
+        url.searchParams.delete('active');
+        window.history.replaceState({}, '', url.pathname + (url.search ? '?' + url.searchParams.toString() : ''));
+    } catch(e) {}
+})();
+
 // Restore session if active
 (function restoreSession() {
     try {
         const saved = JSON.parse(localStorage.getItem(CHARGE_KEY));
         if (saved && saved.startTime) {
             chargeStartTime = new Date(saved.startTime);
-            document.getElementById('date').value = saved.date || '';
-            document.getElementById('charge_hour').value = saved.hour || '';
-            document.getElementById('soc_from').value = saved.socFrom || '';
-            document.getElementById('odometer').value = saved.odometer || '';
+            // Only overwrite fields that the server didn't already pre-fill
+            // from pre_charge. Empty DOM values mean no server-side pre-fill.
+            const dateEl = document.getElementById('date');
+            if (!dateEl.value) dateEl.value = saved.date || '';
+            const hourEl = document.getElementById('charge_hour');
+            if (!hourEl.value) hourEl.value = saved.hour || '';
+            const socFromEl = document.getElementById('soc_from');
+            if (!socFromEl.value) socFromEl.value = saved.socFrom || '';
+            const odoEl = document.getElementById('odometer');
+            if (!odoEl.value) odoEl.value = saved.odometer || '';
             if (saved.chargeType) {
                 document.getElementById('type' + saved.chargeType).checked = true;
                 document.getElementById('chargeTypeHidden').value = saved.chargeType;
+            }
+            if (saved.chargeId) {
+                document.getElementById('chargeIdHidden').value = saved.chargeId;
             }
             btnStart.disabled = true;
             btnStart.innerHTML = '<i class="bi bi-check-circle"></i> ' + T.started;
@@ -364,6 +419,11 @@ const CHARGE_KEY = 'ev_charge_session';
                 timerEl.style.display = '';
                 startTimer();
                 startAutoPolling();
+                // Running session → repurpose the submit button as an
+                // intermediate-save so it's clear that saving doesn't
+                // end the charge.
+                const lblEl = document.getElementById('btnSaveLabel');
+                if (lblEl) lblEl.textContent = T.save_intermediate;
             }
         }
     } catch(e) {}
@@ -423,41 +483,100 @@ async function fetchVehicle(btn) {
     }
 }
 
-btnStart.addEventListener('click', async () => {
-    try {
-        const data = await fetchVehicle(btnStart);
-        const now = new Date();
-        chargeStartTime = now;
+// Quiet status fetch — like fetchVehicle but doesn't touch the button UI
+// so the retry loop can manage its own spinner/label without races.
+async function fetchVehicleQuiet() {
+    const r = await fetch('/api/vehicle/status?force=1');
+    const d = await r.json();
+    if (d.error) throw new Error(d.error);
+    const dashCache = JSON.parse(localStorage.getItem('ev_vehicle_data') || '{}');
+    for (const key in dashCache) {
+        if (d[key] === null || d[key] === undefined) d[key] = dashCache[key];
+    }
+    localStorage.setItem('ev_vehicle_data', JSON.stringify(d));
+    return d;
+}
 
-        // Fill start values
-        document.getElementById('date').value = now.toISOString().slice(0, 10);
-        document.getElementById('charge_hour').value = now.getHours();
+// Start-with-retry: the click timestamp is ALWAYS the charge start — if
+// the initial /api/vehicle/status?force=1 fails (car offline or busy
+// reporting state to the Kia/Hyundai cloud), the loop polls every 30 s
+// up to ~20 min. On eventual success the fields are filled with a note
+// that the charge was started retroactively at the click time, so the
+// timer reflects the actual connect moment rather than "whenever the
+// server came back".
+let startRetryTimer = null;
+const START_RETRY_INTERVAL_MS = 30_000;
+const START_RETRY_MAX_MIN = 20;
+
+function cancelStartRetry() {
+    if (startRetryTimer) { clearTimeout(startRetryTimer); startRetryTimer = null; }
+}
+
+function fmtHHMM(d) {
+    return String(d.getHours()).padStart(2, '0') + ':' + String(d.getMinutes()).padStart(2, '0');
+}
+
+async function tryStart(clickTime, attempt, deadline) {
+    const chargeType = document.getElementById('chargeTypeHidden').value;
+    try {
+        const data = await fetchVehicleQuiet();
+        chargeStartTime = clickTime;
+
+        document.getElementById('date').value = clickTime.toISOString().slice(0, 10);
+        document.getElementById('charge_hour').value = clickTime.getHours();
         if (data.soc != null) document.getElementById('soc_from').value = data.soc;
         if (data.odometer != null) document.getElementById('odometer').value = data.odometer;
 
-        const chargeType = document.getElementById('chargeTypeHidden').value;
-
-        // Save session
         localStorage.setItem(CHARGE_KEY, JSON.stringify({
-            startTime: now.toISOString(),
+            startTime: clickTime.toISOString(),
             date: document.getElementById('date').value,
-            hour: now.getHours().toString(),
+            hour: clickTime.getHours().toString(),
             socFrom: data.soc,
             odometer: data.odometer,
             chargeType: chargeType,
         }));
 
         btnStart.disabled = true;
-        btnStart.innerHTML = '<i class="bi bi-check-circle"></i> ' + T.started;
         btnStart.classList.replace('btn-success', 'btn-secondary');
+        btnStart.innerHTML = '<i class="bi bi-check-circle"></i> ' + T.started;
         btnStop.disabled = false;
         timerEl.style.display = '';
         document.getElementById('kwh_loaded').dataset.manual = '';
+        const lblEl = document.getElementById('btnSaveLabel');
+        if (lblEl) lblEl.textContent = T.save_intermediate;
         startTimer();
         startAutoPolling();
+
+        if (attempt > 0) {
+            alert(T.started_retroactively.replace('{time}', fmtHHMM(clickTime)));
+        }
+        return true;
     } catch(e) {
-        alert(T.error_prefix + e.message);
+        if (Date.now() >= deadline) {
+            btnStart.disabled = false;
+            btnStart.classList.replace('btn-secondary', 'btn-success');
+            btnStart.innerHTML = '<i class="bi bi-play-circle"></i> ' + T.start;
+            alert(T.retry_failed + '\n' + e.message);
+            return false;
+        }
+        const secsLeft = Math.ceil((deadline - Date.now()) / 1000);
+        const mins = Math.ceil(secsLeft / 60);
+        btnStart.innerHTML = '<span class="spinner-border spinner-border-sm"></span> ' +
+            T.waiting_for_car + ' (' + mins + 'm)';
+        startRetryTimer = setTimeout(() => tryStart(clickTime, attempt + 1, deadline),
+                                     START_RETRY_INTERVAL_MS);
+        return false;
     }
+}
+
+btnStart.addEventListener('click', () => {
+    cancelStartRetry();
+    const clickTime = new Date();
+    const deadline = Date.now() + START_RETRY_MAX_MIN * 60_000;
+    btnStart.disabled = true;
+    btnStart.classList.replace('btn-success', 'btn-secondary');
+    btnStart.innerHTML = '<span class="spinner-border spinner-border-sm"></span> ' + T.waiting_for_car;
+    tryStart(clickTime, 0, deadline);
 });
 
 // === Auto-Polling: check every 5 min if charging stopped or limit reached ===
@@ -575,8 +694,22 @@ btnStop.addEventListener('click', async () => {
     }
 });
 
-// Clean up session after form submit
+// Submit handler: if the charge session is still running (user clicked
+// Start but not Stop), treat this as an intermediate save — keep the
+// session in localStorage and tell the server to redirect with the new
+// charge_id so we don't re-insert on the next save. Stopped or
+// non-session saves fall through to the old "wipe and start fresh" path.
 document.getElementById('chargeForm').addEventListener('submit', () => {
+    try {
+        const saved = JSON.parse(localStorage.getItem(CHARGE_KEY) || 'null');
+        const activeFlag = document.getElementById('sessionActiveHidden');
+        if (saved && saved.startTime && !saved.stopped) {
+            if (activeFlag) activeFlag.value = '1';
+            // Keep the session record intact so the redirected /input page
+            // can restore timer/SoC-from/etc on the next render.
+            return;
+        }
+    } catch(e) {}
     localStorage.removeItem(CHARGE_KEY);
 });
 {% endif %}
