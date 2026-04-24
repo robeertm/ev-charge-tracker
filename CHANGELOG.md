@@ -1,5 +1,21 @@
 # Changelog
 
+## v2.28.54 (2026-04-24)
+
+### Fahrtenbuch — PE ``soc_arrived`` / ``soc_departed`` now match trip-row consumption
+
+User report: in the Fahrtenbuch, trip consumption delta was correct but the per-PE start/end SoC shown in the edit modal was wrong — e.g. a 5 % drive rendered as "67 → 67 %" in the modal because ``soc_arrived`` kept the first post-drive sync's cached pre-drive SoC.
+
+Root cause — the Kia/Hyundai cloud usually returns the new odometer + new GPS on the first post-drive sync but keeps echoing the pre-drive SoC for a few seconds to a few minutes, then sends a second "partial" sync (``gps_ts = None``) with the real post-drive SoC. The existing trust gate correctly rejects that partial sync for GPS/location purposes (to avoid coord echoes at origin), but the same gate silently blocked the SoC update too — so ``soc_arrived`` stayed on the echo. The trip row used ``_soc_min_in`` to bypass the echo on the fly; the stored field didn't.
+
+Three fixes:
+
+1. **New ``recompute_pe_soc(evt)`` helper** that derives ``soc_arrived`` / ``soc_departed`` from ``VehicleSync`` using the same logic the trip row already uses (``_soc_min_in`` over the first 30 min after arrival; ``_soc_before`` for departure). Called at every PE close (odo-advance, odo-jump split, distance-threshold move) so newly-closed PEs have correct values immediately.
+
+2. **Arrival-echo correction at sync time.** Within the first 30 min of a PE's lifetime, any sync whose odometer matches the PE's (proof the car is parked there, not mid-drive) may pull ``soc_arrived`` DOWN regardless of ``gps_ts`` freshness. Catches the "second partial-fresh sync with real post-drive SoC" without weakening the GPS/location freshness gate.
+
+3. **New repair endpoint** ``POST /api/trips/repair_soc``. One-shot maintenance that walks every PE and realigns stored SoC with ``VehicleSync``-derived values. Safe to run repeatedly; only writes on actual differences.
+
 ## v2.28.53 (2026-04-24)
 
 ### Hyundai Fahrtenbuch — stamp the newly opened PE, not the closing one

@@ -2697,6 +2697,21 @@ def register_routes(app):
         except Exception as e:
             return jsonify({'error': str(e)}), 500
 
+    @app.route('/api/trips/repair_soc', methods=['POST'])
+    def api_trips_repair_soc():
+        """Realign every PE's ``soc_arrived`` / ``soc_departed`` with the
+        VehicleSync-derived values the trip row already displays.
+
+        Fixes the Kia/Hyundai "first post-drive sync carries pre-drive
+        SoC" echo that leaves PE fields out of sync with the Fahrtenbuch
+        delta. Safe to run multiple times; only writes when a stored
+        value differs from the recomputed one."""
+        from services.trips_service import repair_all_pe_soc
+        try:
+            return jsonify({'ok': True, **repair_all_pe_soc()})
+        except Exception as e:
+            return jsonify({'error': str(e)}), 500
+
     @app.route('/api/trips/sdk_backfill', methods=['POST'])
     def api_trips_sdk_backfill():
         """Pull per-trip data from the Kia/Hyundai server for the last N

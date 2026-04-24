@@ -166,6 +166,13 @@ def update_parking_from_sync(sync) -> Optional[ParkingEvent]:
         last_odo = open_evt.odometer_departed or open_evt.odometer_arrived
         if last_odo is not None and sync.odometer_km - last_odo >= 1:
             open_evt.departed_at = open_evt.last_seen_at or open_evt.arrived_at
+            # Realign arrival/departure SoC with the trip-display derivation
+            # (min-in-first-30min for arrival; last sync before departure for
+            # departure) now that this PE is closed. The running same-place
+            # updates miss the Kia/Hyundai "first post-drive sync carries
+            # pre-drive SoC" echo; trip row uses the corrected values via
+            # VehicleSync scan, so stored fields have to match.
+            recompute_pe_soc(open_evt)
             db.session.commit()
             try:
                 from services.vehicle.sync_service import (
@@ -285,6 +292,30 @@ def update_parking_from_sync(sync) -> Optional[ParkingEvent]:
             db.session.commit()
             return open_evt
 
+    # Arrival-echo correction: pull ``soc_arrived`` down to the min
+    # seen within the first 30 min of the PE's lifetime, regardless of
+    # this sync's GPS freshness. Kia/Hyundai's first post-drive sync
+    # often carries the PRE-drive SoC as a cloud cache echo, followed
+    # by a partial-fresh sync (gps_ts = None) 10-20 s later with the
+    # real post-drive SoC — that partial sync is rejected by the
+    # freshness gate for GPS/location purposes (correct) but its SoC
+    # reading is trustworthy when its odometer matches the PE's own
+    # odometer (car is provably at the destination, not mid-drive).
+    # Without this patch the stored ``soc_arrived`` keeps the echo and
+    # the Fahrtenbuch edit modal disagrees with the trip row's delta
+    # (which already uses ``_soc_min_in`` to bypass the echo).
+    if (open_evt is not None
+            and open_evt.arrived_at is not None
+            and open_evt.odometer_arrived is not None
+            and sync.odometer_km == open_evt.odometer_arrived
+            and sync.soc_percent is not None
+            and open_evt.soc_arrived is not None
+            and sync.soc_percent < open_evt.soc_arrived
+            and (sync.timestamp - open_evt.arrived_at).total_seconds() / 60.0
+                <= _ARRIVAL_SOC_WINDOW_MIN):
+        open_evt.soc_arrived = sync.soc_percent
+        db.session.commit()
+
     if sync.location_lat is None or sync.location_lon is None:
         return None
 
@@ -339,6 +370,7 @@ def update_parking_from_sync(sync) -> Optional[ParkingEvent]:
                 and sync.odometer_km is not None
                 and sync.odometer_km - last_odo >= 1):
             open_evt.departed_at = open_evt.last_seen_at or open_evt.arrived_at
+            recompute_pe_soc(open_evt)
             db.session.commit()
             try:
                 from services.vehicle.sync_service import (
@@ -396,6 +428,7 @@ def update_parking_from_sync(sync) -> Optional[ParkingEvent]:
             open_evt.odometer_departed = sync.odometer_km
         if open_evt.soc_departed is None and sync.soc_percent is not None:
             open_evt.soc_departed = sync.soc_percent
+        recompute_pe_soc(open_evt)
         db.session.commit()
         # Ask the sync service to schedule an immediate force-refresh on
         # the next tick so curr.arrived_at / soc_arrived / odometer_arrived
@@ -499,6 +532,75 @@ def _stamp_closed_pe(evt: ParkingEvent, sync) -> None:
     evt.label = label
     evt.favorite_name = fav_name
     evt.address = None
+
+
+def recompute_pe_soc(evt: ParkingEvent, soc_lookup=None) -> bool:
+    """Align a PE's ``soc_arrived`` / ``soc_departed`` with the values
+    that the trip display would derive from ``VehicleSync``.
+
+    Two data-quality problems the raw state-machine capture leaves behind:
+
+    1. **Arrival echo.** Kia/Hyundai clouds often return the pre-drive SoC
+       on the very first sync at the new odometer — fresh GPS + new
+       odometer + stale SoC. Seconds later the real post-drive SoC lands.
+       The PE is opened from that first sync and sticks with the echo
+       unless a same-place update beats the trust gate. ``_soc_min_in``
+       over the first 30 min of arrival window picks the lowest reading
+       — i.e. the real post-drive SoC — because any in-window charging
+       pulse would only drag it further below and comes back above later.
+
+    2. **Departure gating.** The same trust gate blocks SoC updates on
+       any same-place sync whose ``gps_ts`` is missing (the partial-echo
+       fingerprint). That's correct for coord updates but under-reports
+       ``soc_departed`` at drives where only the partial syncs carried
+       real post-parked SoC. ``_soc_before(departed_at)`` scans raw
+       VehicleSync regardless of gps_ts, which is what the trip
+       ``start_soc`` uses — so aligning ``soc_departed`` to it matches
+       what the user sees in the Fahrtenbuch row.
+
+    Returns True if either field changed.
+    """
+    if evt is None or evt.arrived_at is None:
+        return False
+    if soc_lookup is None:
+        soc_lookup = _load_soc_lookup()
+
+    changed = False
+    window_end = evt.arrived_at + timedelta(minutes=_ARRIVAL_SOC_WINDOW_MIN)
+    if evt.departed_at is not None and evt.departed_at < window_end:
+        window_end = evt.departed_at
+    new_arr = _soc_min_in(soc_lookup, evt.arrived_at, window_end)
+    if new_arr is not None and new_arr != evt.soc_arrived:
+        evt.soc_arrived = new_arr
+        changed = True
+
+    if evt.departed_at is not None:
+        new_dep = _soc_before(soc_lookup, evt.departed_at)
+        # Fallback: when no strictly-before sync exists (e.g. the PE
+        # never saw a fresh-gps-ts reading so ``_soc_before`` skips its
+        # own in-lifetime syncs too), keep the running soc_departed the
+        # state machine collected — better than blanking it out.
+        if new_dep is not None and new_dep != evt.soc_departed:
+            evt.soc_departed = new_dep
+            changed = True
+
+    return changed
+
+
+def repair_all_pe_soc() -> dict:
+    """One-shot maintenance: walk every PE and run ``recompute_pe_soc``.
+
+    Returns ``{'checked': N, 'fixed': M}``.
+    """
+    soc_lookup = _load_soc_lookup()
+    events = ParkingEvent.query.order_by(ParkingEvent.arrived_at.asc()).all()
+    fixed = 0
+    for evt in events:
+        if recompute_pe_soc(evt, soc_lookup):
+            fixed += 1
+    if fixed:
+        db.session.commit()
+    return {'checked': len(events), 'fixed': fixed}
 
 
 def _previous_labelled_pe(evt: ParkingEvent) -> Optional[ParkingEvent]:
