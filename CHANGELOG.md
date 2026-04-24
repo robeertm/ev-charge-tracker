@@ -68,9 +68,9 @@ Consequence: when Hyundai Bluelink fails to ever deliver a fresh-GPS for a drive
 
 ### Hyundai 1-step-behind: drive-distance discriminator instead of in-lifetime fresh check
 
-v2.28.47's in-lifetime fresh-GPS check had a subtle bug: the sync that TRIGGERS the odo-advance of the following PE falls inside the newly-opened PE's window after SDK reconcile snaps ``arrived_at`` backwards (trip end) — so the opening sync's own fresh-GPS counted as in-lifetime confirmation, and the repeat-echo guard never actually fired. The result: PE#20 still got stamped as Ponytruppe on ev-dirk.
+v2.28.47's in-lifetime fresh-GPS check had a subtle bug: the sync that TRIGGERS the odo-advance of the following PE falls inside the newly-opened PE's window after SDK reconcile snaps ``arrived_at`` backwards (trip end) — so the opening sync's own fresh-GPS counted as in-lifetime confirmation, and the repeat-echo guard never actually fired. The result: PE#20 still got stamped as Ponytruppe on the Hyundai install.
 
-Replaced the in-lifetime check with a much simpler discriminator: the odometer distance of the drive that triggered this odo-advance. A same-coord stamp candidate is skipped only when the preceding drive was shorter than 2 km (Hyundai's cache occasionally returns the previous coord a second time on in-area hops of a few hundred meters to a kilometre; legitimate same-coord round trips — overnight parking at Home with a real out-and-back during the day — are always longer). Picked from ev-dirk's observed data: trip#137 at 1 km was the artefact, trip#138 at 9 km was the real round trip, so 2 km splits them cleanly.
+Replaced the in-lifetime check with a much simpler discriminator: the odometer distance of the drive that triggered this odo-advance. A same-coord stamp candidate is skipped only when the preceding drive was shorter than 2 km (Hyundai's cache occasionally returns the previous coord a second time on in-area hops of a few hundred meters to a kilometre; legitimate same-coord round trips — overnight parking at Home with a real out-and-back during the day — are always longer). Picked from the Hyundai install's observed data: trip#137 at 1 km was the artefact, trip#138 at 9 km was the real round trip, so 2 km splits them cleanly.
 
 Also removed the now-unused ``_has_in_lifetime_fresh_at`` helper.
 
@@ -98,7 +98,7 @@ The v2.28.44 echo-distance heuristic (< 80 m → Unknown) is subsumed by this: u
 
 ### Hyundai silence degradation: skip when odometer is stable
 
-v2.28.43's silence degradation masked the origin label of a trip when the origin PE had no fresh-GPS contact for > 60 min before departure. This over-triggered when the car sat parked at a labelled spot for hours — odometer was demonstrably constant during the PE lifetime (car didn't move) but the label still got replaced with Unknown at render time. Today's example on ev-dirk: 17:41 Home → Work rendered as "unknown → Work" because PE#22 (Home) had its last fresh GPS fix at 08:30 while the actual departure was at 17:41, 9 h of silence — but ``odometer_arrived == odometer_departed == 50792`` proved the car never moved.
+v2.28.43's silence degradation masked the origin label of a trip when the origin PE had no fresh-GPS contact for > 60 min before departure. This over-triggered when the car sat parked at a labelled spot for hours — odometer was demonstrably constant during the PE lifetime (car didn't move) but the label still got replaced with Unknown at render time. Today's example on the Hyundai install: 17:41 Home → Work rendered as "unknown → Work" because PE#22 (Home) had its last fresh GPS fix at 08:30 while the actual departure was at 17:41, 9 h of silence — but ``odometer_arrived == odometer_departed == 50792`` proved the car never moved.
 
 The silence degradation now checks odometer stability first: if ``odometer_arrived == odometer_departed`` on the origin PE, the car provably didn't leave, so the label stays. Otherwise (e.g. the car moved but we never got a fresh coord for the new spot), the Unknown mask still applies.
 
@@ -110,7 +110,7 @@ Hyundai Bluelink has a subtle pattern observed across every install's history: w
 
 The odo-advance branch now compares the purportedly-fresh GPS coord against the just-closed PE's coord. If the distance is within ``SAME_PLACE_M`` (80 m), the fresh fix is treated as a departure echo and the successor PE opens as Unknown instead. The existing ``_upgrade_unknown`` path then handles the real arrival: when a later fresh-GPS sync lands with a *different* coord (the actual destination), it stamps coords + label in place on the Unknown PE. Kia is unaffected (Hyundai-only brand gate).
 
-In Fahrtenbuch: a 17:41 Home → Home (9 km) rendering on ev-dirk today — the classic same-spot-echo artefact after a Home → Work drive whose arrival GPS hadn't caught up yet — now resolves to Home → Work as soon as sync #72 delivers the real Work coord. Overnight same-spot echoes (``Ponytruppe → Ponytruppe`` 1 km, the shopping-round-trip artefact from yesterday) similarly resolve to ``Ponytruppe → Unknown``, honestly reflecting that we don't actually know the shopping destination.
+In Fahrtenbuch: a 17:41 Home → Home (9 km) rendering on the Hyundai install today — the classic same-spot-echo artefact after a Home → Work drive whose arrival GPS hadn't caught up yet — now resolves to Home → Work as soon as sync #72 delivers the real Work coord. Overnight same-spot echoes (``Ponytruppe → Ponytruppe`` 1 km, the shopping-round-trip artefact from yesterday) similarly resolve to ``Ponytruppe → Unknown``, honestly reflecting that we don't actually know the shopping destination.
 
 ## v2.28.43 (2026-04-22)
 
@@ -124,7 +124,7 @@ When a Hyundai PE was open for hours without a fresh-GPS confirmation — the ``
 
 ### Fix: VAG ``is_charging`` was permanently stuck at True (substring bug)
 
-``connector_vag.py`` decided whether the car was charging with ``'CHARGING' in str(ch.state.value).upper()``. The carconnectivity ``ch.state.value`` is an ``EnumAttribute``-wrapped enum member, not a plain string; ``str(ChargingState.OFF)`` renders as ``'ChargingState.OFF'``, and ``'CHARGING'`` is a substring of ``'CHARGINGSTATE'``. Every Skoda/VW/SEAT/Cupra/Audi sync whose ``charging`` object existed at all was stored with ``is_charging = 1`` regardless of actual state — the dashboard on ev-mike showed "lädt" while the car sat parked with ``charging.state = 'off'`` and ``charging.power = 0.0 kW``.
+``connector_vag.py`` decided whether the car was charging with ``'CHARGING' in str(ch.state.value).upper()``. The carconnectivity ``ch.state.value`` is an ``EnumAttribute``-wrapped enum member, not a plain string; ``str(ChargingState.OFF)`` renders as ``'ChargingState.OFF'``, and ``'CHARGING'`` is a substring of ``'CHARGINGSTATE'``. Every Skoda/VW/SEAT/Cupra/Audi sync whose ``charging`` object existed at all was stored with ``is_charging = 1`` regardless of actual state — the dashboard on the Skoda install showed "lädt" while the car sat parked with ``charging.state = 'off'`` and ``charging.power = 0.0 kW``.
 
 The check now reads the enum's underlying string via ``state.value.value`` and compares exactly to ``'charging'``. When the state field is missing or unknown the code falls back to ``charge_power > 0.1`` — power flowing is ground truth. Applied to every existing VAG sync on deploy so the dashboard reflects reality without waiting for the next poll.
 
@@ -198,7 +198,7 @@ UI: the ``/trips`` map marker feed and ``/api/trips/export.gpx`` now drop ``labe
 
 **(B) State-machine close path uses `sync.timestamp`, not `last_seen_at`.** Previously a detected move closed the current PE with `departed_at = last_seen_at or sync.timestamp`. Under the Hyundai cache-echo pattern (same-place updates from a sync whose GPS timestamp had been advanced past the real leave-moment), `last_seen_at` could poison the departure time. Kia/Hyundai trip reconcile immediately snaps this to `sdk.start_time` anyway; for brands without tripinfo, the first-at-new-location sync timestamp is a safer single-source anchor (slightly overestimates drive time rather than silently using possibly-corrupted data).
 
-**(C) Odometer-jump PE split.** When a fresh-GPS sync lands on the same spot as the open PE but `odometer_km` has advanced ≥ 1 km since the last at-spot reading, the car took an invisible round trip (left and returned before any move could be observed — e.g. ev-dirk 19.04. PE#10 where `odometer_arrived=50648` / `odometer_departed=50663` collapsed a 15-km round trip into a single "Home" entry). The state machine now closes the current PE at its prior `last_seen_at` / `arrived_at` and opens a fresh one at the same coord. The gap between the two PEs becomes a visible slot that the SDK trip reconciler can bind a matching trip to, and the Fahrtenbuch endpoint inference (v2.28.30) surfaces it as a `Home → Home` loop with correct km. Queues a post-move reconcile immediately.
+**(C) Odometer-jump PE split.** When a fresh-GPS sync lands on the same spot as the open PE but `odometer_km` has advanced ≥ 1 km since the last at-spot reading, the car took an invisible round trip (left and returned before any move could be observed — e.g. the Hyundai install 19.04. PE#10 where `odometer_arrived=50648` / `odometer_departed=50663` collapsed a 15-km round trip into a single "Home" entry). The state machine now closes the current PE at its prior `last_seen_at` / `arrived_at` and opens a fresh one at the same coord. The gap between the two PEs becomes a visible slot that the SDK trip reconciler can bind a matching trip to, and the Fahrtenbuch endpoint inference (v2.28.30) surfaces it as a `Home → Home` loop with correct km. Queues a post-move reconcile immediately.
 
 ## v2.28.32 (2026-04-21)
 
@@ -212,7 +212,7 @@ Hyundai Bluelink (and occasionally Kia UVO) ships cached GPS fixes whose `locati
 
 ### Remove /trips page auto-force-refresh (stop draining 12 V on every visit)
 
-The `/trips` route used to kick off a background `get_status(force=True)` whenever the last GPS sync was > 2 h old. With the user opening Fahrtenbuch repeatedly from the phone during the day, each visit that passed the 5-min debounce turned into a car wakeup and a 12 V aux battery hit — five wakeups on ev-robert today alone (log source `trips-auto`). Fahrtenbuch is a history view; fresh GPS isn't needed to render it.
+The `/trips` route used to kick off a background `get_status(force=True)` whenever the last GPS sync was > 2 h old. With the user opening Fahrtenbuch repeatedly from the phone during the day, each visit that passed the 5-min debounce turned into a car wakeup and a 12 V aux battery hit — five wakeups on the Kia install today alone (log source `trips-auto`). Fahrtenbuch is a history view; fresh GPS isn't needed to render it.
 
 The background sync loop (smart mode) already wakes the car at most once per `smart_force_max_hours` window (default 6 h) and on explicit state transitions (motion detected). The manual "Jetzt synchronisieren" button is unchanged for on-demand pulls.
 
@@ -249,7 +249,7 @@ Applying an update restarts the Flask app (and the background sync loop) for a f
 
 ### PE same-place updates: trust only freshly-timestamped GPS
 
-Observed on ev-robert (Kia): the first sync after the overnight smart-window re-opens sometimes carries `gps_ts=None` with the **origin's GPS** (home coords) while the car has already started the morning commute. Because the coords match the open Home PE, the same-place path happily overwrote `soc_departed` with the mid-drive SoC reading (50 % → 45 %, where 50 % was the true pre-drive value and 45 % the in-progress drive value). The Fahrtenbuch then showed the trip as "left Home at 45 %", which is just the Work-arrival SoC bleeding backward.
+Observed on the Kia install (Kia): the first sync after the overnight smart-window re-opens sometimes carries `gps_ts=None` with the **origin's GPS** (home coords) while the car has already started the morning commute. Because the coords match the open Home PE, the same-place path happily overwrote `soc_departed` with the mid-drive SoC reading (50 % → 45 %, where 50 % was the true pre-drive value and 45 % the in-progress drive value). The Fahrtenbuch then showed the trip as "left Home at 45 %", which is just the Work-arrival SoC bleeding backward.
 
 The odometer is unchanged across these echo syncs (origin's cached odo), so they can't be distinguished by coord alone — but the missing `gps_ts` is the tell. v2.28.27 gates the same-place update on `location_last_updated_at` being present AND within the 30-min staleness window. If not: the function returns the open PE unchanged, skipping the `soc_departed` / `odometer_departed` / `last_seen_at` writes. Missing-ts syncs are still written to the VehicleSync table (so regen / SoC lookups can find them), just not allowed to rewrite PE state.
 
@@ -257,7 +257,7 @@ The odometer is unchanged across these echo syncs (origin's cached odo), so they
 
 ### PE state machine: reject GPS moves when odometer hasn't advanced (Hyundai cache-echo fix)
 
-Observed on ev-dirk (Hyundai Bluelink): cloud occasionally serves a stale GPS reading with a deceptively fresh timestamp (4 min old, below the 30-min staleness gate) that points at an earlier location (e.g. the morning's Work coord after the car has long since been Home). The PE state machine would interpret this as a real move — closing the current Home PE and opening a phantom Work PE — even though the car never physically moved. Once reconcile ran, the phantom PE paired with the next morning's genuine Home sync to render as a bizarre multi-hour `work → home` "trip".
+Observed on the Hyundai install (Hyundai Bluelink): cloud occasionally serves a stale GPS reading with a deceptively fresh timestamp (4 min old, below the 30-min staleness gate) that points at an earlier location (e.g. the morning's Work coord after the car has long since been Home). The PE state machine would interpret this as a real move — closing the current Home PE and opening a phantom Work PE — even though the car never physically moved. Once reconcile ran, the phantom PE paired with the next morning's genuine Home sync to render as a bizarre multi-hour `work → home` "trip".
 
 Ground truth is the odometer. Every legitimate move must advance it. `update_parking_from_sync` now requires `sync.odometer_km` to differ from the open PE's last-known odometer (`odometer_departed or odometer_arrived`) by ≥ 1 km before accepting the GPS-based move; otherwise it ignores the sync and keeps the current PE intact. No impact on Kia — its cache echoes haven't shown this pattern; the guard is just a belt-and-suspenders check.
 
@@ -388,7 +388,7 @@ Read-only — no DB migration, no replay.
 
 ### SDK-stats dedup + reconcile conflict-check refactor
 
-Two related bugs surfaced on ev-dirk: a phantom Home→Work PE pair (GPS-jitter "trip" of 0 km right after a real Work→Home drive) was inheriting the *real* drive's SDK stats (drive_minutes / idle_minutes / avg_speed / max_speed all identical to the line above). Looked like a duplicate entry.
+Two related bugs surfaced on the Hyundai install: a phantom Home→Work PE pair (GPS-jitter "trip" of 0 km right after a real Work→Home drive) was inheriting the *real* drive's SDK stats (drive_minutes / idle_minutes / avg_speed / max_speed all identical to the line above). Looked like a duplicate entry.
 
 ### Bug 1 — `_find_sdk_stats` had no dedup, 60-min tolerance
 
@@ -417,7 +417,7 @@ While investigating, found a latent issue in `trip_reconcile.reconcile_day`: the
 
 ### Fahrtenbuch trip-end SoC — ignore cache-echo on arrival
 
-v2.28.13 fixed the start-SoC side. Debugging the remaining "0 % consumption" trips on ev-robert (Kia) surfaced a mirror-image bug at the *other* end. Example: PE#28→#29 on 2026-04-16, 30 km drive, start SoC 51 %. The first at-destination sync (15:39:22) reported SoC = **51 %** — identical to the pre-drive value. The next sync (15:48, 9 min later) reported SoC = **43 %**. That's the real trip end. 51 − 43 = 8 % consumption (≈ 2.7 %/10 km, plausible for an e-GMP 64 kWh battery).
+v2.28.13 fixed the start-SoC side. Debugging the remaining "0 % consumption" trips on the Kia install (Kia) surfaced a mirror-image bug at the *other* end. Example: PE#28→#29 on 2026-04-16, 30 km drive, start SoC 51 %. The first at-destination sync (15:39:22) reported SoC = **51 %** — identical to the pre-drive value. The next sync (15:48, 9 min later) reported SoC = **43 %**. That's the real trip end. 51 − 43 = 8 % consumption (≈ 2.7 %/10 km, plausible for an e-GMP 64 kWh battery).
 
 ### Cache-echo at arrival
 
@@ -543,7 +543,7 @@ New module **`services/trip_reconcile.py`** greedy-matches PE pairs to SDK trips
 
 **What this does NOT do:** merge PE pairs that split across a single SDK trip (GPS-jitter artefacts), split PE pairs that merged several short SDK trips (below-threshold stops), or backfill missed trips. Those represent different views of the same journey and can't be reconciled without data loss.
 
-**Brand gate:** runs only when `vehicle_api_brand == 'hyundai'`. Kia (ev-robert reference install, 400 V platform) is untouched — the `_is_hyundai()` check short-circuits every entry point. Tested both branches locally.
+**Brand gate:** runs only when `vehicle_api_brand == 'hyundai'`. Kia (the Kia install reference install, 400 V platform) is untouched — the `_is_hyundai()` check short-circuits every entry point. Tested both branches locally.
 
 ### Trigger points
 
@@ -551,7 +551,7 @@ New module **`services/trip_reconcile.py`** greedy-matches PE pairs to SDK trips
 
 2. **Daily from the sync loop** (`sync_service._maybe_daily_hyundai_reconcile`): once per calendar day, after a normal sync tick, backfill the last 3 days of SDK trips and reconcile. `last_reconcile_at` in `AppConfig` prevents same-day re-runs. The gate `should_run_daily()` is Hyundai-only.
 
-### What a typical run looks like on ev-dirk
+### What a typical run looks like on the Hyundai install
 
 Runs recorded (2026-04-20): 17 PE pairs on the last 5 days, 2 applied (PE#3→#4 arrived_at 12:48 → 10:45, PE#5→#6 overnight arrival 06:01 → 00:16), 1 skipped conflict, 14 unmatched. The unmatched cases are legitimate structural mismatches — PE merging multiple short SDK trips or PE splitting via GPS jitter — not cases we should be touching.
 
@@ -941,7 +941,7 @@ if (!document.getElementById('btnSslSave')) return;
 
 One line. The SSL IIFE now exits cleanly when its card isn't present, the outer Locations IIFE continues, `loadFavs()` runs, the add-favorite handler is registered.
 
-Hit all three production hosts in the same rollout. Verified by fetching the rendered `/settings` page on each and confirming the `Siedlung` + `Eltern` favorites Robert has configured now show up in the list markup.
+Hit all three production hosts in the same rollout. Verified by fetching the rendered `/settings` page on each and confirming the user-configured favorites now show up in the list markup.
 
 ---
 
