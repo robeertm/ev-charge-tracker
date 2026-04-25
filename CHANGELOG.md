@@ -1,5 +1,17 @@
 # Changelog
 
+## v2.28.55 (2026-04-25)
+
+### Input — recover from "phantom charge" lockout
+
+User report on the Skoda install: a charge session was stuck in the stopped-but-unsaved state. Both Start and Stop rendered greyed out and there was no obvious way out — only the small Cancel button at the right of Save would have wiped it.
+
+Cause is the input page's session state machine: once `doStop()` runs (manual stop or auto-poll detecting `is_charging=false` with rising SoC), `localStorage.ev_charge_session.stopped` is set. On the next render `restoreSession()` disables both buttons. The user can still click Save (commit) or Cancel (discard), but on small viewports those weren't visible without scrolling, so the page looked frozen.
+
+**Fix**: in the stopped state, leave Stop greyed but re-enable Start as a "discard & restart" recovery path. Clicking it prompts `Beendete Ladung verwerfen und neue starten?`, then wipes the session in localStorage, clears the form fields the previous session populated (SoC, odometer, kWh), resets the hidden charge_id so the next save creates a fresh row, and falls through to the normal start-with-retry flow. New translation key `input.discard_stopped_confirm` in all six languages.
+
+The auto-stop heuristic (`is_charging=false` AND current SoC > start SoC) is unchanged for now — if the brief disconnects on the Skoda's CarConnectivity feed turn out to over-trigger it, we'll tighten that separately. The recovery path means a false trigger is no longer a hard lockout.
+
 ## v2.28.54 (2026-04-24)
 
 ### Fahrtenbuch — PE ``soc_arrived`` / ``soc_departed`` now match trip-row consumption

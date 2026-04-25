@@ -282,6 +282,8 @@ const T = {
     start: {{ t('input.start')|tojson }},
     started_retroactively: {{ t('input.started_retroactively')|tojson }},
     retry_failed: {{ t('input.retry_failed')|tojson }},
+    discard_stopped_confirm: {{ t('input.discard_stopped_confirm')|tojson }},
+    stop: {{ t('input.stop')|tojson }},
 };
 
 // Sync charge_type radio to hidden input
@@ -407,14 +409,21 @@ const CHARGE_KEY = 'ev_charge_session';
             if (saved.chargeId) {
                 document.getElementById('chargeIdHidden').value = saved.chargeId;
             }
-            btnStart.disabled = true;
-            btnStart.innerHTML = '<i class="bi bi-check-circle"></i> ' + T.started;
-            btnStart.classList.replace('btn-success', 'btn-secondary');
             if (saved.stopped) {
+                // Stopped, unsaved session: keep Stop greyed but re-enable
+                // Start as a "discard & restart" recovery path so the user
+                // isn't trapped with both buttons disabled if they didn't
+                // notice the small Cancel button. Click handler will prompt
+                // before wiping the in-progress data.
                 btnStop.disabled = true;
                 btnStop.innerHTML = '<i class="bi bi-check-circle"></i> ' + T.stopped;
                 btnStop.classList.replace('btn-danger', 'btn-secondary');
+                btnStart.disabled = false;
+                btnStart.dataset.discardAndRestart = '1';
             } else {
+                btnStart.disabled = true;
+                btnStart.innerHTML = '<i class="bi bi-check-circle"></i> ' + T.started;
+                btnStart.classList.replace('btn-success', 'btn-secondary');
                 btnStop.disabled = false;
                 timerEl.style.display = '';
                 startTimer();
@@ -570,6 +579,34 @@ async function tryStart(clickTime, attempt, deadline) {
 }
 
 btnStart.addEventListener('click', () => {
+    // Recovery path: a previously stopped-but-unsaved session is in
+    // localStorage. Clicking Start in that state means "discard the old
+    // charge and start fresh" — confirm to avoid losing manual entries.
+    if (btnStart.dataset.discardAndRestart === '1') {
+        if (!confirm(T.discard_stopped_confirm)) return;
+        localStorage.removeItem(CHARGE_KEY);
+        delete btnStart.dataset.discardAndRestart;
+        btnStop.disabled = true;
+        btnStop.classList.replace('btn-secondary', 'btn-danger');
+        btnStop.innerHTML = '<i class="bi bi-stop-circle"></i> ' + T.stop;
+        const lblEl = document.getElementById('btnSaveLabel');
+        if (lblEl) lblEl.textContent = T.save;
+        document.getElementById('chargeIdHidden').value = '';
+        // Wipe form fields the stopped session may have populated, so the
+        // fresh /api/vehicle/status fetch starts from a clean slate.
+        ['soc_from', 'soc_to', 'odometer', 'kwh_loaded', 'co2_g_per_kwh',
+         'eur_per_kwh', 'notes'].forEach(id => {
+            const el = document.getElementById(id);
+            if (el) el.value = '';
+        });
+        const kwhField = document.getElementById('kwh_loaded');
+        if (kwhField) kwhField.dataset.manual = '';
+        const tDisp = document.getElementById('timerDisplay');
+        if (tDisp) tDisp.textContent = '00:00';
+        timerEl.style.display = 'none';
+        const badge = timerDisplay.parentNode.querySelector('.badge.bg-info');
+        if (badge) badge.remove();
+    }
     cancelStartRetry();
     const clickTime = new Date();
     const deadline = Date.now() + START_RETRY_MAX_MIN * 60_000;
