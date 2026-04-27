@@ -205,6 +205,7 @@
   "report.plot_loss": "Pertes de charge par bucket",
   "report.plot_extras": "Frais additionnels par bucket (démarrage + pénalité)",
   "report.plot_regen": "Récupération par bucket",
+  "report.plot_activity": "Activité par bucket (recharges + trajets)",
   "input.extra_costs": "Frais additionnels (frais de démarrage / pénalité)",
   "input.extra_costs_hint": "Les frais de démarrage (forfait par session ou part de l'abonnement mensuel) et la pénalité (dépassement / blocage de la place) s'ajoutent au total.",
   "input.start_fee": "Frais de démarrage",

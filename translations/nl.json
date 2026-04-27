@@ -205,6 +205,7 @@
   "report.plot_loss": "Laadverliezen per bucket",
   "report.plot_extras": "Extra kosten per bucket (start + boete)",
   "report.plot_regen": "Recuperatie per bucket",
+  "report.plot_activity": "Activiteit per bucket (laadbeurten + ritten)",
   "input.extra_costs": "Extra kosten (startkosten / boete)",
   "input.extra_costs_hint": "Startkosten (vergoeding per sessie of deel van het maandabonnement) en boete (te lang staan / paal blokkeren) worden bij het totaal opgeteld.",
   "input.start_fee": "Startkosten",

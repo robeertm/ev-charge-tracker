@@ -1,5 +1,18 @@
 # Changelog
 
+## v2.28.61 (2026-04-27)
+
+### Report tab — uniform plot card sizes + 16th plot to balance the grid
+
+User report after v2.28.60: the Zusatzkosten plot was visibly narrower / shorter than the Rekuperation plot, and other cards weren't all the same size either.
+
+Two causes:
+
+1. `.plot-card .card-body` had `min-height: 260px` rather than a fixed height. Cards with bottom legends (Zusatzkosten stacked bar, day-of-week dual-axis) grew taller than cards without legends; cards alone on a row didn't stretch against a row-mate. Switched to `height: 320px` (fixed) plus `canvas {width:100% !important; height:100% !important; max-height: none !important}` so every plot card is the exact same size regardless of content.
+2. After v2.28.60 added 3 new plots, the total was 15 — odd count meant the last `col-lg-6` row had Rekuperation alone next to an empty column. Added a 16th plot — Aktivität pro Bucket (Anzahl Ladungen als Bar links, Anzahl Fahrten als Linie rechts, dual axis) — uses the existing `series.charges_count` / `series.trips_count` data, no backend change. Now 8 rows of 2 cards each.
+
+New translation key `report.plot_activity` in all six languages.
+
 ## v2.28.60 (2026-04-27)
 
 ### Report tab rework: empty plots get a "no data" badge, plus three new statistics

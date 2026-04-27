@@ -205,6 +205,7 @@
   "report.plot_loss": "Perdite di carica per periodo",
   "report.plot_extras": "Costi aggiuntivi per periodo (avvio + penale)",
   "report.plot_regen": "Recupero per periodo",
+  "report.plot_activity": "Attività per periodo (ricariche + tragitti)",
   "input.extra_costs": "Costi aggiuntivi (tariffa iniziale / penale)",
   "input.extra_costs_hint": "La tariffa iniziale (costo per sessione o quota mensile) e la penale (sosta prolungata / blocco della colonnina) vengono sommate al totale.",
   "input.start_fee": "Tariffa iniziale",

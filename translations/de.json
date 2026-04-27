@@ -403,6 +403,7 @@
   "report.plot_loss": "Ladeverluste pro Bucket",
   "report.plot_extras": "Zusatzkosten pro Bucket (Start- + Strafgebühr)",
   "report.plot_regen": "Rekuperation pro Bucket",
+  "report.plot_activity": "Aktivität pro Bucket (Ladungen + Fahrten)",
   "report.kpi_co2_saved": "CO₂ gespart",
   "report.kpi_cost": "Kosten",
   "report.kpi_km": "Gefahren",

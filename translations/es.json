@@ -205,6 +205,7 @@
   "report.plot_loss": "Pérdidas de carga por intervalo",
   "report.plot_extras": "Costes adicionales por intervalo (inicio + penalización)",
   "report.plot_regen": "Recuperación por intervalo",
+  "report.plot_activity": "Actividad por intervalo (cargas + trayectos)",
   "input.extra_costs": "Costes adicionales (tarifa de inicio / penalización)",
   "input.extra_costs_hint": "La tarifa de inicio (cargo por sesión o parte de cuota mensual) y la penalización (estancia prolongada / bloquear la plaza) se suman al total.",
   "input.start_fee": "Tarifa de inicio",

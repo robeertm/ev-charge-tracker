@@ -403,6 +403,7 @@
   "report.plot_loss": "Charging losses per bucket",
   "report.plot_extras": "Extra fees per bucket (start + penalty)",
   "report.plot_regen": "Recuperation per bucket",
+  "report.plot_activity": "Activity per bucket (charges + trips)",
   "report.kpi_co2_saved": "CO₂ saved",
   "report.kpi_cost": "Cost",
   "report.kpi_km": "Distance",
