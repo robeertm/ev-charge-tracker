@@ -1,5 +1,16 @@
 # Changelog
 
+## v2.28.62 (2026-04-27)
+
+### Report tab — secondary KPI cards same height; empty plots hidden entirely
+
+User report: the "Zusatzkosten €0,00" card was a different height to its row-mates, and the v2.28.60 "Keine Daten" badge wasn't what was wanted — empty plots should disappear from the page entirely until data shows up.
+
+Two fixes:
+
+- Secondary KPI row (Verlust / Rekuperation / Zusatzkosten / Ø Preis) gains `h-100` on each card plus `d-flex flex-column justify-content-center` on the card-body, so all four cards stretch to the row's tallest sibling regardless of how much sub-text each carries. The Zusatzkosten card with no breakdown text no longer sits short.
+- Empty plot cards now have their entire `col-lg-6` wrapper toggled with `d-none` instead of carrying a centred "Keine Daten" badge. Switched `setEmpty()` to walk up to the grid column and hide it; `destroyAll()` re-shows everything before the next render so range changes re-evaluate. The badge CSS is gone with the behaviour.
+
 ## v2.28.61 (2026-04-27)
 
 ### Report tab — uniform plot card sizes + 16th plot to balance the grid

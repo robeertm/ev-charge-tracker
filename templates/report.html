@@ -30,13 +30,10 @@
 .report-loading{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;
     background:rgba(255,255,255,.7);z-index:5;border-radius:.5rem}
 [data-bs-theme="dark"] .report-loading{background:rgba(0,0,0,.5)}
-/* Empty-state badge for plots that have no data in the chosen
-   range. Sits over the canvas (which itself stays empty) and gives
-   the user a clear "no data" instead of a silently blank card. */
-.plot-empty{position:absolute;inset:0;display:flex;flex-direction:column;
-    align-items:center;justify-content:center;color:var(--bs-secondary-color);
-    font-size:.85rem;text-align:center;padding:1rem;pointer-events:none}
-.plot-empty i{font-size:1.6rem;opacity:.4;margin-bottom:.25rem}
+/* v2.28.62: empty plots are hidden entirely, not badge-marked, so
+   the report only ever shows cards with real content. The .plot-empty
+   class above (badge style) is removed in favour of a simple
+   display:none on the column wrapper at render time. */
 </style>
 {% endblock %}
 
@@ -130,26 +127,26 @@
 
 <!-- Sekundäre Stats: Verlust / Rekup / Zusatzkosten / Schnitt-Preis (v2.28.60) -->
 <div class="row g-2 mb-3" id="secondaryStatsRow">
-    <div class="col-6 col-md-3"><div class="card border-0 shadow-sm">
-        <div class="card-body p-2 text-center">
+    <div class="col-6 col-md-3"><div class="card border-0 shadow-sm h-100">
+        <div class="card-body p-2 text-center d-flex flex-column justify-content-center">
             <div class="kpi-label">{{ t('report.kpi_loss') }}</div>
             <div class="fw-bold" id="kpiLoss">–</div>
             <div class="kpi-sub" id="kpiLossSub"></div>
         </div></div></div>
-    <div class="col-6 col-md-3"><div class="card border-0 shadow-sm">
-        <div class="card-body p-2 text-center">
+    <div class="col-6 col-md-3"><div class="card border-0 shadow-sm h-100">
+        <div class="card-body p-2 text-center d-flex flex-column justify-content-center">
             <div class="kpi-label">{{ t('report.kpi_regen') }}</div>
             <div class="fw-bold text-success" id="kpiRegen">–</div>
             <div class="kpi-sub" id="kpiRegenSub"></div>
         </div></div></div>
-    <div class="col-6 col-md-3"><div class="card border-0 shadow-sm">
-        <div class="card-body p-2 text-center">
+    <div class="col-6 col-md-3"><div class="card border-0 shadow-sm h-100">
+        <div class="card-body p-2 text-center d-flex flex-column justify-content-center">
             <div class="kpi-label">{{ t('report.kpi_extras') }}</div>
             <div class="fw-bold text-warning" id="kpiExtras">–</div>
             <div class="kpi-sub" id="kpiExtrasSub"></div>
         </div></div></div>
-    <div class="col-6 col-md-3"><div class="card border-0 shadow-sm">
-        <div class="card-body p-2 text-center">
+    <div class="col-6 col-md-3"><div class="card border-0 shadow-sm h-100">
+        <div class="card-body p-2 text-center d-flex flex-column justify-content-center">
             <div class="kpi-label">{{ t('report.kpi_avg_price') }}</div>
             <div class="fw-bold text-primary" id="kpiAvgPrice">–</div>
             <div class="kpi-sub" id="kpiAvgPriceSub"></div>
@@ -285,22 +282,24 @@
     function destroyAll() {
         Object.values(charts).forEach(c => { try { c.destroy(); } catch(e){} });
         charts = {};
-        // Wipe any pre-existing empty-state badges so the next render
-        // can re-evaluate per plot.
-        document.querySelectorAll('.plot-empty').forEach(el => el.remove());
+        // Restore visibility on every plot card so the next render can
+        // re-decide per plot which ones have data. Targets the col-lg-6
+        // ancestor (the grid column) so the entire tile collapses, not
+        // just the canvas — hidden cards leave no empty whitespace.
+        document.querySelectorAll('[id^="plot"]').forEach(canvas => {
+            const col = canvas.closest('.col-lg-6, .col-md-6, .col-12');
+            if (col) col.classList.remove('d-none');
+        });
     }
 
-    // Show a "no data" badge over a plot's card-body when the dataset
-    // is empty. Idempotent: removes any prior badge first.
+    // Hide the entire plot card column when its dataset is empty.
+    // v2.28.62: switched from a "no data" badge overlay to outright
+    // hiding so the report only shows tiles with real content.
     function setEmpty(canvasId) {
         const canvas = document.getElementById(canvasId);
         if (!canvas) return;
-        const body = canvas.parentElement;
-        body.querySelectorAll('.plot-empty').forEach(el => el.remove());
-        const badge = document.createElement('div');
-        badge.className = 'plot-empty';
-        badge.innerHTML = '<i class="bi bi-bar-chart"></i><span>' + T.no_data + '</span>';
-        body.appendChild(badge);
+        const col = canvas.closest('.col-lg-6, .col-md-6, .col-12');
+        if (col) col.classList.add('d-none');
     }
 
     // True when the array has at least one strictly positive value.
