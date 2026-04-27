@@ -129,6 +129,48 @@
                         </div>
                     </div>
 
+                    <!-- Zusatzkosten (Startgebühr + Blockiergebühr) — collapsed
+                         by default, expanded automatically when one of the
+                         values arrives non-zero from pre_charge so the user
+                         sees the figures without an extra click. -->
+                    {% set _prefill_extras = pre_charge and ((pre_charge.start_fee_eur or 0) > 0 or (pre_charge.blocking_fee_eur or 0) > 0) %}
+                    <div class="mb-3">
+                        <button type="button" class="btn btn-sm btn-outline-secondary w-100" data-bs-toggle="collapse" data-bs-target="#extraCostsCollapse" aria-expanded="{{ 'true' if _prefill_extras else 'false' }}">
+                            <i class="bi bi-plus-square"></i> {{ t('input.extra_costs') }}
+                        </button>
+                        <div class="collapse {% if _prefill_extras %}show{% endif %}" id="extraCostsCollapse">
+                            <div class="row g-2 mt-2">
+                                <div class="col-6">
+                                    <label for="start_fee_eur" class="form-label small">
+                                        {{ t('input.start_fee') }}
+                                        <small class="text-muted">{{ t('input.optional') }}</small>
+                                    </label>
+                                    <div class="input-group input-group-sm">
+                                        <input type="number" class="form-control" id="start_fee_eur"
+                                               name="start_fee_eur" step="0.01" min="0" max="500"
+                                               placeholder="0.00" inputmode="decimal"
+                                               value="{{ '%.2f'|format(pre_charge.start_fee_eur) if pre_charge and pre_charge.start_fee_eur is not none else '' }}">
+                                        <span class="input-group-text">€</span>
+                                    </div>
+                                </div>
+                                <div class="col-6">
+                                    <label for="blocking_fee_eur" class="form-label small">
+                                        {{ t('input.blocking_fee') }}
+                                        <small class="text-muted">{{ t('input.optional') }}</small>
+                                    </label>
+                                    <div class="input-group input-group-sm">
+                                        <input type="number" class="form-control" id="blocking_fee_eur"
+                                               name="blocking_fee_eur" step="0.01" min="0" max="500"
+                                               placeholder="0.00" inputmode="decimal"
+                                               value="{{ '%.2f'|format(pre_charge.blocking_fee_eur) if pre_charge and pre_charge.blocking_fee_eur is not none else '' }}">
+                                        <span class="input-group-text">€</span>
+                                    </div>
+                                </div>
+                            </div>
+                            <div class="form-text small mt-1">{{ t('input.extra_costs_hint') }}</div>
+                        </div>
+                    </div>
+
                     <!-- Berechneter Preis -->
                     <div class="mb-3">
                         <label class="form-label text-muted">{{ t('input.total_price') }}</label>
@@ -299,13 +341,30 @@ document.querySelectorAll('input[name="charge_type_select"]').forEach(radio => {
     });
 });
 
-// Live price calculation
+// Live price calculation — base = €/kWh × kWh, plus optional
+// Startgebühr + Blockiergebühr. Mirrors the server-side
+// Charge.calculate_fields() so the user sees the same total before
+// and after save.
 function updateCalcPrice() {
     const eur = parseFloat(document.getElementById('eur_per_kwh').value);
     const kwh = parseFloat(document.getElementById('kwh_loaded').value);
+    const startFee = parseFloat(document.getElementById('start_fee_eur').value) || 0;
+    const blockFee = parseFloat(document.getElementById('blocking_fee_eur').value) || 0;
     const el = document.getElementById('calcPrice');
+    let total = null;
     if (!isNaN(eur) && !isNaN(kwh)) {
-        el.textContent = '€' + (eur * kwh).toFixed(2);
+        total = eur * kwh + startFee + blockFee;
+    } else if (startFee || blockFee) {
+        total = startFee + blockFee;
+    }
+    if (total != null) {
+        let txt = '€' + total.toFixed(2);
+        if (startFee || blockFee) {
+            const base = (!isNaN(eur) && !isNaN(kwh)) ? (eur * kwh) : 0;
+            const extra = startFee + blockFee;
+            txt += '  (' + base.toFixed(2) + ' + ' + extra.toFixed(2) + ' Zusatzk.)';
+        }
+        el.textContent = txt;
         el.classList.remove('text-muted');
         el.classList.add('fw-bold', 'text-success');
     } else {
@@ -314,6 +373,8 @@ function updateCalcPrice() {
 }
 document.getElementById('eur_per_kwh').addEventListener('input', updateCalcPrice);
 document.getElementById('kwh_loaded').addEventListener('input', updateCalcPrice);
+document.getElementById('start_fee_eur').addEventListener('input', updateCalcPrice);
+document.getElementById('blocking_fee_eur').addEventListener('input', updateCalcPrice);
 
 // Calculate kWh from SoC difference or from time + power
 function calcKwh() {
@@ -396,7 +457,7 @@ const CHARGE_KEY = 'ev_charge_session';
 const FORM_FIELD_IDS = ['date', 'charge_hour', 'odometer',
     'soc_from', 'soc_to', 'eur_per_kwh', 'kwh_loaded', 'loss_kwh',
     'co2_g_per_kwh', 'notes', 'location_name', 'location_lat',
-    'location_lon', 'operator'];
+    'location_lon', 'operator', 'start_fee_eur', 'blocking_fee_eur'];
 
 function persistFormCache() {
     try {
@@ -663,7 +724,7 @@ btnStart.addEventListener('click', () => {
         // Wipe form fields the stopped session may have populated, so the
         // fresh /api/vehicle/status fetch starts from a clean slate.
         ['soc_from', 'soc_to', 'odometer', 'kwh_loaded', 'co2_g_per_kwh',
-         'eur_per_kwh', 'notes'].forEach(id => {
+         'eur_per_kwh', 'notes', 'start_fee_eur', 'blocking_fee_eur'].forEach(id => {
             const el = document.getElementById(id);
             if (el) el.value = '';
         });

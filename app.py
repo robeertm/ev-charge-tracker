@@ -111,6 +111,14 @@ def create_app(config_class=Config):
         if 'operator' not in columns:
             db.session.execute(text('ALTER TABLE charges ADD COLUMN operator VARCHAR(64)'))
 
+        # Migrate: add Zusatzkosten columns to charges (v2.28.59) — Startgebühr
+        # (one-off Vorgangskosten / Grundgebühr-Anteil) and Blockiergebühr
+        # (Strafgebühr für zu langes Stehen / Säulenblockade).
+        if 'start_fee_eur' not in columns:
+            db.session.execute(text('ALTER TABLE charges ADD COLUMN start_fee_eur REAL'))
+        if 'blocking_fee_eur' not in columns:
+            db.session.execute(text('ALTER TABLE charges ADD COLUMN blocking_fee_eur REAL'))
+
         # Migrate: add last_seen_at to parking_events
         try:
             parking_columns = [c['name'] for c in inspector.get_columns('parking_events')]
@@ -327,6 +335,29 @@ def _get_operator_prices():
                 p = float(price)
                 if p > 0:
                     out[str(name).strip()] = round(p, 4)
+            except (TypeError, ValueError):
+                continue
+        return out
+    except (ValueError, TypeError):
+        return {}
+
+
+def _get_operator_monthly_fees():
+    """Return {operator_name: monthly_eur} for the contract Grundgebühren
+    column on the operator settings page. Same shape/lookup semantics
+    as _get_operator_prices; unset/blank fees drop out."""
+    import json as _json
+    try:
+        raw = AppConfig.get('operator_monthly_fees', '{}') or '{}'
+        data = _json.loads(raw)
+        if not isinstance(data, dict):
+            return {}
+        out = {}
+        for name, fee in data.items():
+            try:
+                f = float(fee)
+                if f > 0:
+                    out[str(name).strip()] = round(f, 2)
             except (TypeError, ValueError):
                 continue
         return out
@@ -1071,6 +1102,8 @@ def register_routes(app):
                 charge.location_lon = _float(request.form.get('location_lon'))
                 charge.location_name = request.form.get('location_name', '').strip() or None
                 charge.operator = request.form.get('operator', '').strip() or None
+                charge.start_fee_eur = _float(request.form.get('start_fee_eur'))
+                charge.blocking_fee_eur = _float(request.form.get('blocking_fee_eur'))
                 charge.calculate_fields(_get_battery_kwh())
 
                 # If no CO2 provided, set automatically
@@ -1221,6 +1254,8 @@ def register_routes(app):
                 charge.location_lat = _float(request.form.get('location_lat'))
                 charge.location_lon = _float(request.form.get('location_lon'))
                 charge.operator = request.form.get('operator', '').strip() or None
+                charge.start_fee_eur = _float(request.form.get('start_fee_eur'))
+                charge.blocking_fee_eur = _float(request.form.get('blocking_fee_eur'))
                 charge.calculate_fields(_get_battery_kwh())
                 db.session.commit()
                 flash(t('flash.entry_updated'), 'success')
@@ -1302,9 +1337,14 @@ def register_routes(app):
                 # operator, each with a name (may be blank for empty row),
                 # a price (may be blank), and an is_builtin flag so we
                 # know not to re-add built-ins to the custom list.
-                names    = request.form.getlist('op_name')
-                prices   = request.form.getlist('op_price')
-                builtins = request.form.getlist('op_builtin')  # '1'/'0' per row
+                names      = request.form.getlist('op_name')
+                prices     = request.form.getlist('op_price')
+                # Monthly base fee per operator — added v2.28.59 for users
+                # with a contract / Grundgebühr that doesn't show up in
+                # the per-kWh price. Stored as a parallel JSON dict so
+                # the field is optional per row and unset rows drop out.
+                monthly    = request.form.getlist('op_monthly_fee')
+                builtins   = request.form.getlist('op_builtin')  # '1'/'0' per row
                 # Pad the builtin flag in case the form was tampered with —
                 # safer than crashing on IndexError.
                 while len(builtins) < len(names):
@@ -1312,6 +1352,7 @@ def register_routes(app):
 
                 custom_list = []
                 price_map = {}
+                monthly_map = {}
                 for i, raw_name in enumerate(names):
                     name = (raw_name or '').strip()
                     if not name:
@@ -1333,9 +1374,19 @@ def register_routes(app):
                                 price_map[name] = round(p, 4)
                         except ValueError:
                             pass
+                    raw_monthly = (monthly[i] if i < len(monthly) else '') or ''
+                    raw_monthly = raw_monthly.replace(',', '.').strip()
+                    if raw_monthly:
+                        try:
+                            m = float(raw_monthly)
+                            if m > 0:
+                                monthly_map[name] = round(m, 2)
+                        except ValueError:
+                            pass
 
                 AppConfig.set('custom_operators', _json.dumps(custom_list))
                 AppConfig.set('operator_prices', _json.dumps(price_map))
+                AppConfig.set('operator_monthly_fees', _json.dumps(monthly_map))
                 flash(t('flash.operators_saved'), 'success')
 
             elif action == 'save_pv':
@@ -1614,6 +1665,7 @@ def register_routes(app):
                                operators_builtin=get_default_operators(),
                                operators_custom=_get_custom_operators(),
                                operator_prices=_get_operator_prices(),
+                               operator_monthly_fees=_get_operator_monthly_fees(),
                                _json_logical_field_labels=_json_logical_field_labels_for_ui(),
                                last_rollback=_get_last_rollback(),
                                app_version=Config.APP_VERSION)

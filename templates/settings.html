@@ -1043,9 +1043,10 @@
                         <table class="table table-sm align-middle mb-2" id="operatorsTable">
                             <thead>
                                 <tr>
-                                    <th style="width:55%">{{ t('set.operators_col_name') }}</th>
-                                    <th style="width:35%">{{ t('set.operators_col_price') }}</th>
-                                    <th style="width:10%"></th>
+                                    <th style="width:35%">{{ t('set.operators_col_name') }}</th>
+                                    <th style="width:25%">{{ t('set.operators_col_price') }}</th>
+                                    <th style="width:25%">{{ t('set.operators_col_monthly') }}</th>
+                                    <th style="width:15%"></th>
                                 </tr>
                             </thead>
                             <tbody id="operatorsTbody">
@@ -1064,6 +1065,14 @@
                                             <span class="input-group-text">€/kWh</span>
                                         </div>
                                     </td>
+                                    <td>
+                                        <div class="input-group input-group-sm">
+                                            <input type="number" step="0.01" min="0" name="op_monthly_fee"
+                                                   class="form-control" value="{{ '%.2f' % operator_monthly_fees[op] if op in operator_monthly_fees else '' }}"
+                                                   placeholder="0.00">
+                                            <span class="input-group-text">€/Mon.</span>
+                                        </div>
+                                    </td>
                                     <td class="text-muted small">{{ t('set.operators_builtin_badge') }}</td>
                                 </tr>
                                 {% endfor %}
@@ -1080,6 +1089,14 @@
                                                    class="form-control" value="{{ '%.4f' % operator_prices[op] if op in operator_prices else '' }}"
                                                    placeholder="0.00">
                                             <span class="input-group-text">€/kWh</span>
+                                        </div>
+                                    </td>
+                                    <td>
+                                        <div class="input-group input-group-sm">
+                                            <input type="number" step="0.01" min="0" name="op_monthly_fee"
+                                                   class="form-control" value="{{ '%.2f' % operator_monthly_fees[op] if op in operator_monthly_fees else '' }}"
+                                                   placeholder="0.00">
+                                            <span class="input-group-text">€/Mon.</span>
                                         </div>
                                     </td>
                                     <td>
@@ -1117,6 +1134,12 @@
                     <div class="input-group input-group-sm">
                         <input type="number" step="0.0001" min="0" name="op_price" class="form-control" placeholder="0.00">
                         <span class="input-group-text">€/kWh</span>
+                    </div>
+                </td>
+                <td>
+                    <div class="input-group input-group-sm">
+                        <input type="number" step="0.01" min="0" name="op_monthly_fee" class="form-control" placeholder="0.00">
+                        <span class="input-group-text">€/Mon.</span>
                     </div>
                 </td>
                 <td>

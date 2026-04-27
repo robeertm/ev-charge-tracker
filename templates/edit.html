@@ -87,6 +87,28 @@
                         </div>
                     </div>
 
+                    <!-- Zusatzkosten — Startgebühr / Blockiergebühr (v2.28.59) -->
+                    <div class="row g-3 mb-3">
+                        <div class="col-6">
+                            <label class="form-label">{{ t('input.start_fee') }}</label>
+                            <div class="input-group">
+                                <input type="number" class="form-control" name="start_fee_eur"
+                                       step="0.01" min="0" max="500"
+                                       value="{{ '%.2f'|format(charge.start_fee_eur) if charge.start_fee_eur is not none else '' }}">
+                                <span class="input-group-text">€</span>
+                            </div>
+                        </div>
+                        <div class="col-6">
+                            <label class="form-label">{{ t('input.blocking_fee') }}</label>
+                            <div class="input-group">
+                                <input type="number" class="form-control" name="blocking_fee_eur"
+                                       step="0.01" min="0" max="500"
+                                       value="{{ '%.2f'|format(charge.blocking_fee_eur) if charge.blocking_fee_eur is not none else '' }}">
+                                <span class="input-group-text">€</span>
+                            </div>
+                        </div>
+                    </div>
+
                     <!-- Anbieter — echtes Select für Mobile, Freitext als Fallback -->
                     {% set current_op = charge.operator or '' %}
                     {% set op_in_list = current_op in operators %}

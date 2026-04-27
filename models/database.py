@@ -27,12 +27,27 @@ class Charge(db.Model):
     location_lon = db.Column(db.Float)
     location_name = db.Column(db.String(200))
     operator = db.Column(db.String(64))  # Anbieter/CPO of the charging station
+    # Zusatzkosten — added v2.28.59 so providers with start fees /
+    # contract base fees / blocking penalties can be tracked alongside
+    # the per-kWh price. Both fees roll into total_cost so cost/100km
+    # and similar aggregates reflect the true wallet impact.
+    start_fee_eur = db.Column(db.Float)     # Vorgangs- oder Grundgebührenanteil
+    blocking_fee_eur = db.Column(db.Float)  # Strafgebühr fürs Blockieren
     created_at = db.Column(db.DateTime, default=datetime.now)
 
     def calculate_fields(self, battery_kwh=None):
         """Auto-calculate derived fields."""
         if self.eur_per_kwh is not None and self.kwh_loaded is not None:
-            self.total_cost = round(self.eur_per_kwh * self.kwh_loaded, 2)
+            base_cost = self.eur_per_kwh * self.kwh_loaded
+            base_cost += float(self.start_fee_eur or 0)
+            base_cost += float(self.blocking_fee_eur or 0)
+            self.total_cost = round(base_cost, 2)
+        elif self.start_fee_eur is not None or self.blocking_fee_eur is not None:
+            # Charge with no kWh-based cost (e.g. PV at €0 with only a
+            # Grundgebühr-Anteil) — total still reflects the extras.
+            self.total_cost = round(
+                float(self.start_fee_eur or 0) + float(self.blocking_fee_eur or 0), 2
+            )
         if self.soc_from is not None and self.soc_to is not None:
             self.soc_charged = self.soc_to - self.soc_from
             # Auto-calculate loss if not manually provided
@@ -67,6 +82,8 @@ class Charge(db.Model):
             'location_lon': self.location_lon,
             'location_name': self.location_name,
             'operator': self.operator,
+            'start_fee_eur': self.start_fee_eur,
+            'blocking_fee_eur': self.blocking_fee_eur,
         }
 
 

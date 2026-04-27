@@ -1,5 +1,28 @@
 # Changelog
 
+## v2.28.59 (2026-04-27)
+
+### Zusatzkosten on the input form: Startgebühr + Strafgebühr
+
+User report: providers with start fees, blocking penalties, or contract base fees couldn't be tracked alongside the per-kWh price. Cost/100km and total-spend KPIs were systematically too low.
+
+Charges gain two new fields:
+
+- `start_fee_eur` — Vorgangskosten or share of a monthly base fee
+- `blocking_fee_eur` — penalty for overstaying / blocking the bay
+
+Both fold into `Charge.calculate_fields()` so `total_cost` becomes `eur_per_kwh × kwh_loaded + start_fee + blocking_fee` (with a graceful path for charges that have only fees and no kWh-based cost). All downstream KPIs (`avg_eur_per_kwh`, `cost_per_100km`, monthly aggregates, PDF report totals) automatically reflect the extras since they sum `total_cost`.
+
+UI:
+
+- /input form has a collapsed "Zusatzkosten" section under €/kWh + kWh, expanded automatically when the saved charge already carries fees so the user sees them without an extra click.
+- Live calc-price label shows the breakdown: `€42.50 (38.50 + 4.00 Zusatzk.)` when extras are non-zero.
+- Both fields are part of the `formCache` localStorage round-trip from v2.28.56 — intermediate-save preserves them like any other field.
+- /edit form has the same pair of inputs in the same row as Verlust + CO₂.
+- /settings → Anbieter table gains a new "Grundgebühr / Monat" column per operator (stored in `operator_monthly_fees` JSON config). The monthly fee isn't auto-attributed to charges yet — it's surfaced as a configuration value the user can manually distribute via `start_fee_eur` on the relevant charge. Auto-attribution can come later once usage patterns are clearer.
+
+Schema migration `ALTER TABLE charges ADD COLUMN start_fee_eur REAL` + `blocking_fee_eur REAL` runs on first boot. Translations in all six languages.
+
 ## v2.28.58 (2026-04-27)
 
 ### Dashboard "Rekuperation nach Zeitraum" panel — sourced from the trip log
