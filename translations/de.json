@@ -809,6 +809,7 @@
   "trips.col_duration": "Dauer",
   "trips.col_from": "Von",
   "trips.col_regen": "Rekup",
+  "trips.regen_estimated": "Geschätzt aus km × Rekuperationsrate (kein Messwert vorhanden)",
   "trips.col_to": "Nach",
   "trips.col_when": "Wann",
   "trips.edit_address": "Adresse",

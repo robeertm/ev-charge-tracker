@@ -565,6 +565,7 @@
   "trips.col_duration": "Durata",
   "trips.col_from": "Da",
   "trips.col_regen": "Recup",
+  "trips.regen_estimated": "Stimato da km × tasso di recupero (nessuna misura disponibile)",
   "trips.col_to": "A",
   "trips.col_when": "Quando",
   "trips.edit_gap_hint": "Partenza {from} → arrivo {to}. Nessun dato di sync in questa finestra (intervallo del viaggio).",

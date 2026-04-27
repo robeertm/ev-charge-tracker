@@ -164,7 +164,11 @@
                         </td>
                         <td class="text-end">{% if tr.km %}{{ tr.km }}{% endif %}</td>
                         <td class="text-end">{% if tr.soc_used %}−{{ tr.soc_used }}%{% endif %}</td>
-                        <td class="text-end text-success">{% if tr.regen_kwh %}+{{ "%.1f"|format(tr.regen_kwh) }}{% endif %}</td>
+                        <td class="text-end {% if tr.regen_estimated %}text-success-emphasis{% else %}text-success{% endif %}">
+                            {% if tr.regen_kwh %}
+                                {% if tr.regen_estimated %}<i class="bi bi-asterisk small" title="{{ t('trips.regen_estimated') }}"></i> {% endif %}+{{ "%.1f"|format(tr.regen_kwh) }}
+                            {% endif %}
+                        </td>
                     </tr>
                 {% else %}
                     <tr><td colspan="6" class="text-center text-muted py-4">{{ t('trips.empty') }}</td></tr>

@@ -840,6 +840,16 @@ def get_trips(limit: Optional[int] = None,
 
     brand = (AppConfig.get('vehicle_api_brand', '') or '').lower()
 
+    # Static fallback for trips where the SDK regen delta resolves to
+    # None (the car missed a sync window around either trip endpoint, or
+    # the brand doesn't report regen at all). km × the user's configured
+    # rate from Settings/Vehicle/Recuperation. Surfaced as
+    # ``regen_estimated=True`` so the UI can mark it as not measured.
+    try:
+        static_recup_rate = float(AppConfig.get('recuperation_kwh_per_km', '0.086'))
+    except (ValueError, TypeError):
+        static_recup_rate = 0.086
+
     trips = []
     pe_covered_dates = set()
     used_sdk_ids: set = set()
@@ -892,6 +902,7 @@ def get_trips(limit: Optional[int] = None,
             soc_used = max(start_soc - end_soc, 0)
 
         regen_kwh = None
+        regen_estimated = False
         # Anchor regen lookup on ``prev.departed_at`` only — never
         # ``last_seen_at``. The pair-iteration loop already skips
         # pairs where ``prev.departed_at is None`` (see earlier
@@ -906,6 +917,13 @@ def get_trips(limit: Optional[int] = None,
         cum_arr = _cum_regen_at_or_after(regen_lookup, curr.arrived_at)
         if cum_dep is not None and cum_arr is not None:
             regen_kwh = round(max(cum_arr - cum_dep, 0), 2)
+        # Fallback to km × configured static rate when measurement is
+        # unavailable (overnight smart-mode polling skip, brand without
+        # regen reporting, etc.). Cell stays empty only when km is also
+        # unknown — never both km and regen blank for a real drive.
+        if regen_kwh is None and km:
+            regen_kwh = round(km * static_recup_rate, 2)
+            regen_estimated = True
 
         trip = {
             'from': _event_to_dict(prev, include_departed=True),
@@ -913,6 +931,7 @@ def get_trips(limit: Optional[int] = None,
             'km': km,
             'soc_used': soc_used,
             'regen_kwh': regen_kwh,
+            'regen_estimated': regen_estimated,
             'source': 'polled',
         }
 
@@ -1020,12 +1039,15 @@ def get_trips(limit: Optional[int] = None,
                    if dest_pe is not None
                    else _unknown_endpoint_dict(include_departed=False, time_override=to_time))
 
+        sdk_km = round(row.distance_km, 1) if row.distance_km is not None else None
+        sdk_regen = round(sdk_km * static_recup_rate, 2) if sdk_km else None
         trips.append({
             'from': from_dict,
             'to':   to_dict,
-            'km': round(row.distance_km, 1) if row.distance_km is not None else None,
+            'km': sdk_km,
             'soc_used': None,
-            'regen_kwh': None,
+            'regen_kwh': sdk_regen,
+            'regen_estimated': sdk_regen is not None,
             'source': 'sdk',
             'drive_min': row.drive_minutes,
             'idle_min': row.idle_minutes,

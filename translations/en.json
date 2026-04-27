@@ -809,6 +809,7 @@
   "trips.col_duration": "Duration",
   "trips.col_from": "From",
   "trips.col_regen": "Regen",
+  "trips.regen_estimated": "Estimated from km × recuperation rate (no measurement available)",
   "trips.col_to": "To",
   "trips.col_when": "When",
   "trips.edit_address": "Address",

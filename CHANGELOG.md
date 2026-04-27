@@ -1,5 +1,29 @@
 # Changelog
 
+## v2.28.56 (2026-04-27)
+
+Four user-reported items from a single morning's friction:
+
+### Trip log — recuperation falls back to configured rate when measurement is missing
+
+User report: a trip on the Kia install rendered with empty Recup column even though it had a real km value. Same risk on the Hyundai install. Cause — the trip-row regen calculation depends on the difference between cumulative-regen sync rows at the trip's start and end timestamps. If smart-mode polling missed either window (overnight idle, manual mode, brand without regen reporting), the lookup returns None and the cell renders blank.
+
+**Fix**: when the SDK-derived regen is unavailable, fall back to `km × Settings/Vehicle/Recuperation/recuperation_kwh_per_km` (default 0.086, user-editable). Marked with a small asterisk icon in the table so estimated values are visually distinguishable from measured ones — title attribute spells out the source. SDK-only trips (Skoda/VW Group, no regen telemetry) now also get the estimate instead of always-empty cells. Backfill is implicit: the change is in the read path, so every historical trip gets the fallback on the next render.
+
+### Input — auto-fill "loaded %" while a charge is running
+
+The kWh field already auto-evolves during an AC session (`elapsed_hours × max_ac_kw`). The "SoC bis" field didn't, so the user saw the kWh estimate climb while the SoC field stayed on the start value. Now SoC-to mirrors the same time-based estimate (`soc_from + kWh_estimate / battery_kwh × 100`, capped at 100 %), and the 10-min auto-poll pins it to the polled vehicle SoC for an accurate live value. Manual edits stick (dataset.manual flag like kWh).
+
+### Input — intermediate save no longer drops field values
+
+User report: filling all fields, clicking Speichern during an active session, and the next render came back with eur_per_kwh empty. Other fields could be affected too. Repro path is unclear — server stores the value but the round-trip occasionally lost it (browser autofill, validation reject, redirect race).
+
+**Fix**: belt-and-suspenders cache. Every editable form field is mirrored to `localStorage.ev_charge_session.formCache` on every input event during the session. On page load, after pre_charge fills, any field that's still empty gets restored from the cache. Programmatic value changes (PV-radio price/CO2 prefill, operator price autofill, GPS button, timer) also hit the cache. Form gains `autocomplete="off"` to keep iOS Safari out of the way.
+
+### History moves under New Charge
+
+`/input` now renders the full history table (filters, bulk-action bar, paginated rows) below the new-charge form, Fahrtenbuch-style. `/history` keeps working as a standalone page — both routes share a `_history_section.html` partial. Removed the redundant "letzte Ladung" snippet from the input page since the table covers it.
+
 ## v2.28.55 (2026-04-25)
 
 ### Input — recover from "phantom charge" lockout

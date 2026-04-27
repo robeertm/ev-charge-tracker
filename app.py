@@ -1114,6 +1114,12 @@ def register_routes(app):
         if saved_id:
             pre_charge = Charge.query.get(saved_id)
             active_session = request.args.get('active') == '1'
+        # Embedded history table — same filter / pagination semantics as
+        # /history. The partial template is included after the input form
+        # so the user lands on /input and sees recent charges in one view
+        # (Fahrtenbuch-style: edit + new entry on the same page).
+        charges, charge_type, year_filter, years, per_page_eff = \
+            _build_charges_query(request.args)
         return render_template('input.html',
                                today=date.today().isoformat(),
                                last_charge=last_charge,
@@ -1131,15 +1137,24 @@ def register_routes(app):
                                work_lon=AppConfig.get('work_lon', ''),
                                work_label=AppConfig.get('work_label', ''),
                                operators=_get_operator_list(),
-                               operator_prices=_get_operator_prices())
+                               operator_prices=_get_operator_prices(),
+                               charges=charges,
+                               charge_type=charge_type,
+                               year=year_filter,
+                               years=years,
+                               per_page=per_page_eff)
 
-    # ── HISTORY ────────────────────────────────────────────────
-    @app.route('/history')
-    def history():
-        page = request.args.get('page', 1, type=int)
-        per_page_raw = (request.args.get('per_page', '50') or '50').strip().lower()
-        charge_type = request.args.get('type', '')
-        year = request.args.get('year', '', type=str)
+    def _build_charges_query(args):
+        """Shared query/pagination builder for /history and /input.
+
+        Returns (charges, charge_type, year, years, per_page_raw). Both
+        endpoints render the same `_history_section.html` partial so they
+        consume identical filter/pagination data.
+        """
+        page = args.get('page', 1, type=int)
+        per_page_raw = (args.get('per_page', '50') or '50').strip().lower()
+        charge_type = args.get('type', '')
+        year = args.get('year', '', type=str)
 
         query = Charge.query
         if charge_type in ('AC', 'DC', 'PV'):
@@ -1170,6 +1185,13 @@ def register_routes(app):
         ).order_by(db.func.strftime('%Y', Charge.date).desc()).all()
         years = [y[0] for y in years if y[0]]
 
+        return charges, charge_type, year, years, per_page_raw
+
+    # ── HISTORY ────────────────────────────────────────────────
+    @app.route('/history')
+    def history():
+        charges, charge_type, year, years, per_page_raw = \
+            _build_charges_query(request.args)
         return render_template('history.html', charges=charges,
                                charge_type=charge_type, year=year, years=years,
                                per_page=per_page_raw)

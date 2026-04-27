@@ -53,7 +53,7 @@
                 {% endif %}
 
                 <!-- Formular (alle Felder änderbar) -->
-                <form method="POST" id="chargeForm">
+                <form method="POST" id="chargeForm" autocomplete="off">
                     <input type="hidden" name="charge_type" id="chargeTypeHidden" value="{{ pre_charge.charge_type if pre_charge else 'AC' }}">
                     <input type="hidden" name="charge_id" id="chargeIdHidden" value="{{ pre_charge.id if pre_charge else '' }}">
                     <input type="hidden" name="session_active" id="sessionActiveHidden" value="">
@@ -241,18 +241,18 @@
                     </div>
                 </form>
 
-                {% if last_charge %}
-                <div class="mt-3 p-2 bg-light rounded small">
-                    <strong>{{ t('input.last_charge') }}</strong>
-                    {{ last_charge.date.strftime('%d.%m.%Y') }} —
-                    {{ last_charge.kwh_loaded }} kWh ({{ last_charge.charge_type }}) —
-                    €{{ "%.2f"|format(last_charge.total_cost or 0) }}
-                </div>
-                {% endif %}
             </div>
         </div>
     </div>
 </div>
+
+{% if charges %}
+<div class="row justify-content-center mt-4">
+    <div class="col-12">
+        {% include "_history_section.html" %}
+    </div>
+</div>
+{% endif %}
 {% endblock %}
 
 {% block scripts %}
@@ -295,6 +295,7 @@ document.querySelectorAll('input[name="charge_type_select"]').forEach(radio => {
             document.getElementById('eur_per_kwh').value = pvPrice;
             updateCalcPrice();
         }
+        if (typeof persistFormCache === 'function') persistFormCache();
     });
 });
 
@@ -386,6 +387,30 @@ const CHARGE_KEY = 'ev_charge_session';
     } catch(e) {}
 })();
 
+// Field IDs we cache to localStorage during an active session — covers
+// every user-editable form field. Belt-and-suspenders against the
+// intermediate-save round-trip occasionally losing a value (browser
+// autofill, validation reject, server miss): if the rendered form
+// comes back empty but the cache has the value the user typed, we
+// restore it.
+const FORM_FIELD_IDS = ['date', 'charge_hour', 'odometer',
+    'soc_from', 'soc_to', 'eur_per_kwh', 'kwh_loaded', 'loss_kwh',
+    'co2_g_per_kwh', 'notes', 'location_name', 'location_lat',
+    'location_lon', 'operator'];
+
+function persistFormCache() {
+    try {
+        const s = JSON.parse(localStorage.getItem(CHARGE_KEY) || 'null');
+        if (!s || !s.startTime) return;  // only during active session
+        s.formCache = s.formCache || {};
+        FORM_FIELD_IDS.forEach(id => {
+            const el = document.getElementById(id);
+            if (el) s.formCache[id] = el.value || '';
+        });
+        localStorage.setItem(CHARGE_KEY, JSON.stringify(s));
+    } catch(e) {}
+}
+
 // Restore session if active
 (function restoreSession() {
     try {
@@ -408,6 +433,19 @@ const CHARGE_KEY = 'ev_charge_session';
             }
             if (saved.chargeId) {
                 document.getElementById('chargeIdHidden').value = saved.chargeId;
+            }
+            // Replay formCache for any field the server didn't pre-fill.
+            // This catches the intermediate-save edge case where eur_per_kwh
+            // / soc_to / etc. came back empty in pre_charge — the user's
+            // typed value is still in the cache and we restore it here.
+            if (saved.formCache && !saved.stopped) {
+                FORM_FIELD_IDS.forEach(id => {
+                    const el = document.getElementById(id);
+                    if (el && !el.value && saved.formCache[id]) {
+                        el.value = saved.formCache[id];
+                    }
+                });
+                if (typeof updateCalcPrice === 'function') updateCalcPrice();
             }
             if (saved.stopped) {
                 // Stopped, unsaved session: keep Stop greyed but re-enable
@@ -450,7 +488,8 @@ function startTimer() {
         const type = document.getElementById('chargeTypeHidden').value;
         if (type === 'AC') {
             const hours = elapsed / 3600;
-            const estKwh = (hours * MAX_AC_KW).toFixed(3);
+            const estKwhNum = hours * MAX_AC_KW;
+            const estKwh = estKwhNum.toFixed(3);
             const kwhField = document.getElementById('kwh_loaded');
             // Only auto-fill if not manually changed
             if (!kwhField.dataset.manual) {
@@ -458,13 +497,41 @@ function startTimer() {
                 document.getElementById('kwhHint').textContent = '(~' + estKwh + ' kWh bei ' + MAX_AC_KW + ' kW)';
                 updateCalcPrice();
             }
+            // Mirror SoC-to from the same time-based estimate so the user
+            // sees an evolving target value while the charge runs. Capped
+            // at 100 %; manual edits stick (dataset.manual on soc_to).
+            const socToField = document.getElementById('soc_to');
+            const socFromVal = parseInt(document.getElementById('soc_from').value);
+            if (!socToField.dataset.manual && !isNaN(socFromVal) && BATTERY_KWH > 0) {
+                const estSoc = Math.min(100, Math.round(socFromVal + (estKwhNum / BATTERY_KWH) * 100));
+                socToField.value = estSoc;
+            }
         }
+        // Mirror the just-updated values into formCache so the
+        // intermediate-save round-trip can restore them if the
+        // server-rendered form comes back without them.
+        if (typeof persistFormCache === 'function') persistFormCache();
     }, 1000);
 }
 
 // Mark kWh field as manually edited
 document.getElementById('kwh_loaded').addEventListener('input', function() {
     this.dataset.manual = '1';
+});
+// Same for soc_to so the timer's projection doesn't clobber a manual entry.
+document.getElementById('soc_to').addEventListener('input', function() {
+    this.dataset.manual = '1';
+});
+
+// Persist every editable field to localStorage.formCache during an
+// active session, so fields the server might lose on the
+// intermediate-save round-trip can be replayed on the next render.
+FORM_FIELD_IDS.forEach(id => {
+    const el = document.getElementById(id);
+    if (el) {
+        el.addEventListener('input', persistFormCache);
+        el.addEventListener('change', persistFormCache);
+    }
 });
 
 async function fetchVehicle(btn) {
@@ -551,6 +618,7 @@ async function tryStart(clickTime, attempt, deadline) {
         btnStop.disabled = false;
         timerEl.style.display = '';
         document.getElementById('kwh_loaded').dataset.manual = '';
+        document.getElementById('soc_to').dataset.manual = '';
         const lblEl = document.getElementById('btnSaveLabel');
         if (lblEl) lblEl.textContent = T.save_intermediate;
         startTimer();
@@ -601,6 +669,8 @@ btnStart.addEventListener('click', () => {
         });
         const kwhField = document.getElementById('kwh_loaded');
         if (kwhField) kwhField.dataset.manual = '';
+        const socToField = document.getElementById('soc_to');
+        if (socToField) socToField.dataset.manual = '';
         const tDisp = document.getElementById('timerDisplay');
         if (tDisp) tDisp.textContent = '00:00';
         timerEl.style.display = 'none';
@@ -642,6 +712,15 @@ async function autoCheck() {
         // Update SoC live display
         if (d.soc != null) {
             document.getElementById('kwhHint').textContent = '(' + T.current + d.soc + '%)';
+            // Pin soc_to to the polled value when the user hasn't typed
+            // their own. The 1-second timer keeps a time-based estimate
+            // running too, but a real SoC reading from the car overrides
+            // it on every 10-min poll for a more accurate live value.
+            const socToField = document.getElementById('soc_to');
+            const socFromVal = parseInt(document.getElementById('soc_from').value);
+            if (!socToField.dataset.manual && (isNaN(socFromVal) || d.soc >= socFromVal)) {
+                socToField.value = d.soc;
+            }
         }
 
         // Auto-stop conditions
@@ -790,6 +869,7 @@ document.getElementById('chargeForm').addEventListener('submit', () => {
         latIn.value = parseFloat(lat).toFixed(6);
         lonIn.value = parseFloat(lon).toFixed(6);
         if (name) nameIn.value = name;
+        if (typeof persistFormCache === 'function') persistFormCache();
     }
 
     async function reverseGeocode(lat, lon) {
@@ -910,6 +990,7 @@ document.getElementById('chargeForm').addEventListener('submit', () => {
     function commit(value) {
         hidden.value = value || '';
         tryAutoFillPrice(hidden.value);
+        if (typeof persistFormCache === 'function') persistFormCache();
     }
 
     sel.addEventListener('change', () => {
@@ -926,7 +1007,10 @@ document.getElementById('chargeForm').addEventListener('submit', () => {
     // Free text — commit on input so the hidden field is always current
     // before form submit; blur triggers price auto-fill for the finished
     // name (input events would fire for every keystroke).
-    custom.addEventListener('input', () => { hidden.value = custom.value.trim(); });
+    custom.addEventListener('input', () => {
+        hidden.value = custom.value.trim();
+        if (typeof persistFormCache === 'function') persistFormCache();
+    });
     custom.addEventListener('blur', () => { commit(custom.value); });
 })();
 

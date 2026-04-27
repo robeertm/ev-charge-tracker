@@ -565,6 +565,7 @@
   "trips.col_duration": "Duur",
   "trips.col_from": "Van",
   "trips.col_regen": "Recup",
+  "trips.regen_estimated": "Geschat uit km × recuperatietempo (geen meting beschikbaar)",
   "trips.col_to": "Naar",
   "trips.col_when": "Wanneer",
   "trips.edit_gap_hint": "Vertrek {from} → aankomst {to}. Geen sync-gegevens in dit venster (ritinterval).",
