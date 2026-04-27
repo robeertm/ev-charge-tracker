@@ -75,7 +75,7 @@
   "dash.recuperation": "Recuperation",
   "dash.regen_30d": "30 days",
   "dash.regen_auto": "Auto from vehicle",
-  "dash.regen_by_period": "Measured recuperation",
+  "dash.regen_by_period": "Recuperation by period",
   "dash.regen_measured": "cumulative",
   "dash.regen_month": "Month",
   "dash.regen_since": "Since",

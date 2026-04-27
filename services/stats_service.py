@@ -88,20 +88,28 @@ def _regen_cumulative_at(rows_sorted, ts):
 
 
 def get_regen_stats():
-    """Return measured recuperation aggregated by time period.
+    """Return recuperation aggregated by time period.
 
-    Uses the monotonic `regen_cumulative_kwh` column. Requires vehicle sync
-    data from a brand that reports regen (Kia/Hyundai). Returns None if
-    there is no regen data at all.
+    Bucket totals (today / this_week / this_month / last_30d / last_90d /
+    this_year) are sourced from the trip log — same values the user sees
+    in the Fahrtenbuch, including the km × static-rate fallback for trips
+    where SDK measurement was None or collapsed to a flat zero. This
+    keeps the dashboard aligned with the table and stops "Gemessene
+    Rekuperation heute" from sitting at 0 for hours while Kia's rolling
+    3-month value lags the actual driving.
+
+    Lifetime stays anchored on the SDK cumulative (cum_now - first_cum)
+    because it's the most stable long-horizon read; per-trip
+    inconsistencies wash out over years of data.
+
+    Returns None when there's no regen data at all (no Kia/Hyundai sync
+    data and no completed trips).
     """
     rows = (VehicleSync.query
             .filter(VehicleSync.regen_cumulative_kwh.isnot(None))
             .order_by(VehicleSync.timestamp.asc())
             .all())
-    if not rows:
-        return None
 
-    lookup = [(r.timestamp, r.regen_cumulative_kwh) for r in rows]
     now = datetime.now()
     today_start = datetime.combine(now.date(), datetime.min.time())
     week_start = today_start - timedelta(days=now.weekday())
@@ -110,27 +118,57 @@ def get_regen_stats():
     d30_start = now - timedelta(days=30)
     d90_start = now - timedelta(days=90)
 
-    cum_now = lookup[-1][1]
-    first_ts = lookup[0][0]
-    first_cum = lookup[0][1]
+    if rows:
+        lookup = [(r.timestamp, r.regen_cumulative_kwh) for r in rows]
+        cum_now = lookup[-1][1]
+        first_ts = lookup[0][0]
+        first_cum = lookup[0][1]
+        lifetime = round(cum_now - first_cum, 2)
+        sync_count = len(rows)
+        first_sync_iso = first_ts.isoformat()
+    else:
+        cum_now = 0.0
+        lifetime = 0.0
+        sync_count = 0
+        first_sync_iso = None
 
-    def _delta(start):
-        # cumulative at last sync <= now minus cumulative at last sync <= start
-        return round(cum_now - _regen_cumulative_at(lookup, start), 2)
+    # Trip-derived bucket sums. Imported here to avoid a top-level
+    # circular import with trips_service.
+    from services.trips_service import get_trips
+    trips = get_trips()
+    trip_regens = []
+    for t in trips:
+        from_obj = t.get('from') or {}
+        ts_s = from_obj.get('departed_at')
+        if not ts_s:
+            continue
+        try:
+            ts = datetime.fromisoformat(ts_s)
+        except (TypeError, ValueError):
+            continue
+        kwh = t.get('regen_kwh') or 0
+        if kwh > 0:
+            trip_regens.append((ts, kwh))
+
+    if not rows and not trip_regens:
+        return None
+
+    def _bucket(start):
+        return round(sum(kwh for ts, kwh in trip_regens if ts >= start), 2)
 
     # Estimated km via recup rate — so "X kWh ≈ Y km range-equivalent"
     rate, _ = get_recup_rate_kwh_per_km()
 
     stats = {
-        'today': _delta(today_start),
-        'this_week': _delta(week_start),
-        'this_month': _delta(month_start),
-        'last_30d': _delta(d30_start),
-        'last_90d': _delta(d90_start),
-        'this_year': _delta(year_start),
-        'lifetime': round(cum_now - first_cum, 2),
-        'first_sync': first_ts.isoformat(),
-        'sync_count': len(rows),
+        'today': _bucket(today_start),
+        'this_week': _bucket(week_start),
+        'this_month': _bucket(month_start),
+        'last_30d': _bucket(d30_start),
+        'last_90d': _bucket(d90_start),
+        'this_year': _bucket(year_start),
+        'lifetime': lifetime,
+        'first_sync': first_sync_iso,
+        'sync_count': sync_count,
         'rate_kwh_per_km': rate,
     }
     # km equivalents (how many km you could drive from that recuperated energy)

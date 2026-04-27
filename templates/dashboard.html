@@ -819,7 +819,9 @@
 <div class="card mb-3 border-success">
     <div class="card-header bg-white fw-bold d-flex justify-content-between align-items-center">
         <span><i class="bi bi-lightning-charge-fill text-success"></i> {{ t('dash.regen_by_period') }}</span>
+        {% if stats.regen_stats.first_sync %}
         <span class="text-muted small">{{ t('dash.regen_since') }} {{ stats.regen_stats.first_sync[:10] }}</span>
+        {% endif %}
     </div>
     <div class="card-body py-2">
         <div class="row g-2 text-center">

@@ -1,5 +1,19 @@
 # Changelog
 
+## v2.28.58 (2026-04-27)
+
+### Dashboard "Rekuperation nach Zeitraum" panel — sourced from the trip log
+
+User report after v2.28.57: dashboard's "Gemessene Rekuperation" panel still showed today's value way under what was actually driven. Cause — the bucket totals (`today` / `this_week` / etc.) were `cum_now - cum_at(bucket_start)` over the SDK-side `regen_cumulative_kwh` series, which is delta-walked from Kia's rolling 3-month `total_regenerated_kwh` field. That field doesn't update on every drive — it lags by hours and sometimes by entire trips. So the panel sat at 0 for half the day even though the user drove 18 km in the morning, and only caught up once the cloud's rolling value advanced.
+
+**Fix**: bucket totals now sum the trip log's `regen_kwh` values for trips ending in each bucket. The trip log already runs the measured-or-`km × static rate`-fallback logic per trip, so the dashboard is automatically aligned with what the user sees in the Fahrtenbuch — and it doesn't depend on Kia's lagging rolling-window number being current. Lifetime stays anchored on the SDK cumulative (most stable long-horizon read). Same `regen_stats` payload, so `/report` PDF renders consistently too.
+
+The panel was renamed `Gemessene Rekuperation` → `Rekuperation nach Zeitraum` (drop "Gemessene") because the value now combines measured + km × rate fallback. PDF report section and dashboard card header updated in all six languages.
+
+The vehicle-history chart `vhRegen` (cumulative regen-since-tracking-started) keeps showing the SDK monotonic series — that's still the right surface for the long-term trend; only the bucket totals needed the trip-log fix.
+
+`get_regen_stats()` no longer returns `None` purely because the brand has no SDK regen reporting (Skoda/VW Group): if there are completed trips, the panel renders the trip-summed estimates. `first_sync` may be `None` in that case; the dashboard guards against rendering it.
+
 ## v2.28.57 (2026-04-27)
 
 ### Trip log — regen fallback now also kicks in on flat-zero measurements

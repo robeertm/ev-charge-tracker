@@ -434,15 +434,17 @@ def generate_report():
             pdf.cell(0, 5, pdf._clean(f"Letzter Standort: {last['lat']:.5f}, {last['lon']:.5f}"),
                      align='C', new_x='LMARGIN', new_y='NEXT')
 
-    # === Measured regen stats (only if we have vehicle API data) ===
+    # === Recuperation by period (combined measured + km × rate fallback) ===
     regen_stats = stats.get('regen_stats')
     if regen_stats:
         pdf.add_page()
-        pdf.section_title('Gemessene Rekuperation')
+        pdf.section_title('Rekuperation nach Zeitraum')
         pdf.set_font('Helvetica', 'I', 8)
         pdf.set_text_color(120, 120, 120)
+        first_sync = regen_stats.get('first_sync')
+        since_part = f"seit {first_sync[:10]} - " if first_sync else ''
         pdf.cell(0, 5, pdf._clean(
-            f"Gemessen vom Auto seit {regen_stats['first_sync'][:10]} - "
+            f"Gemessen + Schaetzung wo Messwert fehlt - {since_part}"
             f"Rate: {regen_stats['rate_kwh_per_km']:.3f} kWh/km"
         ), align='C', new_x='LMARGIN', new_y='NEXT')
         pdf.ln(3)
