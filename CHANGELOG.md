@@ -1,5 +1,17 @@
 # Changelog
 
+## v2.28.57 (2026-04-27)
+
+### Trip log — regen fallback now also kicks in on flat-zero measurements
+
+User report after v2.28.56 deploy: ev-robert's morning commute (2026-04-27 06:48, km=18) still showed Recup 0.0 instead of the new estimate. The v2.28.56 fallback only triggered when the measured value was `None`; trips where `cum_arr - cum_dep` collapsed to exactly 0 (e.g. the departure-side sync snapped to the first sync AFTER drive start, so the delta vanished) bypassed it.
+
+**Fix**: condition is now `regen is None OR regen == 0` (combined with `km > 0`). Any real drive with km ≥ 1 recuperates non-zero — a measured zero is broken-measurement-shaped, so we'd rather show the estimate. Same change in the SDK-only path.
+
+### History tab removed from nav
+
+Now that `/input` shows the full history table below the new-charge form, the standalone History tab is redundant. Nav link removed; the input link's `active` state extends to `endpoint == 'history'` so deep links to `/history` still highlight the right tab. The `/history` route itself stays for bookmarks.
+
 ## v2.28.56 (2026-04-27)
 
 Four user-reported items from a single morning's friction:

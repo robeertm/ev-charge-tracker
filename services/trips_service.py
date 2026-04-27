@@ -918,10 +918,15 @@ def get_trips(limit: Optional[int] = None,
         if cum_dep is not None and cum_arr is not None:
             regen_kwh = round(max(cum_arr - cum_dep, 0), 2)
         # Fallback to km × configured static rate when measurement is
-        # unavailable (overnight smart-mode polling skip, brand without
-        # regen reporting, etc.). Cell stays empty only when km is also
-        # unknown — never both km and regen blank for a real drive.
-        if regen_kwh is None and km:
+        # unavailable OR comes back as a flat zero. Zero on a real drive
+        # is broken-measurement-shaped (e.g. cum_dep snapped to a sync
+        # AFTER drive start, so cum_arr - cum_dep collapsed to 0); any
+        # real km of driving recuperates non-zero. The user's morning
+        # commute on 2026-04-27 surfaced this: km=18, measured regen 0,
+        # so the original ``regen is None`` guard didn't kick in. Cell
+        # stays empty only when km itself is unknown — never both blank
+        # for a real drive.
+        if (regen_kwh is None or regen_kwh == 0) and km:
             regen_kwh = round(km * static_recup_rate, 2)
             regen_estimated = True
 

@@ -30,13 +30,8 @@
                         </a>
                     </li>
                     <li class="nav-item">
-                        <a class="nav-link {% if request.endpoint == 'input_charge' %}active{% endif %}" href="/input">
+                        <a class="nav-link {% if request.endpoint in ('input_charge', 'history') %}active{% endif %}" href="/input">
                             <i class="bi bi-plus-circle"></i> {{ t('nav.input') }}
-                        </a>
-                    </li>
-                    <li class="nav-item">
-                        <a class="nav-link {% if request.endpoint == 'history' %}active{% endif %}" href="/history">
-                            <i class="bi bi-clock-history"></i> {{ t('nav.history') }}
                         </a>
                     </li>
                     <li class="nav-item">
