@@ -230,6 +230,25 @@
 <div id="reportOverlay" class="report-loading d-none">
     <div class="spinner-border text-primary"></div>
 </div>
+
+<!-- Shared fullscreen modal — every plot card on this page is
+     clickable and re-renders into this modal at fullscreen size,
+     same pattern as the dashboard's chart tiles. -->
+<div class="modal fade" id="reportFullscreenModal" tabindex="-1" aria-hidden="true">
+    <div class="modal-dialog modal-fullscreen">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title"><i class="bi bi-graph-up"></i> <span id="reportFullscreenTitle"></span></h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+            </div>
+            <div class="modal-body p-3">
+                <div class="h-100" style="position:relative;">
+                    <canvas id="reportFullscreenCanvas"></canvas>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
 {% endif %}
 {% endblock %}
 
@@ -278,6 +297,80 @@
 
     let currentPreset = 'month';
     let charts = {};
+
+    // Expandable-chart wiring (same UX as the dashboard's tiles).
+    // Each chart is created via makeChart() so we can stash a deep-clone
+    // of its config and re-instantiate it inside the fullscreen modal
+    // without worrying about Chart.js mutating shared option objects.
+    const REPORT_CHARTS = {};
+    function cloneCfg(v) {
+        if (v === null || typeof v !== 'object') return v;
+        if (Array.isArray(v)) return v.map(cloneCfg);
+        const o = {};
+        for (const k of Object.keys(v)) o[k] = cloneCfg(v[k]);
+        return o;
+    }
+    function makeChart(canvasId, cfg) {
+        const el = document.getElementById(canvasId);
+        if (!el) return null;
+        const card = el.closest('.card');
+        const header = card ? card.querySelector('.card-header') : null;
+        const title = header ? header.textContent.trim() : canvasId;
+        REPORT_CHARTS[canvasId] = { cfg: cloneCfg(cfg), title };
+        const chart = new Chart(el, cfg);
+        if (card && header) {
+            card.style.cursor = 'pointer';
+            card.tabIndex = 0;
+            // Add the fullscreen icon to the header on first render only.
+            if (!header.querySelector('.report-fs-icon')) {
+                header.classList.add('d-flex', 'justify-content-between', 'align-items-center');
+                const ic = document.createElement('i');
+                ic.className = 'bi bi-arrows-fullscreen text-muted report-fs-icon ms-2';
+                ic.style.fontSize = '.8rem';
+                header.appendChild(ic);
+            }
+            // Click + keyboard wiring is set once per card. On re-render
+            // (range change → destroyAll → makeChart again) the listener
+            // is still there because we never tear down the card itself.
+            if (!card.dataset.reportFsWired) {
+                card.dataset.reportFsWired = '1';
+                card.dataset.reportFsId = canvasId;
+                card.addEventListener('click', ev => {
+                    if (ev.target.closest('a,button,input,select,textarea,label')) return;
+                    openReportFullscreen(card.dataset.reportFsId);
+                });
+                card.addEventListener('keydown', ev => {
+                    if (ev.key === 'Enter' || ev.key === ' ') {
+                        ev.preventDefault();
+                        openReportFullscreen(card.dataset.reportFsId);
+                    }
+                });
+            }
+        }
+        return chart;
+    }
+    let _reportModal = null, _reportModalChart = null;
+    function openReportFullscreen(canvasId) {
+        const entry = REPORT_CHARTS[canvasId];
+        const modalEl = document.getElementById('reportFullscreenModal');
+        if (!entry || !modalEl || typeof bootstrap === 'undefined') return;
+        if (!_reportModal) {
+            _reportModal = new bootstrap.Modal(modalEl);
+            modalEl.addEventListener('hidden.bs.modal', () => {
+                if (_reportModalChart) {
+                    try { _reportModalChart.destroy(); } catch(e){}
+                    _reportModalChart = null;
+                }
+            });
+        }
+        document.getElementById('reportFullscreenTitle').textContent = entry.title;
+        _reportModal.show();
+        // Chart.js needs the canvas visible before it can measure — one frame.
+        setTimeout(() => {
+            if (_reportModalChart) { try { _reportModalChart.destroy(); } catch(e){} _reportModalChart = null; }
+            _reportModalChart = new Chart(document.getElementById('reportFullscreenCanvas'), cloneCfg(entry.cfg));
+        }, 150);
+    }
 
     function destroyAll() {
         Object.values(charts).forEach(c => { try { c.destroy(); } catch(e){} });
@@ -371,14 +464,13 @@
     }
 
     function makeBar(id, labels, data, color, yFmt) {
-        // Empty-state: instead of rendering an axis with no bars, show
-        // a centered "Keine Daten" badge so the user understands the
-        // plot is empty by design, not by bug.
+        // Empty-state: hide the entire card column when the dataset is
+        // empty (v2.28.62) so the report shows only tiles with content.
         if (!hasData(data)) {
             setEmpty(id);
             return;
         }
-        charts[id] = new Chart(document.getElementById(id), {
+        charts[id] = makeChart(id, {
             type: 'bar',
             data: {labels, datasets: [{data, backgroundColor: color, borderRadius: 3}]},
             options: {
@@ -452,7 +544,7 @@
                     });
                 }
             };
-            charts.plotChargeTypes = new Chart(document.getElementById('plotChargeTypes'), {
+            charts.plotChargeTypes = makeChart('plotChargeTypes', {
                 type: 'doughnut',
                 data: {
                     labels: ct.labels,
@@ -480,7 +572,7 @@
         if (!eff.length) {
             setEmpty('plotEfficiency');
         } else {
-            charts.plotEfficiency = new Chart(document.getElementById('plotEfficiency'), {
+            charts.plotEfficiency = makeChart('plotEfficiency', {
                 type: 'line',
                 data: {
                     labels: eff.map(p => p.x),
@@ -505,7 +597,7 @@
         makeBar('plotHourOfDay', data.hour_of_day.labels, data.hour_of_day.kwh, C.cyan, v => v + ' kWh');
 
         // Day-of-week: dual axis (kWh left, trips right)
-        charts.plotDayOfWeek = new Chart(document.getElementById('plotDayOfWeek'), {
+        charts.plotDayOfWeek = makeChart('plotDayOfWeek', {
             data: {
                 labels: data.day_of_week.labels,
                 datasets: [
@@ -532,7 +624,7 @@
         if (!pp.length) {
             setEmpty('plotPrice');
         } else {
-            charts.plotPrice = new Chart(document.getElementById('plotPrice'), {
+            charts.plotPrice = makeChart('plotPrice', {
                 type: 'scatter',
                 data: {
                     datasets: [{
@@ -567,7 +659,7 @@
         if (!ops.length) {
             setEmpty('plotOperators');
         } else {
-            charts.plotOperators = new Chart(document.getElementById('plotOperators'), {
+            charts.plotOperators = makeChart('plotOperators', {
                 type: 'bar',
                 data: {
                     labels: ops.map(o => o.name),
@@ -595,7 +687,7 @@
         if (!locs.length) {
             setEmpty('plotLocations');
         } else {
-            charts.plotLocations = new Chart(document.getElementById('plotLocations'), {
+            charts.plotLocations = makeChart('plotLocations', {
                 type: 'bar',
                 data: {
                     labels: locs.map(l => l.name),
@@ -630,7 +722,7 @@
         if (!hasData(extrasStart) && !hasData(extrasBlock)) {
             setEmpty('plotExtras');
         } else {
-            charts.plotExtras = new Chart(document.getElementById('plotExtras'), {
+            charts.plotExtras = makeChart('plotExtras', {
                 type: 'bar',
                 data: {
                     labels,
@@ -663,7 +755,7 @@
         if (!hasData(charges) && !hasData(tripsCount)) {
             setEmpty('plotActivity');
         } else {
-            charts.plotActivity = new Chart(document.getElementById('plotActivity'), {
+            charts.plotActivity = makeChart('plotActivity', {
                 data: {
                     labels,
                     datasets: [

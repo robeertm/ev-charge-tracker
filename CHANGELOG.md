@@ -1,5 +1,21 @@
 # Changelog
 
+## v2.28.63 (2026-04-27)
+
+### Report tab — every plot is clickable to open fullscreen, like the dashboard tiles
+
+User report: the dashboard's "click any chart to fullscreen" UX is much nicer for inspecting data; the report tab should work the same way.
+
+Implemented the same pattern from `templates/dashboard.html` (`makeExpandableChart` / `openDashFullscreen`). Each plot card on `/report` is now clickable / keyboard-accessible: pressing Enter / Space or clicking anywhere on the card opens a Bootstrap fullscreen modal that re-renders the chart at full window size with the same data + options.
+
+Implementation details:
+
+- New JS helpers `makeChart(canvasId, cfg)` and `openReportFullscreen(canvasId)` mirroring the dashboard's helpers. Configs are deep-cloned before stashing so Chart.js can mutate the modal copy without affecting the inline tile.
+- Every chart-creation site (`makeBar`, doughnut, line, scatter, dual-axis, stacked) now flows through `makeChart` and gets the click-handler + expand-icon wiring automatically.
+- Card-headers gain a `bi-arrows-fullscreen` icon on the right side, and the card itself becomes `tabIndex=0` for keyboard navigation. Click is suppressed on form-element children so embedded controls (range picker etc.) keep their normal behaviour.
+- Click + keyboard listeners are wired once per card (guarded by `card.dataset.reportFsWired`) so range changes don't pile on extra handlers.
+- New shared modal `#reportFullscreenModal` at the bottom of the page; on close, its chart is destroyed cleanly.
+
 ## v2.28.62 (2026-04-27)
 
 ### Report tab — secondary KPI cards same height; empty plots hidden entirely
