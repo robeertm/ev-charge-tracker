@@ -190,13 +190,21 @@ def build_report(start: date, end: date, lang: str = 'de') -> dict:
     buckets = list(_iter_buckets(start, end, bucket_size, lang))
     bucket_labels = [b[2] for b in buckets]
 
-    # ── Buckets: kWh, cost, CO2, km ─────────────────────────────────
+    # ── Buckets: kWh, cost, CO2, km, loss, extras ─────────────────
     buck_kwh = [0.0] * len(buckets)
     buck_cost = [0.0] * len(buckets)
     buck_co2 = [0.0] * len(buckets)
     buck_km = [0.0] * len(buckets)
     buck_trips = [0] * len(buckets)
     buck_charges = [0] * len(buckets)
+    # v2.28.60: per-bucket loss + Zusatzkosten so the report can show
+    # them as their own plots. ``buck_loss`` totals the explicit
+    # ``Charge.loss_kwh`` column; ``buck_extras`` is start_fee + blocking
+    # _fee from v2.28.59. Both are 0 by default — empty buckets render
+    # an empty-state message on the frontend now.
+    buck_loss = [0.0] * len(buckets)
+    buck_extras_start = [0.0] * len(buckets)
+    buck_extras_block = [0.0] * len(buckets)
 
     def _bucket_index(target: date) -> int:
         for i, (bs, be, _) in enumerate(buckets):
@@ -212,6 +220,9 @@ def build_report(start: date, end: date, lang: str = 'de') -> dict:
         buck_cost[i] += _safe(c.total_cost)
         buck_co2[i] += _safe(c.co2_kg)
         buck_charges[i] += 1
+        buck_loss[i] += _safe(c.loss_kwh)
+        buck_extras_start[i] += _safe(getattr(c, 'start_fee_eur', None))
+        buck_extras_block[i] += _safe(getattr(c, 'blocking_fee_eur', None))
 
     for t in trips:
         i = _bucket_index(t.trip_date)
@@ -226,6 +237,10 @@ def build_report(start: date, end: date, lang: str = 'de') -> dict:
     total_co2_kg = sum(_safe(c.co2_kg) for c in charges)
     total_km = sum(_safe(t.distance_km) for t in trips)
     total_drive_min = sum(_safe(t.drive_minutes) for t in trips)
+    total_loss = sum(_safe(c.loss_kwh) for c in charges)
+    total_extras_start = sum(_safe(getattr(c, 'start_fee_eur', None)) for c in charges)
+    total_extras_block = sum(_safe(getattr(c, 'blocking_fee_eur', None)) for c in charges)
+    total_extras = total_extras_start + total_extras_block
     count_charges = len(charges)
     count_trips = len(trips)
 
@@ -297,22 +312,74 @@ def build_report(start: date, end: date, lang: str = 'de') -> dict:
     top_operators = [{'name': k, 'kwh': round(v, 1), 'cost': round(op_cost[k], 2),
                       'count': op_cnt[k]} for k, v in top_operators if v > 0]
 
-    # ── Top destinations from parking events (not range-filtered
-    # perfectly, but close: we look at arrivals within the window) ──
-    pe_rows = (ParkingEvent.query
-               .filter(ParkingEvent.arrived_at >= datetime.combine(start, datetime.min.time()),
-                       ParkingEvent.arrived_at <= datetime.combine(end, datetime.max.time()))
-               .all())
-    loc_cnt = Counter()
-    for pe in pe_rows:
-        if pe.favorite_name:
-            loc_cnt[pe.favorite_name] += 1
-        elif pe.label in ('home', 'work'):
-            loc_cnt[pe.label.capitalize()] += 1
-        elif pe.address:
-            loc_cnt[pe.address[:40]] += 1
-    top_locations = [{'name': k, 'count': v}
-                     for k, v in loc_cnt.most_common(8)]
+    # ── Top charging locations (Charge.location_name within window) —
+    # the user's "Top Ladeorte" plot wants to know where charges
+    # happened, not where the car parked. ParkingEvent destinations
+    # are kept around as a fallback when no charge has a location
+    # name set.
+    charge_loc_kwh = defaultdict(float)
+    charge_loc_cnt = Counter()
+    for c in charges:
+        name = (c.location_name or '').strip()
+        if not name:
+            continue
+        charge_loc_kwh[name] += _safe(c.kwh_loaded)
+        charge_loc_cnt[name] += 1
+    if charge_loc_cnt:
+        top_locations = [
+            {'name': k, 'count': charge_loc_cnt[k], 'kwh': round(charge_loc_kwh[k], 1)}
+            for k, _ in charge_loc_cnt.most_common(8)
+        ]
+    else:
+        # Fallback to parking destinations when no charge carries a
+        # location_name — keeps the panel useful for users who haven't
+        # filled the field yet.
+        pe_rows = (ParkingEvent.query
+                   .filter(ParkingEvent.arrived_at >= datetime.combine(start, datetime.min.time()),
+                           ParkingEvent.arrived_at <= datetime.combine(end, datetime.max.time()))
+                   .all())
+        loc_cnt = Counter()
+        for pe in pe_rows:
+            if pe.favorite_name:
+                loc_cnt[pe.favorite_name] += 1
+            elif pe.label in ('home', 'work'):
+                loc_cnt[pe.label.capitalize()] += 1
+            elif pe.address:
+                loc_cnt[pe.address[:40]] += 1
+        top_locations = [{'name': k, 'count': v, 'kwh': 0.0}
+                         for k, v in loc_cnt.most_common(8)]
+
+    # ── Regen by bucket — same trip-log values shown in the
+    # Fahrtenbuch (measured + km × static-rate fallback). Aligned with
+    # dashboard's "Rekuperation nach Zeitraum" so report stays
+    # consistent. Trip log isn't filtered by the report range, so we
+    # gate by trip start datetime fitting inside [start, end].
+    buck_regen = [0.0] * len(buckets)
+    try:
+        from services.trips_service import get_trips
+        all_trips = get_trips()
+    except Exception:
+        all_trips = []
+    range_start_dt = datetime.combine(start, datetime.min.time())
+    range_end_dt = datetime.combine(end, datetime.max.time())
+    for tr in all_trips:
+        from_obj = tr.get('from') or {}
+        ts_s = from_obj.get('departed_at')
+        if not ts_s:
+            continue
+        try:
+            ts = datetime.fromisoformat(ts_s)
+        except (TypeError, ValueError):
+            continue
+        if ts < range_start_dt or ts > range_end_dt:
+            continue
+        idx = _bucket_index(ts.date())
+        if idx < 0:
+            continue
+        kwh = tr.get('regen_kwh') or 0
+        if kwh > 0:
+            buck_regen[idx] += kwh
+    total_regen = sum(buck_regen)
 
     # ── Price development (per-charge avg EUR/kWh over time) ───────
     price_points = [{'x': c.date.isoformat(), 'y': round(c.eur_per_kwh, 4)}
@@ -362,6 +429,12 @@ def build_report(start: date, end: date, lang: str = 'de') -> dict:
             'total_co2_kg': round(total_co2_kg, 1),
             'total_km': round(total_km, 1),
             'total_drive_min': total_drive_min,
+            'total_loss_kwh': round(total_loss, 2),
+            'avg_loss_pct': round(total_loss / total_kwh * 100, 2) if total_kwh > 0 else 0,
+            'total_extras_eur': round(total_extras, 2),
+            'total_start_fee_eur': round(total_extras_start, 2),
+            'total_blocking_fee_eur': round(total_extras_block, 2),
+            'total_regen_kwh': round(total_regen, 2),
             'count_charges': count_charges,
             'count_trips': count_trips,
             'avg_efficiency_kwh_per_100km': round(avg_efficiency, 2),
@@ -380,6 +453,10 @@ def build_report(start: date, end: date, lang: str = 'de') -> dict:
             'km': [round(v, 1) for v in buck_km],
             'trips_count': buck_trips,
             'charges_count': buck_charges,
+            'loss_kwh': [round(v, 2) for v in buck_loss],
+            'extras_start': [round(v, 2) for v in buck_extras_start],
+            'extras_block': [round(v, 2) for v in buck_extras_block],
+            'regen_kwh': [round(v, 2) for v in buck_regen],
         },
         'charge_type': {
             'labels': list(type_totals.keys()),

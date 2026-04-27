@@ -25,6 +25,13 @@
 .report-loading{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;
     background:rgba(255,255,255,.7);z-index:5;border-radius:.5rem}
 [data-bs-theme="dark"] .report-loading{background:rgba(0,0,0,.5)}
+/* Empty-state badge for plots that have no data in the chosen
+   range. Sits over the canvas (which itself stays empty) and gives
+   the user a clear "no data" instead of a silently blank card. */
+.plot-empty{position:absolute;inset:0;display:flex;flex-direction:column;
+    align-items:center;justify-content:center;color:var(--bs-secondary-color);
+    font-size:.85rem;text-align:center;padding:1rem;pointer-events:none}
+.plot-empty i{font-size:1.6rem;opacity:.4;margin-bottom:.25rem}
 </style>
 {% endblock %}
 
@@ -102,15 +109,46 @@
 
 <!-- Highlights + savings ─────────────────────────────────────────────────── -->
 <div class="row g-2 mb-3">
-    <div class="col-md-4"><div class="highlight-card green"><h6>{{ t('report.hl_cost_saved') }}</h6>
+    <div class="col-md-3 col-sm-6"><div class="highlight-card green"><h6>{{ t('report.hl_cost_saved') }}</h6>
         <div class="v text-success" id="hlCostSaved">–</div>
         <div class="sub" id="hlCostSavedSub"></div></div></div>
-    <div class="col-md-4"><div class="highlight-card orange"><h6>{{ t('report.hl_biggest_charge') }}</h6>
+    <div class="col-md-3 col-sm-6"><div class="highlight-card orange"><h6>{{ t('report.hl_biggest_charge') }}</h6>
         <div class="v" id="hlBiggestCharge">–</div>
         <div class="sub" id="hlBiggestChargeSub"></div></div></div>
-    <div class="col-md-4"><div class="highlight-card purple"><h6>{{ t('report.hl_longest_trip') }}</h6>
+    <div class="col-md-3 col-sm-6"><div class="highlight-card purple"><h6>{{ t('report.hl_longest_trip') }}</h6>
         <div class="v" id="hlLongestTrip">–</div>
         <div class="sub" id="hlLongestTripSub"></div></div></div>
+    <div class="col-md-3 col-sm-6"><div class="highlight-card"><h6>{{ t('report.hl_cheapest_charge') }}</h6>
+        <div class="v" id="hlCheapestCharge">–</div>
+        <div class="sub" id="hlCheapestChargeSub"></div></div></div>
+</div>
+
+<!-- Sekundäre Stats: Verlust / Rekup / Zusatzkosten / Schnitt-Preis (v2.28.60) -->
+<div class="row g-2 mb-3" id="secondaryStatsRow">
+    <div class="col-6 col-md-3"><div class="card border-0 shadow-sm">
+        <div class="card-body p-2 text-center">
+            <div class="kpi-label">{{ t('report.kpi_loss') }}</div>
+            <div class="fw-bold" id="kpiLoss">–</div>
+            <div class="kpi-sub" id="kpiLossSub"></div>
+        </div></div></div>
+    <div class="col-6 col-md-3"><div class="card border-0 shadow-sm">
+        <div class="card-body p-2 text-center">
+            <div class="kpi-label">{{ t('report.kpi_regen') }}</div>
+            <div class="fw-bold text-success" id="kpiRegen">–</div>
+            <div class="kpi-sub" id="kpiRegenSub"></div>
+        </div></div></div>
+    <div class="col-6 col-md-3"><div class="card border-0 shadow-sm">
+        <div class="card-body p-2 text-center">
+            <div class="kpi-label">{{ t('report.kpi_extras') }}</div>
+            <div class="fw-bold text-warning" id="kpiExtras">–</div>
+            <div class="kpi-sub" id="kpiExtrasSub"></div>
+        </div></div></div>
+    <div class="col-6 col-md-3"><div class="card border-0 shadow-sm">
+        <div class="card-body p-2 text-center">
+            <div class="kpi-label">{{ t('report.kpi_avg_price') }}</div>
+            <div class="fw-bold text-primary" id="kpiAvgPrice">–</div>
+            <div class="kpi-sub" id="kpiAvgPriceSub"></div>
+        </div></div></div>
 </div>
 
 <!-- Plot grid ────────────────────────────────────────────────────────────── -->
@@ -167,6 +205,20 @@
         <div class="card-header"><i class="bi bi-geo-alt"></i> {{ t('report.plot_top_locations') }}</div>
         <div class="card-body p-2"><canvas id="plotLocations"></canvas></div>
     </div></div>
+
+    <!-- v2.28.60 additions: Verlust + Zusatzkosten + Rekup pro Bucket -->
+    <div class="col-lg-6"><div class="card plot-card">
+        <div class="card-header"><i class="bi bi-droplet-half"></i> {{ t('report.plot_loss') }}</div>
+        <div class="card-body"><canvas id="plotLoss"></canvas></div>
+    </div></div>
+    <div class="col-lg-6"><div class="card plot-card">
+        <div class="card-header"><i class="bi bi-receipt"></i> {{ t('report.plot_extras') }}</div>
+        <div class="card-body"><canvas id="plotExtras"></canvas></div>
+    </div></div>
+    <div class="col-lg-6"><div class="card plot-card">
+        <div class="card-header"><i class="bi bi-arrow-down-circle"></i> {{ t('report.plot_regen') }}</div>
+        <div class="card-body"><canvas id="plotRegen"></canvas></div>
+    </div></div>
 </div>
 
 <div id="reportOverlay" class="report-loading d-none">
@@ -211,6 +263,11 @@
         bucket_day: {{ t('report.bucket_day')|tojson }},
         bucket_week: {{ t('report.bucket_week')|tojson }},
         bucket_month: {{ t('report.bucket_month')|tojson }},
+        no_data:    {{ t('report.no_data_short')|tojson }},
+        loss:       {{ t('report.lbl_loss')|tojson }},
+        regen:      {{ t('report.lbl_regen')|tojson }},
+        start_fee:  {{ t('input.start_fee')|tojson }},
+        block_fee:  {{ t('input.blocking_fee')|tojson }},
     };
 
     let currentPreset = 'month';
@@ -219,6 +276,29 @@
     function destroyAll() {
         Object.values(charts).forEach(c => { try { c.destroy(); } catch(e){} });
         charts = {};
+        // Wipe any pre-existing empty-state badges so the next render
+        // can re-evaluate per plot.
+        document.querySelectorAll('.plot-empty').forEach(el => el.remove());
+    }
+
+    // Show a "no data" badge over a plot's card-body when the dataset
+    // is empty. Idempotent: removes any prior badge first.
+    function setEmpty(canvasId) {
+        const canvas = document.getElementById(canvasId);
+        if (!canvas) return;
+        const body = canvas.parentElement;
+        body.querySelectorAll('.plot-empty').forEach(el => el.remove());
+        const badge = document.createElement('div');
+        badge.className = 'plot-empty';
+        badge.innerHTML = '<i class="bi bi-bar-chart"></i><span>' + T.no_data + '</span>';
+        body.appendChild(badge);
+    }
+
+    // True when the array has at least one strictly positive value.
+    // Charts with all-zero buckets render visually empty and confuse
+    // the user, so treat them as no-data.
+    function hasData(arr) {
+        return Array.isArray(arr) && arr.some(v => Number(v) > 0);
     }
 
     function fmtNum(n, d=0) {
@@ -257,9 +337,39 @@
             document.getElementById('hlLongestTrip').textContent = '–';
             document.getElementById('hlLongestTripSub').textContent = '';
         }
+        const cc = hl.cheapest_charge;
+        if (cc) {
+            document.getElementById('hlCheapestCharge').textContent = '€' + fmtNum(cc.eur_per_kwh, 4).replace('.', ',') + '/kWh';
+            document.getElementById('hlCheapestChargeSub').textContent = cc.date + ' · ' + fmtNum(cc.kwh, 1) + ' kWh';
+        } else {
+            document.getElementById('hlCheapestCharge').textContent = '–';
+            document.getElementById('hlCheapestChargeSub').textContent = '';
+        }
+
+        // Secondary KPI row: Verlust / Rekup / Zusatzkosten / Ø-Preis
+        document.getElementById('kpiLoss').textContent = fmtNum(s.total_loss_kwh, 1) + ' kWh';
+        document.getElementById('kpiLossSub').textContent = s.avg_loss_pct > 0 ? '∅ ' + fmtNum(s.avg_loss_pct, 1) + ' %' : '';
+        document.getElementById('kpiRegen').textContent = '+ ' + fmtNum(s.total_regen_kwh, 1) + ' kWh';
+        document.getElementById('kpiRegenSub').textContent = (s.total_km > 0 && s.total_regen_kwh > 0)
+            ? fmtNum(s.total_regen_kwh / s.total_km * 100, 2) + ' kWh/100km' : '';
+        document.getElementById('kpiExtras').textContent = '€' + fmtNum(s.total_extras_eur, 2);
+        const eParts = [];
+        if (s.total_start_fee_eur > 0) eParts.push('S €' + fmtNum(s.total_start_fee_eur, 2));
+        if (s.total_blocking_fee_eur > 0) eParts.push('B €' + fmtNum(s.total_blocking_fee_eur, 2));
+        document.getElementById('kpiExtrasSub').textContent = eParts.join(' · ');
+        document.getElementById('kpiAvgPrice').textContent = s.avg_eur_per_kwh > 0
+            ? '€' + fmtNum(s.avg_eur_per_kwh, 3).replace('.', ',') + '/kWh' : '–';
+        document.getElementById('kpiAvgPriceSub').textContent = s.count_charges + ' × ' + T.charges;
     }
 
     function makeBar(id, labels, data, color, yFmt) {
+        // Empty-state: instead of rendering an axis with no bars, show
+        // a centered "Keine Daten" badge so the user understands the
+        // plot is empty by design, not by bug.
+        if (!hasData(data)) {
+            setEmpty(id);
+            return;
+        }
         charts[id] = new Chart(document.getElementById(id), {
             type: 'bar',
             data: {labels, datasets: [{data, backgroundColor: color, borderRadius: 3}]},
@@ -286,7 +396,9 @@
 
         // Charge type pie (counts + kWh in tooltip)
         const ct = data.charge_type || {labels:[], counts:[], kwh:[]};
-        if (ct.labels.length) {
+        if (!ct.labels.length || !hasData(ct.kwh)) {
+            setEmpty('plotChargeTypes');
+        } else if (ct.labels.length) {
             // Custom label plugin: write the segment name (AC/DC/PV) on every
             // arc, and if the arc is big enough also write the kWh value
             // underneath. Falls back to legend alone when an arc is too
@@ -357,7 +469,9 @@
 
         // Efficiency over time (one point per bucket where km>0)
         const eff = data.efficiency_by_bucket || [];
-        if (eff.length) {
+        if (!eff.length) {
+            setEmpty('plotEfficiency');
+        } else {
             charts.plotEfficiency = new Chart(document.getElementById('plotEfficiency'), {
                 type: 'line',
                 data: {
@@ -377,8 +491,6 @@
                     }
                 }
             });
-        } else {
-            document.getElementById('plotEfficiency').getContext('2d').clearRect(0,0,9999,9999);
         }
 
         // Hour-of-day
@@ -404,25 +516,39 @@
 
         makeBar('plotTripLength', data.trip_length_dist.labels, data.trip_length_dist.counts, C.green, v => v);
 
-        // Price timeseries
+        // Price timeseries — category x-axis (date strings) so we don't
+        // need the chartjs-adapter-date-fns plugin loaded just for one
+        // chart. Was rendering blank pre-v2.28.60 because the 'time'
+        // adapter wasn't available.
         const pp = data.price_points || [];
-        if (pp.length) {
+        if (!pp.length) {
+            setEmpty('plotPrice');
+        } else {
             charts.plotPrice = new Chart(document.getElementById('plotPrice'), {
-                type: 'line',
+                type: 'scatter',
                 data: {
-                    labels: pp.map(p => p.x),
                     datasets: [{
-                        data: pp.map(p => p.y),
+                        label: T.cost,
+                        data: pp.map(p => ({x: p.x, y: p.y})),
                         borderColor: C.red,
                         backgroundColor: C.redL,
-                        fill: false, tension: 0, pointRadius: 3, showLine: false,
+                        pointRadius: 3,
+                        showLine: false,
                     }]
                 },
                 options: {
-                    plugins: {legend: {display: false}},
+                    parsing: false,
+                    plugins: {
+                        legend: {display: false},
+                        tooltip: {callbacks: {
+                            label: ctx => ctx.raw.x + ' · €' + ctx.raw.y.toFixed(4),
+                        }},
+                    },
                     scales: {
-                        x: {type: 'time', time: {unit: 'day'}, ticks: {font:{size:9}, maxTicksLimit: 8}},
-                        y: {ticks: {font:{size:10}, callback: v => '€' + v.toFixed(2)}}
+                        x: {type: 'category',
+                            labels: pp.map(p => p.x),
+                            ticks: {font: {size: 9}, maxTicksLimit: 8, autoSkip: true}},
+                        y: {ticks: {font:{size:10}, callback: v => '€' + v.toFixed(2)}},
                     }
                 }
             });
@@ -430,7 +556,9 @@
 
         // Top operators (horizontal bar by kWh)
         const ops = data.top_operators || [];
-        if (ops.length) {
+        if (!ops.length) {
+            setEmpty('plotOperators');
+        } else {
             charts.plotOperators = new Chart(document.getElementById('plotOperators'), {
                 type: 'bar',
                 data: {
@@ -456,7 +584,9 @@
         }
         // Top locations
         const locs = data.top_locations || [];
-        if (locs.length) {
+        if (!locs.length) {
+            setEmpty('plotLocations');
+        } else {
             charts.plotLocations = new Chart(document.getElementById('plotLocations'), {
                 type: 'bar',
                 data: {
@@ -469,11 +599,52 @@
                 },
                 options: {
                     indexAxis: 'y',
-                    plugins: {legend: {display: false}},
+                    plugins: {
+                        legend: {display: false},
+                        tooltip: {callbacks: {label: ctx => {
+                            const l = locs[ctx.dataIndex];
+                            return l.count + ' × · ' + fmtNum(l.kwh, 1) + ' kWh';
+                        }}},
+                    },
                     scales: {x: {beginAtZero: true, ticks: {font: {size: 10}, stepSize: 1}}, y: {ticks: {font: {size: 10}}}}
                 }
             });
         }
+
+        // Loss kWh by bucket. Tooltip rolls in % of charged energy.
+        makeBar('plotLoss', labels, s.loss_kwh || [], C.purple, v => v + ' kWh');
+
+        // Zusatzkosten by bucket — stacked bar: Startgebühr (orange)
+        // and Strafgebühr (red). Renders empty-state when both arrays
+        // are flat zero.
+        const extrasStart = s.extras_start || [];
+        const extrasBlock = s.extras_block || [];
+        if (!hasData(extrasStart) && !hasData(extrasBlock)) {
+            setEmpty('plotExtras');
+        } else {
+            charts.plotExtras = new Chart(document.getElementById('plotExtras'), {
+                type: 'bar',
+                data: {
+                    labels,
+                    datasets: [
+                        {label: T.start_fee, data: extrasStart, backgroundColor: C.orange, borderRadius: 3},
+                        {label: T.block_fee, data: extrasBlock, backgroundColor: C.red,    borderRadius: 3},
+                    ],
+                },
+                options: {
+                    plugins: {legend: {position: 'bottom', labels: {font: {size: 10}}}},
+                    scales: {
+                        x: {stacked: true, ticks: {font: {size: 9}, maxTicksLimit: 12, autoSkip: true}},
+                        y: {stacked: true, beginAtZero: true, ticks: {font: {size: 10}, callback: v => '€' + v}},
+                    }
+                }
+            });
+        }
+
+        // Regen by bucket — sourced from the trip log (measured + km
+        // × static-rate fallback), so it stays consistent with the
+        // Fahrtenbuch and the dashboard "Rekuperation nach Zeitraum".
+        makeBar('plotRegen', labels, s.regen_kwh || [], C.cyan, v => v + ' kWh');
     }
 
     async function load(preset, custom) {

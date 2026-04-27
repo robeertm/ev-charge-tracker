@@ -1,5 +1,29 @@
 # Changelog
 
+## v2.28.60 (2026-04-27)
+
+### Report tab rework: empty plots get a "no data" badge, plus three new statistics
+
+User report: several plots on `/report` rendered as completely blank cards. The Preisentwicklung chart was particularly egregious — it used `type: 'time'` on the X-axis but the Chart.js date adapter (`chartjs-adapter-date-fns`) wasn't loaded, so it errored out silently and never drew anything. Other plots (Effizienz, Operatoren, Standorte, Lade-Typen) skipped rendering entirely on empty datasets, also leaving silent blank cards.
+
+Fixes:
+
+- **Empty-state badge** centred over every plot whose dataset is empty (`<i class="bi bi-bar-chart">` + "Keine Daten in diesem Zeitraum"). Renders for buckets that exist but have zero values *and* for plots whose data list is empty. Cleared on every render so range changes re-evaluate per plot.
+- **Preisentwicklung** switched from `type: 'time'` to a category x-axis with the date strings already coming from the backend — no adapter dependency, renders reliably on every range. Tooltip carries date + price to 4 decimals.
+- **Top-Standorte plot** sourced from `Charge.location_name` within the report range (was previously parking destinations, which the user couldn't influence directly). Tooltip now shows kWh and count. Falls back to parking destinations when no charge has a location_name.
+
+New plots and KPIs (more statistics):
+
+- **Verlust pro Bucket** — `Charge.loss_kwh` summed per bucket. Empty-state when no losses recorded.
+- **Zusatzkosten pro Bucket** — stacked bar, Startgebühr (orange) + Strafgebühr (red), driven by the v2.28.59 columns. Stacked so total is the height; tooltips show breakdown.
+- **Rekuperation pro Bucket** — sum of trip-log `regen_kwh` per bucket (measured + km × static-rate fallback). Stays consistent with Fahrtenbuch and dashboard's "Rekuperation nach Zeitraum".
+- **Secondary KPI row** with four compact cards: Verlust (kWh + Ø %), Rekuperation (+ kWh/100km), Zusatzkosten (€ + breakdown), Ø Preis (+ Anzahl Ladungen).
+- **Cheapest-charge highlight card** added next to the existing biggest-charge / longest-trip / cost-saved cards. The four highlight cards now share a 4-up grid on desktop, 2-up on mobile.
+
+Backend `build_report()` extensions: `series.loss_kwh`, `series.extras_start`, `series.extras_block`, `series.regen_kwh` (per bucket); `summary.total_loss_kwh` / `avg_loss_pct` / `total_extras_eur` / `total_start_fee_eur` / `total_blocking_fee_eur` / `total_regen_kwh`.
+
+New translation keys (12) added to all six languages.
+
 ## v2.28.59 (2026-04-27)
 
 ### Zusatzkosten on the input form: Startgebühr + Strafgebühr
