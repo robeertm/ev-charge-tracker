@@ -140,113 +140,160 @@ def _compute_sleep_secs(app) -> tuple[int, bool]:
         return (int(hours * 3600), True)
 
 
-def _do_sync(app):
-    """Fetch vehicle status and store as VehicleSync row."""
-    with app.app_context():
-        from models.database import AppConfig
-        from services.vehicle import get_connector
+def _sync_one_vehicle(app, vehicle):
+    """Sync a single Vehicle row. Returns the persisted VehicleSync or None.
 
-        brand = AppConfig.get('vehicle_api_brand', '')
-        if not brand:
-            return None
+    Each vehicle carries its own credentials + API counter (legacy
+    AppConfig key for Vehicle#1, ``vehicle_{id}_api_counter`` for the
+    rest). Smart-mode decisions are scoped to that vehicle's own sync
+    history so a Niro's GPS staleness doesn't trigger a force-refresh
+    on a Skoda. ``request_force_refresh()`` still uses a global flag
+    (set by the parking hook on whichever car just moved) and applies
+    to every vehicle on the next tick — Phase 2.1 can scope it per
+    vehicle once the parking hook reports vehicle_id.
+    """
+    from models.database import AppConfig, VehicleSync
+    from services.vehicle import get_connector
+    from datetime import date, datetime, timedelta as _td
 
-        # Rate limit check (200/day for Kia EU)
-        from datetime import date
-        today_str = date.today().isoformat()
-        counter_date = AppConfig.get('vehicle_api_counter_date', '')
-        if counter_date != today_str:
-            AppConfig.set('vehicle_api_counter_date', today_str)
-            AppConfig.set('vehicle_api_counter', '0')
-        api_count = int(AppConfig.get('vehicle_api_counter', '0'))
-        if api_count >= 190:
-            logger.warning(f"Vehicle sync skipped: daily API limit reached ({api_count}/200)")
-            return None
-        AppConfig.set('vehicle_api_counter', str(api_count + 1))
+    brand = (vehicle.api_brand or '').strip()
+    if not brand:
+        return None
+    if not vehicle.api_username:
+        return None  # creds incomplete; skip silently
 
-        creds = {
-            'username': AppConfig.get('vehicle_api_username', ''),
-            'password': AppConfig.get('vehicle_api_password', ''),
-            'pin': AppConfig.get('vehicle_api_pin', ''),
-            'region': AppConfig.get('vehicle_api_region', 'EU'),
-            'vin': AppConfig.get('vehicle_api_vin', ''),
-        }
+    # Rate-limit counter: per-vehicle keys keep different Kia/Hyundai
+    # accounts' 200/day budgets independent. Vehicle#1 keeps the legacy
+    # key names so an in-flight counter survives the v2.29 upgrade.
+    if vehicle.id == 1:
+        cnt_date_key = 'vehicle_api_counter_date'
+        cnt_key = 'vehicle_api_counter'
+    else:
+        cnt_date_key = f'vehicle_{vehicle.id}_api_counter_date'
+        cnt_key = f'vehicle_{vehicle.id}_api_counter'
+    today_str = date.today().isoformat()
+    if AppConfig.get(cnt_date_key, '') != today_str:
+        AppConfig.set(cnt_date_key, today_str)
+        AppConfig.set(cnt_key, '0')
+    try:
+        api_count = int(AppConfig.get(cnt_key, '0'))
+    except (TypeError, ValueError):
+        api_count = 0
+    if api_count >= 190:
+        logger.warning(
+            f"Vehicle sync [{vehicle.name}] skipped: daily API limit "
+            f"reached ({api_count}/200)"
+        )
+        return None
+    AppConfig.set(cnt_key, str(api_count + 1))
 
-        # ── Determine effective force flag based on mode ─────
-        # 'cached' = always cached (cheap, no GPS most of the time)
-        # 'force'  = always force (wakes the car, gets GPS, but burns 12V)
-        # 'smart'  = cached by default, but force if:
-        #            - last cached sync shows odometer changed (car was moved)
-        #              compared to the previous sync row, OR
-        #            - the latest VehicleSync row with GPS data is older than
-        #              the smart_force_max_hours threshold (default 6h),
-        #            …and the car is not currently charging.
-        mode = AppConfig.get('vehicle_sync_mode', 'cached')
-        force = (mode == 'force')
-        mode_label = mode  # 'cached' | 'force' | 'smart' (overridden below)
+    creds = {
+        'username': vehicle.api_username or '',
+        'password': vehicle.api_password or '',
+        'pin': vehicle.api_pin or '',
+        'region': vehicle.api_region or 'EU',
+        'vin': vehicle.api_vin or '',
+    }
 
-        # A queued request_force_refresh() overrides the mode's normal
-        # decision and upgrades this tick to a force-refresh.
-        global _force_refresh_pending
-        triggered_reason = _force_refresh_pending
-        if triggered_reason:
-            _force_refresh_pending = None
-            force = True
-            mode_label = f'triggered:{triggered_reason}'
-            logger.info(f"Smart sync: triggered force-refresh ({triggered_reason})")
+    # ── Determine effective force flag ──
+    mode = AppConfig.get('vehicle_sync_mode', 'cached')
+    force = (mode == 'force')
+    mode_label = mode
 
-        if not triggered_reason and mode == 'smart':
-            mode_label = 'smart->cached'
-            try:
-                from datetime import datetime, timedelta
-                from models.database import VehicleSync
-                # Find the last sync with GPS to know how stale our location is
-                last_with_gps = (VehicleSync.query
-                                 .filter(VehicleSync.location_lat.isnot(None))
-                                 .order_by(VehicleSync.timestamp.desc())
-                                 .first())
-                # Find the absolutely-last sync to check charging state
-                last_sync = (VehicleSync.query
+    # Global force-refresh flag — applies to next tick across vehicles.
+    global _force_refresh_pending
+    triggered_reason = _force_refresh_pending
+    if triggered_reason:
+        _force_refresh_pending = None
+        force = True
+        mode_label = f'triggered:{triggered_reason}'
+        logger.info(
+            f"Vehicle sync [{vehicle.name}]: triggered force-refresh "
+            f"({triggered_reason})"
+        )
+
+    if not triggered_reason and mode == 'smart':
+        mode_label = 'smart->cached'
+        try:
+            # Per-vehicle staleness: the last GPS / last sync queries
+            # are scoped to this vehicle so a fleet doesn't share one
+            # smart-window heuristic.
+            last_with_gps = (VehicleSync.query
+                             .filter(VehicleSync.vehicle_id == vehicle.id)
+                             .filter(VehicleSync.location_lat.isnot(None))
                              .order_by(VehicleSync.timestamp.desc())
                              .first())
-                # Charging skip
-                is_charging = bool(last_sync.is_charging) if last_sync else False
-                # Threshold for force re-fetch (default 6 hours)
-                try:
-                    max_hours = float(AppConfig.get('smart_force_max_hours', '6'))
-                except (ValueError, TypeError):
-                    max_hours = 6.0
-                stale = True
-                if last_with_gps:
-                    age_hours = (datetime.now() - last_with_gps.timestamp).total_seconds() / 3600
-                    stale = (age_hours >= max_hours)
-                if not is_charging and stale:
-                    force = True
-                    mode_label = 'smart->force'
-                    logger.info(
-                        f"Smart sync: forcing live refresh (gps stale, "
-                        f"max_hours={max_hours}, charging={is_charging})"
-                    )
+            last_sync = (VehicleSync.query
+                         .filter(VehicleSync.vehicle_id == vehicle.id)
+                         .order_by(VehicleSync.timestamp.desc())
+                         .first())
+            is_charging = bool(last_sync.is_charging) if last_sync else False
+            try:
+                max_hours = float(AppConfig.get('smart_force_max_hours', '6'))
+            except (ValueError, TypeError):
+                max_hours = 6.0
+            stale = True
+            if last_with_gps:
+                age_hours = (datetime.now() - last_with_gps.timestamp).total_seconds() / 3600
+                stale = (age_hours >= max_hours)
+            if not is_charging and stale:
+                force = True
+                mode_label = 'smart->force'
+                logger.info(
+                    f"Vehicle sync [{vehicle.name}]: smart→force "
+                    f"(gps stale, max_hours={max_hours}, charging={is_charging})"
+                )
+        except Exception as e:
+            logger.warning(
+                f"Vehicle sync [{vehicle.name}]: smart decision failed, using cached: {e}"
+            )
+            force = False
+            mode_label = 'smart->cached'
+
+    connector = get_connector(brand, creds)
+    status = connector.get_status(force=force)
+
+    if force:
+        AppConfig.set('last_force_refresh_at', datetime.now().isoformat())
+
+    from app import _save_vehicle_sync
+    battery_kwh = float(vehicle.battery_kwh) if vehicle.battery_kwh else 64.0
+    sync = _save_vehicle_sync(
+        status, battery_kwh,
+        raw_json=json.dumps(status.raw_data, default=str),
+        vehicle_id=vehicle.id,
+    )
+    log_sync_result(status, mode_label=f'{vehicle.name}/{mode_label}', source='bg-loop')
+    return sync
+
+
+def _do_sync(app):
+    """Fetch vehicle status for every active fleet vehicle.
+
+    v2.29: iterates ``Vehicle.query.filter_by(is_archived=False,
+    auto_sync=True).filter(api_brand IS NOT NULL).all()`` and runs the
+    per-vehicle sync for each. Failures on one vehicle don't stop the
+    others. Returns a list of saved syncs (or partial list on errors).
+    """
+    with app.app_context():
+        from models.database import Vehicle
+        targets = (Vehicle.query
+                   .filter_by(is_archived=False, auto_sync=True)
+                   .filter(Vehicle.api_brand.isnot(None))
+                   .filter(Vehicle.api_username.isnot(None))
+                   .order_by(Vehicle.id.asc())
+                   .all())
+        if not targets:
+            return []
+        results = []
+        for v in targets:
+            try:
+                r = _sync_one_vehicle(app, v)
+                if r is not None:
+                    results.append(r)
             except Exception as e:
-                logger.warning(f"Smart-mode decision failed, using cached: {e}")
-                force = False
-                mode_label = 'smart->cached'
-
-        connector = get_connector(brand, creds)
-        status = connector.get_status(force=force)
-
-        # Track the timestamp of the last successful force-refresh, so the
-        # smart-mode decision logic above has something to compare against.
-        if force:
-            from datetime import datetime as _dt
-            AppConfig.set('last_force_refresh_at', _dt.now().isoformat())
-
-        from app import _save_vehicle_sync, _get_battery_kwh
-        sync = _save_vehicle_sync(status, _get_battery_kwh(),
-                                  raw_json=json.dumps(status.raw_data, default=str))
-
-        log_sync_result(status, mode_label=mode_label, source='bg-loop')
-
-        return sync
+                logger.error(f"Vehicle sync [{v.name}] error: {e}")
+        return results
 
 
 def _maybe_post_move_reconcile(app) -> None:
@@ -395,10 +442,21 @@ def start_sync(app):
         return False
 
     with app.app_context():
-        from models.database import AppConfig
-        brand = AppConfig.get('vehicle_api_brand', '')
+        from models.database import AppConfig, Vehicle
         enabled = AppConfig.get('vehicle_sync_enabled', 'false')
-        if not brand or enabled != 'true':
+        if enabled != 'true':
+            return False
+        # v2.29: require at least one non-archived vehicle with API
+        # credentials and auto_sync set. Falls back to the legacy
+        # AppConfig check so installs that haven't migrated their
+        # AppConfig values onto the Vehicle row yet still start.
+        ready = (Vehicle.query
+                 .filter_by(is_archived=False, auto_sync=True)
+                 .filter(Vehicle.api_brand.isnot(None))
+                 .filter(Vehicle.api_username.isnot(None))
+                 .first())
+        legacy_brand = AppConfig.get('vehicle_api_brand', '')
+        if ready is None and not legacy_brand:
             return False
 
     logger.info("Starting vehicle sync service")

@@ -638,8 +638,12 @@ def _extract_location_last_updated(status, raw_json):
     return None
 
 
-def _build_vehicle_sync(status, battery_kwh, raw_json=''):
-    """Build a VehicleSync row from a connector VehicleStatus."""
+def _build_vehicle_sync(status, battery_kwh, raw_json='', vehicle_id=None):
+    """Build a VehicleSync row from a connector VehicleStatus.
+
+    ``vehicle_id`` (v2.29) stamps the row so multi-vehicle fleets keep
+    each car's syncs scoped — None for legacy single-car installs.
+    """
     regen_kwh = None
     if status.total_power_regenerated_kwh is not None:
         try:
@@ -656,6 +660,7 @@ def _build_vehicle_sync(status, battery_kwh, raw_json=''):
         except (ValueError, TypeError):
             pass
     return VehicleSync(
+        vehicle_id=vehicle_id,
         soc_percent=status.soc_percent,
         odometer_km=status.odometer_km,
         is_charging=status.is_charging,
@@ -672,7 +677,7 @@ def _build_vehicle_sync(status, battery_kwh, raw_json=''):
     )
 
 
-def _save_vehicle_sync(status, battery_kwh, raw_json=''):
+def _save_vehicle_sync(status, battery_kwh, raw_json='', vehicle_id=None):
     """Persist a VehicleSync row only if any tracked value differs from the
     most recent row. Returns the saved (or last existing) sync row.
 
@@ -684,8 +689,15 @@ def _save_vehicle_sync(status, battery_kwh, raw_json=''):
       2. A force-refresh delivers identical GPS coords to the existing row
          (car hasn't moved), which would otherwise skip the hook entirely.
     """
-    new_sync = _build_vehicle_sync(status, battery_kwh, raw_json=raw_json)
-    last = VehicleSync.query.order_by(VehicleSync.timestamp.desc()).first()
+    new_sync = _build_vehicle_sync(status, battery_kwh, raw_json=raw_json,
+                                   vehicle_id=vehicle_id)
+    # v2.29: scope the "previous sync" lookup per-vehicle so the
+    # regen-cumulative delta-walk (and the differs_from de-dup check)
+    # don't mix data across cars in a fleet.
+    _last_q = VehicleSync.query
+    if vehicle_id is not None:
+        _last_q = _last_q.filter(VehicleSync.vehicle_id == vehicle_id)
+    last = _last_q.order_by(VehicleSync.timestamp.desc()).first()
 
     # Compute monotonic cumulative regen from the rolling 3-month raw value
     if new_sync.total_regenerated_kwh is not None:
@@ -720,12 +732,16 @@ def _save_vehicle_sync(status, battery_kwh, raw_json=''):
             from datetime import timedelta
             fix_ts = result.location_last_updated_at
             window = timedelta(minutes=5)
-            affected = (VehicleSync.query
-                        .filter(VehicleSync.id != result.id)
-                        .filter(VehicleSync.location_lat.is_(None))
-                        .filter(VehicleSync.timestamp >= fix_ts - window)
-                        .filter(VehicleSync.timestamp <= fix_ts + window)
-                        .all())
+            # v2.29: per-vehicle backfill — never stamp one car's fix
+            # onto another car's GPS-less syncs.
+            _bf_q = (VehicleSync.query
+                     .filter(VehicleSync.id != result.id)
+                     .filter(VehicleSync.location_lat.is_(None))
+                     .filter(VehicleSync.timestamp >= fix_ts - window)
+                     .filter(VehicleSync.timestamp <= fix_ts + window))
+            if result.vehicle_id is not None:
+                _bf_q = _bf_q.filter(VehicleSync.vehicle_id == result.vehicle_id)
+            affected = _bf_q.all()
             if affected:
                 for r in affected:
                     r.location_lat = result.location_lat
@@ -2038,8 +2054,17 @@ def register_routes(app):
                         creds = _get_vehicle_credentials()
                         connector = get_connector(brand, creds)
                         status = connector.get_status(force=force)
-                        _save_vehicle_sync(status, _get_battery_kwh(),
-                                           raw_json=_json.dumps(status.raw_data, default=str))
+                        _picker_set = _active_vehicle_id()
+                        _stamp_vid_set = _picker_set if isinstance(_picker_set, int) else None
+                        if _stamp_vid_set is None:
+                            from models.database import Vehicle as _Vset
+                            _vs = (_Vset.query.filter_by(is_archived=False)
+                                   .order_by(_Vset.id.asc()).first()
+                                   or _Vset.query.order_by(_Vset.id.asc()).first())
+                            _stamp_vid_set = _vs.id if _vs else None
+                        _save_vehicle_sync(status, _get_battery_kwh(vehicle_id=_stamp_vid_set),
+                                           raw_json=_json.dumps(status.raw_data, default=str),
+                                           vehicle_id=_stamp_vid_set)
                         log_sync_result(status,
                                         mode_label='force' if force else 'cached',
                                         source='settings')
@@ -2610,8 +2635,17 @@ def register_routes(app):
             creds = _get_vehicle_credentials()
             connector = get_connector(brand, creds)
             s = connector.get_status(force=force)
-            sync = _save_vehicle_sync(s, _get_battery_kwh(),
-                                      raw_json=_json.dumps(s.raw_data, default=str))
+            _picker_d = _active_vehicle_id()
+            _stamp_vid_d = _picker_d if isinstance(_picker_d, int) else None
+            if _stamp_vid_d is None:
+                from models.database import Vehicle as _Vd
+                _vd = (_Vd.query.filter_by(is_archived=False)
+                       .order_by(_Vd.id.asc()).first()
+                       or _Vd.query.order_by(_Vd.id.asc()).first())
+                _stamp_vid_d = _vd.id if _vd else None
+            sync = _save_vehicle_sync(s, _get_battery_kwh(vehicle_id=_stamp_vid_d),
+                                      raw_json=_json.dumps(s.raw_data, default=str),
+                                      vehicle_id=_stamp_vid_d)
             log_sync_result(s,
                             mode_label='force' if force else 'cached',
                             source='dashboard')
@@ -3312,8 +3346,19 @@ def register_routes(app):
             creds = _get_vehicle_credentials()
             connector = get_connector(brand, creds)
             status = connector.get_status(force=True)
-            sync = _save_vehicle_sync(status, _get_battery_kwh(),
-                                      raw_json=_json.dumps(status.raw_data, default=str))
+            # v2.29: stamp the picker's active (or first non-archived)
+            # vehicle so the row is correctly attributed in fleets.
+            _picker = _active_vehicle_id()
+            _stamp_vid = _picker if isinstance(_picker, int) else None
+            if _stamp_vid is None:
+                from models.database import Vehicle as _V
+                _v = (_V.query.filter_by(is_archived=False)
+                      .order_by(_V.id.asc()).first()
+                      or _V.query.order_by(_V.id.asc()).first())
+                _stamp_vid = _v.id if _v else None
+            sync = _save_vehicle_sync(status, _get_battery_kwh(vehicle_id=_stamp_vid),
+                                      raw_json=_json.dumps(status.raw_data, default=str),
+                                      vehicle_id=_stamp_vid)
             log_sync_result(status, mode_label='force', source='manual')
             return jsonify({
                 'ok': True,

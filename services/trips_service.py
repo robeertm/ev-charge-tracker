@@ -124,16 +124,32 @@ def update_parking_from_sync(sync) -> Optional[ParkingEvent]:
     - Open a new ParkingEvent (car arrived somewhere new)
     - Close the currently open event (car has moved)
     - Do nothing (car is moving / no GPS data / same spot)
+
+    v2.29 multi-vehicle: every PE query is scoped to the sync's
+    vehicle_id so simultaneous syncs from different cars in a fleet
+    don't cross-contaminate each other's parking-state machines.
+    The per-vehicle ``brand`` lookup also now reads from the Vehicle
+    row (with AppConfig fallback for legacy single-car installs) so
+    the Hyundai-specific branches only fire for actual Hyundai cars.
     """
     if sync is None:
         return None
 
-    open_evt = (ParkingEvent.query
-                .filter(ParkingEvent.departed_at.is_(None))
-                .order_by(ParkingEvent.arrived_at.desc())
-                .first())
+    veh_id = getattr(sync, 'vehicle_id', None)
+    open_evt_q = ParkingEvent.query.filter(ParkingEvent.departed_at.is_(None))
+    if veh_id is not None:
+        open_evt_q = open_evt_q.filter(ParkingEvent.vehicle_id == veh_id)
+    open_evt = open_evt_q.order_by(ParkingEvent.arrived_at.desc()).first()
 
-    brand = (AppConfig.get('vehicle_api_brand', '') or '').lower()
+    # Brand lookup: Vehicle row first, AppConfig as legacy fallback.
+    brand = ''
+    if veh_id is not None:
+        from models.database import Vehicle
+        _v = Vehicle.query.get(veh_id)
+        if _v is not None and _v.api_brand:
+            brand = _v.api_brand.lower()
+    if not brand:
+        brand = (AppConfig.get('vehicle_api_brand', '') or '').lower()
 
     # Fresh-GPS shortcut (used for upgrade and odo-advance branches).
     # Strict: requires ``location_last_updated_at`` to be present AND
@@ -255,12 +271,15 @@ def update_parking_from_sync(sync) -> Optional[ParkingEvent]:
         flip = False
         if not teleport:
             from models.database import VehicleSync
-            earlier = VehicleSync.query.filter(
+            _eq = VehicleSync.query.filter(
                 VehicleSync.timestamp >= open_evt.arrived_at,
                 VehicleSync.timestamp < sync.timestamp,
                 VehicleSync.location_lat.isnot(None),
                 VehicleSync.location_last_updated_at.isnot(None),
-            ).all()
+            )
+            if veh_id is not None:
+                _eq = _eq.filter(VehicleSync.vehicle_id == veh_id)
+            earlier = _eq.all()
             for es in earlier:
                 age = (es.timestamp - es.location_last_updated_at).total_seconds() / 60.0
                 if age > STALE_GPS_MAX_MIN:
@@ -458,6 +477,7 @@ def _open_event(sync, lat: float, lon: float) -> ParkingEvent:
     # Same-place syncs will overwrite with newer at-spot values until the
     # car moves.
     evt = ParkingEvent(
+        vehicle_id=getattr(sync, 'vehicle_id', None),
         arrived_at=sync.timestamp,
         last_seen_at=sync.timestamp,
         lat=lat,
@@ -480,6 +500,7 @@ def _open_unknown(sync) -> ParkingEvent:
     sentinel (0,0) and label is 'unknown'. A later fresh-GPS sync
     upgrades it via ``_upgrade_unknown``."""
     evt = ParkingEvent(
+        vehicle_id=getattr(sync, 'vehicle_id', None),
         arrived_at=sync.timestamp,
         last_seen_at=sync.timestamp,
         lat=0.0,
@@ -607,15 +628,20 @@ def _previous_labelled_pe(evt: ParkingEvent) -> Optional[ParkingEvent]:
     """Most recent ParkingEvent ending before ``evt`` that has a real
     label (not ``'unknown'``, not ``None``) and real coords. Used by
     the 1-step-behind repeat-echo guard to compare a candidate stamp
-    coord against the last confirmed location."""
-    return (ParkingEvent.query
-            .filter(ParkingEvent.id != evt.id)
-            .filter(ParkingEvent.departed_at.isnot(None))
-            .filter(ParkingEvent.label.isnot(None))
-            .filter(ParkingEvent.label != 'unknown')
-            .filter(ParkingEvent.arrived_at < evt.arrived_at)
-            .order_by(ParkingEvent.arrived_at.desc())
-            .first())
+    coord against the last confirmed location.
+
+    v2.29: scoped to ``evt.vehicle_id`` so a Skoda's predecessors don't
+    pollute a Niro's repeat-echo guard.
+    """
+    q = (ParkingEvent.query
+         .filter(ParkingEvent.id != evt.id)
+         .filter(ParkingEvent.departed_at.isnot(None))
+         .filter(ParkingEvent.label.isnot(None))
+         .filter(ParkingEvent.label != 'unknown')
+         .filter(ParkingEvent.arrived_at < evt.arrived_at))
+    if evt.vehicle_id is not None:
+        q = q.filter(ParkingEvent.vehicle_id == evt.vehicle_id)
+    return q.order_by(ParkingEvent.arrived_at.desc()).first()
 
 
 
