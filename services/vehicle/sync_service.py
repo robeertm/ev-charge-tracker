@@ -311,52 +311,101 @@ def _do_sync(app):
         return results
 
 
+def _trip_info_vehicles():
+    """Return all non-archived Kia/Hyundai fleet vehicles with creds —
+    those are the only ones day_trip_info runs against. Used by both
+    the post-move + nightly reconcile paths."""
+    from models.database import Vehicle
+    return (Vehicle.query
+            .filter_by(is_archived=False, auto_sync=True)
+            .filter(Vehicle.api_brand.in_(['kia', 'hyundai']))
+            .filter(Vehicle.api_username.isnot(None))
+            .order_by(Vehicle.id.asc())
+            .all())
+
+
 def _maybe_post_move_reconcile(app) -> None:
     """If a PE transition queued a one-shot reconcile, run backfill +
-    reconcile for today. Pure observability-free path — failures log a
-    warning but never interrupt the sync loop. The flag self-clears so
-    multiple transitions within one sync window coalesce into a single
-    reconcile call."""
+    reconcile for today across every Kia/Hyundai fleet vehicle. The
+    flag self-clears so multiple transitions within one sync window
+    coalesce into a single reconcile call."""
     global _post_move_reconcile_pending
     if not _post_move_reconcile_pending:
         return
     _post_move_reconcile_pending = False
     try:
         with app.app_context():
-            from services.trip_reconcile import _brand_supports_trip_info
-            if not _brand_supports_trip_info():
-                return
             from services.vehicle.trip_log_fetch import backfill
-            logger.info("Post-move trip reconcile: fetching today's SDK trips")
-            r = backfill(days=1)
-            total = sum(d.get('added', 0) + d.get('updated', 0) for d in r.get('results', []))
-            logger.info(f"Post-move trip reconcile done: {total} SDK trip(s) touched")
+            from services.trip_reconcile import _brand_supports_trip_info
+            targets = _trip_info_vehicles()
+            if not targets:
+                # Fall back to the legacy single-vehicle path when no
+                # Vehicle row carries Kia/Hyundai creds — covers
+                # installs that haven't been migrated to per-vehicle
+                # creds yet.
+                if not _brand_supports_trip_info():
+                    return
+                r = backfill(days=1)
+                total = sum(d.get('added', 0) + d.get('updated', 0) for d in r.get('results', []))
+                logger.info(f"Post-move trip reconcile (legacy): {total} SDK trip(s) touched")
+                return
+            for v in targets:
+                try:
+                    r = backfill(days=1, vehicle_id=v.id)
+                    total = sum(d.get('added', 0) + d.get('updated', 0) for d in r.get('results', []))
+                    logger.info(
+                        f"Post-move trip reconcile [{v.name}]: {total} SDK trip(s) touched"
+                    )
+                except Exception as e:
+                    logger.warning(f"Post-move reconcile [{v.name}] failed: {e}")
     except Exception as e:
         logger.warning(f"Post-move reconcile failed: {e}")
 
 
 def _maybe_daily_trip_reconcile(app) -> None:
-    """Once per calendar day on brands that expose day_trip_info (Kia +
-    Hyundai), pull the last 3 days of SDK trip-info and realign PE-pair
-    ``departed_at`` against them. No-op on unsupported brands and on
-    same-day re-entry. Wrapped wide: a reconcile failure must never
-    take the sync loop down.
+    """Once per calendar day per Kia/Hyundai vehicle, pull the last 3
+    days of SDK trip-info and realign PE-pair ``departed_at`` against
+    them. No-op on unsupported brands and on same-day re-entry.
+
+    v2.29: iterates every fleet vehicle and tracks the once-per-day
+    gate per-vehicle, so two Kias each get their own daily reconcile.
+    Wrapped wide: a reconcile failure on one vehicle must never block
+    the others or take the sync loop down.
     """
     try:
         with app.app_context():
             from services.trip_reconcile import should_run_daily, reconcile_range
             from services.vehicle.trip_log_fetch import backfill
-            if not should_run_daily():
+            targets = _trip_info_vehicles()
+            if not targets:
+                # Legacy single-vehicle path
+                if not should_run_daily():
+                    return
+                logger.info("Daily trip reconcile (legacy): 3-day walk")
+                backfill(days=3)
+                r = reconcile_range(days=3)
+                logger.info(
+                    f"Daily trip reconcile (legacy) done: "
+                    f"dep={r.get('total_applied', 0)} "
+                    f"arr={r.get('total_arr_applied', 0)} "
+                    f"conflicts={r.get('total_conflicts', 0)}"
+                )
                 return
-            logger.info("Daily trip reconcile: fetching last 3 days of SDK trips")
-            backfill(days=3)  # populate today + yesterday + day-before
-            r = reconcile_range(days=3)
-            logger.info(
-                f"Daily trip reconcile done: "
-                f"dep={r.get('total_applied', 0)} "
-                f"arr={r.get('total_arr_applied', 0)} "
-                f"conflicts={r.get('total_conflicts', 0)}"
-            )
+            for v in targets:
+                try:
+                    if not should_run_daily(vehicle_id=v.id):
+                        continue
+                    logger.info(f"Daily trip reconcile [{v.name}]: 3-day walk")
+                    backfill(days=3, vehicle_id=v.id)
+                    r = reconcile_range(days=3, vehicle_id=v.id)
+                    logger.info(
+                        f"Daily trip reconcile [{v.name}] done: "
+                        f"dep={r.get('total_applied', 0)} "
+                        f"arr={r.get('total_arr_applied', 0)} "
+                        f"conflicts={r.get('total_conflicts', 0)}"
+                    )
+                except Exception as e:
+                    logger.warning(f"Daily trip reconcile [{v.name}] failed: {e}")
     except Exception as e:
         logger.warning(f"Daily trip reconcile failed: {e}")
 

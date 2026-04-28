@@ -56,14 +56,25 @@ _KM_TOL_REL = 0.25       # distance may differ by ≤ 25 %…
 _KM_TOL_ABS = 3.0        # …or ≤ 3 km absolute (helps very short trips)
 
 
-def _brand_supports_trip_info() -> bool:
+def _brand_supports_trip_info(vehicle_id=None) -> bool:
     """Gate: only run where the SDK actually returns day_trip_info data.
-    Currently both Kia UVO and Hyundai Bluelink do."""
-    brand = AppConfig.get('vehicle_api_brand', '').lower()
+    Currently both Kia UVO and Hyundai Bluelink do.
+
+    v2.29: when ``vehicle_id`` is set, check that vehicle's brand;
+    otherwise fall back to the legacy AppConfig single-vehicle path.
+    """
+    brand = ''
+    if vehicle_id is not None:
+        from models.database import Vehicle
+        v = Vehicle.query.get(vehicle_id)
+        if v is not None and v.api_brand:
+            brand = v.api_brand.lower()
+    if not brand:
+        brand = (AppConfig.get('vehicle_api_brand', '') or '').lower()
     return brand in ('kia', 'hyundai')
 
 
-def reconcile_day(target_date: date) -> dict:
+def reconcile_day(target_date: date, vehicle_id=None) -> dict:
     """Align each PE pair's ``departed_at`` with its matching SDK trip
     for a single calendar day.
 
@@ -84,16 +95,18 @@ def reconcile_day(target_date: date) -> dict:
         'changes': [],
         'skipped_reason': None,
     }
-    if not _brand_supports_trip_info():
+    if not _brand_supports_trip_info(vehicle_id):
         out['skipped_reason'] = 'brand_unsupported'
         return out
 
     # PE pairs where either the (stored, possibly-stale) departed_at or
-    # the (reliable) arrived_at falls on target_date. We key on both
-    # because pre-reconciliation departed_at can be days off — filtering
-    # purely on departed_at.date() would miss the PE pairs that most
-    # need correcting.
-    events = list(ParkingEvent.query.order_by(ParkingEvent.arrived_at.asc()).all())
+    # the (reliable) arrived_at falls on target_date. v2.29: scoped to
+    # the vehicle when given so different fleet members' PE chains
+    # don't share one reconcile pass.
+    _ev_q = ParkingEvent.query
+    if vehicle_id is not None:
+        _ev_q = _ev_q.filter_by(vehicle_id=vehicle_id)
+    events = list(_ev_q.order_by(ParkingEvent.arrived_at.asc()).all())
     pairs = []
     for prev, curr in zip(events, events[1:]):
         if prev.departed_at is None:
@@ -109,11 +122,11 @@ def reconcile_day(target_date: date) -> dict:
             km = None
         pairs.append((prev, curr, km))
 
-    # SDK trips for that day
-    sdk_rows = list(VehicleTrip.query
-                    .filter_by(trip_date=target_date)
-                    .order_by(VehicleTrip.start_time.asc())
-                    .all())
+    # SDK trips for that day, scoped to the same vehicle.
+    _sdk_q = VehicleTrip.query.filter_by(trip_date=target_date)
+    if vehicle_id is not None:
+        _sdk_q = _sdk_q.filter_by(vehicle_id=vehicle_id)
+    sdk_rows = list(_sdk_q.order_by(VehicleTrip.start_time.asc()).all())
 
     if not pairs or not sdk_rows:
         out['unmatched_pe'] = len(pairs)
@@ -224,26 +237,34 @@ def reconcile_day(target_date: date) -> dict:
     return out
 
 
-def reconcile_range(days: int = 7) -> dict:
+def reconcile_range(days: int = 7, vehicle_id=None) -> dict:
     """Reconcile the last ``days`` calendar days, newest first. Returns
-    a shape-stable dict even when the active brand is unsupported."""
+    a shape-stable dict even when the active brand is unsupported.
+
+    v2.29: ``vehicle_id`` scopes everything; None falls back to the
+    legacy single-vehicle path that mostly only worked correctly when
+    AppConfig.vehicle_api_brand was set anyway.
+    """
     out = {'days_attempted': 0, 'total_applied': 0, 'total_arr_applied': 0,
-           'total_conflicts': 0, 'per_day': []}
-    if not _brand_supports_trip_info():
+           'total_conflicts': 0, 'per_day': [], 'vehicle_id': vehicle_id}
+    if not _brand_supports_trip_info(vehicle_id):
         out['skipped_reason'] = 'brand_unsupported'
         return out
     today = date.today()
     for i in range(days):
         d = today - timedelta(days=i)
-        r = reconcile_day(d)
+        r = reconcile_day(d, vehicle_id=vehicle_id)
         out['per_day'].append(r)
         out['total_applied'] += r.get('applied', 0)
         out['total_arr_applied'] += r.get('arr_applied', 0)
         out['total_conflicts'] += r.get('skipped_conflict', 0)
         out['days_attempted'] += 1
-    AppConfig.set('last_reconcile_at', datetime.now().isoformat())
+    if vehicle_id is None or vehicle_id == 1:
+        AppConfig.set('last_reconcile_at', datetime.now().isoformat())
+    else:
+        AppConfig.set(f'last_reconcile_at_{vehicle_id}', datetime.now().isoformat())
     logger.info(
-        f"trip_reconcile: {days}d walk, "
+        f"trip_reconcile [vid={vehicle_id}]: {days}d walk, "
         f"{out['total_applied']} departed_at + "
         f"{out['total_arr_applied']} arrived_at corrected, "
         f"{out['total_conflicts']} conflicts skipped"
@@ -251,14 +272,22 @@ def reconcile_range(days: int = 7) -> dict:
     return out
 
 
-def should_run_daily() -> bool:
+def should_run_daily(vehicle_id=None) -> bool:
     """Gate for the sync-loop: only return True once per calendar day
     on brands that expose day_trip_info. The caller should call
     ``reconcile_range`` (and ``trip_log_fetch.backfill``) when this
-    returns True."""
-    if not _brand_supports_trip_info():
+    returns True.
+
+    v2.29: per-vehicle key ``last_reconcile_at_{id}`` (Vehicle#1 keeps
+    the legacy ``last_reconcile_at`` for nahtlosen Upgrade) so two
+    Kia/Hyundai cars in a fleet each get their own once-per-day gate.
+    """
+    if not _brand_supports_trip_info(vehicle_id):
         return False
-    last = AppConfig.get('last_reconcile_at', '')
+    if vehicle_id is None or vehicle_id == 1:
+        last = AppConfig.get('last_reconcile_at', '')
+    else:
+        last = AppConfig.get(f'last_reconcile_at_{vehicle_id}', '')
     if not last:
         return True
     try:

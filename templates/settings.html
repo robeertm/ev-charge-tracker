@@ -125,6 +125,20 @@
                                     {% endif %}
                                 </td>
                                 <td class="text-end">
+                                    {% if v.api_brand and v.api_username %}
+                                    <form method="POST" action="/vehicles/{{ v.id }}/test" class="d-inline">
+                                        <button type="submit" class="btn btn-sm btn-outline-info"
+                                                title="{{ t('set.fleet_test') }}">
+                                            <i class="bi bi-cloud-check"></i>
+                                        </button>
+                                    </form>
+                                    <form method="POST" action="/vehicles/{{ v.id }}/sync" class="d-inline">
+                                        <button type="submit" class="btn btn-sm btn-outline-success"
+                                                title="{{ t('set.fleet_sync_now') }}">
+                                            <i class="bi bi-arrow-repeat"></i>
+                                        </button>
+                                    </form>
+                                    {% endif %}
                                     <button type="button" class="btn btn-sm btn-outline-primary" data-edit-vehicle='{{ v.to_dict()|tojson }}'>
                                         <i class="bi bi-pencil"></i>
                                     </button>

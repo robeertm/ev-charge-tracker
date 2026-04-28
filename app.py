@@ -1392,6 +1392,58 @@ def register_routes(app):
         flash(t('flash.vehicle_archived' if v.is_archived else 'flash.vehicle_restored'), 'success')
         return redirect('/settings#sec-fleet')
 
+    @app.route('/vehicles/<int:vid>/test', methods=['POST'])
+    def vehicles_test(vid):
+        """Probe a vehicle's API credentials without persisting anything.
+        Returns flash with success/error so the user can sanity-check
+        their setup right from the Fahrzeuge table."""
+        from models.database import Vehicle
+        v = Vehicle.query.get_or_404(vid)
+        if not (v.api_brand and v.api_username):
+            flash(t('flash.vehicle_test_no_creds'), 'warning')
+            return redirect('/settings#sec-fleet')
+        try:
+            from services.vehicle import get_connector
+            creds = {
+                'username': v.api_username or '',
+                'password': v.api_password or '',
+                'pin': v.api_pin or '',
+                'region': v.api_region or 'EU',
+                'vin': v.api_vin or '',
+            }
+            connector = get_connector(v.api_brand.lower(), creds)
+            connector._ensure_auth()
+            flash(t('flash.vehicle_test_ok', name=v.name), 'success')
+        except Exception as e:
+            flash(t('flash.vehicle_test_failed', name=v.name, error=str(e)), 'danger')
+        return redirect('/settings#sec-fleet')
+
+    @app.route('/vehicles/<int:vid>/sync', methods=['POST'])
+    def vehicles_sync(vid):
+        """Manual one-shot sync for a single vehicle. Same path as the
+        background loop's _sync_one_vehicle, just on demand."""
+        from models.database import Vehicle
+        v = Vehicle.query.get_or_404(vid)
+        if not (v.api_brand and v.api_username):
+            flash(t('flash.vehicle_sync_no_creds'), 'warning')
+            return redirect('/settings#sec-fleet')
+        try:
+            from services.vehicle.sync_service import _sync_one_vehicle
+            sync = _sync_one_vehicle(app, v)
+            if sync is None:
+                flash(t('flash.vehicle_sync_no_data', name=v.name), 'warning')
+            else:
+                parts = []
+                if sync.soc_percent is not None:
+                    parts.append(f'SoC {sync.soc_percent}%')
+                if sync.odometer_km is not None:
+                    parts.append(f'{sync.odometer_km:,} km')
+                summary = ' · '.join(parts) if parts else 'OK'
+                flash(t('flash.vehicle_sync_ok', name=v.name, summary=summary), 'success')
+        except Exception as e:
+            flash(t('flash.vehicle_sync_failed', name=v.name, error=str(e)), 'danger')
+        return redirect('/settings#sec-fleet')
+
     @app.route('/vehicles/<int:vid>/delete', methods=['POST'])
     def vehicles_delete(vid):
         """Hard-delete a vehicle. Refused when any Charge / VehicleSync
