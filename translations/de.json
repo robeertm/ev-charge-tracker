@@ -239,6 +239,7 @@
   "input.cancel_confirm": "Eingegebene Daten verwerfen?",
   "input.cancel_title": "Eingabe verwerfen und zurück zum Dashboard",
   "input.charge_type": "Stromart",
+  "input.vehicle": "Fahrzeug",
   "input.co2_auto": "leer lassen = automatisch via ENTSO-E",
   "input.co2_fetch": "CO₂ von ENTSO-E holen",
   "input.co2_gkwh": "CO₂ (g/kWh)",

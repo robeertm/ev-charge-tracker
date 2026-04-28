@@ -239,6 +239,7 @@
   "input.cancel_confirm": "Discard entered data?",
   "input.cancel_title": "Discard entry and return to dashboard",
   "input.charge_type": "Charge Type",
+  "input.vehicle": "Vehicle",
   "input.co2_auto": "leave empty = automatic via ENTSO-E",
   "input.co2_fetch": "Fetch CO₂ from ENTSO-E",
   "input.co2_gkwh": "CO₂ (g/kWh)",

@@ -15,6 +15,41 @@
             </div>
             <div class="card-body">
 
+                {# v2.29: Fahrzeug-Auswahl pro Ladung. Default = pre_charge's
+                   vehicle (when editing) → picker (when one is selected) →
+                   first non-archived. Always visible so the user can re-
+                   target without leaving the page; archived vehicles are
+                   listed but greyed so old data can still be edited but
+                   new charges go on active cars. #}
+                {% set _input_default_vid = pre_charge.vehicle_id if pre_charge and pre_charge.vehicle_id
+                                              else (active_vehicle_filter if active_vehicle_filter and active_vehicle_filter != 'all' else None) %}
+                {% if not _input_default_vid and fleet_vehicles %}
+                    {% for v in fleet_vehicles %}{% if not v.is_archived and not _input_default_vid %}{% set _input_default_vid = v.id %}{% endif %}{% endfor %}
+                {% endif %}
+                {% if fleet_vehicles and fleet_vehicles|length > 0 %}
+                <div class="mb-3">
+                    <label class="form-label fw-bold" for="charge_vehicle_id">
+                        <i class="bi bi-car-front-fill"></i> {{ t('input.vehicle') }}
+                    </label>
+                    {# The visible select sits OUTSIDE the form (above the
+                       Start/Stop buttons so it's the first thing the user
+                       picks). Form submission happens through the
+                       #vehicle_id_hidden input inside the form, kept in
+                       sync via the JS handler on this select. #}
+                    <select class="form-select form-select-lg" id="charge_vehicle_id">
+                        {% for v in fleet_vehicles %}
+                        <option value="{{ v.id }}"
+                                data-battery-kwh="{{ v.battery_kwh or '' }}"
+                                data-max-ac-kw="{{ v.max_ac_kw or '' }}"
+                                {% if _input_default_vid == v.id %}selected{% endif %}
+                                {% if v.is_archived %}class="text-muted"{% endif %}>
+                            {{ v.name }}{% if v.brand or v.model %} — {{ v.brand or '' }}{% if v.brand and v.model %} {% endif %}{{ v.model or '' }}{% endif %}{% if v.is_archived %} ({{ t('nav.archived') }}){% endif %}
+                        </option>
+                        {% endfor %}
+                    </select>
+                </div>
+                {% endif %}
+
                 <!-- Stromart (immer sichtbar, muss zuerst gewählt werden) -->
                 <div class="mb-3">
                     <label class="form-label fw-bold">
@@ -57,6 +92,10 @@
                     <input type="hidden" name="charge_type" id="chargeTypeHidden" value="{{ pre_charge.charge_type if pre_charge else 'AC' }}">
                     <input type="hidden" name="charge_id" id="chargeIdHidden" value="{{ pre_charge.id if pre_charge else '' }}">
                     <input type="hidden" name="session_active" id="sessionActiveHidden" value="">
+                    {# v2.29: vehicle_id mirror — JS keeps this in sync with
+                       the visible #charge_vehicle_id select up top so the
+                       form submission carries the user's chosen vehicle. #}
+                    <input type="hidden" name="vehicle_id" id="vehicle_id_hidden" value="{{ _input_default_vid or '' }}">
 
                     <!-- Datum & Uhrzeit -->
                     <div class="row g-3 mb-3">
@@ -299,8 +338,11 @@
 
 {% block scripts %}
 <script>
-const MAX_AC_KW = {{ max_ac_kw or 11 }};
-const BATTERY_KWH = {{ battery_kwh }};
+// v2.29: these get re-bound when the user changes the per-charge
+// vehicle dropdown (the kWh-from-time and SoC-from-kWh estimators
+// downstream pick up the new values automatically).
+let MAX_AC_KW = {{ max_ac_kw or 11 }};
+let BATTERY_KWH = {{ battery_kwh }};
 const pvCo2 = {{ pv_co2 }};
 const pvPrice = {{ pv_price }};
 let chargeStartTime = null;
@@ -327,6 +369,38 @@ const T = {
     discard_stopped_confirm: {{ t('input.discard_stopped_confirm')|tojson }},
     stop: {{ t('input.stop')|tojson }},
 };
+
+// v2.29 vehicle-selector wiring. The visible select sits outside the
+// form (above the Start/Stop buttons); the form's hidden vehicle_id
+// mirrors it via this handler. We also re-bind BATTERY_KWH + MAX_AC_KW
+// from the selected option's data-* attributes so the timer's kWh /
+// SoC estimators always reflect the chosen car.
+(function () {
+    const sel = document.getElementById('charge_vehicle_id');
+    const hidden = document.getElementById('vehicle_id_hidden');
+    if (!sel || !hidden) return;
+    function applyVehicle() {
+        const opt = sel.selectedOptions[0];
+        if (!opt) return;
+        hidden.value = opt.value;
+        const bk = parseFloat(opt.dataset.batteryKwh);
+        const mk = parseFloat(opt.dataset.maxAcKw);
+        if (!isNaN(bk) && bk > 0) BATTERY_KWH = bk;
+        if (!isNaN(mk) && mk > 0) MAX_AC_KW = mk;
+    }
+    sel.addEventListener('change', () => {
+        applyVehicle();
+        // Recompute the live kWh / SoC estimates after the rebind so
+        // an in-flight session doesn't display stale numbers.
+        if (typeof updateCalcPrice === 'function') updateCalcPrice();
+    });
+    // Initial bind on load — the rendered ``selected`` option already
+    // matches the picker / pre_charge default, but BATTERY_KWH +
+    // MAX_AC_KW were templated from the legacy AppConfig values, so
+    // pull them from the data-attrs to make the JS source-of-truth
+    // the selected vehicle from the start.
+    applyVehicle();
+})();
 
 // Sync charge_type radio to hidden input
 document.querySelectorAll('input[name="charge_type_select"]').forEach(radio => {
