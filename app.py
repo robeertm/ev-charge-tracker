@@ -174,6 +174,76 @@ def create_app(config_class=Config):
             _backfill_regen_cumulative()
             logger.info(f"Backfilled regen_cumulative_kwh for {_missing} vehicle_syncs rows")
 
+        # ── v2.29.0 multi-vehicle migration ──────────────────────────
+        # Goal: every Charge / VehicleSync / ParkingEvent / VehicleTrip
+        # / MaintenanceEntry row carries vehicle_id; legacy installs
+        # get exactly one Vehicle#1 seeded from AppConfig and all rows
+        # backfilled to it. Idempotent — safe to run on every boot.
+        _vehicle_migrate_inspector = inspect(db.engine)
+        _vehicle_child_tables = (
+            'charges', 'vehicle_syncs', 'parking_events',
+            'vehicle_trips', 'maintenance_log',
+        )
+        for _t in _vehicle_child_tables:
+            try:
+                _cols = [c['name'] for c in _vehicle_migrate_inspector.get_columns(_t)]
+            except Exception:
+                continue  # table doesn't exist yet — create_all already handled fresh installs
+            if 'vehicle_id' not in _cols:
+                db.session.execute(text(f'ALTER TABLE {_t} ADD COLUMN vehicle_id INTEGER REFERENCES vehicles(id)'))
+        db.session.commit()
+
+        # Seed Vehicle#1 from AppConfig once. Subsequent boots skip
+        # this branch entirely so adding/removing vehicles via the UI
+        # doesn't get clobbered.
+        from models.database import Vehicle as _VehicleModel
+        if _VehicleModel.query.count() == 0:
+            def _f(key, default=None):
+                v = AppConfig.get(key, default)
+                if v is None or v == '':
+                    return None
+                try:
+                    return float(str(v).replace(',', '.'))
+                except (ValueError, TypeError):
+                    return None
+            _seed = _VehicleModel(
+                name=(AppConfig.get('car_model', '') or 'Mein Auto').strip()[:64] or 'Mein Auto',
+                brand=(AppConfig.get('vehicle_api_brand', '') or '').strip().capitalize() or None,
+                model=(AppConfig.get('car_model', '') or '').strip() or None,
+                color='#0d6efd',  # Bootstrap primary; user can edit later
+                battery_kwh=_f('battery_kwh', '64'),
+                battery_soh_baseline=_f('battery_soh_baseline', '100'),
+                battery_co2_per_kwh=_f('battery_co2_per_kwh'),
+                max_ac_kw=_f('max_ac_kw', '11'),
+                fossil_co2_per_km=_f('fossil_co2_per_km', '164'),
+                recuperation_kwh_per_km=_f('recuperation_kwh_per_km', '0.086'),
+                api_brand=(AppConfig.get('vehicle_api_brand', '') or '').strip() or None,
+                api_username=(AppConfig.get('vehicle_api_username', '') or '').strip() or None,
+                api_password=(AppConfig.get('vehicle_api_password', '') or '') or None,
+                api_pin=(AppConfig.get('vehicle_api_pin', '') or '').strip() or None,
+                api_region=(AppConfig.get('vehicle_api_region', '') or '').strip() or None,
+                api_vin=(AppConfig.get('vehicle_api_vin', '') or '').strip() or None,
+                auto_sync=True,
+                is_archived=False,
+            )
+            db.session.add(_seed)
+            db.session.commit()
+            logger.info(f"v2.29 migration: seeded Vehicle#{_seed.id} '{_seed.name}' from AppConfig")
+            # Backfill all existing rows to the new Vehicle#1 in one
+            # pass per table. Doing this with raw SQL keeps the
+            # migration fast even on installs with thousands of rows
+            # and avoids loading every ORM object into memory.
+            for _t in _vehicle_child_tables:
+                try:
+                    db.session.execute(
+                        text(f'UPDATE {_t} SET vehicle_id = :vid WHERE vehicle_id IS NULL'),
+                        {'vid': _seed.id},
+                    )
+                except Exception as _e:
+                    logger.warning(f"v2.29 backfill on {_t} skipped: {_e}")
+            db.session.commit()
+            logger.info(f"v2.29 migration: backfilled vehicle_id={_seed.id} on all child tables")
+
     register_routes(app)
 
     # Initialize i18n
@@ -340,6 +410,58 @@ def _get_operator_prices():
         return out
     except (ValueError, TypeError):
         return {}
+
+
+def _active_vehicle_id():
+    """Read the user's "currently focused" vehicle from the Flask session.
+
+    Returns:
+      - 'all' (str) when the fleet-wide aggregate view is selected
+      - int when a specific vehicle is selected
+      - the first non-archived vehicle's id when nothing is set yet,
+        falling back to vehicle_id=1 (which the v2.29 migration always
+        creates), or None if no vehicle exists at all.
+
+    The picker stores its choice in `session['vehicle_filter']` so it
+    persists across requests on the same browser without forcing a
+    server-wide setting (multi-user installs may want different views
+    per user later).
+    """
+    from flask import session
+    from models.database import Vehicle
+    raw = session.get('vehicle_filter')
+    if raw == 'all':
+        return 'all'
+    if raw is not None:
+        try:
+            vid = int(raw)
+            if Vehicle.query.get(vid) is not None:
+                return vid
+        except (ValueError, TypeError):
+            pass
+    # No selection yet — default to the first non-archived vehicle.
+    v = (Vehicle.query.filter_by(is_archived=False)
+         .order_by(Vehicle.id.asc()).first())
+    if v is not None:
+        return v.id
+    fallback = Vehicle.query.order_by(Vehicle.id.asc()).first()
+    return fallback.id if fallback else None
+
+
+def _resolved_vehicle_filter():
+    """Returns (vehicle_id_or_None_for_all, vehicle_or_None).
+
+    Helper for routes that need both the filter int and the actual
+    Vehicle object (e.g. dashboard header showing "Robert's Niro").
+    Returns (None, None) for fleet view; (id, Vehicle) for specific.
+    """
+    from models.database import Vehicle
+    raw = _active_vehicle_id()
+    if raw == 'all':
+        return None, None
+    if raw is None:
+        return None, None
+    return raw, Vehicle.query.get(raw)
 
 
 def _get_operator_monthly_fees():
@@ -1003,12 +1125,152 @@ def register_routes(app):
             ).first()
             if not existing:
                 thg_reminder = prev_year
+        # v2.29 fleet picker — drives the navbar dropdown so the user
+        # can flip between vehicles or the "Alle Flotten-Daten" view
+        # from any page without leaving it.
+        from models.database import Vehicle
+        all_vehicles = Vehicle.query.order_by(
+            Vehicle.is_archived.asc(), Vehicle.id.asc()
+        ).all()
+        active_vid = _active_vehicle_id()  # 'all' | int | None
+        active_vehicle = None
+        if isinstance(active_vid, int):
+            active_vehicle = Vehicle.query.get(active_vid)
         return {
             'app_version': Config.APP_VERSION,
-            'car_model': AppConfig.get('car_model', Config.CAR_MODEL),
+            'car_model': (
+                active_vehicle.name if active_vehicle and active_vehicle.name
+                else AppConfig.get('car_model', Config.CAR_MODEL)
+            ),
             'current_year': today.year,
             'thg_reminder_year': thg_reminder,
+            'fleet_vehicles': all_vehicles,
+            'active_vehicle_filter': active_vid,  # 'all' or int or None
+            'active_vehicle': active_vehicle,
         }
+
+    # ── v2.29 Fleet CRUD ──────────────────────────────────────
+    @app.route('/vehicles/save', methods=['POST'])
+    def vehicles_save():
+        """Create or update a Vehicle from the Settings → Fahrzeuge form.
+
+        Hidden ``vehicle_id`` field decides: empty → new, otherwise
+        update existing. Redirects back to the Fahrzeuge section so
+        the user sees the new state.
+        """
+        from models.database import Vehicle
+        vid = _int(request.form.get('vehicle_id'))
+        if vid:
+            v = Vehicle.query.get_or_404(vid)
+        else:
+            v = Vehicle()
+        v.name = (request.form.get('name', '') or '').strip()[:64]
+        if not v.name:
+            flash(t('flash.vehicle_name_required', default='Name darf nicht leer sein'), 'danger')
+            return redirect('/settings#sec-fleet')
+        v.brand = (request.form.get('brand', '') or '').strip() or None
+        v.model = (request.form.get('model', '') or '').strip() or None
+        v.color = (request.form.get('color', '') or '').strip() or None
+        v.battery_kwh = _float(request.form.get('battery_kwh'))
+        v.battery_soh_baseline = _float(request.form.get('battery_soh_baseline'))
+        v.battery_co2_per_kwh = _float(request.form.get('battery_co2_per_kwh'))
+        v.max_ac_kw = _float(request.form.get('max_ac_kw'))
+        v.fossil_co2_per_km = _float(request.form.get('fossil_co2_per_km'))
+        v.recuperation_kwh_per_km = _float(request.form.get('recuperation_kwh_per_km'))
+        v.api_brand = (request.form.get('api_brand', '') or '').strip().lower() or None
+        v.api_username = (request.form.get('api_username', '') or '').strip() or None
+        # Password: keep existing when blank (so editing other fields
+        # doesn't clear it). New entry with empty password = None.
+        new_pw = request.form.get('api_password', '')
+        if new_pw:
+            v.api_password = new_pw
+        elif not vid:
+            v.api_password = None
+        v.api_pin = (request.form.get('api_pin', '') or '').strip() or None
+        v.api_region = (request.form.get('api_region', '') or '').strip().upper() or None
+        v.api_vin = (request.form.get('api_vin', '') or '').strip().upper() or None
+        v.auto_sync = request.form.get('auto_sync') == '1'
+        try:
+            ad = request.form.get('acquired_at', '').strip()
+            v.acquired_at = datetime.strptime(ad, '%Y-%m-%d').date() if ad else None
+        except ValueError:
+            v.acquired_at = None
+        try:
+            rd = request.form.get('retired_at', '').strip()
+            v.retired_at = datetime.strptime(rd, '%Y-%m-%d').date() if rd else None
+        except ValueError:
+            v.retired_at = None
+        v.notes = (request.form.get('notes', '') or '').strip() or None
+        if not vid:
+            db.session.add(v)
+        db.session.commit()
+        flash(t('flash.vehicle_saved', default='Fahrzeug gespeichert'), 'success')
+        return redirect('/settings#sec-fleet')
+
+    @app.route('/vehicles/<int:vid>/archive', methods=['POST'])
+    def vehicles_archive(vid):
+        """Toggle the ``is_archived`` flag. Archived vehicles drop out
+        of the active picker but their history stays in fleet aggregates."""
+        from models.database import Vehicle
+        v = Vehicle.query.get_or_404(vid)
+        v.is_archived = not v.is_archived
+        if v.is_archived and not v.retired_at:
+            v.retired_at = date.today()
+        db.session.commit()
+        flash(t('flash.vehicle_archived' if v.is_archived else 'flash.vehicle_restored',
+                default='Fahrzeug aktualisiert'), 'success')
+        return redirect('/settings#sec-fleet')
+
+    @app.route('/vehicles/<int:vid>/delete', methods=['POST'])
+    def vehicles_delete(vid):
+        """Hard-delete a vehicle. Refused when any Charge / VehicleSync
+        / ParkingEvent / VehicleTrip / MaintenanceEntry still references
+        it — those rows would orphan otherwise. The user must reassign
+        or delete the data first (a future "merge" tool can automate
+        that, but for now we keep it strict)."""
+        from models.database import (
+            Vehicle, Charge, VehicleSync, ParkingEvent, VehicleTrip, MaintenanceEntry,
+        )
+        v = Vehicle.query.get_or_404(vid)
+        in_use = (
+            Charge.query.filter_by(vehicle_id=vid).count()
+            + VehicleSync.query.filter_by(vehicle_id=vid).count()
+            + ParkingEvent.query.filter_by(vehicle_id=vid).count()
+            + VehicleTrip.query.filter_by(vehicle_id=vid).count()
+            + MaintenanceEntry.query.filter_by(vehicle_id=vid).count()
+        )
+        if in_use > 0:
+            flash(t('flash.vehicle_has_data',
+                    default=f'Fahrzeug "{v.name}" hat noch {in_use} Datensätze und kann nicht gelöscht werden — erst archivieren'),
+                  'danger')
+            return redirect('/settings#sec-fleet')
+        db.session.delete(v)
+        db.session.commit()
+        flash(t('flash.vehicle_deleted', default='Fahrzeug gelöscht'), 'warning')
+        return redirect('/settings#sec-fleet')
+
+    @app.route('/api/vehicles/select', methods=['POST'])
+    def api_vehicles_select():
+        """Persist the user's vehicle-picker choice in the Flask session.
+
+        Body: JSON {"vehicle_id": "all" | int}. Returns the resolved
+        choice so the navbar can update without a page reload.
+        """
+        from flask import session
+        from models.database import Vehicle
+        data = request.get_json(silent=True) or {}
+        raw = data.get('vehicle_id')
+        if raw == 'all':
+            session['vehicle_filter'] = 'all'
+            return jsonify({'ok': True, 'vehicle_id': 'all'})
+        try:
+            vid = int(raw)
+        except (TypeError, ValueError):
+            return jsonify({'error': 'invalid vehicle_id'}), 400
+        if Vehicle.query.get(vid) is None:
+            return jsonify({'error': 'vehicle not found'}), 404
+        session['vehicle_filter'] = vid
+        return jsonify({'ok': True, 'vehicle_id': vid})
 
     # ── DASHBOARD ──────────────────────────────────────────────
     @app.route('/')
@@ -1017,10 +1279,15 @@ def register_routes(app):
             get_summary_stats, get_chart_data, get_ac_dc_stats,
             get_yearly_stats, get_vehicle_history,
         )
-        stats = get_summary_stats()
-        chart_data = get_chart_data()
-        acdc = get_ac_dc_stats()
-        yearly = get_yearly_stats()
+        # v2.29 fleet picker: 'all' → fleet aggregate (no filter);
+        # int → that vehicle. _active_vehicle_id() returns 'all' or
+        # an int; map 'all' to None for the stats API.
+        _picker = _active_vehicle_id()
+        vid_filter = None if _picker == 'all' else _picker
+        stats = get_summary_stats(vehicle_id=vid_filter)
+        chart_data = get_chart_data(vehicle_id=vid_filter)
+        acdc = get_ac_dc_stats(vehicle_id=vid_filter)
+        yearly = get_yearly_stats(vehicle_id=vid_filter)
         vehicle_configured = bool(AppConfig.get('vehicle_api_brand', ''))
         # User's preferred default range for the vehicle-history plots
         # (0 = all). Stored in AppConfig so the choice persists across
@@ -1029,7 +1296,7 @@ def register_routes(app):
             default_days = int(AppConfig.get('dash_history_days', '30') or '30')
         except (ValueError, TypeError):
             default_days = 30
-        vehicle_history = get_vehicle_history(days=default_days or None) if vehicle_configured else None
+        vehicle_history = get_vehicle_history(days=default_days or None, vehicle_id=vid_filter) if vehicle_configured else None
         # The map card only makes sense with GPS. Under Kia/Hyundai
         # "cached" mode the most recent sync often has no lat/lon — but
         # earlier syncs in the same window may. Pick the last row that
@@ -1104,6 +1371,21 @@ def register_routes(app):
                 charge.operator = request.form.get('operator', '').strip() or None
                 charge.start_fee_eur = _float(request.form.get('start_fee_eur'))
                 charge.blocking_fee_eur = _float(request.form.get('blocking_fee_eur'))
+                # v2.29 multi-vehicle: stamp the active vehicle on every
+                # NEW charge. Updates keep whatever vehicle_id was
+                # already set so a stale picker doesn't accidentally
+                # re-attribute an old row to a different car.
+                if not is_update:
+                    _picker = _active_vehicle_id()
+                    if isinstance(_picker, int):
+                        charge.vehicle_id = _picker
+                    else:
+                        from models.database import Vehicle
+                        _v = (Vehicle.query.filter_by(is_archived=False)
+                              .order_by(Vehicle.id.asc()).first()
+                              or Vehicle.query.order_by(Vehicle.id.asc()).first())
+                        if _v is not None:
+                            charge.vehicle_id = _v.id
                 charge.calculate_fields(_get_battery_kwh())
 
                 # If no CO2 provided, set automatically
@@ -1190,6 +1472,11 @@ def register_routes(app):
         year = args.get('year', '', type=str)
 
         query = Charge.query
+        # v2.29 fleet picker — restrict to active vehicle unless the
+        # user picked "Alle" in the navbar dropdown.
+        _picker = _active_vehicle_id()
+        if isinstance(_picker, int):
+            query = query.filter_by(vehicle_id=_picker)
         if charge_type in ('AC', 'DC', 'PV'):
             query = query.filter_by(charge_type=charge_type)
         if year and year.isdigit():
@@ -1763,7 +2050,10 @@ def register_routes(app):
         end = request.args.get('end')
         lang = AppConfig.get('app_language', 'de')
         s, e, label = resolve_range(preset, start, end, lang=lang)
-        data = build_report(s, e, lang=lang)
+        # v2.29 fleet picker
+        _picker = _active_vehicle_id()
+        _vid = _picker if isinstance(_picker, int) else None
+        data = build_report(s, e, lang=lang, vehicle_id=_vid)
         data['label'] = label
         data['preset'] = preset
         return jsonify(data)
@@ -2540,9 +2830,14 @@ def register_routes(app):
         except Exception as e:
             logger.warning(f"trips_page geocode dispatch failed: {e}")
 
-        trips = get_trips(limit=200)
+        # v2.29 fleet picker
+        _picker = _active_vehicle_id()
+        _vid = _picker if isinstance(_picker, int) else None
+        trips = get_trips(limit=200, vehicle_id=_vid)
         events = get_parking_events(limit=200)
-        summary = get_trip_summary()
+        if _vid is not None:
+            events = [e for e in events if e.vehicle_id == _vid]
+        summary = get_trip_summary(vehicle_id=_vid)
         locations = _load_locations()
 
         # Freshness info for the UI

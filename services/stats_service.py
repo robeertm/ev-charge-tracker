@@ -5,6 +5,22 @@ from sqlalchemy import func, extract
 from models.database import db, Charge, ThgQuota, AppConfig, VehicleSync
 
 
+def _filter_by_vehicle(query, model, vehicle_id):
+    """Apply the multi-vehicle filter introduced in v2.29.
+
+    ``vehicle_id`` semantics:
+      - None  → no filter (fleet-wide aggregate; default for legacy callers)
+      - int   → filter to that specific vehicle
+
+    Anchored on ``model.vehicle_id`` so the same helper works for any
+    of the five child tables (Charge / VehicleSync / ParkingEvent /
+    VehicleTrip / MaintenanceEntry).
+    """
+    if vehicle_id is None:
+        return query
+    return query.filter(model.vehicle_id == vehicle_id)
+
+
 def get_soh_baseline() -> float:
     """Return the configured SoH baseline used to scale raw BMS readings.
 
@@ -32,20 +48,25 @@ def scale_soh(raw):
         return None
 
 
-def _measured_regen_rate_kwh_per_km():
+def _measured_regen_rate_kwh_per_km(vehicle_id=None):
     """Compute kWh recuperated per km from the last ~90 days of vehicle syncs.
 
     Uses the monotonic regen_cumulative_kwh (delta) divided by the odometer
     delta over the same window. Returns None if there's insufficient data,
     in which case callers should fall back to the configured static rate.
+
+    ``vehicle_id`` restricts the calculation to one vehicle; None for
+    fleet-wide (which mixes drives across cars and is rarely useful —
+    callers usually pass the active picker selection).
     """
     cutoff = datetime.now() - timedelta(days=90)
-    rows = (VehicleSync.query
-            .filter(VehicleSync.timestamp >= cutoff,
-                    VehicleSync.regen_cumulative_kwh.isnot(None),
-                    VehicleSync.odometer_km.isnot(None))
-            .order_by(VehicleSync.timestamp.asc())
-            .all())
+    q = VehicleSync.query.filter(
+        VehicleSync.timestamp >= cutoff,
+        VehicleSync.regen_cumulative_kwh.isnot(None),
+        VehicleSync.odometer_km.isnot(None),
+    )
+    q = _filter_by_vehicle(q, VehicleSync, vehicle_id)
+    rows = q.order_by(VehicleSync.timestamp.asc()).all()
     if len(rows) < 2:
         return None
     regen_delta = rows[-1].regen_cumulative_kwh - rows[0].regen_cumulative_kwh
@@ -55,14 +76,20 @@ def _measured_regen_rate_kwh_per_km():
     return round(regen_delta / km_delta, 4)
 
 
-def get_recup_rate_kwh_per_km():
+def get_recup_rate_kwh_per_km(vehicle_id=None):
     """Return the recuperation rate in kWh/km.
 
     Prefers a measured rate from the last 90 days of vehicle syncs (when
     available). Falls back to the user-configured static value (default 0.086).
     Returns a tuple (rate, source) where source is 'measured' or 'configured'.
+
+    ``vehicle_id`` (v2.29) restricts the measurement window to one car
+    so a fleet with mixed efficiencies (e.g. Niro + Skoda Enyaq) doesn't
+    average them into a meaningless number. Configured fallback still
+    comes from the global AppConfig — per-vehicle override is on the
+    Vehicle row but threading it everywhere is Phase 2 work.
     """
-    measured = _measured_regen_rate_kwh_per_km()
+    measured = _measured_regen_rate_kwh_per_km(vehicle_id=vehicle_id)
     if measured is not None and measured > 0:
         return measured, 'measured'
     try:
@@ -87,7 +114,7 @@ def _regen_cumulative_at(rows_sorted, ts):
     return rows_sorted[idx][1]
 
 
-def get_regen_stats():
+def get_regen_stats(vehicle_id=None):
     """Return recuperation aggregated by time period.
 
     Bucket totals (today / this_week / this_month / last_30d / last_90d /
@@ -105,10 +132,9 @@ def get_regen_stats():
     Returns None when there's no regen data at all (no Kia/Hyundai sync
     data and no completed trips).
     """
-    rows = (VehicleSync.query
-            .filter(VehicleSync.regen_cumulative_kwh.isnot(None))
-            .order_by(VehicleSync.timestamp.asc())
-            .all())
+    _q = VehicleSync.query.filter(VehicleSync.regen_cumulative_kwh.isnot(None))
+    _q = _filter_by_vehicle(_q, VehicleSync, vehicle_id)
+    rows = _q.order_by(VehicleSync.timestamp.asc()).all()
 
     now = datetime.now()
     today_start = datetime.combine(now.date(), datetime.min.time())
@@ -135,7 +161,7 @@ def get_regen_stats():
     # Trip-derived bucket sums. Imported here to avoid a top-level
     # circular import with trips_service.
     from services.trips_service import get_trips
-    trips = get_trips()
+    trips = get_trips(vehicle_id=vehicle_id)
     trip_regens = []
     for t in trips:
         from_obj = t.get('from') or {}
@@ -174,8 +200,9 @@ def get_regen_stats():
     # km equivalents (how many km you could drive from that recuperated energy)
     # Using the average consumption as rough equivalence
     try:
-        total_km = max((c.odometer for c in Charge.query.all() if c.odometer), default=0)
-        total_kwh = sum(c.kwh_loaded or 0 for c in Charge.query.all())
+        _all_charges = _filter_by_vehicle(Charge.query, Charge, vehicle_id).all()
+        total_km = max((c.odometer for c in _all_charges if c.odometer), default=0)
+        total_kwh = sum(c.kwh_loaded or 0 for c in _all_charges)
         kwh_per_100km = (total_kwh / (total_km / 100)) if total_km > 0 else 17
     except Exception:
         kwh_per_100km = 17
@@ -186,9 +213,13 @@ def get_regen_stats():
     return stats
 
 
-def get_summary_stats():
-    """Get overall summary statistics."""
-    charges = Charge.query.all()
+def get_summary_stats(vehicle_id=None):
+    """Get overall summary statistics.
+
+    ``vehicle_id`` (v2.29) restricts the aggregation to a single
+    vehicle; pass None for fleet-wide totals.
+    """
+    charges = _filter_by_vehicle(Charge.query, Charge, vehicle_id).all()
     if not charges:
         return {}
 
@@ -221,15 +252,14 @@ def get_summary_stats():
     #   km from first vehicle sync onwards     → real measured cumulative kWh
     # This preserves the historical estimate AND layers measured values on top
     # as they come in, without double-counting.
-    regen_stats = get_regen_stats()
+    regen_stats = get_regen_stats(vehicle_id=vehicle_id)
     historical_km = 0
     historical_regen = 0
     measured_regen = 0
     if regen_stats:
-        first_sync = (VehicleSync.query
-                      .filter(VehicleSync.odometer_km.isnot(None))
-                      .order_by(VehicleSync.timestamp.asc())
-                      .first())
+        first_sync_q = VehicleSync.query.filter(VehicleSync.odometer_km.isnot(None))
+        first_sync_q = _filter_by_vehicle(first_sync_q, VehicleSync, vehicle_id)
+        first_sync = first_sync_q.order_by(VehicleSync.timestamp.asc()).first()
         if first_sync and first_sync.odometer_km:
             historical_km = first_sync.odometer_km
             historical_regen = historical_km * static_recup_rate
@@ -297,9 +327,9 @@ def get_summary_stats():
     }
 
 
-def get_monthly_stats():
+def get_monthly_stats(vehicle_id=None):
     """Get monthly aggregated statistics."""
-    results = db.session.query(
+    q = db.session.query(
         extract('year', Charge.date).label('year'),
         extract('month', Charge.date).label('month'),
         func.sum(Charge.kwh_loaded).label('kwh'),
@@ -309,7 +339,9 @@ def get_monthly_stats():
         func.avg(Charge.loss_pct).label('avg_loss_pct'),
         func.min(Charge.odometer).label('odo_min'),
         func.max(Charge.odometer).label('odo_max'),
-    ).group_by(
+    )
+    q = _filter_by_vehicle(q, Charge, vehicle_id)
+    results = q.group_by(
         extract('year', Charge.date),
         extract('month', Charge.date)
     ).order_by(
@@ -335,15 +367,17 @@ def get_monthly_stats():
     return months
 
 
-def get_yearly_stats():
+def get_yearly_stats(vehicle_id=None):
     """Get yearly aggregated statistics."""
-    results = db.session.query(
+    q = db.session.query(
         extract('year', Charge.date).label('year'),
         func.sum(Charge.kwh_loaded).label('kwh'),
         func.sum(Charge.total_cost).label('cost'),
         func.sum(Charge.co2_kg).label('co2'),
         func.count(Charge.id).label('count'),
-    ).group_by(
+    )
+    q = _filter_by_vehicle(q, Charge, vehicle_id)
+    results = q.group_by(
         extract('year', Charge.date)
     ).order_by(
         extract('year', Charge.date)
@@ -365,11 +399,13 @@ def get_yearly_stats():
     } for r in results]
 
 
-def get_ac_dc_stats():
+def get_ac_dc_stats(vehicle_id=None):
     """Get AC vs DC comparison stats."""
     stats = {}
     for ct in ['AC', 'DC', 'PV']:
-        charges = Charge.query.filter_by(charge_type=ct).all()
+        q = Charge.query.filter_by(charge_type=ct)
+        q = _filter_by_vehicle(q, Charge, vehicle_id)
+        charges = q.all()
         if charges:
             total_kwh = sum(c.kwh_loaded or 0 for c in charges)
             total_cost = sum(c.total_cost or 0 for c in charges)
@@ -384,15 +420,18 @@ def get_ac_dc_stats():
     return stats
 
 
-def get_vehicle_history(days=None):
+def get_vehicle_history(days=None, vehicle_id=None):
     """Return time series of tracked vehicle metrics from VehicleSync rows.
 
     days: optional, limit to last N days. None = all history.
+    vehicle_id: v2.29 filter — None for fleet-wide (mixes brands), int
+                for one specific car.
     """
     q = VehicleSync.query.order_by(VehicleSync.timestamp.asc())
     if days:
         cutoff = datetime.now() - timedelta(days=days)
         q = q.filter(VehicleSync.timestamp >= cutoff)
+    q = _filter_by_vehicle(q, VehicleSync, vehicle_id)
     rows = q.all()
     if not rows:
         return None
@@ -460,9 +499,9 @@ def get_vehicle_history(days=None):
     return {'series': series, 'summary': summary}
 
 
-def get_chart_data():
+def get_chart_data(vehicle_id=None):
     """Get data formatted for Chart.js."""
-    monthly = get_monthly_stats()
+    monthly = get_monthly_stats(vehicle_id=vehicle_id)
 
     # Cumulative data
     cum_cost = 0

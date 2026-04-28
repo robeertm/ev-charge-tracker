@@ -39,6 +39,7 @@
 {% block content %}
 {% set settings_sections = [
     ('language',  'bi-translate',   t('set.language')),
+    ('fleet',     'bi-collection',  t('set.fleet_title', default='Fahrzeuge')),
     ('vehicle',   'bi-car-front',   t('set.vehicle')),
     ('thg',       'bi-cash-coin',   t('set.thg_title')),
     ('locations', 'bi-geo-alt',     t('set.locations_title')),
@@ -83,6 +84,177 @@
                         <input type="hidden" name="action" value="save_language">
                     </div>
                 </form>
+            </div>
+        </div>
+
+        <!-- v2.29 Fahrzeuge / Flotte ─────────────────────────────── -->
+        <div class="card mb-4 settings-card" id="sec-fleet">
+            <div class="card-header bg-white fw-bold">
+                <i class="bi bi-collection"></i> {{ t('set.fleet_title', default='Fahrzeuge') }}
+            </div>
+            <div class="card-body">
+                <p class="text-muted small mb-3">{{ t('set.fleet_desc', default='Mehrere Fahrzeuge gleichzeitig verwalten. Jede Ladung, Fahrt und Wartung bleibt am Auto, das sie betrifft. Statistiken können je Fahrzeug oder als Flotten-Aggregat gefiltert werden (Picker oben rechts).') }}</p>
+
+                {% if fleet_vehicles %}
+                <div class="table-responsive mb-3">
+                    <table class="table table-sm align-middle mb-0">
+                        <thead>
+                            <tr>
+                                <th>{{ t('set.fleet_col_name', default='Name') }}</th>
+                                <th>{{ t('set.fleet_col_brand', default='Marke / Modell') }}</th>
+                                <th class="text-end">{{ t('set.fleet_col_battery', default='Akku') }}</th>
+                                <th>{{ t('set.fleet_col_api', default='API') }}</th>
+                                <th>{{ t('set.fleet_col_status', default='Status') }}</th>
+                                <th class="text-end"></th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {% for v in fleet_vehicles %}
+                            <tr {% if v.is_archived %}class="text-muted"{% endif %}>
+                                <td>
+                                    <span class="d-inline-block rounded-circle me-1" style="width:.75rem; height:.75rem; background:{{ v.color or '#0d6efd' }};"></span>
+                                    {{ v.name }}
+                                </td>
+                                <td class="small">{{ v.brand or '—' }}{% if v.model %} · {{ v.model }}{% endif %}</td>
+                                <td class="text-end small">{% if v.battery_kwh %}{{ "%.1f"|format(v.battery_kwh) }} kWh{% else %}—{% endif %}</td>
+                                <td class="small">{% if v.api_brand %}<i class="bi bi-broadcast text-success"></i> {{ v.api_brand }}{% if not v.auto_sync %} <span class="text-muted">({{ t('set.fleet_sync_off', default='sync aus') }})</span>{% endif %}{% else %}<span class="text-muted">—</span>{% endif %}</td>
+                                <td>
+                                    {% if v.is_archived %}
+                                    <span class="badge bg-secondary">{{ t('set.fleet_archived', default='archiviert') }}</span>
+                                    {% else %}
+                                    <span class="badge bg-success">{{ t('set.fleet_active', default='aktiv') }}</span>
+                                    {% endif %}
+                                </td>
+                                <td class="text-end">
+                                    <button type="button" class="btn btn-sm btn-outline-primary" data-edit-vehicle='{{ v.to_dict()|tojson }}'>
+                                        <i class="bi bi-pencil"></i>
+                                    </button>
+                                    <form method="POST" action="/vehicles/{{ v.id }}/archive" class="d-inline">
+                                        <button type="submit" class="btn btn-sm btn-outline-secondary"
+                                                title="{{ t('set.fleet_archive', default='Archivieren') if not v.is_archived else t('set.fleet_restore', default='Reaktivieren') }}">
+                                            <i class="bi {{ 'bi-arrow-counterclockwise' if v.is_archived else 'bi-archive' }}"></i>
+                                        </button>
+                                    </form>
+                                    <form method="POST" action="/vehicles/{{ v.id }}/delete" class="d-inline"
+                                          onsubmit="return confirm('{{ t('set.fleet_confirm_delete', default='Wirklich löschen? Funktioniert nur, wenn keine Daten dranhängen.') }}')">
+                                        <button type="submit" class="btn btn-sm btn-outline-danger">
+                                            <i class="bi bi-trash"></i>
+                                        </button>
+                                    </form>
+                                </td>
+                            </tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
+                {% endif %}
+
+                <button type="button" class="btn btn-primary btn-sm" id="btnNewVehicle" data-bs-toggle="collapse" data-bs-target="#vehicleForm">
+                    <i class="bi bi-plus-lg"></i> {{ t('set.fleet_add', default='Neues Fahrzeug') }}
+                </button>
+
+                <div class="collapse mt-3" id="vehicleForm">
+                    <form method="POST" action="/vehicles/save" class="border rounded p-3">
+                        <input type="hidden" name="vehicle_id" id="vf_id" value="">
+                        <h6 class="mb-3" id="vf_title">{{ t('set.fleet_form_new', default='Neues Fahrzeug') }}</h6>
+                        <div class="row g-2">
+                            <div class="col-md-6">
+                                <label class="form-label small">{{ t('set.fleet_field_name', default='Anzeigename') }}*</label>
+                                <input type="text" class="form-control form-control-sm" name="name" id="vf_name" maxlength="64" required>
+                            </div>
+                            <div class="col-md-3">
+                                <label class="form-label small">{{ t('set.fleet_field_brand', default='Marke') }}</label>
+                                <input type="text" class="form-control form-control-sm" name="brand" id="vf_brand" maxlength="32">
+                            </div>
+                            <div class="col-md-3">
+                                <label class="form-label small">{{ t('set.fleet_field_model', default='Modell') }}</label>
+                                <input type="text" class="form-control form-control-sm" name="model" id="vf_model" maxlength="64">
+                            </div>
+                            <div class="col-md-3">
+                                <label class="form-label small">{{ t('set.fleet_field_color', default='Farbe (hex)') }}</label>
+                                <input type="color" class="form-control form-control-color form-control-sm" name="color" id="vf_color" value="#0d6efd">
+                            </div>
+                            <div class="col-md-3">
+                                <label class="form-label small">{{ t('set.fleet_field_battery', default='Akku (kWh)') }}</label>
+                                <input type="number" step="0.1" class="form-control form-control-sm" name="battery_kwh" id="vf_battery_kwh">
+                            </div>
+                            <div class="col-md-3">
+                                <label class="form-label small">{{ t('set.fleet_field_max_ac', default='Max AC (kW)') }}</label>
+                                <input type="number" step="0.1" class="form-control form-control-sm" name="max_ac_kw" id="vf_max_ac_kw">
+                            </div>
+                            <div class="col-md-3">
+                                <label class="form-label small">{{ t('set.fleet_field_recup', default='Rekuperation (kWh/km)') }}</label>
+                                <input type="number" step="0.001" class="form-control form-control-sm" name="recuperation_kwh_per_km" id="vf_recup">
+                            </div>
+                        </div>
+                        <hr class="my-3">
+                        <h6 class="small text-muted">{{ t('set.fleet_section_api', default='API-Zugang (optional, für automatischen Sync)') }}</h6>
+                        <div class="row g-2">
+                            <div class="col-md-3">
+                                <label class="form-label small">{{ t('set.fleet_field_api_brand', default='API-Connector') }}</label>
+                                <select class="form-select form-select-sm" name="api_brand" id="vf_api_brand">
+                                    <option value="">—</option>
+                                    <option value="kia">Kia</option>
+                                    <option value="hyundai">Hyundai</option>
+                                    <option value="vw">VW Group (Skoda/Seat/VW)</option>
+                                    <option value="tesla">Tesla</option>
+                                    <option value="renault">Renault</option>
+                                    <option value="mg">MG</option>
+                                    <option value="polestar">Polestar</option>
+                                    <option value="porsche">Porsche</option>
+                                    <option value="smart">Smart</option>
+                                </select>
+                            </div>
+                            <div class="col-md-3">
+                                <label class="form-label small">{{ t('set.fleet_field_api_user', default='Benutzername') }}</label>
+                                <input type="text" class="form-control form-control-sm" name="api_username" id="vf_api_username" autocomplete="off">
+                            </div>
+                            <div class="col-md-3">
+                                <label class="form-label small">{{ t('set.fleet_field_api_pw', default='Passwort') }}</label>
+                                <input type="password" class="form-control form-control-sm" name="api_password" id="vf_api_password" autocomplete="new-password" placeholder="{{ t('set.fleet_field_api_pw_keep', default='leer = unverändert') }}">
+                            </div>
+                            <div class="col-md-1">
+                                <label class="form-label small">{{ t('set.fleet_field_api_pin', default='PIN') }}</label>
+                                <input type="text" class="form-control form-control-sm" name="api_pin" id="vf_api_pin" maxlength="20">
+                            </div>
+                            <div class="col-md-1">
+                                <label class="form-label small">{{ t('set.fleet_field_api_region', default='Region') }}</label>
+                                <input type="text" class="form-control form-control-sm" name="api_region" id="vf_api_region" maxlength="6">
+                            </div>
+                            <div class="col-md-1">
+                                <label class="form-label small">{{ t('set.fleet_field_api_vin', default='VIN') }}</label>
+                                <input type="text" class="form-control form-control-sm" name="api_vin" id="vf_api_vin" maxlength="40">
+                            </div>
+                            <div class="col-md-12 form-check ms-2">
+                                <input class="form-check-input" type="checkbox" value="1" name="auto_sync" id="vf_auto_sync" checked>
+                                <label class="form-check-label small" for="vf_auto_sync">{{ t('set.fleet_field_auto_sync', default='Automatischer Sync (sobald Multi-Sync verfügbar ist)') }}</label>
+                            </div>
+                        </div>
+                        <hr class="my-3">
+                        <div class="row g-2">
+                            <div class="col-md-3">
+                                <label class="form-label small">{{ t('set.fleet_field_acquired', default='Angeschafft am') }}</label>
+                                <input type="date" class="form-control form-control-sm" name="acquired_at" id="vf_acquired_at">
+                            </div>
+                            <div class="col-md-3">
+                                <label class="form-label small">{{ t('set.fleet_field_retired', default='Abgegeben am') }}</label>
+                                <input type="date" class="form-control form-control-sm" name="retired_at" id="vf_retired_at">
+                            </div>
+                            <div class="col-md-6">
+                                <label class="form-label small">{{ t('set.fleet_field_notes', default='Notizen') }}</label>
+                                <input type="text" class="form-control form-control-sm" name="notes" id="vf_notes">
+                            </div>
+                        </div>
+                        <div class="mt-3 d-flex justify-content-end gap-2">
+                            <button type="button" class="btn btn-outline-secondary btn-sm" data-bs-toggle="collapse" data-bs-target="#vehicleForm">
+                                {{ t('set.fleet_form_cancel', default='Abbrechen') }}
+                            </button>
+                            <button type="submit" class="btn btn-primary btn-sm">
+                                <i class="bi bi-save"></i> {{ t('set.fleet_form_save', default='Speichern') }}
+                            </button>
+                        </div>
+                    </form>
+                </div>
             </div>
         </div>
 
@@ -1790,6 +1962,52 @@
 {% endblock %}
 
 {% block scripts %}
+<script>
+// ── v2.29 Fleet form: edit button pre-fills the inline form ──────────
+(function () {
+    const form = document.getElementById('vehicleForm');
+    if (!form) return;
+    const collapse = bootstrap.Collapse.getOrCreateInstance(form, { toggle: false });
+    const fieldMap = {
+        id: 'vf_id', name: 'vf_name', brand: 'vf_brand', model: 'vf_model',
+        color: 'vf_color', battery_kwh: 'vf_battery_kwh', max_ac_kw: 'vf_max_ac_kw',
+        api_brand: 'vf_api_brand', auto_sync: 'vf_auto_sync',
+        acquired_at: 'vf_acquired_at', retired_at: 'vf_retired_at',
+    };
+    function clearForm() {
+        form.querySelectorAll('input, select').forEach(el => {
+            if (el.type === 'checkbox') {
+                el.checked = (el.id === 'vf_auto_sync');  // default new=on
+            } else if (el.type === 'color') {
+                el.value = '#0d6efd';
+            } else {
+                el.value = '';
+            }
+        });
+        document.getElementById('vf_title').textContent = {{ t('set.fleet_form_new', default='Neues Fahrzeug')|tojson }};
+    }
+    document.querySelectorAll('[data-edit-vehicle]').forEach(btn => {
+        btn.addEventListener('click', () => {
+            let v;
+            try { v = JSON.parse(btn.getAttribute('data-edit-vehicle')); }
+            catch (e) { return; }
+            clearForm();
+            for (const [k, fid] of Object.entries(fieldMap)) {
+                const el = document.getElementById(fid);
+                if (!el || v[k] == null) continue;
+                if (el.type === 'checkbox') el.checked = !!v[k];
+                else el.value = v[k];
+            }
+            document.getElementById('vf_title').textContent =
+                {{ t('set.fleet_form_edit', default='Fahrzeug bearbeiten')|tojson }} + ': ' + (v.name || '');
+            collapse.show();
+            form.scrollIntoView({behavior: 'smooth', block: 'center'});
+        });
+    });
+    const newBtn = document.getElementById('btnNewVehicle');
+    if (newBtn) newBtn.addEventListener('click', clearForm);
+})();
+</script>
 <script>
 // ── Settings navigation: sidebar scroll-spy + preserve section on save ──
 (function() {

@@ -170,7 +170,8 @@ def _safe(v, default=0):
     return default if v is None else v
 
 
-def build_report(start: date, end: date, lang: str = 'de') -> dict:
+def build_report(start: date, end: date, lang: str = 'de',
+                 vehicle_id: int | None = None) -> dict:
     """The heavy lifter — queries Charge + VehicleTrip + ParkingEvent for
     the window and shapes them into the JSON structure the /report page
     consumes. All numbers are rounded server-side so the frontend can
@@ -178,13 +179,21 @@ def build_report(start: date, end: date, lang: str = 'de') -> dict:
 
     ``lang`` controls the bucket labels (KW vs W), day-of-week short
     names, and month-year preset label. The route layer should pull it
-    from ``AppConfig['app_language']``."""
-    charges = (Charge.query
-               .filter(Charge.date >= start, Charge.date <= end)
-               .order_by(Charge.date.asc()).all())
-    trips = (VehicleTrip.query
-             .filter(VehicleTrip.trip_date >= start, VehicleTrip.trip_date <= end)
-             .order_by(VehicleTrip.start_time.asc()).all())
+    from ``AppConfig['app_language']``.
+
+    ``vehicle_id`` (v2.29) restricts every aggregation to one car;
+    None means fleet-wide.
+    """
+    cq = Charge.query.filter(Charge.date >= start, Charge.date <= end)
+    if vehicle_id is not None:
+        cq = cq.filter(Charge.vehicle_id == vehicle_id)
+    charges = cq.order_by(Charge.date.asc()).all()
+
+    tq = VehicleTrip.query.filter(VehicleTrip.trip_date >= start,
+                                   VehicleTrip.trip_date <= end)
+    if vehicle_id is not None:
+        tq = tq.filter(VehicleTrip.vehicle_id == vehicle_id)
+    trips = tq.order_by(VehicleTrip.start_time.asc()).all()
 
     bucket_size = _bucket_interval(start, end)
     buckets = list(_iter_buckets(start, end, bucket_size, lang))
@@ -334,10 +343,12 @@ def build_report(start: date, end: date, lang: str = 'de') -> dict:
         # Fallback to parking destinations when no charge carries a
         # location_name — keeps the panel useful for users who haven't
         # filled the field yet.
-        pe_rows = (ParkingEvent.query
-                   .filter(ParkingEvent.arrived_at >= datetime.combine(start, datetime.min.time()),
-                           ParkingEvent.arrived_at <= datetime.combine(end, datetime.max.time()))
-                   .all())
+        _pe_q = (ParkingEvent.query
+                 .filter(ParkingEvent.arrived_at >= datetime.combine(start, datetime.min.time()),
+                         ParkingEvent.arrived_at <= datetime.combine(end, datetime.max.time())))
+        if vehicle_id is not None:
+            _pe_q = _pe_q.filter(ParkingEvent.vehicle_id == vehicle_id)
+        pe_rows = _pe_q.all()
         loc_cnt = Counter()
         for pe in pe_rows:
             if pe.favorite_name:
@@ -357,7 +368,7 @@ def build_report(start: date, end: date, lang: str = 'de') -> dict:
     buck_regen = [0.0] * len(buckets)
     try:
         from services.trips_service import get_trips
-        all_trips = get_trips()
+        all_trips = get_trips(vehicle_id=vehicle_id)
     except Exception:
         all_trips = []
     range_start_dt = datetime.combine(start, datetime.min.time())

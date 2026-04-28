@@ -814,7 +814,8 @@ def _find_pe_after(events, ts):
 
 
 def get_trips(limit: Optional[int] = None,
-              since: Optional[datetime] = None):
+              since: Optional[datetime] = None,
+              vehicle_id: Optional[int] = None):
     """Unified trip feed.
 
     Source of truth: ParkingEvent pairs (same as pre-v2.24). SDK data
@@ -824,15 +825,21 @@ def get_trips(limit: Optional[int] = None,
     along on the polled trip for extra detail.
 
     Trips are sorted newest-first.
+
+    ``vehicle_id`` (v2.29): None for fleet-wide; int for one car.
     """
     ev_q = ParkingEvent.query.order_by(ParkingEvent.arrived_at.asc())
     if since:
         ev_q = ev_q.filter(ParkingEvent.arrived_at >= since)
+    if vehicle_id is not None:
+        ev_q = ev_q.filter(ParkingEvent.vehicle_id == vehicle_id)
     events = ev_q.all()
 
     sdk_q = VehicleTrip.query.order_by(VehicleTrip.start_time.asc())
     if since:
         sdk_q = sdk_q.filter(VehicleTrip.start_time >= since)
+    if vehicle_id is not None:
+        sdk_q = sdk_q.filter(VehicleTrip.vehicle_id == vehicle_id)
     sdk_rows = sdk_q.all()
 
     regen_lookup = _load_regen_lookup()
@@ -1070,9 +1077,10 @@ def get_trips(limit: Optional[int] = None,
     return trips
 
 
-def get_trip_summary(since: Optional[datetime] = None):
+def get_trip_summary(since: Optional[datetime] = None,
+                     vehicle_id: Optional[int] = None):
     """Aggregate trip statistics: total km, count, home<->work split, regen."""
-    trips = get_trips(since=since)
+    trips = get_trips(since=since, vehicle_id=vehicle_id)
     total_km = sum(t['km'] for t in trips if t['km'])
     home_work_km = sum(
         t['km'] for t in trips

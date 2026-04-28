@@ -4,10 +4,83 @@ from datetime import datetime, date
 db = SQLAlchemy()
 
 
+class Vehicle(db.Model):
+    """Fleet vehicle. Multi-vehicle support landed in v2.29.0 — every
+    Charge / VehicleSync / ParkingEvent / VehicleTrip / MaintenanceEntry
+    row carries a vehicle_id FK that anchors the data to one specific
+    car for life. Aggregate "fleet" stats sum across all vehicles;
+    per-vehicle stats filter by vehicle_id.
+
+    Lifecycle: ``is_archived = True`` retires a vehicle (sold / replaced)
+    without losing its history. Archived vehicles still contribute to
+    fleet-wide aggregates so the sold Kia's lifetime kWh / km / cost
+    stays visible.
+    """
+    __tablename__ = 'vehicles'
+
+    id = db.Column(db.Integer, primary_key=True)
+    name = db.Column(db.String(64), nullable=False)        # display name (e.g. "Robert's Niro")
+    brand = db.Column(db.String(32))                       # "Kia", "Hyundai", "Skoda", ...
+    model = db.Column(db.String(64))                       # "Niro EV 64kWh MY21"
+    color = db.Column(db.String(7))                        # hex like "#0d6efd" — UI badge / chart color
+    icon = db.Column(db.String(40))                        # bootstrap-icon class without the "bi-" prefix
+
+    # Hardware — falls back to AppConfig defaults when NULL during
+    # the migration window, but new vehicles should always set these.
+    battery_kwh = db.Column(db.Float)
+    battery_soh_baseline = db.Column(db.Float)
+    battery_co2_per_kwh = db.Column(db.Float)
+    max_ac_kw = db.Column(db.Float)
+    fossil_co2_per_km = db.Column(db.Float)
+    recuperation_kwh_per_km = db.Column(db.Float)
+
+    # API credentials — same shape as the legacy AppConfig.vehicle_api_*
+    # keys, just per-vehicle. ``auto_sync`` gates whether the background
+    # sync loop polls this vehicle (Phase 2 will wire this fully; in
+    # Phase 1 only the primary still syncs from AppConfig).
+    api_brand = db.Column(db.String(32))                    # 'kia' | 'hyundai' | 'vw' | 'mg' | ...
+    api_username = db.Column(db.String(120))
+    api_password = db.Column(db.String(120))
+    api_pin = db.Column(db.String(40))
+    api_region = db.Column(db.String(8))
+    api_vin = db.Column(db.String(40))
+    auto_sync = db.Column(db.Boolean, default=True)
+
+    # Lifecycle
+    is_archived = db.Column(db.Boolean, default=False, nullable=False)
+    acquired_at = db.Column(db.Date)
+    retired_at = db.Column(db.Date)
+    notes = db.Column(db.Text)
+    created_at = db.Column(db.DateTime, default=datetime.now)
+
+    def to_dict(self):
+        return {
+            'id': self.id,
+            'name': self.name,
+            'brand': self.brand,
+            'model': self.model,
+            'color': self.color,
+            'icon': self.icon,
+            'battery_kwh': self.battery_kwh,
+            'max_ac_kw': self.max_ac_kw,
+            'api_brand': self.api_brand,
+            'auto_sync': self.auto_sync,
+            'is_archived': self.is_archived,
+            'acquired_at': self.acquired_at.isoformat() if self.acquired_at else None,
+            'retired_at': self.retired_at.isoformat() if self.retired_at else None,
+        }
+
+
 class Charge(db.Model):
     __tablename__ = 'charges'
 
     id = db.Column(db.Integer, primary_key=True)
+    # v2.29.0: per-vehicle scoping. Nullable for the migration window
+    # (legacy rows written before vehicles existed); the startup hook
+    # backfills every existing row to vehicle_id=1 (Vehicle#1 seeded
+    # from AppConfig). Going forward the input form sets it from the
+    # currently-active vehicle picker.
+    vehicle_id = db.Column(db.Integer, db.ForeignKey('vehicles.id'), index=True)
     date = db.Column(db.Date, nullable=False, index=True)
     charge_hour = db.Column(db.Integer)  # 0-23, hour of charging
     odometer = db.Column(db.Integer)  # km-Stand bei Ladung
@@ -113,6 +186,7 @@ class VehicleSync(db.Model):
     __tablename__ = 'vehicle_syncs'
 
     id = db.Column(db.Integer, primary_key=True)
+    vehicle_id = db.Column(db.Integer, db.ForeignKey('vehicles.id'), index=True)  # v2.29.0
     timestamp = db.Column(db.DateTime, nullable=False, default=datetime.now, index=True)
     soc_percent = db.Column(db.Integer)
     odometer_km = db.Column(db.Integer)
@@ -180,6 +254,7 @@ class ParkingEvent(db.Model):
     __tablename__ = 'parking_events'
 
     id = db.Column(db.Integer, primary_key=True)
+    vehicle_id = db.Column(db.Integer, db.ForeignKey('vehicles.id'), index=True)  # v2.29.0
     arrived_at = db.Column(db.DateTime, nullable=False, index=True)
     last_seen_at = db.Column(db.DateTime)  # Most recent sync confirming this position
     departed_at = db.Column(db.DateTime, index=True)  # NULL = currently parked
@@ -211,6 +286,7 @@ class VehicleTrip(db.Model):
     __tablename__ = 'vehicle_trips'
 
     id = db.Column(db.Integer, primary_key=True)
+    vehicle_id = db.Column(db.Integer, db.ForeignKey('vehicles.id'), index=True)  # v2.29.0
     trip_date = db.Column(db.Date, index=True, nullable=False)
     start_time = db.Column(db.DateTime, index=True, nullable=False, unique=True)
     drive_minutes = db.Column(db.Integer)
@@ -227,6 +303,7 @@ class MaintenanceEntry(db.Model):
     __tablename__ = 'maintenance_log'
 
     id = db.Column(db.Integer, primary_key=True)
+    vehicle_id = db.Column(db.Integer, db.ForeignKey('vehicles.id'), index=True)  # v2.29.0
     date = db.Column(db.Date, nullable=False, index=True)
     item_type = db.Column(db.String(40), nullable=False)  # 'inspection','tires','brakes','wiper','battery_12v','other'
     title = db.Column(db.String(120))
