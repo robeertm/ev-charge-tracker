@@ -40,12 +40,21 @@ def get_language():
 
 
 def t(key, **kwargs):
-    """Translate a key. Falls back to German, then returns the key itself."""
+    """Translate a key. Falls back to German, then to a caller-supplied
+    ``default=`` string, and finally to the key itself.
+
+    The ``default=`` kwarg lets templates ship with sensible inline
+    fallbacks for keys that haven't been translated yet, instead of
+    surfacing the bare key (e.g. "set.fleet_title") to the user. Any
+    other kwargs are still forwarded to ``str.format()`` for
+    placeholder substitution.
+    """
+    default = kwargs.pop('default', None)
     text = _load_lang(_current_lang).get(key)
     if text is None and _current_lang != _DEFAULT_LANG:
         text = _load_lang(_DEFAULT_LANG).get(key)
     if text is None:
-        return key
+        text = default if default is not None else key
     if kwargs:
         try:
             text = text.format(**kwargs)
