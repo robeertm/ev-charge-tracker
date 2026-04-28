@@ -831,6 +831,8 @@
   "set.thg_total": "Gesamt",
   "set.thg_year_from": "Jahr von",
   "set.thg_year_to": "Jahr bis",
+  "set.api_target_hint": "Diese Eingaben (Marke, Zugangsdaten, Token-Fetch, Test, Sync-Now) wirken auf das aktuell aktive Fahrzeug — wechselbar oben rechts im Picker. Pro-Fahrzeug-Konfiguration neuer Autos:",
+  "set.api_goto_fleet": "→ Fahrzeuge",
   "set.fleet_active": "aktiv",
   "set.fleet_add": "Neues Fahrzeug",
   "set.fleet_archive": "Archivieren",

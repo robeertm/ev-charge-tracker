@@ -479,8 +479,18 @@
         <div class="card mb-4 settings-card" id="sec-api">
             <div class="card-header bg-white fw-bold">
                 <i class="bi bi-ev-station"></i> {{ t('set.api_title') }}
+                {% if api_target_vehicle %}
+                <span class="badge ms-2" style="background:{{ api_target_vehicle.color or '#0d6efd' }};">
+                    <i class="bi bi-car-front-fill"></i> {{ api_target_vehicle.name }}
+                </span>
+                {% endif %}
             </div>
             <div class="card-body">
+                <div class="alert alert-info small mb-3">
+                    <i class="bi bi-info-circle"></i>
+                    {{ t('set.api_target_hint') }}
+                    <a href="#sec-fleet">{{ t('set.api_goto_fleet') }}</a>.
+                </div>
                 <p class="text-muted small mb-3">{{ t('set.api_desc') }}</p>
                 {% if vehicle_api_brand %}
                 <div class="mb-3">

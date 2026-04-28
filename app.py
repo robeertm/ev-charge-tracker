@@ -2111,17 +2111,36 @@ def register_routes(app):
         except (ValueError, TypeError):
             pass
 
+        # v2.29: pre-fill the legacy "API" section from the picker-active
+        # Vehicle row so the form is always editing THAT car's creds.
+        # Falls back to AppConfig for backward-compat with single-car
+        # installs that haven't fully transitioned yet.
+        from models.database import Vehicle as _SetV
+        _picker_v = None
+        _api_active_vid = _active_vehicle_id()
+        if isinstance(_api_active_vid, int):
+            _picker_v = _SetV.query.get(_api_active_vid)
+        if _picker_v is None:
+            _picker_v = (_SetV.query.filter_by(is_archived=False)
+                         .order_by(_SetV.id.asc()).first())
+
+        def _api_field(attr, key, default=''):
+            if _picker_v is not None and getattr(_picker_v, attr):
+                return getattr(_picker_v, attr)
+            return AppConfig.get(key, default) or default
+
         return render_template('settings.html',
                                entsoe_key=AppConfig.get('entsoe_api_key', ''),
                                car_model_val=AppConfig.get('car_model', Config.CAR_MODEL),
                                vehicle_brands=vehicle_brands,
                                installed_brand_keys=installed_brand_keys,
-                               vehicle_api_brand=AppConfig.get('vehicle_api_brand', ''),
-                               vehicle_api_username=AppConfig.get('vehicle_api_username', ''),
-                               vehicle_api_password=AppConfig.get('vehicle_api_password', ''),
-                               vehicle_api_pin=AppConfig.get('vehicle_api_pin', ''),
-                               vehicle_api_region=AppConfig.get('vehicle_api_region', 'EU'),
-                               vehicle_api_vin=AppConfig.get('vehicle_api_vin', ''),
+                               api_target_vehicle=_picker_v,
+                               vehicle_api_brand=_api_field('api_brand', 'vehicle_api_brand'),
+                               vehicle_api_username=_api_field('api_username', 'vehicle_api_username'),
+                               vehicle_api_password=_api_field('api_password', 'vehicle_api_password'),
+                               vehicle_api_pin=_api_field('api_pin', 'vehicle_api_pin'),
+                               vehicle_api_region=_api_field('api_region', 'vehicle_api_region', 'EU'),
+                               vehicle_api_vin=_api_field('api_vin', 'vehicle_api_vin'),
                                vehicle_sync_enabled=AppConfig.get('vehicle_sync_enabled', 'false'),
                                vehicle_sync_interval=AppConfig.get('vehicle_sync_interval_hours', '4'),
                                vehicle_sync_mode=AppConfig.get('vehicle_sync_mode', 'cached'),
