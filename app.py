@@ -326,10 +326,51 @@ def _get_vehicle_credentials():
     }
 
 
-def _get_battery_kwh():
-    val = AppConfig.get('battery_kwh')
+def _vehicle_attr(vehicle_id, attr, fallback):
+    """Generic helper: read a Vehicle field, falling back to a value
+    when the vehicle row has it as None / missing / archived only.
+
+    Resolution order:
+      1. Explicit ``vehicle_id`` (int) → that vehicle's attr
+      2. First non-archived vehicle's attr
+      3. Any vehicle's attr (covers a fully-archived install)
+      4. ``fallback`` value
+
+    Used by ``_get_battery_kwh``, ``_get_max_ac_kw`` etc. so each
+    helper has the same lookup semantics. ``fallback`` is the
+    final defensive default when no vehicle row carries the field.
+    """
+    from models.database import Vehicle
+    if isinstance(vehicle_id, int):
+        v = Vehicle.query.get(vehicle_id)
+        if v is not None and getattr(v, attr) is not None:
+            return getattr(v, attr)
+    v = (Vehicle.query.filter_by(is_archived=False)
+         .order_by(Vehicle.id.asc()).first())
+    if v is not None and getattr(v, attr) is not None:
+        return getattr(v, attr)
+    v = Vehicle.query.order_by(Vehicle.id.asc()).first()
+    if v is not None and getattr(v, attr) is not None:
+        return getattr(v, attr)
+    return fallback
+
+
+def _get_battery_kwh(vehicle_id=None):
+    """Return battery capacity in kWh for the given (or active) vehicle.
+
+    v2.29: prefers the Vehicle row's value; falls back to legacy
+    AppConfig.battery_kwh for installs that still write there, and
+    finally to the hard-coded build-time default.
+    """
+    val = _vehicle_attr(vehicle_id, 'battery_kwh', None)
+    if val:
+        try:
+            return float(val)
+        except (ValueError, TypeError):
+            pass
+    raw = AppConfig.get('battery_kwh')
     try:
-        return float(val) if val else Config.BATTERY_CAPACITY_KWH
+        return float(raw) if raw else Config.BATTERY_CAPACITY_KWH
     except (ValueError, TypeError):
         return Config.BATTERY_CAPACITY_KWH
 
@@ -1166,7 +1207,7 @@ def register_routes(app):
             v = Vehicle()
         v.name = (request.form.get('name', '') or '').strip()[:64]
         if not v.name:
-            flash(t('flash.vehicle_name_required', default='Name darf nicht leer sein'), 'danger')
+            flash(t('flash.vehicle_name_required'), 'danger')
             return redirect('/settings#sec-fleet')
         v.brand = (request.form.get('brand', '') or '').strip() or None
         v.model = (request.form.get('model', '') or '').strip() or None
@@ -1204,7 +1245,36 @@ def register_routes(app):
         if not vid:
             db.session.add(v)
         db.session.commit()
-        flash(t('flash.vehicle_saved', default='Fahrzeug gespeichert'), 'success')
+        # v2.29 legacy mirror: stats services + sync_service still read
+        # AppConfig.battery_kwh / battery_soh_baseline / etc. directly.
+        # Mirror the primary vehicle (lowest id, non-archived) onto
+        # AppConfig so single-vehicle installs continue to render the
+        # same numbers after every save. Phase 2 will refactor the
+        # readers to be vehicle-aware and we can drop this mirror.
+        from models.database import Vehicle as _V
+        primary = (_V.query.filter_by(is_archived=False)
+                   .order_by(_V.id.asc()).first()
+                   or _V.query.order_by(_V.id.asc()).first())
+        if primary is not None and primary.id == v.id:
+            def _mirror(key, val):
+                AppConfig.set(key, '' if val is None else str(val))
+            _mirror('car_model', v.name)
+            _mirror('battery_kwh', v.battery_kwh)
+            _mirror('battery_soh_baseline', v.battery_soh_baseline)
+            _mirror('battery_co2_per_kwh', v.battery_co2_per_kwh)
+            _mirror('max_ac_kw', v.max_ac_kw)
+            _mirror('fossil_co2_per_km', v.fossil_co2_per_km)
+            _mirror('recuperation_kwh_per_km', v.recuperation_kwh_per_km)
+            # API creds also mirror so the legacy sync_service finds
+            # them. Password stays only when explicitly entered.
+            _mirror('vehicle_api_brand', v.api_brand or '')
+            _mirror('vehicle_api_username', v.api_username or '')
+            if v.api_password:
+                _mirror('vehicle_api_password', v.api_password)
+            _mirror('vehicle_api_pin', v.api_pin or '')
+            _mirror('vehicle_api_region', v.api_region or '')
+            _mirror('vehicle_api_vin', v.api_vin or '')
+        flash(t('flash.vehicle_saved'), 'success')
         return redirect('/settings#sec-fleet')
 
     @app.route('/vehicles/<int:vid>/archive', methods=['POST'])
@@ -1217,8 +1287,7 @@ def register_routes(app):
         if v.is_archived and not v.retired_at:
             v.retired_at = date.today()
         db.session.commit()
-        flash(t('flash.vehicle_archived' if v.is_archived else 'flash.vehicle_restored',
-                default='Fahrzeug aktualisiert'), 'success')
+        flash(t('flash.vehicle_archived' if v.is_archived else 'flash.vehicle_restored'), 'success')
         return redirect('/settings#sec-fleet')
 
     @app.route('/vehicles/<int:vid>/delete', methods=['POST'])
@@ -1246,7 +1315,7 @@ def register_routes(app):
             return redirect('/settings#sec-fleet')
         db.session.delete(v)
         db.session.commit()
-        flash(t('flash.vehicle_deleted', default='Fahrzeug gelöscht'), 'warning')
+        flash(t('flash.vehicle_deleted'), 'warning')
         return redirect('/settings#sec-fleet')
 
     @app.route('/api/vehicles/select', methods=['POST'])
@@ -1609,14 +1678,12 @@ def register_routes(app):
                 return redirect(_settings_url_with_section())
 
             elif action == 'save_car':
-                AppConfig.set('car_model', request.form.get('car_model', '').strip())
-                AppConfig.set('battery_kwh', request.form.get('battery_kwh', ''))
-                AppConfig.set('battery_soh_baseline', request.form.get('battery_soh_baseline', '100'))
-                AppConfig.set('max_ac_kw', request.form.get('max_ac_kw', ''))
-                AppConfig.set('battery_co2_per_kwh', request.form.get('battery_co2_per_kwh', ''))
-                AppConfig.set('fossil_co2_per_km', request.form.get('fossil_co2_per_km', ''))
-                AppConfig.set('recuperation_kwh_per_km', request.form.get('recuperation_kwh_per_km', ''))
-                flash(t('flash.vehicle_saved'), 'success')
+                # v2.29: legacy single-vehicle form is gone (replaced by
+                # the per-vehicle Fahrzeuge section). Stub kept so any
+                # cached client retry doesn't 404 — silently no-ops and
+                # nudges the user to the new section.
+                flash(t('flash.vehicle_legacy_save_redirect'), 'info')
+                return redirect('/settings#sec-fleet')
 
             elif action == 'save_operators':
                 import json as _json
@@ -1766,12 +1833,40 @@ def register_routes(app):
                     flash(t('flash.backfill_running'), 'warning')
 
             elif action == 'save_vehicle_api':
-                AppConfig.set('vehicle_api_brand', request.form.get('vehicle_api_brand', ''))
-                AppConfig.set('vehicle_api_username', request.form.get('vehicle_api_username', ''))
-                AppConfig.set('vehicle_api_password', request.form.get('vehicle_api_password', ''))
-                AppConfig.set('vehicle_api_pin', request.form.get('vehicle_api_pin', ''))
-                AppConfig.set('vehicle_api_region', request.form.get('vehicle_api_region', 'EU'))
-                AppConfig.set('vehicle_api_vin', request.form.get('vehicle_api_vin', ''))
+                _api_brand = request.form.get('vehicle_api_brand', '')
+                _api_user = request.form.get('vehicle_api_username', '')
+                _api_pw = request.form.get('vehicle_api_password', '')
+                _api_pin = request.form.get('vehicle_api_pin', '')
+                _api_region = request.form.get('vehicle_api_region', 'EU')
+                _api_vin = request.form.get('vehicle_api_vin', '')
+                AppConfig.set('vehicle_api_brand', _api_brand)
+                AppConfig.set('vehicle_api_username', _api_user)
+                AppConfig.set('vehicle_api_password', _api_pw)
+                AppConfig.set('vehicle_api_pin', _api_pin)
+                AppConfig.set('vehicle_api_region', _api_region)
+                AppConfig.set('vehicle_api_vin', _api_vin)
+                # v2.29: mirror credentials onto the picker-active
+                # Vehicle row so the Fahrzeuge UI shows them too. Sync
+                # service still reads AppConfig (Phase 1) but Phase 2
+                # multi-sync will iterate Vehicles, so keeping the row
+                # current avoids a divergent state.
+                from models.database import Vehicle
+                _picker = _active_vehicle_id()
+                _v = None
+                if isinstance(_picker, int):
+                    _v = Vehicle.query.get(_picker)
+                if _v is None:
+                    _v = (Vehicle.query.filter_by(is_archived=False)
+                          .order_by(Vehicle.id.asc()).first())
+                if _v is not None:
+                    _v.api_brand = _api_brand.strip().lower() or None
+                    _v.api_username = _api_user.strip() or None
+                    if _api_pw:
+                        _v.api_password = _api_pw
+                    _v.api_pin = _api_pin.strip() or None
+                    _v.api_region = _api_region.strip().upper() or None
+                    _v.api_vin = _api_vin.strip().upper() or None
+                    db.session.commit()
                 # Also save sync settings (same form)
                 enabled = 'true' if 'vehicle_sync_enabled' in request.form else 'false'
                 AppConfig.set('vehicle_sync_enabled', enabled)
@@ -3292,9 +3387,24 @@ def register_routes(app):
             list_entries, get_due_items, get_summary, add_entry, DEFAULT_INTERVALS,
         )
 
+        # v2.29 picker: filter list/summary/due by active vehicle.
+        _picker = _active_vehicle_id()
+        _vid = _picker if isinstance(_picker, int) else None
+
         if request.method == 'POST':
             try:
                 date_str = request.form.get('date')
+                # Stamp the new entry with the picker's vehicle (or
+                # the form-submitted one if "Alle" was active and
+                # the user explicitly chose a target vehicle there).
+                form_vid = _int(request.form.get('vehicle_id'))
+                stamp_vid = form_vid if form_vid else _vid
+                if stamp_vid is None:
+                    from models.database import Vehicle
+                    _v = (Vehicle.query.filter_by(is_archived=False)
+                          .order_by(Vehicle.id.asc()).first()
+                          or Vehicle.query.order_by(Vehicle.id.asc()).first())
+                    stamp_vid = _v.id if _v else None
                 add_entry(
                     date_=datetime.strptime(date_str, '%Y-%m-%d').date() if date_str else date.today(),
                     item_type=request.form.get('item_type', 'other'),
@@ -3305,25 +3415,32 @@ def register_routes(app):
                     next_due_km=_int(request.form.get('next_due_km')),
                     next_due_date=(datetime.strptime(request.form.get('next_due_date'), '%Y-%m-%d').date()
                                     if request.form.get('next_due_date') else None),
+                    vehicle_id=stamp_vid,
                 )
                 flash(t('flash.maintenance_saved'), 'success')
             except Exception as e:
                 flash(t('flash.error', error=e), 'danger')
             return redirect(url_for('maintenance_page'))
 
-        # Determine current odometer (latest charge or vehicle sync)
-        current_odo = None
-        last_charge = Charge.query.filter(Charge.odometer.isnot(None)).order_by(Charge.date.desc()).first()
-        if last_charge:
-            current_odo = last_charge.odometer
-        last_sync = VehicleSync.query.filter(VehicleSync.odometer_km.isnot(None)).order_by(VehicleSync.timestamp.desc()).first()
+        # Determine current odometer (latest charge or vehicle sync) —
+        # scoped to the picker so a multi-car install shows the right
+        # mileage per vehicle.
+        cq = Charge.query.filter(Charge.odometer.isnot(None))
+        if _vid is not None:
+            cq = cq.filter_by(vehicle_id=_vid)
+        last_charge = cq.order_by(Charge.date.desc()).first()
+        current_odo = last_charge.odometer if last_charge else None
+        sq = VehicleSync.query.filter(VehicleSync.odometer_km.isnot(None))
+        if _vid is not None:
+            sq = sq.filter_by(vehicle_id=_vid)
+        last_sync = sq.order_by(VehicleSync.timestamp.desc()).first()
         if last_sync and (current_odo is None or (last_sync.odometer_km or 0) > current_odo):
             current_odo = last_sync.odometer_km
 
         return render_template('maintenance.html',
-                               entries=list_entries(),
-                               due_items=get_due_items(current_odo),
-                               summary=get_summary(),
+                               entries=list_entries(vehicle_id=_vid),
+                               due_items=get_due_items(current_odo, vehicle_id=_vid),
+                               summary=get_summary(vehicle_id=_vid),
                                current_odo=current_odo,
                                today=date.today().isoformat(),
                                default_intervals=DEFAULT_INTERVALS)

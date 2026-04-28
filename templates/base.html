@@ -66,21 +66,21 @@
                 <div class="dropdown me-2">
                     <button class="btn btn-sm btn-outline-light dropdown-toggle py-0 px-2"
                             id="vehiclePickerBtn" data-bs-toggle="dropdown" aria-expanded="false"
-                            title="{{ t('nav.vehicle_picker_title', default='Aktives Fahrzeug') }}">
+                            title="{{ t('nav.vehicle_picker_title') }}">
                         <i class="bi bi-car-front-fill"></i>
                         {% if active_vehicle_filter == 'all' %}
-                            {{ t('nav.fleet_all', default='Alle') }}
+                            {{ t('nav.fleet_all') }}
                         {% elif active_vehicle %}
                             {{ active_vehicle.name }}
                         {% else %}
-                            {{ t('nav.vehicle_pick', default='Fahrzeug') }}
+                            {{ t('nav.vehicle_pick') }}
                         {% endif %}
                     </button>
                     <ul class="dropdown-menu dropdown-menu-end" aria-labelledby="vehiclePickerBtn">
-                        <li><h6 class="dropdown-header">{{ t('nav.vehicle_picker_title', default='Aktives Fahrzeug') }}</h6></li>
+                        <li><h6 class="dropdown-header">{{ t('nav.vehicle_picker_title') }}</h6></li>
                         <li><a class="dropdown-item vehicle-picker-item {% if active_vehicle_filter == 'all' %}active{% endif %}"
                                href="#" data-vid="all">
-                            <i class="bi bi-collection"></i> {{ t('nav.fleet_all', default='Alle (Flotte)') }}
+                            <i class="bi bi-collection"></i> {{ t('nav.fleet_all') }}
                         </a></li>
                         <li><hr class="dropdown-divider"></li>
                         {% for v in fleet_vehicles %}
@@ -88,12 +88,12 @@
                                href="#" data-vid="{{ v.id }}">
                             {% if v.is_archived %}<i class="bi bi-archive text-muted"></i>{% else %}<i class="bi bi-car-front" style="color: {{ v.color or '#0d6efd' }};"></i>{% endif %}
                             {{ v.name }}
-                            {% if v.is_archived %}<small class="text-muted">({{ t('nav.archived', default='archiviert') }})</small>{% endif %}
+                            {% if v.is_archived %}<small class="text-muted">({{ t('nav.archived') }})</small>{% endif %}
                         </a></li>
                         {% endfor %}
                         <li><hr class="dropdown-divider"></li>
                         <li><a class="dropdown-item" href="/settings#sec-fleet">
-                            <i class="bi bi-gear"></i> {{ t('nav.manage_fleet', default='Fahrzeuge verwalten') }}…
+                            <i class="bi bi-gear"></i> {{ t('nav.manage_fleet') }}…
                         </a></li>
                     </ul>
                 </div>

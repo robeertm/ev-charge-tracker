@@ -101,6 +101,7 @@
                         <thead>
                             <tr>
                                 <th>{{ t('maint.field_date') }}</th>
+                                {% if active_vehicle_filter == 'all' %}<th>{{ t('maint.col_vehicle') }}</th>{% endif %}
                                 <th>{{ t('maint.field_type') }}</th>
                                 <th>{{ t('maint.field_title') }}</th>
                                 <th class="text-end">km</th>
@@ -109,9 +110,24 @@
                             </tr>
                         </thead>
                         <tbody>
+                        {# v2.29: render a small color-dotted vehicle badge per
+                           row only when the picker is on "Alle Flotte" — when
+                           a single vehicle is selected the badge would be
+                           redundant. Lookup map keyed by id. #}
+                        {% set _veh_by_id = {} %}
+                        {% for v in fleet_vehicles %}{% set _ = _veh_by_id.update({v.id: v}) %}{% endfor %}
                         {% for e in entries %}
                             <tr>
                                 <td class="small">{{ e.date.strftime('%d.%m.%Y') }}</td>
+                                {% if active_vehicle_filter == 'all' %}
+                                <td class="small">
+                                    {% set _v = _veh_by_id.get(e.vehicle_id) %}
+                                    {% if _v %}
+                                    <span class="d-inline-block rounded-circle me-1" style="width:.6rem; height:.6rem; background:{{ _v.color or '#0d6efd' }};"></span>
+                                    {{ _v.name }}
+                                    {% else %}<span class="text-muted">—</span>{% endif %}
+                                </td>
+                                {% endif %}
                                 <td><span class="badge bg-secondary">{{ e.item_type }}</span></td>
                                 <td>{{ e.title or '—' }}</td>
                                 <td class="text-end">{% if e.odometer_km %}{{ '{:,.0f}'.format(e.odometer_km).replace(',', '.') }}{% endif %}</td>
@@ -123,7 +139,7 @@
                                 </td>
                             </tr>
                         {% else %}
-                            <tr><td colspan="6" class="text-center text-muted py-4">{{ t('maint.empty') }}</td></tr>
+                            <tr><td colspan="{{ 7 if active_vehicle_filter == 'all' else 6 }}" class="text-center text-muted py-4">{{ t('maint.empty') }}</td></tr>
                         {% endfor %}
                         </tbody>
                     </table>

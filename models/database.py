@@ -62,12 +62,21 @@ class Vehicle(db.Model):
             'color': self.color,
             'icon': self.icon,
             'battery_kwh': self.battery_kwh,
+            'battery_soh_baseline': self.battery_soh_baseline,
+            'battery_co2_per_kwh': self.battery_co2_per_kwh,
             'max_ac_kw': self.max_ac_kw,
+            'fossil_co2_per_km': self.fossil_co2_per_km,
+            'recuperation_kwh_per_km': self.recuperation_kwh_per_km,
             'api_brand': self.api_brand,
+            'api_username': self.api_username,
+            'api_pin': self.api_pin,
+            'api_region': self.api_region,
+            'api_vin': self.api_vin,
             'auto_sync': self.auto_sync,
             'is_archived': self.is_archived,
             'acquired_at': self.acquired_at.isoformat() if self.acquired_at else None,
             'retired_at': self.retired_at.isoformat() if self.retired_at else None,
+            'notes': self.notes,
         }
 
 

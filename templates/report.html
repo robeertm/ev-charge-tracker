@@ -49,6 +49,11 @@
 <div class="d-flex flex-wrap align-items-center gap-2 mb-3">
     <h4 class="mb-0"><i class="bi bi-bar-chart-line"></i> {{ t('report.title') }}</h4>
     <span class="text-muted small ms-2" id="rangeLabel">…</span>
+    {% if active_vehicle_filter == 'all' %}
+    <span class="badge bg-secondary"><i class="bi bi-collection"></i> {{ t('nav.fleet_all') }}</span>
+    {% elif active_vehicle %}
+    <span class="badge" style="background:{{ active_vehicle.color or '#0d6efd' }};"><i class="bi bi-car-front-fill"></i> {{ active_vehicle.name }}</span>
+    {% endif %}
     {% if has_any_data %}
     <a href="/report/export.pdf" class="btn btn-sm btn-outline-secondary ms-auto" title="{{ t('report.export_pdf_title') }}">
         <i class="bi bi-file-earmark-pdf"></i> {{ t('report.export_pdf') }}

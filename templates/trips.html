@@ -127,6 +127,7 @@
                 <thead>
                     <tr>
                         <th>{{ t('trips.col_when') }}</th>
+                        {% if active_vehicle_filter == 'all' %}<th>{{ t('trips.col_vehicle') }}</th>{% endif %}
                         <th>{{ t('trips.col_from') }}</th>
                         <th>{{ t('trips.col_to') }}</th>
                         <th class="text-end">km</th>
@@ -135,6 +136,8 @@
                     </tr>
                 </thead>
                 <tbody>
+                {% set _veh_by_id = {} %}
+                {% for v in fleet_vehicles %}{% set _ = _veh_by_id.update({v.id: v}) %}{% endfor %}
                 {% for tr in trips %}
                     <tr data-from-id="{{ tr.from.id }}" data-to-id="{{ tr.to.id }}" data-source="{{ tr.source or 'polled' }}">
                         <td class="small">
@@ -144,6 +147,15 @@
                                title="{{ t('trips.source_sdk') }} · {{ tr.drive_min }}min{% if tr.avg_speed_kmh %} · Ø {{ tr.avg_speed_kmh }}km/h{% endif %}{% if tr.max_speed_kmh %} · max {{ tr.max_speed_kmh }}km/h{% endif %}"></i>
                             {% endif %}
                         </td>
+                        {% if active_vehicle_filter == 'all' %}
+                        <td class="small">
+                            {% set _v = _veh_by_id.get(tr.vehicle_id) %}
+                            {% if _v %}
+                            <span class="d-inline-block rounded-circle me-1" style="width:.6rem; height:.6rem; background:{{ _v.color or '#0d6efd' }};"></span>
+                            {{ _v.name }}
+                            {% else %}<span class="text-muted">—</span>{% endif %}
+                        </td>
+                        {% endif %}
                         <td class="small trip-endpoint" data-evt-id="{{ tr.from.id }}" role="button"
                             title="{{ t('trips.edit_title') }}">
                             {% if tr.from.label == 'home' %}<i class="bi bi-house-fill text-success"></i> {{ tr.from.name or t('trips.home') }}
@@ -171,7 +183,7 @@
                         </td>
                     </tr>
                 {% else %}
-                    <tr><td colspan="6" class="text-center text-muted py-4">{{ t('trips.empty') }}</td></tr>
+                    <tr><td colspan="{{ 7 if active_vehicle_filter == 'all' else 6 }}" class="text-center text-muted py-4">{{ t('trips.empty') }}</td></tr>
                 {% endfor %}
                 </tbody>
             </table>

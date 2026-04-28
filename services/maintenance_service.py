@@ -19,7 +19,7 @@ DEFAULT_INTERVALS = {
 
 
 def add_entry(date_, item_type, title=None, odometer_km=None, cost_eur=None,
-              notes=None, next_due_km=None, next_due_date=None):
+              notes=None, next_due_km=None, next_due_date=None, vehicle_id=None):
     entry = MaintenanceEntry(
         date=date_,
         item_type=item_type,
@@ -29,6 +29,7 @@ def add_entry(date_, item_type, title=None, odometer_km=None, cost_eur=None,
         notes=notes,
         next_due_km=next_due_km,
         next_due_date=next_due_date,
+        vehicle_id=vehicle_id,
     )
     db.session.add(entry)
     db.session.commit()
@@ -55,18 +56,25 @@ def delete_entry(entry_id: int) -> bool:
     return True
 
 
-def list_entries():
-    return MaintenanceEntry.query.order_by(MaintenanceEntry.date.desc()).all()
+def list_entries(vehicle_id: Optional[int] = None):
+    q = MaintenanceEntry.query
+    if vehicle_id is not None:
+        q = q.filter_by(vehicle_id=vehicle_id)
+    return q.order_by(MaintenanceEntry.date.desc()).all()
 
 
-def get_due_items(current_odo_km: Optional[int] = None):
+def get_due_items(current_odo_km: Optional[int] = None,
+                  vehicle_id: Optional[int] = None):
     """Return items due within the next 30 days or 1500 km.
 
     Each item is returned with a `severity`: 'overdue' | 'due_soon' | 'ok'.
     """
     today = date.today()
     out = []
-    for entry in MaintenanceEntry.query.all():
+    _q = MaintenanceEntry.query
+    if vehicle_id is not None:
+        _q = _q.filter_by(vehicle_id=vehicle_id)
+    for entry in _q.all():
         severity = None
         reasons = []
 
@@ -105,8 +113,11 @@ def get_due_items(current_odo_km: Optional[int] = None):
     return out
 
 
-def get_summary():
-    entries = MaintenanceEntry.query.all()
+def get_summary(vehicle_id: Optional[int] = None):
+    q = MaintenanceEntry.query
+    if vehicle_id is not None:
+        q = q.filter_by(vehicle_id=vehicle_id)
+    entries = q.all()
     total_cost = sum((e.cost_eur or 0) for e in entries)
     return {
         'count': len(entries),

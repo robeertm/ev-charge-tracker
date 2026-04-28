@@ -945,6 +945,7 @@ def get_trips(limit: Optional[int] = None,
             'regen_kwh': regen_kwh,
             'regen_estimated': regen_estimated,
             'source': 'polled',
+            'vehicle_id': prev.vehicle_id,
         }
 
         # Hyundai silence degradation: if the origin PE's last fresh-GPS
@@ -1061,6 +1062,7 @@ def get_trips(limit: Optional[int] = None,
             'regen_kwh': sdk_regen,
             'regen_estimated': sdk_regen is not None,
             'source': 'sdk',
+            'vehicle_id': row.vehicle_id,
             'drive_min': row.drive_minutes,
             'idle_min': row.idle_minutes,
             'avg_speed_kmh': row.avg_speed_kmh,
