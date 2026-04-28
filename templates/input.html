@@ -388,11 +388,24 @@ const T = {
         if (!isNaN(bk) && bk > 0) BATTERY_KWH = bk;
         if (!isNaN(mk) && mk > 0) MAX_AC_KW = mk;
     }
-    sel.addEventListener('change', () => {
+    sel.addEventListener('change', async () => {
+        // The history table embedded below the form is filtered by
+        // the navbar picker (server-side via session). When the user
+        // changes the per-charge vehicle here, sync that selection
+        // up to the picker and reload — otherwise the Verlauf below
+        // keeps showing the previous vehicle's charges. localStorage
+        // form-cache (formCache) survives the reload, so any in-
+        // flight typed data is restored on the next render.
         applyVehicle();
-        // Recompute the live kWh / SoC estimates after the rebind so
-        // an in-flight session doesn't display stale numbers.
         if (typeof updateCalcPrice === 'function') updateCalcPrice();
+        try {
+            await fetch('/api/vehicles/select', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({vehicle_id: parseInt(sel.value, 10)}),
+            });
+        } catch (e) { /* fall through to reload regardless */ }
+        location.reload();
     });
     // Initial bind on load — the rendered ``selected`` option already
     // matches the picker / pre_charge default, but BATTERY_KWH +
