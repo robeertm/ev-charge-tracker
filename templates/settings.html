@@ -43,7 +43,7 @@
     ('thg',       'bi-cash-coin',   t('set.thg_title')),
     ('locations', 'bi-geo-alt',     t('set.locations_title')),
     ('pv',        'bi-sun',         t('set.pv_title')),
-    ('api',       'bi-ev-station',  t('set.api_title')),
+    ('api',       'bi-arrow-repeat', t('set.sync_title')),
     ('entsoe',    'bi-cloud',       t('set.entsoe_title')),
     ('operators', 'bi-building',    t('set.operators_title')),
     ('database',  'bi-database',    t('set.db_title')),
@@ -262,6 +262,17 @@
                             <div class="col-md-12 form-check ms-2">
                                 <input class="form-check-input" type="checkbox" value="1" name="auto_sync" id="vf_auto_sync" checked>
                                 <label class="form-check-label small" for="vf_auto_sync">{{ t('set.fleet_field_auto_sync') }}</label>
+                            </div>
+                            {# Token-Fetch hint: Kia/Hyundai need a refresh
+                               token instead of a plain password. Anchor link
+                               jumps to the Auto-Sync section where the
+                               Token-Fetch helper lives. #}
+                            <div class="col-md-12">
+                                <div class="form-text small" id="vf_token_hint" style="display:none">
+                                    <i class="bi bi-info-circle text-info"></i>
+                                    {{ t('set.fleet_token_hint') }}
+                                    <a href="#sec-api">{{ t('set.fleet_token_link') }}</a>
+                                </div>
                             </div>
                         </div>
                         <hr class="my-3">
@@ -489,10 +500,13 @@
             </div>
         </div>
 
-        <!-- Fahrzeug-API -->
+        <!-- Sync-Einstellungen (v2.29: was "Fahrzeug-API"; per-vehicle creds
+             moved into Fahrzeuge, this section now hosts the global sync
+             schedule + brand-package install + token-fetch helper for the
+             picker-active vehicle) -->
         <div class="card mb-4 settings-card" id="sec-api">
             <div class="card-header bg-white fw-bold">
-                <i class="bi bi-ev-station"></i> {{ t('set.api_title') }}
+                <i class="bi bi-arrow-repeat"></i> {{ t('set.sync_title') }}
                 {% if api_target_vehicle %}
                 <span class="badge ms-2" style="background:{{ api_target_vehicle.color or '#0d6efd' }};">
                     <i class="bi bi-car-front-fill"></i> {{ api_target_vehicle.name }}
@@ -502,10 +516,9 @@
             <div class="card-body">
                 <div class="alert alert-info small mb-3">
                     <i class="bi bi-info-circle"></i>
-                    {{ t('set.api_target_hint') }}
+                    {{ t('set.sync_target_hint') }}
                     <a href="#sec-fleet">{{ t('set.api_goto_fleet') }}</a>.
                 </div>
-                <p class="text-muted small mb-3">{{ t('set.api_desc') }}</p>
                 {% if vehicle_api_brand %}
                 <div class="mb-3">
                     <a href="/vehicle/raw" class="btn btn-sm btn-outline-info">
@@ -514,20 +527,7 @@
                 </div>
                 {% endif %}
                 <form method="POST">
-                    <!-- Markenauswahl -->
-                    <div class="mb-3">
-                        <label for="vehicle_api_brand" class="form-label">{{ t('set.api_brand') }}</label>
-                        <select class="form-select" id="vehicle_api_brand" name="vehicle_api_brand" onchange="updateVehicleFields()">
-                            <option value="">{{ t('set.api_choose') }}</option>
-                            {% for brand in vehicle_brands %}
-                            <option value="{{ brand.key }}" {% if brand.key == vehicle_api_brand %}selected{% endif %}>
-                                {{ brand.name }}
-                            </option>
-                            {% endfor %}
-                        </select>
-                    </div>
-
-                    <!-- Install-Buttons für nicht installierte Pakete -->
+                    <!-- Brand-Connector-Pakete installieren (OS-Level, global) -->
                     {% set missing_packages = [] %}
                     {% if 'kia' not in installed_brand_keys %}{% set _ = missing_packages.append(('hyundai-kia', 'Kia / Hyundai')) %}{% endif %}
                     {% if 'vw' not in installed_brand_keys %}{% set _ = missing_packages.append(('vw', 'Volkswagen')) %}{% endif %}
@@ -554,120 +554,61 @@
                     </div>
                     {% endif %}
 
-                    <!-- Brand feature support matrix -->
-                    <div id="brandFeatureCard" class="mb-3" {% if not vehicle_api_brand %}style="display:none"{% endif %}>
-                        <div class="border rounded p-2 bg-light">
-                            <div class="small fw-bold mb-1"><i class="bi bi-check2-square"></i> {{ t('set.feat_title') }}</div>
-                            <div id="brandFeatureGrid" class="row g-1 small"></div>
+                    {# Token-fetch helper (Kia/Hyundai only): runs against the
+                       picker-active vehicle, captured token is written onto
+                       its api_password. Hidden when the active vehicle isn't
+                       Kia/Hyundai or not yet selected. #}
+                    {% if api_target_vehicle and (api_target_vehicle.api_brand or '')|lower in ('kia', 'hyundai') %}
+                    <div class="mb-3">
+                        <div class="alert alert-info py-2 mb-0 small">
+                            <strong><i class="bi bi-shield-lock"></i> {{ t('set.api_token_required') }}</strong><br>
+                            {{ t('set.api_token_desc') }}
+                            <div class="mt-2 d-flex gap-2 align-items-center flex-wrap">
+                                <button type="button" class="btn btn-warning btn-sm" id="btnFetchToken">
+                                    <i class="bi bi-key"></i> {{ t('set.api_fetch_token') }}
+                                </button>
+                                <button type="button" class="btn btn-outline-secondary btn-sm" id="btnCancelToken" style="display:none">
+                                    <i class="bi bi-x-lg"></i> {{ t('set.api_cancel') }}
+                                </button>
+                                <span class="small" id="tokenFetchStatus"></span>
+                            </div>
+                            <div class="mt-2 text-muted" style="font-size:0.75rem">
+                                {{ t('set.api_token_manual') }}
+                            </div>
+                            <hr class="my-2">
+                            <details id="tokenManualDetails">
+                                <summary class="small fw-bold" style="cursor:pointer;">{{ t('set.api_token_paste_title') }}</summary>
+                                <div class="mt-2 small">
+                                    <ol class="mb-2 ps-3">
+                                        <li class="mb-2">
+                                            <strong>{{ t('set.api_token_step1_title') }}</strong> {{ t('set.api_token_step1_body') }}<br>
+                                            <a href="#" id="tokenStep1Link" target="_blank" rel="noopener" class="small text-break"></a>
+                                        </li>
+                                        <li class="mb-2">
+                                            <strong>{{ t('set.api_token_step2_title') }}</strong> {{ t('set.api_token_step2_body') }} <code>?code=...</code>:<br>
+                                            <a href="#" id="tokenStep2Link" target="_blank" rel="noopener" class="small text-break"></a>
+                                        </li>
+                                        <li>
+                                            <strong>{{ t('set.api_token_step3_title') }}</strong> {{ t('set.api_token_step3_body') }} <code>prd.eu-ccapi</code>:
+                                        </li>
+                                    </ol>
+                                </div>
+                                <div class="mt-2 d-flex gap-2 align-items-center flex-wrap">
+                                    <input type="text" class="form-control form-control-sm" id="tokenPasteUrl"
+                                           placeholder="https://prd.eu-ccapi.hyundai.com:8080/api/v1/user/oauth2/token?code=..."
+                                           style="min-width:300px; flex:1;">
+                                    <button type="button" class="btn btn-outline-success btn-sm" id="btnPasteToken">
+                                        <i class="bi bi-clipboard-check"></i> {{ t('set.api_token_paste_btn') }}
+                                    </button>
+                                </div>
+                                <div id="tokenPasteStatus" class="small mt-1"></div>
+                            </details>
                         </div>
                     </div>
+                    {% endif %}
 
-                    <!-- Credentials (nur sichtbar wenn Marke gewählt) -->
-                    <div id="vehicleCredentials" {% if not vehicle_api_brand %}style="display:none"{% endif %}>
-                        <div class="row g-3 mb-3">
-                            <div class="col-sm-6">
-                                <label for="vehicle_api_username" class="form-label">{{ t('set.api_email') }}</label>
-                                <input type="text" class="form-control" id="vehicle_api_username" name="vehicle_api_username"
-                                       value="{{ vehicle_api_username }}">
-                            </div>
-                            <div class="col-sm-6">
-                                <label for="vehicle_api_password" class="form-label" id="labelPassword">{{ t('set.api_password') }}</label>
-                                <input type="password" class="form-control" id="vehicle_api_password" name="vehicle_api_password"
-                                       value="{{ vehicle_api_password }}">
-                                <div class="form-text vehicle-field-token-hint" style="display:none">
-                                    <i class="bi bi-info-circle"></i> {{ t('set.api_token_manual') }}
-                                </div>
-                            </div>
-                            <div class="col-sm-6 vehicle-field-pin" style="display:none">
-                                <label for="vehicle_api_pin" class="form-label">{{ t('set.api_pin') }}</label>
-                                <input type="password" class="form-control" id="vehicle_api_pin" name="vehicle_api_pin"
-                                       value="{{ vehicle_api_pin }}">
-                            </div>
-                            <div class="col-sm-6 vehicle-field-region" style="display:none">
-                                <label for="vehicle_api_region" class="form-label">{{ t('set.api_region') }}</label>
-                                <select class="form-select" id="vehicle_api_region" name="vehicle_api_region">
-                                    <option value="EU" {% if vehicle_api_region == 'EU' %}selected{% endif %}>Europa</option>
-                                    <option value="US" {% if vehicle_api_region == 'US' %}selected{% endif %}>USA</option>
-                                    <option value="CA" {% if vehicle_api_region == 'CA' %}selected{% endif %}>Kanada</option>
-                                    <option value="KR" {% if vehicle_api_region == 'KR' %}selected{% endif %}>Korea</option>
-                                </select>
-                            </div>
-                            <div class="col-sm-6 vehicle-field-vin" style="display:none">
-                                <label for="vehicle_api_vin" class="form-label">{{ t('set.api_vin') }}</label>
-                                <input type="text" class="form-control" id="vehicle_api_vin" name="vehicle_api_vin"
-                                       value="{{ vehicle_api_vin }}" placeholder="{{ t('set.api_vin_hint') }}">
-                            </div>
-                        </div>
-
-                        <!-- Token-Fetch (Kia/Hyundai) -->
-                        <div id="tokenHintSection" class="mb-3" style="display:none">
-                            <div class="alert alert-info py-2 mb-0 small">
-                                <strong><i class="bi bi-shield-lock"></i> {{ t('set.api_token_required') }}</strong><br>
-                                {{ t('set.api_token_desc') }}
-                                <div class="mt-2 d-flex gap-2 align-items-center flex-wrap">
-                                    <button type="button" class="btn btn-warning btn-sm" id="btnFetchToken">
-                                        <i class="bi bi-key"></i> {{ t('set.api_fetch_token') }}
-                                    </button>
-                                    <button type="button" class="btn btn-outline-secondary btn-sm" id="btnCancelToken" style="display:none">
-                                        <i class="bi bi-x-lg"></i> {{ t('set.api_cancel') }}
-                                    </button>
-                                    <span class="small" id="tokenFetchStatus"></span>
-                                </div>
-                                <div class="mt-2 text-muted" style="font-size:0.75rem">
-                                    {{ t('set.api_token_manual') }}
-                                </div>
-                                <hr class="my-2">
-                                <details id="tokenManualDetails">
-                                    <summary class="small fw-bold" style="cursor:pointer;">{{ t('set.api_token_paste_title') }}</summary>
-                                    <div class="mt-2 small">
-                                        <ol class="mb-2 ps-3">
-                                            <li class="mb-2">
-                                                <strong>{{ t('set.api_token_step1_title') }}</strong> {{ t('set.api_token_step1_body') }}<br>
-                                                <a href="#" id="tokenStep1Link" target="_blank" rel="noopener" class="small text-break"></a>
-                                            </li>
-                                            <li class="mb-2">
-                                                <strong>{{ t('set.api_token_step2_title') }}</strong> {{ t('set.api_token_step2_body') }} <code>?code=...</code>:<br>
-                                                <a href="#" id="tokenStep2Link" target="_blank" rel="noopener" class="small text-break"></a>
-                                            </li>
-                                            <li>
-                                                <strong>{{ t('set.api_token_step3_title') }}</strong> {{ t('set.api_token_step3_body') }} <code>prd.eu-ccapi</code>:
-                                            </li>
-                                        </ol>
-                                    </div>
-                                    <div class="mt-2 d-flex gap-2 align-items-center flex-wrap">
-                                        <input type="text" class="form-control form-control-sm" id="tokenPasteUrl"
-                                               placeholder="https://prd.eu-ccapi.hyundai.com:8080/api/v1/user/oauth2/token?code=..."
-                                               style="min-width:300px; flex:1;">
-                                        <button type="button" class="btn btn-outline-success btn-sm" id="btnPasteToken">
-                                            <i class="bi bi-clipboard-check"></i> {{ t('set.api_token_paste_btn') }}
-                                        </button>
-                                    </div>
-                                    <div id="tokenPasteStatus" class="small mt-1"></div>
-                                </details>
-                            </div>
-                        </div>
-
-                        <div class="d-flex gap-2 flex-wrap">
-                            <button type="submit" name="action" value="save_vehicle_api" class="btn btn-primary">
-                                <i class="bi bi-save"></i> {{ t('set.save') }}
-                            </button>
-                            <button type="submit" name="action" value="test_vehicle_api" class="btn btn-outline-secondary">
-                                <i class="bi bi-wifi"></i> {{ t('set.api_test') }}
-                            </button>
-                            <button type="submit" name="action" value="sync_vehicle_now" class="btn btn-outline-info">
-                                <i class="bi bi-arrow-repeat"></i> {{ t('set.api_sync_cached') }}
-                            </button>
-                            <button type="submit" name="action" value="sync_vehicle_force" class="btn btn-outline-warning">
-                                <i class="bi bi-broadcast"></i> {{ t('set.api_sync_live') }}
-                            </button>
-                            <button type="submit" name="action" value="delete_vehicle_api" class="btn btn-outline-danger"
-                                    onclick="return confirm(T.api_delete_confirm)">
-                                <i class="bi bi-trash"></i> {{ t('set.thg_delete') }}
-                            </button>
-                        </div>
-
-                        <!-- Auto-Sync (inside credentials form) -->
-                        <div id="vehicleSyncSection" class="mt-3">
+                    {# Auto-Sync schedule — global, not per-vehicle. #}
+                    <div id="vehicleSyncSection">
                             <hr>
                             <div class="row g-2 align-items-center">
                                 <div class="col-auto">
@@ -749,6 +690,11 @@
                             </div>
                         </div>
                     </div>
+                    <div class="mt-3 d-flex justify-content-end">
+                        <button type="submit" name="action" value="save_sync_settings" class="btn btn-primary btn-sm">
+                            <i class="bi bi-save"></i> {{ t('set.sync_save') }}
+                        </button>
+                    </div>
                 </form>
                 {% if last_vehicle_sync %}
                 <div class="small text-muted mt-2">
@@ -771,14 +717,17 @@
                     const tripWarn    = document.getElementById('smartWindowTripWarning');
                     const resetBtn    = document.getElementById('smartWindowResetDefault');
 
+                    // v2.29: brand check pulls from the picker-active vehicle
+                    // (templated via api_target_vehicle) since the legacy
+                    // brand select is gone.
+                    const ACTIVE_BRAND_FOR_GPS = {{ ((api_target_vehicle.api_brand or '')|lower)|tojson if api_target_vehicle else "''"|safe }};
                     function updateUi() {
                         const sel = document.getElementById('vehicleSyncModeSel');
-                        const brand = document.getElementById('vehicle_api_brand').value;
                         const w = document.getElementById('cachedGpsWarning');
                         const smartRow = document.getElementById('smartWindowRow');
                         const isCached = sel && sel.value === 'cached';
                         const isSmart = sel && sel.value === 'smart';
-                        const wantsGps = ['kia', 'hyundai'].includes(brand);
+                        const wantsGps = ['kia', 'hyundai'].includes(ACTIVE_BRAND_FOR_GPS);
                         w.style.display = (isCached && wantsGps) ? '' : 'none';
                         smartRow.style.display = isSmart ? '' : 'none';
                         refreshTripWarning();
@@ -808,7 +757,6 @@
                         });
                     }
                     document.getElementById('vehicleSyncModeSel').addEventListener('change', updateUi);
-                    document.getElementById('vehicle_api_brand').addEventListener('change', updateUi);
                     updateUi();
                 })();
                 </script>
@@ -878,74 +826,23 @@
                     tires:           {{ t('set.feat_tires')|tojson }},
                 };
 
-                function updateVehicleFields() {
-                    const brand = document.getElementById('vehicle_api_brand').value;
-                    const hasBrand = brand !== '';
-                    const isKiaHyundai = ['kia', 'hyundai'].includes(brand);
-                    const isVAG = ['vw', 'skoda', 'seat', 'cupra', 'audi'].includes(brand);
-                    const isTesla = brand === 'tesla';
-                    // Both Kia and Hyundai EU need a refresh_token (different
-                    // OAuth flows under the hood, but same credential shape).
-                    const needsToken = isKiaHyundai || isTesla;
-                    const hasVin = isVAG || isKiaHyundai || ['polestar', 'mg', 'porsche'].includes(brand);
-                    const hasRegion = isKiaHyundai || brand === 'mg' || brand === 'renault' || brand === 'dacia';
-
-                    // Show/hide credentials section (sync is inside it)
-                    document.getElementById('vehicleCredentials').style.display = hasBrand ? '' : 'none';
-                    document.getElementById('brandFeatureCard').style.display = hasBrand ? '' : 'none';
-
-                    // Brand-specific fields
-                    document.querySelectorAll('.vehicle-field-pin').forEach(el => el.style.display = isKiaHyundai ? '' : 'none');
-                    document.querySelectorAll('.vehicle-field-region').forEach(el => el.style.display = hasRegion ? '' : 'none');
-                    document.querySelectorAll('.vehicle-field-vin').forEach(el => el.style.display = hasVin ? '' : 'none');
-                    document.querySelectorAll('.vehicle-field-token-hint').forEach(el => el.style.display = isKiaHyundai ? '' : 'none');
-                    document.getElementById('labelPassword').textContent = needsToken ? T.api_refresh_token : T.api_password;
-                    document.getElementById('tokenHintSection').style.display = isKiaHyundai ? '' : 'none';
-
-                    // Load feature matrix for this brand
-                    if (hasBrand) loadBrandFeatures(brand);
-                }
-
-                async function loadBrandFeatures(brand) {
-                    try {
-                        const r = await fetch('/api/vehicle/features/' + encodeURIComponent(brand));
-                        if (!r.ok) return;
-                        const data = await r.json();
-                        const grid = document.getElementById('brandFeatureGrid');
-                        grid.innerHTML = '';
-                        const labels = {
-                            soc_range_odo:   T_FEAT.soc_range_odo,
-                            live_status:     T_FEAT.live_status,
-                            location:        T_FEAT.location,
-                            battery_12v:     T_FEAT.battery_12v,
-                            soh:             T_FEAT.soh,
-                            regenerated:     T_FEAT.regenerated,
-                            consumption_30d: T_FEAT.consumption_30d,
-                            doors_locks:     T_FEAT.doors_locks,
-                            climate:         T_FEAT.climate,
-                            tires:           T_FEAT.tires,
-                        };
-                        data.keys.forEach(key => {
-                            const v = data.features[key] || 'no';
-                            const icon = v === 'yes' ? '<i class="bi bi-check-circle-fill text-success"></i>'
-                                       : v === 'partial' ? '<i class="bi bi-dash-circle-fill text-warning"></i>'
-                                       : '<i class="bi bi-x-circle-fill text-danger"></i>';
-                            const col = document.createElement('div');
-                            col.className = 'col-6 col-md-4';
-                            col.innerHTML = icon + ' ' + (labels[key] || key);
-                            grid.appendChild(col);
-                        });
-                    } catch (e) { console.warn('feature load failed', e); }
-                }
-                updateVehicleFields();
+                // v2.29: updateVehicleFields() / loadBrandFeatures() removed
+                // along with the brand-select dropdown and credentials inputs.
+                // Per-vehicle credentials live exclusively in the Fahrzeuge
+                // edit form now; the brand-feature matrix moves there as a
+                // future improvement when the Fahrzeuge form gains brand
+                // awareness.
 
 
-                // Token fetch (Kia/Hyundai)
+                // Token fetch (Kia/Hyundai) — v2.29: scoped to the picker-
+                // active vehicle. Brand + target vehicle are templated in.
                 (function() {
                     const btnFetch = document.getElementById('btnFetchToken');
                     const btnCancel = document.getElementById('btnCancelToken');
                     const statusEl = document.getElementById('tokenFetchStatus');
                     if (!btnFetch) return;
+                    const ACTIVE_BRAND = {{ ((api_target_vehicle.api_brand or '')|lower)|tojson if api_target_vehicle else "''"|safe }};
+                    const ACTIVE_VID   = {{ api_target_vehicle.id|tojson if api_target_vehicle else 'null'|safe }};
                     let pollInterval = null;
 
                     function stopPolling() {
@@ -956,7 +853,8 @@
                     }
 
                     function pollStatus() {
-                        fetch('/api/vehicle/token/status').then(r => r.json()).then(d => {
+                        const url = '/api/vehicle/token/status' + (ACTIVE_VID ? ('?vehicle_id=' + ACTIVE_VID) : '');
+                        fetch(url).then(r => r.json()).then(d => {
                             if (d.token) {
                                 statusEl.innerHTML = '<span class="text-success fw-bold"><i class="bi bi-check-circle"></i> ' + T.api_token_saved + '</span>';
                                 stopPolling();
@@ -976,10 +874,9 @@
                         btnCancel.style.display = '';
                         statusEl.textContent = '';
                         try {
-                            const brand = document.getElementById('vehicle_api_brand').value;
                             const r = await fetch('/api/vehicle/token/start', {
                                 method: 'POST', headers: {'Content-Type': 'application/json'},
-                                body: JSON.stringify({brand}),
+                                body: JSON.stringify({brand: ACTIVE_BRAND, vehicle_id: ACTIVE_VID}),
                             });
                             const d = await r.json();
                             if (d.success) {
@@ -1011,10 +908,9 @@
 
                     // Populate the step links when the user opens the manual section
                     async function loadManualSteps() {
-                        const brand = document.getElementById('vehicle_api_brand').value;
-                        if (!brand || !['kia','hyundai'].includes(brand)) return;
+                        if (!ACTIVE_BRAND || !['kia','hyundai'].includes(ACTIVE_BRAND)) return;
                         try {
-                            const r = await fetch('/api/vehicle/token/manual/step_urls?brand=' + encodeURIComponent(brand));
+                            const r = await fetch('/api/vehicle/token/manual/step_urls?brand=' + encodeURIComponent(ACTIVE_BRAND));
                             if (!r.ok) return;
                             const d = await r.json();
                             if (step1Link && d.step1_login_url) {
@@ -1041,11 +937,10 @@
                             pasteStatus.innerHTML = '<span class="text-primary"><span class="spinner-border spinner-border-sm me-1"></span>' + T.api_token_paste_exchanging + '</span>';
                             btnPaste.disabled = true;
                             try {
-                                const brand = document.getElementById('vehicle_api_brand').value;
                                 const r = await fetch('/api/vehicle/token/manual', {
                                     method: 'POST',
                                     headers: {'Content-Type': 'application/json'},
-                                    body: JSON.stringify({brand, url}),
+                                    body: JSON.stringify({brand: ACTIVE_BRAND, url, vehicle_id: ACTIVE_VID}),
                                 });
                                 const d = await r.json();
                                 if (r.ok && d.success) {
@@ -1972,6 +1867,16 @@
         });
         document.getElementById('vf_title').textContent = {{ t('set.fleet_form_new')|tojson }};
     }
+    function updateTokenHint() {
+        const sel = document.getElementById('vf_api_brand');
+        const hint = document.getElementById('vf_token_hint');
+        if (!sel || !hint) return;
+        const brand = (sel.value || '').toLowerCase();
+        hint.style.display = ['kia', 'hyundai'].includes(brand) ? '' : 'none';
+    }
+    const apiBrandSel = document.getElementById('vf_api_brand');
+    if (apiBrandSel) apiBrandSel.addEventListener('change', updateTokenHint);
+
     document.querySelectorAll('[data-edit-vehicle]').forEach(btn => {
         btn.addEventListener('click', () => {
             let v;
@@ -1986,6 +1891,7 @@
             }
             document.getElementById('vf_title').textContent =
                 {{ t('set.fleet_form_edit')|tojson }} + ': ' + (v.name || '');
+            updateTokenHint();
             collapse.show();
             form.scrollIntoView({behavior: 'smooth', block: 'center'});
         });

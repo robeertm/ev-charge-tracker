@@ -1986,42 +1986,11 @@ def register_routes(app):
                 else:
                     flash(t('flash.backfill_running'), 'warning')
 
-            elif action == 'save_vehicle_api':
-                _api_brand = request.form.get('vehicle_api_brand', '')
-                _api_user = request.form.get('vehicle_api_username', '')
-                _api_pw = request.form.get('vehicle_api_password', '')
-                _api_pin = request.form.get('vehicle_api_pin', '')
-                _api_region = request.form.get('vehicle_api_region', 'EU')
-                _api_vin = request.form.get('vehicle_api_vin', '')
-                AppConfig.set('vehicle_api_brand', _api_brand)
-                AppConfig.set('vehicle_api_username', _api_user)
-                AppConfig.set('vehicle_api_password', _api_pw)
-                AppConfig.set('vehicle_api_pin', _api_pin)
-                AppConfig.set('vehicle_api_region', _api_region)
-                AppConfig.set('vehicle_api_vin', _api_vin)
-                # v2.29: mirror credentials onto the picker-active
-                # Vehicle row so the Fahrzeuge UI shows them too. Sync
-                # service still reads AppConfig (Phase 1) but Phase 2
-                # multi-sync will iterate Vehicles, so keeping the row
-                # current avoids a divergent state.
-                from models.database import Vehicle
-                _picker = _active_vehicle_id()
-                _v = None
-                if isinstance(_picker, int):
-                    _v = Vehicle.query.get(_picker)
-                if _v is None:
-                    _v = (Vehicle.query.filter_by(is_archived=False)
-                          .order_by(Vehicle.id.asc()).first())
-                if _v is not None:
-                    _v.api_brand = _api_brand.strip().lower() or None
-                    _v.api_username = _api_user.strip() or None
-                    if _api_pw:
-                        _v.api_password = _api_pw
-                    _v.api_pin = _api_pin.strip() or None
-                    _v.api_region = _api_region.strip().upper() or None
-                    _v.api_vin = _api_vin.strip().upper() or None
-                    db.session.commit()
-                # Also save sync settings (same form)
+            elif action == 'save_sync_settings':
+                # v2.29: per-vehicle credentials moved to /vehicles/save —
+                # this section is now ONLY the global sync schedule
+                # (interval / mode / smart-window). Picks up the new
+                # values by stopping + restarting the sync thread.
                 enabled = 'true' if 'vehicle_sync_enabled' in request.form else 'false'
                 AppConfig.set('vehicle_sync_enabled', enabled)
                 AppConfig.set('vehicle_sync_interval_hours', request.form.get('vehicle_sync_interval', '4'))
@@ -2035,45 +2004,7 @@ def register_routes(app):
                 _time.sleep(0.5)
                 if enabled == 'true':
                     start_sync(app)
-                flash(t('flash.api_creds_saved'), 'success')
-
-            elif action == 'test_vehicle_api':
-                brand = AppConfig.get('vehicle_api_brand', '')
-                if brand:
-                    try:
-                        from services.vehicle import get_connector
-                        creds = _get_vehicle_credentials()
-                        connector = get_connector(brand, creds)
-                        result = connector.test_connection()
-                        if result:
-                            status = connector.get_status()
-                            parts = []
-                            if status.soc_percent is not None:
-                                parts.append(f'SoC: {status.soc_percent}%')
-                            if status.odometer_km is not None:
-                                parts.append(f'Tacho: {status.odometer_km:,} km')
-                            if status.estimated_range_km is not None:
-                                parts.append(f'Range: {status.estimated_range_km} km')
-                            info = ', '.join(parts) if parts else ''
-                            flash(t('flash.api_connected', info=info), 'success')
-                        else:
-                            flash(t('flash.api_connect_failed'), 'danger')
-                    except Exception as e:
-                        flash(t('flash.error', error=e), 'danger')
-                else:
-                    flash(t('flash.api_no_brand'), 'warning')
-
-            elif action == 'delete_vehicle_api':
-                for key in ('vehicle_api_brand', 'vehicle_api_username', 'vehicle_api_password',
-                            'vehicle_api_pin', 'vehicle_api_region', 'vehicle_api_vin',
-                            'vehicle_sync_enabled', 'vehicle_sync_interval_hours'):
-                    entry = AppConfig.query.get(key)
-                    if entry:
-                        db.session.delete(entry)
-                db.session.commit()
-                from services.vehicle.sync_service import stop_sync
-                stop_sync()
-                flash(t('flash.api_creds_deleted'), 'warning')
+                flash(t('flash.sync_settings_saved'), 'success')
 
             elif action == 'save_vehicle_sync':
                 enabled = 'true' if 'vehicle_sync_enabled' in request.form else 'false'
@@ -2095,43 +2026,11 @@ def register_routes(app):
                 else:
                     flash(t('flash.sync_disabled'), 'warning')
 
-            elif action in ('sync_vehicle_now', 'sync_vehicle_force'):
-                force = action == 'sync_vehicle_force'
-                brand = AppConfig.get('vehicle_api_brand', '')
-                if brand:
-                    try:
-                        from services.vehicle import get_connector
-                        from services.vehicle.sync_service import log_sync_result
-                        import json as _json
-                        creds = _get_vehicle_credentials()
-                        connector = get_connector(brand, creds)
-                        status = connector.get_status(force=force)
-                        _picker_set = _active_vehicle_id()
-                        _stamp_vid_set = _picker_set if isinstance(_picker_set, int) else None
-                        if _stamp_vid_set is None:
-                            from models.database import Vehicle as _Vset
-                            _vs = (_Vset.query.filter_by(is_archived=False)
-                                   .order_by(_Vset.id.asc()).first()
-                                   or _Vset.query.order_by(_Vset.id.asc()).first())
-                            _stamp_vid_set = _vs.id if _vs else None
-                        _save_vehicle_sync(status, _get_battery_kwh(vehicle_id=_stamp_vid_set),
-                                           raw_json=_json.dumps(status.raw_data, default=str),
-                                           vehicle_id=_stamp_vid_set)
-                        log_sync_result(status,
-                                        mode_label='force' if force else 'cached',
-                                        source='settings')
-                        parts = []
-                        if status.soc_percent is not None:
-                            parts.append(f'SoC: {status.soc_percent}%')
-                        if status.odometer_km is not None:
-                            parts.append(f'Tacho: {status.odometer_km:,} km')
-                        mode = 'Live' if force else 'Cached'
-                        flash(t('flash.sync_success', mode=mode, parts=', '.join(parts)), 'success')
-                    except Exception as e:
-                        flash(t('flash.sync_error', error=e), 'danger')
-                else:
-                    flash(t('flash.no_brand_configured'), 'warning')
-
+            # v2.29: legacy actions save_vehicle_api / test_vehicle_api /
+            # delete_vehicle_api / sync_vehicle_now / sync_vehicle_force
+            # are gone — credentials live in /vehicles/save, test+sync
+            # are per-vehicle in the Fahrzeuge table. Stale form
+            # submissions just no-op-redirect to the new section.
             return redirect(_settings_url_with_section())
 
         # Vehicle API brands (only those with installed dependencies)
@@ -2492,11 +2391,24 @@ def register_routes(app):
 
     @app.route('/api/vehicle/token/status')
     def api_vehicle_token_status():
-        """Poll token fetch status."""
+        """Poll token fetch status. v2.29: when ``vehicle_id`` query
+        param is set, write the captured refresh token onto that
+        vehicle's row instead of the legacy AppConfig key."""
         from services.vehicle.token_fetch import get_state
+        from models.database import Vehicle
         state = get_state()
         if state.get('token'):
-            AppConfig.set('vehicle_api_password', state['token'])
+            vid_arg = request.args.get('vehicle_id')
+            if vid_arg:
+                try:
+                    v = Vehicle.query.get(int(vid_arg))
+                    if v is not None:
+                        v.api_password = state['token']
+                        db.session.commit()
+                except (ValueError, TypeError):
+                    pass
+            else:
+                AppConfig.set('vehicle_api_password', state['token'])
         return jsonify(state)
 
     @app.route('/api/vehicle/token/cancel', methods=['POST'])
@@ -2508,15 +2420,32 @@ def register_routes(app):
     @app.route('/api/vehicle/token/manual', methods=['POST'])
     def api_vehicle_token_manual():
         """Manual fallback: user pastes the URL with ?code=... from their own
-        browser, we extract the code and exchange for a refresh_token."""
+        browser, we extract the code and exchange for a refresh_token.
+
+        v2.29: optional ``vehicle_id`` writes the resulting token onto
+        that Vehicle row's api_password (and updates api_brand). When
+        omitted, falls back to the legacy AppConfig keys.
+        """
+        from models.database import Vehicle
         data = request.get_json() or {}
         brand = data.get('brand') or AppConfig.get('vehicle_api_brand', '')
         url = data.get('url') or ''
+        vid = data.get('vehicle_id')
         if brand not in ('kia', 'hyundai'):
             return jsonify({'error': t('err.kia_hyundai_only')}), 400
         from services.vehicle.token_fetch import exchange_manual_url
         ok, msg, token = exchange_manual_url(brand, url)
         if ok and token:
+            if vid:
+                try:
+                    v = Vehicle.query.get(int(vid))
+                    if v is not None:
+                        v.api_brand = brand
+                        v.api_password = token
+                        db.session.commit()
+                        return jsonify({'success': True, 'message': msg, 'vehicle_id': v.id})
+                except (ValueError, TypeError):
+                    pass
             AppConfig.set('vehicle_api_brand', brand)
             AppConfig.set('vehicle_api_password', token)
             return jsonify({'success': True, 'message': msg})
