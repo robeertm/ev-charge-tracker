@@ -194,7 +194,7 @@ def update_parking_from_sync(sync) -> Optional[ParkingEvent]:
                 from services.vehicle.sync_service import (
                     request_force_refresh, request_post_move_reconcile,
                 )
-                request_force_refresh(reason='odo_advance')
+                request_force_refresh(reason='odo_advance', vehicle_id=veh_id)
                 request_post_move_reconcile()
             except Exception:
                 pass
@@ -395,7 +395,7 @@ def update_parking_from_sync(sync) -> Optional[ParkingEvent]:
                 from services.vehicle.sync_service import (
                     request_force_refresh, request_post_move_reconcile,
                 )
-                request_force_refresh(reason='odo_jump_split')
+                request_force_refresh(reason='odo_jump_split', vehicle_id=veh_id)
                 request_post_move_reconcile()
             except Exception:
                 pass
@@ -457,7 +457,7 @@ def update_parking_from_sync(sync) -> Optional[ParkingEvent]:
             from services.vehicle.sync_service import (
                 request_force_refresh, request_post_move_reconcile,
             )
-            request_force_refresh(reason='motion_detected')
+            request_force_refresh(reason='motion_detected', vehicle_id=veh_id)
             # Kick off a one-shot SDK backfill + reconcile so the
             # finished trip's departed_at/arrived_at snap to SDK times
             # immediately instead of waiting until the 03:00 nightly
@@ -876,12 +876,26 @@ def get_trips(limit: Optional[int] = None,
     # Static fallback for trips where the SDK regen delta resolves to
     # None (the car missed a sync window around either trip endpoint, or
     # the brand doesn't report regen at all). km × the user's configured
-    # rate from Settings/Vehicle/Recuperation. Surfaced as
-    # ``regen_estimated=True`` so the UI can mark it as not measured.
+    # rate. v2.29: per-vehicle when scoped, else first non-archived
+    # vehicle's rate, else legacy AppConfig.
+    static_recup_rate = 0.086
     try:
-        static_recup_rate = float(AppConfig.get('recuperation_kwh_per_km', '0.086'))
-    except (ValueError, TypeError):
-        static_recup_rate = 0.086
+        from models.database import Vehicle
+        if vehicle_id is not None:
+            _vrow = Vehicle.query.get(vehicle_id)
+            if _vrow is not None and _vrow.recuperation_kwh_per_km:
+                static_recup_rate = float(_vrow.recuperation_kwh_per_km)
+            elif AppConfig.get('recuperation_kwh_per_km'):
+                static_recup_rate = float(AppConfig.get('recuperation_kwh_per_km', '0.086'))
+        else:
+            _vrow = (Vehicle.query.filter_by(is_archived=False)
+                     .order_by(Vehicle.id.asc()).first())
+            if _vrow is not None and _vrow.recuperation_kwh_per_km:
+                static_recup_rate = float(_vrow.recuperation_kwh_per_km)
+            elif AppConfig.get('recuperation_kwh_per_km'):
+                static_recup_rate = float(AppConfig.get('recuperation_kwh_per_km', '0.086'))
+    except (ValueError, TypeError, Exception):
+        pass
 
     trips = []
     pe_covered_dates = set()

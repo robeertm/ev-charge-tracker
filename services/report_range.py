@@ -254,10 +254,22 @@ def build_report(start: date, end: date, lang: str = 'de',
     count_trips = len(trips)
 
     # ICE comparison: user-configurable fossil CO2/km (default 164 g)
+    # v2.29: per-vehicle fossil reference when scoped, else AppConfig.
+    fossil_co2_per_km = 164.0
     try:
-        fossil_co2_per_km = float(AppConfig.get('fossil_co2_per_km', '164'))
-    except (TypeError, ValueError):
-        fossil_co2_per_km = 164.0
+        from models.database import Vehicle as _V
+        _vrow = None
+        if vehicle_id is not None:
+            _vrow = _V.query.get(vehicle_id)
+        if _vrow is None:
+            _vrow = (_V.query.filter_by(is_archived=False)
+                     .order_by(_V.id.asc()).first())
+        if _vrow is not None and _vrow.fossil_co2_per_km:
+            fossil_co2_per_km = float(_vrow.fossil_co2_per_km)
+        elif AppConfig.get('fossil_co2_per_km'):
+            fossil_co2_per_km = float(AppConfig.get('fossil_co2_per_km', '164'))
+    except (ValueError, TypeError, Exception):
+        pass
     # ICE fuel equivalent: a modest ICE uses ~7 L/100km * ~1.65 €/L = ~11.55 €/100km
     try:
         ice_cost_per_100km = float(AppConfig.get('ice_cost_per_100km', '11.55'))

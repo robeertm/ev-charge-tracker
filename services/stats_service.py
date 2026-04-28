@@ -5,6 +5,41 @@ from sqlalchemy import func, extract
 from models.database import db, Charge, ThgQuota, AppConfig, VehicleSync
 
 
+def _vehicle_field(vehicle_id, attr, appconfig_key, default):
+    """Vehicle-aware config lookup with AppConfig + default fallback.
+
+    Resolution order:
+      1. Vehicle row matching ``vehicle_id`` (if int)
+      2. First non-archived Vehicle row (single-car install)
+      3. ``AppConfig[appconfig_key]`` (legacy install path)
+      4. ``default``
+
+    Returned as the same type as ``default`` (float / int). Used by
+    stats helpers so per-vehicle SoH baseline / fossil-CO2 / etc.
+    can override the legacy AppConfig single-value config without
+    requiring every caller to plumb vehicle_id through five layers.
+    """
+    try:
+        from models.database import Vehicle
+        if isinstance(vehicle_id, int):
+            v = Vehicle.query.get(vehicle_id)
+            if v is not None and getattr(v, attr) is not None:
+                return type(default)(getattr(v, attr))
+        v = (Vehicle.query.filter_by(is_archived=False)
+             .order_by(Vehicle.id.asc()).first())
+        if v is not None and getattr(v, attr) is not None:
+            return type(default)(getattr(v, attr))
+    except Exception:
+        pass
+    try:
+        raw = AppConfig.get(appconfig_key)
+        if raw not in (None, ''):
+            return type(default)(raw)
+    except (ValueError, TypeError):
+        pass
+    return default
+
+
 def _filter_by_vehicle(query, model, vehicle_id):
     """Apply the multi-vehicle filter introduced in v2.29.
 
@@ -21,7 +56,7 @@ def _filter_by_vehicle(query, model, vehicle_id):
     return query.filter(model.vehicle_id == vehicle_id)
 
 
-def get_soh_baseline() -> float:
+def get_soh_baseline(vehicle_id=None) -> float:
     """Return the configured SoH baseline used to scale raw BMS readings.
 
     Hyundai/Kia e-GMP vehicles (800 V platform — Ioniq 5/6, EV6, etc.)
@@ -29,21 +64,45 @@ def get_soh_baseline() -> float:
     the nominal pack capacity, yielding 120–130 % readings on fresh
     batteries. Setting baseline=125 maps those back to a "100 % when new"
     display. Older Kia/Hyundai 400 V models (e.g. Niro EV, Kona Electric)
-    report against nominal and need baseline=100 (the default)."""
+    report against nominal and need baseline=100 (the default).
+
+    v2.29: prefers the per-vehicle Vehicle.battery_soh_baseline; falls
+    back to AppConfig.battery_soh_baseline (legacy single-vehicle
+    installs) and finally to 100.
+    """
     try:
-        v = float(AppConfig.get('battery_soh_baseline', '100'))
+        from models.database import Vehicle
+        if isinstance(vehicle_id, int):
+            v = Vehicle.query.get(vehicle_id)
+            if v is not None and v.battery_soh_baseline:
+                return float(v.battery_soh_baseline) or 100.0
+        # Single-vehicle install: take the only / first non-archived row.
+        v = (Vehicle.query.filter_by(is_archived=False)
+             .order_by(Vehicle.id.asc()).first())
+        if v is not None and v.battery_soh_baseline:
+            return float(v.battery_soh_baseline) or 100.0
+    except Exception:
+        pass
+    try:
+        raw = float(AppConfig.get('battery_soh_baseline', '100'))
+        return raw if raw > 0 else 100.0
     except (ValueError, TypeError):
-        v = 100.0
-    return v if v > 0 else 100.0
+        return 100.0
 
 
-def scale_soh(raw):
+def scale_soh(raw, vehicle_id=None):
     """Apply the baseline scaling for display: raw / baseline * 100.
-    None pass-through. Output rounded to one decimal."""
+    None pass-through. Output rounded to one decimal.
+
+    v2.29: optional ``vehicle_id`` so the per-vehicle baseline applies
+    when scaling that vehicle's syncs. Callers that don't know which
+    vehicle they're scaling (e.g. legacy aggregate views) keep the
+    fleet/AppConfig fallback by passing None.
+    """
     if raw is None:
         return None
     try:
-        return round(float(raw) / get_soh_baseline() * 100.0, 1)
+        return round(float(raw) / get_soh_baseline(vehicle_id) * 100.0, 1)
     except (ValueError, TypeError):
         return None
 
@@ -92,6 +151,19 @@ def get_recup_rate_kwh_per_km(vehicle_id=None):
     measured = _measured_regen_rate_kwh_per_km(vehicle_id=vehicle_id)
     if measured is not None and measured > 0:
         return measured, 'measured'
+    # Configured fallback: per-vehicle row first, then AppConfig.
+    try:
+        from models.database import Vehicle
+        if isinstance(vehicle_id, int):
+            v = Vehicle.query.get(vehicle_id)
+            if v is not None and v.recuperation_kwh_per_km:
+                return float(v.recuperation_kwh_per_km), 'configured'
+        v = (Vehicle.query.filter_by(is_archived=False)
+             .order_by(Vehicle.id.asc()).first())
+        if v is not None and v.recuperation_kwh_per_km:
+            return float(v.recuperation_kwh_per_km), 'configured'
+    except Exception:
+        pass
     try:
         rate = float(AppConfig.get('recuperation_kwh_per_km', '0.086'))
     except (ValueError, TypeError):
@@ -237,15 +309,10 @@ def get_summary_stats(vehicle_id=None):
     odo_values = [c.odometer for c in charges if c.odometer]
     total_km = max(odo_values) if odo_values else 0
 
-    # Config values
-    try:
-        battery_kwh = float(AppConfig.get('battery_kwh', '64'))
-    except (ValueError, TypeError):
-        battery_kwh = 64.0
-    try:
-        static_recup_rate = float(AppConfig.get('recuperation_kwh_per_km', '0.086'))
-    except (ValueError, TypeError):
-        static_recup_rate = 0.086
+    # Config values — v2.29 vehicle-aware with AppConfig fallback.
+    battery_kwh = _vehicle_field(vehicle_id, 'battery_kwh', 'battery_kwh', 64.0)
+    static_recup_rate = _vehicle_field(vehicle_id, 'recuperation_kwh_per_km',
+                                        'recuperation_kwh_per_km', 0.086)
 
     # Hybrid recuperation total:
     #   km before vehicle-API tracking started → km × configured static rate (0.086)
@@ -285,11 +352,9 @@ def get_summary_stats(vehicle_id=None):
     cost_per_100km = round(total_cost / total_km * 100, 2) if total_km > 0 else 0
     net_cost_per_100km = round((total_cost - total_thg) / total_km * 100, 2) if total_km > 0 else 0
 
-    # CO2 comparison — Well-to-Wheel
-    try:
-        fossil_co2_g_per_km = float(AppConfig.get('fossil_co2_per_km', '164'))
-    except (ValueError, TypeError):
-        fossil_co2_g_per_km = 164.0
+    # CO2 comparison — Well-to-Wheel, vehicle-aware in v2.29.
+    fossil_co2_g_per_km = _vehicle_field(vehicle_id, 'fossil_co2_per_km',
+                                          'fossil_co2_per_km', 164.0)
     fossil_co2_per_km = fossil_co2_g_per_km / 1000  # g → kg
     km_for_co2 = total_km if total_km > 0 else total_kwh * 5
     fossil_co2_kg = km_for_co2 * fossil_co2_per_km

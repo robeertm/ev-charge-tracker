@@ -10,7 +10,12 @@ logger = logging.getLogger(__name__)
 _sync_thread = None
 _sync_running = False
 _nightly_thread = None
-_force_refresh_pending = None  # Optional[str] — reason set by request_force_refresh()
+# v2.29: per-vehicle force-refresh queue. Keyed by vehicle_id (int);
+# value is the reason string. ``request_force_refresh(reason, vid)``
+# adds to it; the sync loop's per-vehicle iteration consumes the
+# entry for the vehicle it's syncing. ``None`` key reserved for
+# "any vehicle" / global triggers (e.g. a manual button).
+_force_refresh_pending: dict = {}
 _post_move_reconcile_pending = False  # set after a PE transition; triggers a one-shot backfill+reconcile
 
 # Hour-of-day the nightly maintenance task fires. 03:00 local is chosen
@@ -22,19 +27,24 @@ _post_move_reconcile_pending = False  # set after a PE transition; triggers a on
 NIGHTLY_HOUR = 3
 
 
-def request_force_refresh(reason: str = 'manual') -> None:
+def request_force_refresh(reason: str = 'manual', vehicle_id: int | None = None) -> None:
     """Queue an immediate force-refresh on the next sync-loop tick.
 
     Called from the parking hook when motion is detected: the sync that
     detected motion may have been cached (stale), so this asks the next
     tick to wake the car for a fresh GPS/SoC/odometer snapshot at the
-    new location. The sleep loop polls this flag in 10s increments, so
-    the refresh happens within ~10 seconds of the request even if the
-    smart-mode interval is 10 min.
+    new location.
+
+    v2.29: ``vehicle_id`` scopes the refresh — only that vehicle gets
+    upgraded to force on the next tick. ``None`` triggers a refresh
+    on every vehicle (used by manual buttons that don't know which
+    car the user means). The sleep loop polls this dict in 10s
+    increments, so the refresh happens within ~10 seconds of the
+    request even if the smart-mode interval is 10 min.
     """
     global _force_refresh_pending
-    _force_refresh_pending = reason
-    logger.info(f"Force-refresh queued: {reason}")
+    _force_refresh_pending[vehicle_id] = reason
+    logger.info(f"Force-refresh queued: {reason} (vehicle_id={vehicle_id})")
 
 
 def request_post_move_reconcile() -> None:
@@ -200,11 +210,16 @@ def _sync_one_vehicle(app, vehicle):
     force = (mode == 'force')
     mode_label = mode
 
-    # Global force-refresh flag — applies to next tick across vehicles.
+    # Per-vehicle force-refresh queue. Look for an entry keyed on this
+    # specific vehicle, or the wildcard None ("any vehicle"). Whichever
+    # matches gets consumed.
     global _force_refresh_pending
-    triggered_reason = _force_refresh_pending
+    triggered_reason = None
+    if vehicle.id in _force_refresh_pending:
+        triggered_reason = _force_refresh_pending.pop(vehicle.id)
+    elif None in _force_refresh_pending:
+        triggered_reason = _force_refresh_pending.pop(None)
     if triggered_reason:
-        _force_refresh_pending = None
         force = True
         mode_label = f'triggered:{triggered_reason}'
         logger.info(
@@ -377,7 +392,7 @@ def _sync_loop(app):
         # Sleep in small increments so we can stop quickly and react to
         # a queued force-refresh request within ~10 seconds.
         slept = 0
-        while slept < sleep_secs and _sync_running and _force_refresh_pending is None and not _post_move_reconcile_pending:
+        while slept < sleep_secs and _sync_running and not _force_refresh_pending and not _post_move_reconcile_pending:
             time.sleep(min(10, sleep_secs - slept))
             slept += 10
 
