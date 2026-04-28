@@ -54,6 +54,7 @@
                 <div class="progress-pills">
                     <div class="pill" id="pill-luks"></div>
                     <div class="pill" id="pill-weblogin"></div>
+                    <div class="pill" id="pill-vehicles"></div>
                 </div>
 
                 <!-- Step 0: Welcome -->
@@ -83,7 +84,7 @@
                     <div class="text-center mb-3">
                         <i class="bi bi-key wizard-icon"></i>
                     </div>
-                    <h4 class="text-center mb-2">{{ t('wiz.step_1_of_2') }}</h4>
+                    <h4 class="text-center mb-2">{{ t('wiz.step_1_of_3') }}</h4>
                     <h5 class="text-center mb-3 text-muted">{{ t('wiz.luks_title') }}</h5>
 
                     <form id="luks-form">
@@ -124,7 +125,7 @@
                     <div class="text-center mb-3">
                         <i class="bi bi-person-badge wizard-icon"></i>
                     </div>
-                    <h4 class="text-center mb-2">{{ t('wiz.step_2_of_2') }}</h4>
+                    <h4 class="text-center mb-2">{{ t('wiz.step_2_of_3') }}</h4>
                     <h5 class="text-center mb-3 text-muted">{{ t('wiz.weblogin_title') }}</h5>
 
                     <p class="small text-muted">{{ t('wiz.weblogin_desc') }}</p>
@@ -159,7 +160,73 @@
                     </form>
                 </div>
 
-                <!-- Step 3: Success -->
+                <!-- Step 3: Vehicles (v2.29 multi-vehicle) -->
+                <div id="step-vehicles" style="display:none;">
+                    <div class="text-center mb-3">
+                        <i class="bi bi-car-front-fill wizard-icon"></i>
+                    </div>
+                    <h4 class="text-center mb-2">{{ t('wiz.step_3_of_3') }}</h4>
+                    <h5 class="text-center mb-3 text-muted">{{ t('wiz.vehicles_title') }}</h5>
+                    <p class="small text-muted">{{ t('wiz.vehicles_desc') }}</p>
+
+                    <form id="vehicles-form">
+                        <div id="vehicles-rows"></div>
+                        <div class="d-flex justify-content-between gap-2 mt-2">
+                            <button type="button" class="btn btn-outline-secondary btn-sm" id="vehicles-add">
+                                <i class="bi bi-plus-lg"></i> {{ t('wiz.vehicles_add_another') }}
+                            </button>
+                            <span class="small text-muted align-self-center" id="vehicles-count"></span>
+                        </div>
+
+                        <div class="alert alert-info small mt-3 mb-3">
+                            <i class="bi bi-info-circle"></i>
+                            {{ t('wiz.vehicles_info') }}
+                        </div>
+
+                        <div id="vehicles-error" class="alert alert-danger d-none"></div>
+
+                        <div class="d-grid">
+                            <button type="submit" class="btn btn-primary btn-lg" id="vehicles-submit">
+                                <i class="bi bi-check-circle"></i> {{ t('wiz.vehicles_submit') }}
+                            </button>
+                        </div>
+                    </form>
+                </div>
+
+                <template id="vehicle-row-tpl">
+                    <div class="border rounded p-2 mb-2 vehicle-row">
+                        <div class="d-flex justify-content-between align-items-center mb-2">
+                            <strong class="small vehicle-row-label"></strong>
+                            <button type="button" class="btn btn-sm btn-link text-danger p-0 vehicle-row-remove" title="">
+                                <i class="bi bi-x-lg"></i>
+                            </button>
+                        </div>
+                        <div class="row g-2">
+                            <div class="col-12">
+                                <label class="form-label small">{{ t('wiz.veh_name') }}*</label>
+                                <input type="text" class="form-control form-control-sm v-name" maxlength="64" required>
+                            </div>
+                            <div class="col-6">
+                                <label class="form-label small">{{ t('wiz.veh_brand') }}</label>
+                                <input type="text" class="form-control form-control-sm v-brand" maxlength="32">
+                            </div>
+                            <div class="col-6">
+                                <label class="form-label small">{{ t('wiz.veh_model') }}</label>
+                                <input type="text" class="form-control form-control-sm v-model" maxlength="64">
+                            </div>
+                            <div class="col-6">
+                                <label class="form-label small">{{ t('wiz.veh_battery') }}</label>
+                                <input type="number" step="0.1" min="0" class="form-control form-control-sm v-battery">
+                            </div>
+                            <div class="col-6">
+                                <label class="form-label small">{{ t('wiz.veh_max_ac') }}</label>
+                                <input type="number" step="0.1" min="0" class="form-control form-control-sm v-maxac">
+                            </div>
+                        </div>
+                    </div>
+                </template>
+
+                <!-- Step 4: Success -->
                 <div id="step-done" style="display:none;">
                     <div class="text-center mb-3">
                         <i class="bi bi-check-circle-fill wizard-icon text-success"></i>
@@ -190,21 +257,29 @@
             errConn:         {{ t('wiz.err_connection') | tojson }},
             errUnknown:      {{ t('wiz.err_unknown') | tojson }},
             errUserEmpty:    {{ t('wiz.err_user_empty') | tojson }},
+            errNoVehicle:    {{ t('wiz.err_no_vehicle') | tojson }},
             changing:        {{ t('wiz.status_changing') | tojson }},
             creating:        {{ t('wiz.status_creating') | tojson }},
+            saving:          {{ t('wiz.status_saving') | tojson }},
             luksBtn:         {{ t('wiz.luks_submit') | tojson }},
             wlBtn:           {{ t('wiz.weblogin_submit') | tojson }},
+            vehBtn:          {{ t('wiz.vehicles_submit') | tojson }},
+            vehLabel:        {{ t('wiz.veh_label') | tojson }},     // "Fahrzeug {n}"
+            vehRemove:       {{ t('wiz.veh_remove') | tojson }},
+            vehCount:        {{ t('wiz.veh_count') | tojson }},     // "{n} Fahrzeug(e)"
         };
 
         function updateProgressPills() {
             const pLuks = document.getElementById('pill-luks');
-            const pWL = document.getElementById('pill-weblogin');
+            const pWL   = document.getElementById('pill-weblogin');
+            const pVeh  = document.getElementById('pill-vehicles');
             pLuks.className = 'pill ' + (SETUP_STATE.luks_done ? 'done' : 'active');
-            pWL.className = 'pill ' + (SETUP_STATE.weblogin_done ? 'done' : (SETUP_STATE.luks_done ? 'active' : ''));
+            pWL.className   = 'pill ' + (SETUP_STATE.weblogin_done ? 'done' : (SETUP_STATE.luks_done ? 'active' : ''));
+            pVeh.className  = 'pill ' + (SETUP_STATE.vehicles_done ? 'done' : (SETUP_STATE.weblogin_done ? 'active' : ''));
         }
 
         function showStep(name) {
-            ['welcome', 'luks', 'weblogin', 'done'].forEach(n => {
+            ['welcome', 'luks', 'weblogin', 'vehicles', 'done'].forEach(n => {
                 document.getElementById('step-' + n).style.display = 'none';
             });
             document.getElementById('step-' + name).style.display = 'block';
@@ -216,10 +291,93 @@
                 showStep('welcome');
             } else if (!SETUP_STATE.weblogin_done) {
                 showStep('weblogin');
+            } else if (!SETUP_STATE.vehicles_done) {
+                showStep('vehicles');
+                ensureVehicleRows();
             } else {
                 showStep('done');
             }
         }
+
+        // ── Step 3: vehicles ──────────────────────────────────────
+        function addVehicleRow() {
+            const tpl = document.getElementById('vehicle-row-tpl');
+            const wrap = document.getElementById('vehicles-rows');
+            const node = tpl.content.firstElementChild.cloneNode(true);
+            wrap.appendChild(node);
+            renumberVehicleRows();
+            const removeBtn = node.querySelector('.vehicle-row-remove');
+            removeBtn.title = T.vehRemove;
+            removeBtn.addEventListener('click', () => {
+                node.remove();
+                renumberVehicleRows();
+            });
+            // Auto-focus the name field of the freshest row.
+            node.querySelector('.v-name').focus();
+        }
+        function renumberVehicleRows() {
+            const rows = document.querySelectorAll('#vehicles-rows .vehicle-row');
+            rows.forEach((row, i) => {
+                const lbl = row.querySelector('.vehicle-row-label');
+                if (lbl) lbl.textContent = T.vehLabel.replace('{n}', i + 1);
+            });
+            const cnt = document.getElementById('vehicles-count');
+            if (cnt) cnt.textContent = T.vehCount.replace('{n}', rows.length);
+        }
+        function ensureVehicleRows() {
+            // Always start with at least one empty row so the user
+            // sees what to fill in.
+            if (!document.querySelectorAll('#vehicles-rows .vehicle-row').length) {
+                addVehicleRow();
+            }
+        }
+        document.getElementById('vehicles-add').addEventListener('click', addVehicleRow);
+
+        document.getElementById('vehicles-form').addEventListener('submit', async (e) => {
+            e.preventDefault();
+            hideError('vehicles-error');
+            const rows = document.querySelectorAll('#vehicles-rows .vehicle-row');
+            const payload = [];
+            rows.forEach(row => {
+                const name = row.querySelector('.v-name').value.trim();
+                if (!name) return;
+                payload.push({
+                    name: name,
+                    brand: row.querySelector('.v-brand').value.trim(),
+                    model: row.querySelector('.v-model').value.trim(),
+                    battery_kwh: row.querySelector('.v-battery').value,
+                    max_ac_kw: row.querySelector('.v-maxac').value,
+                });
+            });
+            if (payload.length === 0) {
+                showError('vehicles-error', T.errNoVehicle);
+                return;
+            }
+            const btn = document.getElementById('vehicles-submit');
+            btn.disabled = true;
+            btn.innerHTML = '<span class="spinner-border spinner-border-sm"></span> ' + T.saving;
+            try {
+                const r = await fetch('/api/setup/save_vehicles', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({vehicles: payload}),
+                });
+                const data = await r.json();
+                if (r.ok && data.ok) {
+                    SETUP_STATE.vehicles_done = true;
+                    updateProgressPills();
+                    showStep('done');
+                } else {
+                    showError('vehicles-error', data.error || T.errUnknown);
+                    btn.disabled = false;
+                    btn.innerHTML = '<i class="bi bi-check-circle"></i> ' + T.vehBtn;
+                }
+            } catch (err) {
+                showError('vehicles-error', T.errConn + ': ' + err.message);
+                btn.disabled = false;
+                btn.innerHTML = '<i class="bi bi-check-circle"></i> ' + T.vehBtn;
+            }
+        });
 
         function showError(elId, msg) {
             const el = document.getElementById(elId);
@@ -300,7 +458,12 @@
                 if (r.ok && data.ok) {
                     SETUP_STATE.weblogin_done = true;
                     updateProgressPills();
-                    showStep('done');
+                    if (data.next_step === 'vehicles') {
+                        showStep('vehicles');
+                        ensureVehicleRows();
+                    } else {
+                        showStep('done');
+                    }
                 } else {
                     showError('weblogin-error', data.error || T.errUnknown);
                     btn.disabled = false;

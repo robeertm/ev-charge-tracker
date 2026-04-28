@@ -142,7 +142,11 @@ def change_luks_passphrase(old_passphrase: str, new_passphrase: str) -> tuple[bo
 # ── Wizard state tracking ────────────────────────────────────────────
 
 def _default_state() -> dict:
-    return {'luks_done': False, 'weblogin_done': False}
+    # ``vehicles_done`` was added in v2.29 — the wizard now also asks the
+    # user to register at least one vehicle so the rest of the app has a
+    # real fleet entry to work against (instead of silently auto-creating
+    # a "Mein Auto" placeholder during the migration).
+    return {'luks_done': False, 'weblogin_done': False, 'vehicles_done': False}
 
 
 def load_state() -> dict:

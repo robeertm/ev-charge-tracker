@@ -846,12 +846,98 @@ def register_routes(app):
 
         mark_step_done('weblogin_done')
 
-        # If both wizard steps are done, clear the marker and state file.
-        state = load_state()
-        if state.get('luks_done') and state.get('weblogin_done'):
-            complete_setup()
+        # v2.29: a 3rd "Fahrzeuge anlegen" step now follows so the
+        # user populates the fleet before the wizard exits. The
+        # marker / state file is cleared by api_setup_save_vehicles
+        # when the third step finishes; here we just return a hint
+        # so the frontend advances to the next step instead of
+        # navigating to /.
+        return jsonify({'ok': True, 'message': t('msg.web_login_created'), 'next_step': 'vehicles'})
 
-        return jsonify({'ok': True, 'message': t('msg.web_login_created'), 'redirect': '/'})
+    @app.route('/api/setup/save_vehicles', methods=['POST'])
+    def api_setup_save_vehicles():
+        """Wizard step 3: register at least one vehicle.
+
+        Body: JSON {"vehicles": [{name, brand, model, battery_kwh,
+        max_ac_kw}, ...]}. Each entry must carry a non-empty name; the
+        rest is optional and can be filled in later via Settings →
+        Fahrzeuge. Empty payload is rejected so the wizard cannot be
+        skipped.
+        """
+        from services.setup_service import (
+            is_setup_pending, mark_step_done, load_state, complete_setup,
+        )
+        from models.database import Vehicle
+        if not is_setup_pending():
+            return jsonify({'error': 'setup_not_pending'}), 400
+
+        data = request.get_json(silent=True) or {}
+        rows = data.get('vehicles') or []
+        cleaned = []
+        for row in rows:
+            if not isinstance(row, dict):
+                continue
+            name = (row.get('name') or '').strip()[:64]
+            if not name:
+                continue
+            cleaned.append({
+                'name': name,
+                'brand': (row.get('brand') or '').strip()[:32] or None,
+                'model': (row.get('model') or '').strip()[:64] or None,
+                'battery_kwh': _float(row.get('battery_kwh')),
+                'max_ac_kw': _float(row.get('max_ac_kw')),
+            })
+        if not cleaned:
+            return jsonify({'error': t('err.setup_no_vehicle')}), 400
+
+        # Wipe the placeholder Vehicle#1 if it's still the migration
+        # default and has no data attached — fresh install path. Keeps
+        # the user-entered list as the only fleet members.
+        from models.database import (
+            Charge as _Charge, VehicleSync as _VehicleSync,
+            ParkingEvent as _ParkingEvent, VehicleTrip as _VehicleTrip,
+            MaintenanceEntry as _MaintenanceEntry,
+        )
+        placeholder = (Vehicle.query
+                       .order_by(Vehicle.id.asc()).first())
+        if placeholder is not None and not placeholder.battery_kwh and not placeholder.api_brand:
+            in_use = (
+                _Charge.query.filter_by(vehicle_id=placeholder.id).count()
+                + _VehicleSync.query.filter_by(vehicle_id=placeholder.id).count()
+                + _ParkingEvent.query.filter_by(vehicle_id=placeholder.id).count()
+                + _VehicleTrip.query.filter_by(vehicle_id=placeholder.id).count()
+                + _MaintenanceEntry.query.filter_by(vehicle_id=placeholder.id).count()
+            )
+            if in_use == 0:
+                db.session.delete(placeholder)
+                db.session.commit()
+
+        for cv in cleaned:
+            v = Vehicle(name=cv['name'], brand=cv['brand'], model=cv['model'],
+                        battery_kwh=cv['battery_kwh'], max_ac_kw=cv['max_ac_kw'],
+                        is_archived=False, auto_sync=True, color='#0d6efd')
+            db.session.add(v)
+        db.session.commit()
+        # Mirror the FIRST vehicle's basics onto the legacy AppConfig
+        # keys so the sync_service + stats helpers (which haven't been
+        # vehicle-aware'd yet) see the right defaults out of the gate.
+        first = (Vehicle.query.filter_by(is_archived=False)
+                 .order_by(Vehicle.id.asc()).first())
+        if first is not None:
+            if first.battery_kwh:
+                AppConfig.set('battery_kwh', str(first.battery_kwh))
+            if first.max_ac_kw:
+                AppConfig.set('max_ac_kw', str(first.max_ac_kw))
+            if first.name:
+                AppConfig.set('car_model', first.name)
+
+        mark_step_done('vehicles_done')
+        # All three steps done → exit the wizard.
+        state = load_state()
+        if (state.get('luks_done') and state.get('weblogin_done')
+                and state.get('vehicles_done')):
+            complete_setup()
+        return jsonify({'ok': True, 'count': len(cleaned), 'redirect': '/'})
 
     @app.route('/api/health', methods=['GET'])
     def api_health():
