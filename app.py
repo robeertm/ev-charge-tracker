@@ -2592,37 +2592,37 @@ def register_routes(app):
                 [sys.executable, '-m', 'pip', 'install'] + packages,
                 capture_output=True, text=True, timeout=120,
             )
-            if result.returncode == 0:
-                # Force reload of connector modules so they re-check for installed packages
-                import importlib
-                CONNECTOR_MAP = {
-                    'hyundai-kia': 'connector_hyundai_kia',
-                    'vw': 'connector_vag', 'skoda': 'connector_vag', 'seatcupra': 'connector_vag',
-                    'tesla': 'connector_tesla', 'renault': 'connector_renault',
-                    'polestar': 'connector_polestar', 'mg': 'connector_mg',
-                    'smart': 'connector_smart', 'porsche': 'connector_porsche',
-                }
-                connector_mod = CONNECTOR_MAP.get(pkg_key, '')
-                modules_to_reload = [
-                    f'services.vehicle.{connector_mod}',
-                    'services.vehicle.registry',
-                    'services.vehicle',
-                ]
-                for mod_name in modules_to_reload:
-                    if mod_name in sys.modules:
-                        try:
-                            importlib.reload(sys.modules[mod_name])
-                        except Exception:
-                            pass
-                    else:
-                        try:
-                            importlib.import_module(mod_name)
-                        except Exception:
-                            pass
-                return jsonify({'success': True, 'installed': packages})
-            else:
+            if result.returncode != 0:
                 error = result.stderr.strip().split('\n')[-1] if result.stderr else 'pip install fehlgeschlagen'
                 return jsonify({'success': False, 'error': error}), 500
+
+            # v3.0: schedule a clean systemd restart instead of reloading
+            # modules in-place. The previous approach called
+            # ``importlib.reload(services.vehicle.registry)`` which wiped
+            # the brand registry to an empty dict and then could NOT
+            # repopulate it (the connector modules were already imported
+            # so their module-level ``register(...)`` calls didn't fire
+            # again). Result: every subsequent vehicle sync raised
+            # "Unknown vehicle brand: kia" until the service was
+            # restarted out-of-band. A clean restart picks up the newly
+            # pip-installed connector via fresh imports — reliable.
+            def _delayed_restart():
+                import time as _t
+                _t.sleep(1.0)  # let the HTTP response flush
+                try:
+                    subprocess.run(
+                        ['sudo', '-n', '/bin/systemctl', 'restart', 'ev-tracker.service'],
+                        timeout=10,
+                    )
+                except Exception as _e:
+                    logger.warning(f"Post-install restart failed: {_e}")
+            import threading as _th
+            _th.Thread(target=_delayed_restart, daemon=True).start()
+            return jsonify({
+                'success': True,
+                'installed': packages,
+                'restarting': True,
+            })
         except subprocess.TimeoutExpired:
             return jsonify({'success': False, 'error': 'Timeout — Installation dauert zu lange'}), 500
         except Exception as e:

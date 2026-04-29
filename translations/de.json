@@ -476,6 +476,7 @@
   "set.api_every": "alle",
   "set.api_fetch_token": "Token holen",
   "set.api_install_hint": "Weitere Marken verfügbar — Paket installieren:",
+  "set.api_install_restart": "App startet neu, um neues Paket zu laden …",
   "set.api_installed": "Installiert",
   "set.api_installing": "Installiere...",
   "set.api_last_sync": "Letzte Synchronisierung",

@@ -224,7 +224,7 @@
                         <hr class="my-3">
                         <h6 class="small text-muted">{{ t('set.fleet_section_api') }}</h6>
                         <div class="row g-2">
-                            <div class="col-md-3">
+                            <div class="col-12 col-sm-6 col-md-4">
                                 <label class="form-label small">{{ t('set.fleet_field_api_brand') }}</label>
                                 <select class="form-select form-select-sm" name="api_brand" id="vf_api_brand">
                                     <option value="">—</option>
@@ -239,27 +239,27 @@
                                     <option value="smart">Smart</option>
                                 </select>
                             </div>
-                            <div class="col-md-3">
+                            <div class="col-12 col-sm-6 col-md-4">
                                 <label class="form-label small">{{ t('set.fleet_field_api_user') }}</label>
                                 <input type="text" class="form-control form-control-sm" name="api_username" id="vf_api_username" autocomplete="off">
                             </div>
-                            <div class="col-md-3">
+                            <div class="col-12 col-md-4">
                                 <label class="form-label small">{{ t('set.fleet_field_api_pw') }}</label>
                                 <input type="password" class="form-control form-control-sm" name="api_password" id="vf_api_password" autocomplete="new-password" placeholder="{{ t('set.fleet_field_api_pw_keep') }}">
                             </div>
-                            <div class="col-md-1">
+                            <div class="col-6 col-md-3">
                                 <label class="form-label small">{{ t('set.fleet_field_api_pin') }}</label>
                                 <input type="text" class="form-control form-control-sm" name="api_pin" id="vf_api_pin" maxlength="20">
                             </div>
-                            <div class="col-md-1">
+                            <div class="col-6 col-md-3">
                                 <label class="form-label small">{{ t('set.fleet_field_api_region') }}</label>
-                                <input type="text" class="form-control form-control-sm" name="api_region" id="vf_api_region" maxlength="6">
+                                <input type="text" class="form-control form-control-sm" name="api_region" id="vf_api_region" maxlength="6" placeholder="EU">
                             </div>
-                            <div class="col-md-1">
+                            <div class="col-12 col-md-6">
                                 <label class="form-label small">{{ t('set.fleet_field_api_vin') }}</label>
                                 <input type="text" class="form-control form-control-sm" name="api_vin" id="vf_api_vin" maxlength="40">
                             </div>
-                            <div class="col-md-12 form-check ms-2">
+                            <div class="col-12 form-check ms-2 mt-2">
                                 <input class="form-check-input" type="checkbox" value="1" name="auto_sync" id="vf_auto_sync" checked>
                                 <label class="form-check-label small" for="vf_auto_sync">{{ t('set.fleet_field_auto_sync') }}</label>
                             </div>
@@ -811,6 +811,7 @@
                     api_installing: {{ t('set.api_installing')|tojson }},
                     api_installed: {{ t('set.api_installed')|tojson }},
                     api_retry: {{ t('set.api_retry')|tojson }},
+                    api_install_restart: {{ t('set.api_install_restart')|tojson }},
                     api_sync_active: {{ t('set.api_sync_active')|tojson }},
                     api_sync_inactive: {{ t('set.api_sync_inactive')|tojson }},
                     api_delete_confirm: {{ t('set.api_delete_confirm')|tojson }},
@@ -1028,7 +1029,28 @@
                             btn.classList.remove('btn-outline-primary');
                             btn.classList.add('btn-success');
                             btn.innerHTML = '<i class="bi bi-check-lg"></i> ' + T.api_installed;
-                            setTimeout(() => location.reload(), 1500);
+                            if (d.restarting) {
+                                // v3.0: backend triggers a clean systemd
+                                // restart to load the freshly-installed
+                                // package. Poll the home page until the
+                                // worker is back, then reload — without
+                                // this the reload races the restart and
+                                // the user lands on a connection error.
+                                statusEl.innerHTML = '<span class="text-warning"><span class="spinner-border spinner-border-sm me-1"></span>' + T.api_install_restart + '</span>';
+                                const pollUntilUp = async () => {
+                                    for (let i = 0; i < 30; i++) {
+                                        await new Promise(r => setTimeout(r, 1000));
+                                        try {
+                                            const probe = await fetch('/api/health', {cache: 'no-store'});
+                                            if (probe.ok) { location.reload(); return; }
+                                        } catch (_) { /* still down — keep polling */ }
+                                    }
+                                    location.reload();  // give up and reload anyway
+                                };
+                                pollUntilUp();
+                            } else {
+                                setTimeout(() => location.reload(), 1500);
+                            }
                         } else {
                             btn.classList.remove('btn-outline-primary');
                             btn.classList.add('btn-outline-danger');

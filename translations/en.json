@@ -476,6 +476,7 @@
   "set.api_every": "every",
   "set.api_fetch_token": "Fetch Token",
   "set.api_install_hint": "More brands available — install package:",
+  "set.api_install_restart": "App is restarting to load the new package …",
   "set.api_installed": "Installed",
   "set.api_installing": "Installing...",
   "set.api_last_sync": "Last Sync",
