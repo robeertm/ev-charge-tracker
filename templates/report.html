@@ -629,24 +629,37 @@
         if (!pp.length) {
             setEmpty('plotPrice');
         } else {
+            // v2.28.65: split into one dataset per charge type (AC / DC /
+            // PV) so the legend shows them separately and the user can
+            // see at a glance that PV charges sit at €0.00. Pre-v2.28.65
+            // the chart filtered out zero-priced rows entirely, leaving
+            // a single non-PV dot in the plot that looked like the only
+            // price the user pays.
+            const byType = {AC: [], DC: [], PV: []};
+            pp.forEach(p => {
+                const t = p.t || 'AC';
+                if (!byType[t]) byType[t] = [];
+                byType[t].push({x: p.x, y: p.y});
+            });
+            const datasets = ['AC', 'DC', 'PV']
+                .filter(t => byType[t] && byType[t].length)
+                .map(t => ({
+                    label: t,
+                    data: byType[t],
+                    borderColor: TYPE_COLORS[t] || C.red,
+                    backgroundColor: TYPE_COLORS[t] || C.red,
+                    pointRadius: 3,
+                    showLine: false,
+                }));
             charts.plotPrice = makeChart('plotPrice', {
                 type: 'scatter',
-                data: {
-                    datasets: [{
-                        label: T.cost,
-                        data: pp.map(p => ({x: p.x, y: p.y})),
-                        borderColor: C.red,
-                        backgroundColor: C.redL,
-                        pointRadius: 3,
-                        showLine: false,
-                    }]
-                },
+                data: {datasets},
                 options: {
                     parsing: false,
                     plugins: {
-                        legend: {display: false},
+                        legend: {display: true, position: 'bottom'},
                         tooltip: {callbacks: {
-                            label: ctx => ctx.raw.x + ' · €' + ctx.raw.y.toFixed(4),
+                            label: ctx => ctx.dataset.label + ' · ' + ctx.raw.x + ' · €' + ctx.raw.y.toFixed(4),
                         }},
                     },
                     scales: {
