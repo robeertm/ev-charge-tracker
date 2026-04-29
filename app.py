@@ -233,16 +233,24 @@ def create_app(config_class=Config):
 
 
 def _get_pv_co2():
-    """Calculate PV CO2 in g/kWh from settings."""
+    """Calculate PV CO2 in g/kWh from settings.
+
+    If the user has explicitly zeroed the inputs (yield=0 or lifetime=0
+    means "treat my PV as carbon-neutral"), return 0 — not the legacy
+    42 g/kWh fallback. The 42 only fires when the values are missing or
+    unparseable (truly absent), so a fresh install still gets a sane
+    estimate while a deliberate zero stays zero.
+    """
     try:
         yield_kwp = float(AppConfig.get('pv_yield_per_kwp', '950'))
         lifetime = float(AppConfig.get('pv_lifetime', '25'))
         prod_co2 = float(AppConfig.get('pv_production_co2', '1000'))
         if yield_kwp > 0 and lifetime > 0:
             return int(round(prod_co2 / (yield_kwp * lifetime)))
+        # Explicit zero on yield or lifetime → user wants 0, not 42.
+        return 0
     except (ValueError, TypeError):
-        pass
-    return 42  # fallback
+        return 42  # truly unparseable — fall back
 
 
 def _get_vehicle_credentials():
@@ -1395,6 +1403,26 @@ def register_routes(app):
                 AppConfig.set('pv_lifetime', request.form.get('pv_lifetime', ''))
                 AppConfig.set('pv_production_co2', request.form.get('pv_production_co2', ''))
                 AppConfig.set('pv_price_eur_per_kwh', request.form.get('pv_price_eur_per_kwh', ''))
+                # v2.28.64: cascade the new PV-Strompreis + PV-CO2 onto
+                # every existing PV charge so the report's avg-€/kWh and
+                # cost charts reflect the current setting. Without this,
+                # changing the price from 0.30 to 0 leaves old PV rows
+                # at their saved-time price and the report keeps showing
+                # the stale value.
+                try:
+                    raw_price = (request.form.get('pv_price_eur_per_kwh', '') or '0').replace(',', '.')
+                    new_price = float(raw_price) if raw_price.strip() else 0.0
+                except ValueError:
+                    new_price = 0.0
+                new_co2 = _get_pv_co2()
+                bk = _get_battery_kwh()
+                pv_charges = Charge.query.filter_by(charge_type='PV').all()
+                for c in pv_charges:
+                    c.eur_per_kwh = new_price
+                    c.co2_g_per_kwh = new_co2
+                    c.calculate_fields(bk)
+                if pv_charges:
+                    db.session.commit()
                 flash(t('flash.pv_saved'), 'success')
 
             elif action == 'add_thg':

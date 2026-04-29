@@ -1,5 +1,14 @@
 # Changelog
 
+## v2.28.64 (2026-04-29)
+
+### Report tab — PV charges now reflect the current PV-Strompreis setting
+
+User report: after setting the PV-Strompreis to €0,00 in Settings, the report still showed €0,30/kWh on PV charges. Two reasons, both fixed:
+
+- Saving the PV settings did not cascade onto existing PV rows. Each `Charge` row stores `eur_per_kwh` snapshot-style at insert time, so changing the global PV-Strompreis later left every previously-saved PV charge at its original price. The `save_pv` action now updates `eur_per_kwh` + `co2_g_per_kwh` on every existing PV charge and recalculates `total_cost`, so the report's avg-€/kWh and cost charts immediately reflect the new value. PV charges that had a custom price get overwritten too — the assumption is that PV settings are global by design (self-consumption tariff for the household).
+- `_get_pv_co2()` returned the legacy 42 g/kWh fallback when the user explicitly zeroed the yield or lifetime fields. The check now treats explicit zero as "user wants 0" and returns 0; the 42 fallback only fires when values are truly unparseable / absent.
+
 ## v2.28.63 (2026-04-27)
 
 ### Report tab — every plot is clickable to open fullscreen, like the dashboard tiles
