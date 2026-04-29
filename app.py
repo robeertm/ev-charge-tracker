@@ -182,7 +182,7 @@ def create_app(config_class=Config):
         _vehicle_migrate_inspector = inspect(db.engine)
         _vehicle_child_tables = (
             'charges', 'vehicle_syncs', 'parking_events',
-            'vehicle_trips', 'maintenance_log',
+            'vehicle_trips', 'maintenance_log', 'thg_quotas',
         )
         for _t in _vehicle_child_tables:
             try:
@@ -243,6 +243,21 @@ def create_app(config_class=Config):
                     logger.warning(f"v2.29 backfill on {_t} skipped: {_e}")
             db.session.commit()
             logger.info(f"v2.29 migration: backfilled vehicle_id={_seed.id} on all child tables")
+
+        # v3.0 thg_quotas backfill — runs on every boot but no-ops once
+        # filled. Needed for installs that already ran the v2.29 seed
+        # block (so it won't fire again) but didn't yet have the
+        # thg_quotas vehicle_id column.
+        try:
+            _primary = _VehicleModel.query.filter_by(is_archived=False).order_by(_VehicleModel.id.asc()).first()
+            if _primary is not None:
+                db.session.execute(
+                    text('UPDATE thg_quotas SET vehicle_id = :vid WHERE vehicle_id IS NULL'),
+                    {'vid': _primary.id},
+                )
+                db.session.commit()
+        except Exception as _e:
+            logger.warning(f"v3.0 thg_quotas backfill skipped: {_e}")
 
     register_routes(app)
 
@@ -503,6 +518,21 @@ def _resolved_vehicle_filter():
     if raw is None:
         return None, None
     return raw, Vehicle.query.get(raw)
+
+
+def _thg_quotas_for_picker():
+    """Return ThgQuota rows scoped to the currently picked vehicle.
+
+    'all' fleet view → every quota across the fleet.
+    Specific vehicle → only that vehicle's quotas.
+    Single-vehicle install (no picker yet) → behaves like 'specific'
+    on the only vehicle, so the table is never wrongly cross-mixed.
+    """
+    raw = _active_vehicle_id()
+    q = ThgQuota.query.order_by(ThgQuota.year_from)
+    if isinstance(raw, int):
+        q = q.filter(ThgQuota.vehicle_id == raw)
+    return q.all()
 
 
 def _get_operator_monthly_fees():
@@ -1257,17 +1287,6 @@ def register_routes(app):
 
     @app.context_processor
     def inject_globals():
-        # THG reminder: between Jan 1 and Mar 31, warn if previous year has no quota
-        thg_reminder = None
-        today = date.today()
-        if today.month <= 3:
-            prev_year = today.year - 1
-            existing = ThgQuota.query.filter(
-                ThgQuota.year_from <= prev_year,
-                ThgQuota.year_to >= prev_year,
-            ).first()
-            if not existing:
-                thg_reminder = prev_year
         # v2.29 fleet picker — drives the navbar dropdown so the user
         # can flip between vehicles or the "Alle Flotten-Daten" view
         # from any page without leaving it.
@@ -1279,6 +1298,33 @@ def register_routes(app):
         active_vehicle = None
         if isinstance(active_vid, int):
             active_vehicle = Vehicle.query.get(active_vid)
+
+        # THG reminder: Jan 1 – Mar 31, scoped per-vehicle in v3.0. In
+        # fleet view we warn if ANY non-archived vehicle is missing a
+        # quota for the previous year; in single-vehicle view we only
+        # check the picked vehicle. Reminder fires once and the alert
+        # links to /settings#sec-thg where the user must pick the
+        # correct vehicle anyway, so we don't carry a vehicle name in
+        # the banner — keeps the message short.
+        thg_reminder = None
+        today = date.today()
+        if today.month <= 3:
+            prev_year = today.year - 1
+            if active_vid == 'all':
+                _check_vids = [v.id for v in all_vehicles if not v.is_archived]
+            elif isinstance(active_vid, int):
+                _check_vids = [active_vid]
+            else:
+                _check_vids = []
+            for _vid in _check_vids:
+                _existing = ThgQuota.query.filter(
+                    ThgQuota.vehicle_id == _vid,
+                    ThgQuota.year_from <= prev_year,
+                    ThgQuota.year_to >= prev_year,
+                ).first()
+                if not _existing:
+                    thg_reminder = prev_year
+                    break
         return {
             'app_version': Config.APP_VERSION,
             'car_model': (
@@ -1907,7 +1953,24 @@ def register_routes(app):
 
             elif action == 'add_thg':
                 try:
+                    # v3.0: bind the quota to a specific vehicle. The
+                    # form submits ``thg_vehicle_id`` either from the
+                    # explicit dropdown (fleet view) or a hidden input
+                    # carrying the picker-active vehicle.
+                    raw_vid = request.form.get('thg_vehicle_id', '').strip()
+                    veh_id = None
+                    if raw_vid:
+                        try:
+                            veh_id = int(raw_vid)
+                        except ValueError:
+                            veh_id = None
+                    if veh_id is None:
+                        from models.database import Vehicle as _V
+                        _fallback = (_V.query.filter_by(is_archived=False)
+                                     .order_by(_V.id.asc()).first())
+                        veh_id = _fallback.id if _fallback else None
                     thg = ThgQuota(
+                        vehicle_id=veh_id,
                         year_from=int(request.form['thg_year_from']),
                         year_to=int(request.form['thg_year_to']),
                         amount_eur=float(request.form['thg_amount'].replace(',', '.')),
@@ -2118,7 +2181,7 @@ def register_routes(app):
                                work_lat=AppConfig.get('work_lat', ''),
                                work_lon=AppConfig.get('work_lon', ''),
                                work_label=AppConfig.get('work_label', 'Work'),
-                               thg_quotas=ThgQuota.query.order_by(ThgQuota.year_from).all(),
+                               thg_quotas=_thg_quotas_for_picker(),
                                total_charges=Charge.query.count(),
                                co2_missing=Charge.query.filter(Charge.co2_g_per_kwh.is_(None), Charge.charge_type != 'PV').count(),
                                auth_enabled=(AppConfig.get('auth_enabled', 'false') == 'true'),

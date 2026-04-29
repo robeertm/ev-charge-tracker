@@ -252,6 +252,7 @@ class ThgQuota(db.Model):
     __tablename__ = 'thg_quotas'
 
     id = db.Column(db.Integer, primary_key=True)
+    vehicle_id = db.Column(db.Integer, db.ForeignKey('vehicles.id'), index=True)  # v3.0
     year_from = db.Column(db.Integer, nullable=False)
     year_to = db.Column(db.Integer, nullable=False)
     amount_eur = db.Column(db.Float, nullable=False)

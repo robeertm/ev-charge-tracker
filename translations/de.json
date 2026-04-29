@@ -837,6 +837,7 @@
   "set.thg_period": "Zeitraum",
   "set.thg_title": "THG-Quote",
   "set.thg_total": "Gesamt",
+  "set.thg_vehicle": "Fahrzeug",
   "set.thg_year_from": "Jahr von",
   "set.thg_year_to": "Jahr bis",
   "set.api_target_hint": "Diese Eingaben (Marke, Zugangsdaten, Token-Fetch, Test, Sync-Now) wirken auf das aktuell aktive Fahrzeug — wechselbar oben rechts im Picker. Pro-Fahrzeug-Konfiguration neuer Autos:",

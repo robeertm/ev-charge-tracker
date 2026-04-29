@@ -837,6 +837,7 @@
   "set.thg_period": "Period",
   "set.thg_title": "GHG Quota",
   "set.thg_total": "Total",
+  "set.thg_vehicle": "Vehicle",
   "set.thg_year_from": "Year from",
   "set.thg_year_to": "Year to",
   "set.api_target_hint": "These fields (brand, credentials, token fetch, test, sync now) apply to the currently active vehicle — switch via the picker top-right. To configure a new car from scratch use:",

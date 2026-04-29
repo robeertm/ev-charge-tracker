@@ -302,7 +302,12 @@ def get_summary_stats(vehicle_id=None):
     dc_count = sum(1 for c in charges if c.charge_type == 'DC')
     avg_eur = total_cost / total_kwh if total_kwh > 0 else 0
 
-    total_thg = sum(t.amount_eur for t in ThgQuota.query.all())
+    # v3.0: THG-Quote rows are vehicle-scoped. Single-vehicle view
+    # only counts that vehicle's payouts; fleet view sums everything.
+    _thg_q = ThgQuota.query
+    if vehicle_id is not None:
+        _thg_q = _thg_q.filter(ThgQuota.vehicle_id == vehicle_id)
+    total_thg = sum(t.amount_eur for t in _thg_q.all())
     net_cost = total_cost - total_thg
 
     # Total km = last (highest) odometer reading
@@ -449,7 +454,10 @@ def get_yearly_stats(vehicle_id=None):
     ).all()
 
     thg_map = {}
-    for t in ThgQuota.query.all():
+    _thg_q = ThgQuota.query
+    if vehicle_id is not None:
+        _thg_q = _thg_q.filter(ThgQuota.vehicle_id == vehicle_id)
+    for t in _thg_q.all():
         for y in range(t.year_from, t.year_to + 1):
             thg_map[y] = thg_map.get(y, 0) + t.amount_eur / (t.year_to - t.year_from + 1)
 

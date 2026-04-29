@@ -305,19 +305,42 @@
 
         <!-- THG-Quote -->
         <div class="card mb-4 settings-card" id="sec-thg">
-            <div class="card-header bg-white fw-bold">
-                <i class="bi bi-cash-coin"></i> {{ t('set.thg_title') }}
+            <div class="card-header bg-white fw-bold d-flex justify-content-between align-items-center flex-wrap gap-2">
+                <span><i class="bi bi-cash-coin"></i> {{ t('set.thg_title') }}</span>
+                {% if active_vehicle %}
+                <span class="badge rounded-pill" style="background:{{ active_vehicle.color or '#0d6efd' }};">
+                    {{ active_vehicle.name }}
+                </span>
+                {% elif active_vehicle_filter == 'all' %}
+                <span class="badge bg-secondary">{{ t('nav.fleet_all') }}</span>
+                {% endif %}
             </div>
             <div class="card-body">
                 <p class="text-muted small mb-3">{{ t('set.thg_desc') }}</p>
+                {% set _veh_by_id = {} %}
+                {% for v in fleet_vehicles %}{% set _ = _veh_by_id.update({v.id: v}) %}{% endfor %}
                 {% if thg_quotas %}
                 <table class="table table-sm mb-3">
                     <thead>
-                        <tr><th>{{ t('set.thg_period') }}</th><th class="text-end">{{ t('set.thg_payout') }}</th><th></th></tr>
+                        <tr>
+                            {% if active_vehicle_filter == 'all' %}<th>{{ t('set.thg_vehicle') }}</th>{% endif %}
+                            <th>{{ t('set.thg_period') }}</th>
+                            <th class="text-end">{{ t('set.thg_payout') }}</th>
+                            <th></th>
+                        </tr>
                     </thead>
                     <tbody>
                         {% for thg in thg_quotas %}
                         <tr>
+                            {% if active_vehicle_filter == 'all' %}
+                            <td class="small">
+                                {% set _v = _veh_by_id.get(thg.vehicle_id) %}
+                                {% if _v %}
+                                <span class="d-inline-block rounded-circle me-1" style="width:.6rem; height:.6rem; background:{{ _v.color or '#0d6efd' }};"></span>
+                                {{ _v.name }}
+                                {% else %}<span class="text-muted">—</span>{% endif %}
+                            </td>
+                            {% endif %}
                             <td>{{ thg.year_from }}/{{ thg.year_to }}</td>
                             <td class="text-end">{{ "%.2f"|format(thg.amount_eur) }} €</td>
                             <td class="text-end">
@@ -332,6 +355,7 @@
                         </tr>
                         {% endfor %}
                         <tr class="fw-bold">
+                            {% if active_vehicle_filter == 'all' %}<td></td>{% endif %}
                             <td>{{ t('set.thg_total') }}</td>
                             <td class="text-end">{{ "%.2f"|format(thg_quotas|sum(attribute='amount_eur')) }} €</td>
                             <td></td>
@@ -341,17 +365,30 @@
                 {% endif %}
                 <form method="POST">
                     <div class="row g-2 align-items-end">
-                        <div class="col-4 col-sm-3">
+                        {% if active_vehicle_filter == 'all' %}
+                        <div class="col-12 col-sm-3">
+                            <label class="form-label small">{{ t('set.thg_vehicle') }}</label>
+                            <select class="form-select" name="thg_vehicle_id" required>
+                                {% for v in fleet_vehicles if not v.is_archived %}
+                                <option value="{{ v.id }}">{{ v.name }}</option>
+                                {% endfor %}
+                            </select>
+                        </div>
+                        {% else %}
+                        <input type="hidden" name="thg_vehicle_id"
+                               value="{{ active_vehicle.id if active_vehicle else '' }}">
+                        {% endif %}
+                        <div class="col-4 col-sm-2">
                             <label class="form-label small">{{ t('set.thg_year_from') }}</label>
                             <input type="number" class="form-control" name="thg_year_from"
                                    placeholder="2024" min="2020" max="2040" required>
                         </div>
-                        <div class="col-4 col-sm-3">
+                        <div class="col-4 col-sm-2">
                             <label class="form-label small">{{ t('set.thg_year_to') }}</label>
                             <input type="number" class="form-control" name="thg_year_to"
                                    placeholder="2025" min="2020" max="2040" required>
                         </div>
-                        <div class="col-4 col-sm-3">
+                        <div class="col-4 col-sm-2">
                             <label class="form-label small">{{ t('set.thg_amount') }}</label>
                             <input type="text" class="form-control" name="thg_amount"
                                    placeholder="75,00" required>
