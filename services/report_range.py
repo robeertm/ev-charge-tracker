@@ -382,9 +382,17 @@ def build_report(start: date, end: date, lang: str = 'de') -> dict:
     total_regen = sum(buck_regen)
 
     # ── Price development (per-charge avg EUR/kWh over time) ───────
-    price_points = [{'x': c.date.isoformat(), 'y': round(c.eur_per_kwh, 4)}
+    # v2.28.65: include zero-priced charges (PV self-consumption) so
+    # the chart truthfully shows them as €0.00 dots alongside paid AC/DC
+    # charges. Filtering them out made the plot look like the user was
+    # paying full price across the board when in fact most charges are
+    # free PV. The ``charge_type`` is included so the front-end can
+    # color-code dots by AC / DC / PV.
+    price_points = [{'x': c.date.isoformat(),
+                     'y': round(c.eur_per_kwh, 4),
+                     't': c.charge_type or 'AC'}
                     for c in charges
-                    if c.eur_per_kwh is not None and c.eur_per_kwh > 0]
+                    if c.eur_per_kwh is not None]
 
     # ── SoC usage depth per charge ─────────────────────────────────
     soc_points = [{'x': c.date.isoformat(),

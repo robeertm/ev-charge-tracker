@@ -1,5 +1,17 @@
 # Changelog
 
+## v2.28.65 (2026-04-29)
+
+### Report Preis-Plot — show PV charges as €0,00 dots, color-code by charge type
+
+User report from v2.28.64: after the PV-Strompreis backfill set every PV charge to €0,00, the report's "Preis pro kWh" plot still seemed to claim the user paid €0,30 across the board.
+
+Root cause: `services/report_range.build_report` filtered the `price_points` array down to non-zero entries, so PV charges were silently dropped. With mostly-PV data the chart was left with a handful of paid-AC dots and no zero baseline.
+
+Fix:
+- `price_points` now includes every charge with a non-NULL `eur_per_kwh` and carries the `charge_type` (`AC` / `DC` / `PV`) per point.
+- The frontend splits the data into one dataset per type (using the existing `TYPE_COLORS` palette) and shows a legend, so PV charges sit on the x-axis at €0,00 and AC/DC dots stack above them as before.
+
 ## v2.28.64 (2026-04-29)
 
 ### Report tab — PV charges now reflect the current PV-Strompreis setting
