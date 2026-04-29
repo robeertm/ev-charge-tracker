@@ -1,6 +1,6 @@
 # EV Charge Tracker
 
-> **Self-hosted dashboard for tracking your electric vehicle charges** — costs, kWh, CO2, recuperation, charging losses, and live vehicle status. Connects to 14 EV brands via API. Available in 6 languages.
+> **Self-hosted dashboard for tracking your electric vehicle charges** — costs, kWh, CO2, recuperation, charging losses, and live vehicle status. Multi-vehicle / fleet support, connects to 14 EV brands via API. Available in 6 languages.
 
 [![Latest Release](https://img.shields.io/github/v/release/robeertm/ev-charge-tracker)](https://github.com/robeertm/ev-charge-tracker/releases)
 [![License](https://img.shields.io/badge/license-MIT-blue)](LICENSE)
@@ -65,6 +65,14 @@ Built for EV owners who want **full control over their charging data** — runs 
 ---
 
 ## Features
+
+### Multi-vehicle / fleet (v3.0+)
+- **Track any number of cars in one install** — every charge, sync, parking event, trip and maintenance record is anchored to one specific vehicle for life. Sold a car? Archive it; its lifetime kWh / km / cost stays in fleet aggregates
+- **Navbar fleet picker** — flip between "whole fleet" view and a single vehicle from any page; dashboards, history, trips, maintenance, report and the new-charge form all respect the selection
+- **Per-vehicle hardware** — battery kWh, SoH baseline, battery production CO₂, max-AC kW, recuperation rate, fossil-CO₂/km, color, icon
+- **Per-vehicle API credentials** — every car has its own brand / user / password / pin / region / VIN; the daily API quota counter (200/day for Kia/Hyundai), smart-sync window, force-refresh queue and SDK trip-info reconcile are all per-vehicle so a 5-car fleet doesn't share a single quota
+- **Per-vehicle THG-Quote** — German EV emissions certificate payouts are bound to the right car; the year-end reminder warns only when a non-archived vehicle is missing the previous year's payout
+- **Setup wizard step 3** — first-install flow lets you register multiple vehicles in one shot before the app opens
 
 ### Tracking
 - **Mobile-friendly input form** — quickly log charges from your phone, with Cancel button, native operator `<select>` (datalist-free so iOS Safari works), and optional GPS-captured station location

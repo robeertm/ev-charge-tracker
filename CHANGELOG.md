@@ -1,6 +1,68 @@
 # Changelog
 
-## v2.28.63 (2026-04-27)
+## v3.0.0 (2026-04-29)
+
+Major release: multi-vehicle / fleet support. The app moves from "one car, one set of stats" to "any number of cars, each with its own history, sync schedule, and per-vehicle settings". Single-vehicle installs are auto-migrated and keep working unchanged — the migration seeds a single `Vehicle` row from your existing AppConfig and stamps every existing charge / sync / parking event / trip / maintenance record with that vehicle's id.
+
+> **Backup recommended before update.** The migration is idempotent and well-tested but the schema change is substantial (new `vehicles` table + `vehicle_id` foreign key on five existing tables). If anything goes wrong you'll want a known-good DB to roll back to.
+
+### Multi-vehicle / fleet (Phase 1)
+
+- New `vehicles` table with per-vehicle hardware (battery_kwh, SoH baseline, battery production CO₂, max-AC kW, fossil-CO₂/km, recuperation kWh/km), API credentials (brand/user/pw/pin/region/VIN/auto_sync), color, icon, and lifecycle metadata (acquired_at / retired_at / archived / notes).
+- `vehicle_id` foreign key added to `charges`, `vehicle_syncs`, `parking_events`, `vehicle_trips`, and `maintenance_log`. Every existing row is auto-stamped with the migration-seeded primary vehicle so single-car installs see no change in their data.
+- **Navbar fleet picker** with a "Whole fleet" view + per-vehicle filter. Every dashboard / history / trips / maintenance / report page respects the picker; switching vehicles is one tap from any page.
+- **Fleet CRUD section in Settings** — add, edit, archive, restore, delete vehicles. Per-vehicle test-connection + sync-now buttons. Archived vehicles still contribute to fleet-wide aggregates so a sold car's lifetime kWh / km / cost stays visible.
+- **Setup wizard step 3** — first-install flow now lets you register multiple vehicles in one shot before the app opens.
+- **Per-charge vehicle dropdown** on the new-charge form, with the per-vehicle battery + max-AC values feeding the SoC / time / kWh estimators in real time.
+- Vehicle column appears in history / trips / maintenance / report tables when the picker is on "whole fleet"; hidden when a single vehicle is selected (no redundant column).
+
+### Multi-vehicle / fleet (Phase 2)
+
+- **Per-vehicle simultaneous sync** — each vehicle has its own daily API quota counter (200/day for Kia/Hyundai), its own smart-window state machine, its own force-refresh queue, and its own daily SDK trip-info reconcile.
+- All stats helpers (SoH baseline, recuperation rate, regen totals, fossil CO₂ comparison) became vehicle-aware: pass `vehicle_id` for one car, omit for fleet-wide totals.
+- Token-fetch (Kia/Hyundai OAuth refresh-token helper) operates on the picker-active vehicle and writes to that vehicle's `api_password`.
+- Per-vehicle THG-Quote (German EV emissions certificate payouts) — quotas are bound to one vehicle, the dashboard / yearly chart / report all filter by the picker, and the year-end reminder warns only when a non-archived vehicle is missing the previous year's payout.
+
+### Connector install flow — clean restart instead of broken reload
+
+After `pip install`-ing a new vehicle brand (VW Group, Tesla, Renault, MG, Polestar, Smart, Porsche, …), the API endpoint used to call `importlib.reload(services.vehicle.registry)` to make the freshly-installed connector visible. That wiped the brand registry to an empty dict and could not repopulate it (the connector modules were already imported, so their module-level `register(...)` calls didn't fire on a no-op `__import__`). Result: every subsequent vehicle sync raised "Unknown vehicle brand: kia" until the service was restarted out-of-band.
+
+Now: a successful install schedules a 1-second-delayed systemd restart in a daemon thread (same pattern as DB-backup-import) and returns `restarting: true`. The settings install button polls `/api/health` until the worker is back, then reloads — no more reload-races-restart connection error.
+
+This applied to **every** brand, not just VW. The fix is registry-wide.
+
+### PV (photovoltaic) charges — settings cascade onto existing rows (was v2.28.64)
+
+User report: setting the PV-Strompreis to €0,00 in Settings still left the report showing €0,30/kWh on every PV charge.
+
+Two reasons, both fixed:
+- Saving the PV settings did not cascade onto existing PV rows. Each `Charge` stores `eur_per_kwh` snapshot-style at insert time, so changing the global PV price later left every previously-saved PV charge at its original price. The `save_pv` action now updates `eur_per_kwh` + `co2_g_per_kwh` on every existing PV charge and recalculates `total_cost`.
+- `_get_pv_co2()` returned the legacy 42 g/kWh fallback when the user explicitly zeroed yield or lifetime. The check now treats explicit zero as "user wants 0" and returns 0; the 42 fallback only fires on truly unparseable input.
+
+### Report Preis-Plot — show PV charges as €0,00 dots, color-coded (was v2.28.65)
+
+The price chart used to filter out zero-priced charges entirely, which left only the rare paid AC/DC dots in the plot. For users with mostly-PV data this looked like the chart was claiming they paid that price across the board.
+
+Now: every charge with a non-NULL `eur_per_kwh` is plotted, split into one dataset per charge type (AC / DC / PV) using the existing TYPE_COLORS palette. PV charges sit on the x-axis at €0,00 and the legend makes the breakdown explicit.
+
+### Mobile UX
+
+- Vehicle CRUD form's API row was `col-md-1` for PIN / region / VIN — ~80 px wide on tablets, unusable. Re-flowed to `col-12 / col-sm-6 / col-md-3-or-4` so fields breathe at every breakpoint.
+- Setup wizard step 3 (vehicle registration) uses `col-12 / col-6` grid throughout — already mobile-friendly.
+
+### i18n — backfilled all v3.0 keys across six languages
+
+87 v3.0 strings (fleet section, navbar picker, setup wizard step 3, sync section, vehicle install restart message, per-vehicle THG label, …) were missing in `es / fr / it / nl`. Without these the strings fell through to German per the i18n fallback chain, so Spanish / French / Italian / Dutch users were seeing German UI text. All localised properly.
+
+## v2.28.65 (2026-04-29)
+
+### Report Preis-Plot — show PV charges as €0,00 dots, color-code by charge type
+
+Follow-up hotfix to v2.28.64. After PV charges were correctly cascaded to €0,00 in the database, the report's "Preis pro kWh" plot still looked like the user was paying €0,30 across the board — because the chart was filtering out zero-priced rows entirely. With mostly-PV data, only the rare paid AC/DC dots remained visible.
+
+Fix: include zero-priced rows, split into one dataset per type with a legend.
+
+## v2.28.64 (2026-04-29)
 
 ### Report tab — every plot is clickable to open fullscreen, like the dashboard tiles
 
