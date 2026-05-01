@@ -1,5 +1,29 @@
 # Changelog
 
+## v3.0.2 (2026-05-01)
+
+### Trip-info reconcile — gap-aware backfill on startup
+
+Pre-fix the nightly + startup catch-up always walked back exactly 3 days. After a long offline gap (e.g. an EV-tracker VM that was LUKS-locked for a week, common with the LUKS-encrypted-volume install), trips from days 4-N were silently dropped even though the Kia/Hyundai SDK still has them server-side for ~30-90 days.
+
+Now `gap_days_since_last_reconcile(vehicle_id)` reads `last_reconcile_at_<vid>` and returns the actual gap, capped at 30 days (the SDK retention floor). The daily reconcile loop uses that instead of the hard-coded 3:
+
+- 1 day gap → 3 days (default minimum)
+- 5 day gap → 5 days
+- 25 day gap → 25 days
+- 90 day gap → 30 days (cap)
+- fresh install → 3 days (no timestamp yet, default)
+
+API quota is fine: `day_trip_info` costs 1 call per day, even a 30-day walk only burns 30 of the daily 200/vehicle quota.
+
+## v3.0.1 (2026-05-01)
+
+### Tailscale post-boot kick (3× netcheck in first 90 s)
+
+After a VM reboot tailscaled often comes up before the LAN/DHCP is fully stable, ends up cached on a stale path (DERP-only or no UPnP), and only re-evaluates 30 minutes later on its own. `create_app()` now spawns a daemon thread that runs `tailscale netcheck` at 15 s, 45 s and 90 s after service start to force fresh path discovery. Errors are swallowed so non-Tailscale deploys (Synology/bare-Pi installs without `tailscale`) ignore this silently.
+
+For LUKS-encrypted-volume installs there's now also a separate root-owned systemd unit `tailscale-kick.service` (installed manually, see commit notes) that runs the same kick *before* LUKS unlock, so the unlock page itself stays reachable even after a 3 a.m. unattended-upgrade reboot.
+
 ## v3.0.0 (2026-04-29)
 
 Major release: multi-vehicle / fleet support. The app moves from "one car, one set of stats" to "any number of cars, each with its own history, sync schedule, and per-vehicle settings". Single-vehicle installs are auto-migrated and keep working unchanged — the migration seeds a single `Vehicle` row from your existing AppConfig and stamps every existing charge / sync / parking event / trip / maintenance record with that vehicle's id.
