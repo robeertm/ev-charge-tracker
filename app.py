@@ -314,6 +314,33 @@ def create_app(config_class=Config):
     except Exception:
         pass
 
+    # v3.0.1: post-boot Tailscale kick. After a VM reboot tailscaled
+    # often comes up before the LAN/DHCP is fully stable, ends up
+    # cached on a stale path (DERP-only or no UPnP), and only
+    # re-evaluates 30 min later on its own schedule. We trigger an
+    # explicit ``tailscale netcheck`` 3× in the first 90 s after the
+    # service starts so paths get re-discovered now, not after lunch.
+    # All errors are swallowed so non-Tailscale deploys (Synology /
+    # bare Pi without tailscale installed) ignore this silently.
+    def _tailscale_kick():
+        import time as _t
+        import subprocess as _sp
+        prev = 0
+        for at_seconds in (15, 45, 90):
+            _t.sleep(at_seconds - prev)
+            prev = at_seconds
+            try:
+                _sp.run(['tailscale', 'netcheck'],
+                        capture_output=True, timeout=20)
+            except Exception:
+                return  # tailscale not installed / not running — bail
+    try:
+        import threading as _th
+        _th.Thread(target=_tailscale_kick, daemon=True,
+                   name='tailscale-kick').start()
+    except Exception:
+        pass
+
     return app
 
 
