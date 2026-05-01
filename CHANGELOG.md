@@ -1,5 +1,17 @@
 # Changelog
 
+## v3.0.4 (2026-05-01)
+
+### Settings → LUKS-Passphrase ändern
+
+The setup wizard could already change the LUKS passphrase (during the initial "set your real passphrase" step), but post-setup there was no way to rotate it from inside the app — users had to SSH in and run `cryptsetup` by hand.
+
+New Settings card with old / new / confirm fields. Reuses the existing `services.setup_service.change_luks_passphrase` helper (which is already wired up to the `/sbin/cryptsetup luksChangeKey` sudoers entry).
+
+**Auto-unlock-aware:** if auto-unlock was on when the passphrase change happens, the stored keyfile gets refreshed with the new passphrase right after `cryptsetup` succeeds. Without this the next reboot would fail to auto-unlock with the stale stored key, locking the user out until they manually unlock.
+
+If the keyfile refresh fails (rare — would mean the brand-new passphrase doesn't validate against the LUKS header, which shouldn't happen) the response carries a warning so the user knows the change went through but auto-unlock is now stale.
+
 ## v3.0.3 (2026-05-01)
 
 ### LUKS Auto-Unlock — opt out of the passphrase prompt

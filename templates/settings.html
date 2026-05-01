@@ -49,6 +49,7 @@
     ('database',  'bi-database',    t('set.db_title')),
     ('ssl',       'bi-shield-lock', t('set.ssl_title')),
     ('auth',      'bi-shield-lock', t('set.auth_title')),
+    ('luks',      'bi-key',         t('set.luks_title')),
     ('autounlock', 'bi-unlock',     t('set.autounlock_title')),
     ('notify',    'bi-bell',        t('set.notify_title')),
     ('sysupd',    'bi-arrow-up-circle', t('set.sysupd_title')),
@@ -1669,6 +1670,91 @@
                     </div>
                 </form>
                 {% endif %}
+            </div>
+        </div>
+
+        <!-- LUKS Passphrase ändern (v3.0.4) -->
+        <div class="card mb-4 settings-card" id="sec-luks">
+            <div class="card-header bg-white fw-bold">
+                <i class="bi bi-key"></i> {{ t('set.luks_title') }}
+            </div>
+            <div class="card-body">
+                <p class="small text-muted mb-3">{{ t('set.luks_desc') }}</p>
+                <form id="luksChangeForm" autocomplete="off">
+                    <div class="row g-2 mb-2">
+                        <div class="col-md-4">
+                            <label class="form-label small" for="luksOld">{{ t('set.luks_old_label') }}</label>
+                            <input type="password" class="form-control form-control-sm" id="luksOld" autocomplete="current-password" required>
+                        </div>
+                        <div class="col-md-4">
+                            <label class="form-label small" for="luksNew">{{ t('set.luks_new_label') }}</label>
+                            <input type="password" class="form-control form-control-sm" id="luksNew" autocomplete="new-password" minlength="6" required>
+                        </div>
+                        <div class="col-md-4">
+                            <label class="form-label small" for="luksNewConfirm">{{ t('set.luks_new_confirm_label') }}</label>
+                            <input type="password" class="form-control form-control-sm" id="luksNewConfirm" autocomplete="new-password" minlength="6" required>
+                        </div>
+                    </div>
+                    <button type="submit" class="btn btn-primary btn-sm" id="luksChangeBtn">
+                        <i class="bi bi-key-fill"></i> {{ t('set.luks_change_submit') }}
+                    </button>
+                </form>
+                <div id="luksChangeStatus" class="small mt-2"></div>
+                <script>
+                (function () {
+                    const T_LK = {
+                        ok:       {{ t('flash.luks_changed')|tojson }},
+                        ok_au:    {{ t('flash.luks_changed_autounlock_refreshed')|tojson }},
+                        mismatch: {{ t('err.passphrase_mismatch')|tojson }},
+                        tooShort: {{ t('err.passphrase_too_short')|tojson }},
+                    };
+                    const form = document.getElementById('luksChangeForm');
+                    const status = document.getElementById('luksChangeStatus');
+                    const btn = document.getElementById('luksChangeBtn');
+                    form.addEventListener('submit', async (e) => {
+                        e.preventDefault();
+                        status.innerHTML = '';
+                        const oldP = document.getElementById('luksOld').value;
+                        const newP = document.getElementById('luksNew').value;
+                        const newPC = document.getElementById('luksNewConfirm').value;
+                        if (newP !== newPC) {
+                            status.innerHTML = '<span class="text-danger">' + T_LK.mismatch + '</span>';
+                            return;
+                        }
+                        if (newP.length < 6) {
+                            status.innerHTML = '<span class="text-danger">' + T_LK.tooShort + '</span>';
+                            return;
+                        }
+                        btn.disabled = true;
+                        try {
+                            const r = await fetch('/api/luks/change-passphrase', {
+                                method: 'POST',
+                                headers: {'Content-Type': 'application/json'},
+                                body: JSON.stringify({
+                                    old_passphrase: oldP,
+                                    new_passphrase: newP,
+                                    new_passphrase_confirm: newPC,
+                                }),
+                            });
+                            const d = await r.json();
+                            if (d.ok) {
+                                form.reset();
+                                if (d.warning) {
+                                    status.innerHTML = '<span class="text-warning">' + d.warning + '</span>';
+                                } else {
+                                    status.innerHTML = '<span class="text-success">' + (d.message || T_LK.ok) + '</span>';
+                                }
+                            } else {
+                                status.innerHTML = '<span class="text-danger">' + (d.error || 'Error') + '</span>';
+                            }
+                        } catch (err) {
+                            status.innerHTML = '<span class="text-danger">' + err.message + '</span>';
+                        } finally {
+                            btn.disabled = false;
+                        }
+                    });
+                })();
+                </script>
             </div>
         </div>
 

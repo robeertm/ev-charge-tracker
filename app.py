@@ -1083,6 +1083,41 @@ def register_routes(app):
             return jsonify({'ok': False, 'error': err or 'unknown'}), 400
         return jsonify({'ok': True})
 
+    @app.route('/api/luks/change-passphrase', methods=['POST'])
+    def api_luks_change_passphrase():
+        """Change the LUKS passphrase on the running data volume.
+
+        If auto-unlock was enabled, the stored keyfile gets refreshed
+        with the new passphrase after a successful change — otherwise
+        the next reboot would fail to auto-unlock with the stale key.
+        """
+        from services.setup_service import change_luks_passphrase
+        data = request.get_json(silent=True) or {}
+        old_pass = (data.get('old_passphrase') or '').strip()
+        new_pass = (data.get('new_passphrase') or '').strip()
+        new_pass_confirm = (data.get('new_passphrase_confirm') or '').strip()
+        if not old_pass or not new_pass:
+            return jsonify({'ok': False, 'error': t('err.passphrase_empty')}), 400
+        if new_pass != new_pass_confirm:
+            return jsonify({'ok': False, 'error': t('err.passphrase_mismatch')}), 400
+        if len(new_pass) < 6:
+            return jsonify({'ok': False, 'error': t('err.passphrase_too_short')}), 400
+        ok, msg = change_luks_passphrase(old_pass, new_pass)
+        if not ok:
+            return jsonify({'ok': False, 'error': msg}), 400
+        # If auto-unlock was on, refresh the stored keyfile with the new
+        # passphrase. Failure here is loud (would otherwise leave the
+        # stored key stale → next boot can't auto-unlock).
+        au_ok, _err, au_out = _luks_autounlock_call('status')
+        if au_ok and au_out == 'enabled':
+            re_ok, re_err, _ = _luks_autounlock_call('enable', passphrase=new_pass)
+            if not re_ok:
+                return jsonify({
+                    'ok': True,
+                    'warning': t('flash.luks_changed_autounlock_stale', error=re_err),
+                })
+        return jsonify({'ok': True, 'message': t('flash.luks_changed')})
+
     # ── AUTH GUARD (optional web-UI login) ────────────────────
     # Opt-in password gate in front of the app. Owner enables it in
     # Settings → Zugangsschutz; credentials live in AppConfig (hashed).
