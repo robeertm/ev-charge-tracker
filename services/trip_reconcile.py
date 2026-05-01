@@ -295,3 +295,33 @@ def should_run_daily(vehicle_id=None) -> bool:
     except ValueError:
         return True
     return last_dt.date() < date.today()
+
+
+def gap_days_since_last_reconcile(vehicle_id=None,
+                                  default_days: int = 3,
+                                  cap_days: int = 30) -> int:
+    """How many days back the next backfill should walk.
+
+    Computes the gap between ``last_reconcile_at_{vid}`` and today.
+    Used by the daily reconcile to handle long offline gaps (e.g. an
+    EV-tracker VM that was LUKS-locked for a week — the SDK still has
+    the trips, we just need to walk back further than the default 3).
+
+    Returns ``default_days`` (3) for fresh installs / unparseable
+    timestamps, the actual gap otherwise, capped at ``cap_days`` (30
+    is roughly the Kia/Hyundai server-side trip-history retention).
+    """
+    if vehicle_id is None or vehicle_id == 1:
+        last = AppConfig.get('last_reconcile_at', '')
+    else:
+        last = AppConfig.get(f'last_reconcile_at_{vehicle_id}', '')
+    if not last:
+        return default_days
+    try:
+        last_dt = datetime.fromisoformat(last)
+    except ValueError:
+        return default_days
+    gap = (date.today() - last_dt.date()).days
+    if gap < default_days:
+        return default_days
+    return min(gap, cap_days)

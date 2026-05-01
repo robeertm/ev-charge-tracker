@@ -374,16 +374,23 @@ def _maybe_daily_trip_reconcile(app) -> None:
     """
     try:
         with app.app_context():
-            from services.trip_reconcile import should_run_daily, reconcile_range
+            from services.trip_reconcile import (
+                should_run_daily, reconcile_range, gap_days_since_last_reconcile,
+            )
             from services.vehicle.trip_log_fetch import backfill
             targets = _trip_info_vehicles()
             if not targets:
                 # Legacy single-vehicle path
                 if not should_run_daily():
                     return
-                logger.info("Daily trip reconcile (legacy): 3-day walk")
-                backfill(days=3)
-                r = reconcile_range(days=3)
+                # v3.0.2: gap-aware walk. After a long LUKS-lock the
+                # default 3 days isn't enough — pick up exactly the
+                # number of days since last_reconcile_at, capped at
+                # the SDK's ~30-day server-side retention.
+                walk_days = gap_days_since_last_reconcile()
+                logger.info(f"Daily trip reconcile (legacy): {walk_days}-day walk")
+                backfill(days=walk_days)
+                r = reconcile_range(days=walk_days)
                 logger.info(
                     f"Daily trip reconcile (legacy) done: "
                     f"dep={r.get('total_applied', 0)} "
@@ -395,9 +402,10 @@ def _maybe_daily_trip_reconcile(app) -> None:
                 try:
                     if not should_run_daily(vehicle_id=v.id):
                         continue
-                    logger.info(f"Daily trip reconcile [{v.name}]: 3-day walk")
-                    backfill(days=3, vehicle_id=v.id)
-                    r = reconcile_range(days=3, vehicle_id=v.id)
+                    walk_days = gap_days_since_last_reconcile(vehicle_id=v.id)
+                    logger.info(f"Daily trip reconcile [{v.name}]: {walk_days}-day walk")
+                    backfill(days=walk_days, vehicle_id=v.id)
+                    r = reconcile_range(days=walk_days, vehicle_id=v.id)
                     logger.info(
                         f"Daily trip reconcile [{v.name}] done: "
                         f"dep={r.get('total_applied', 0)} "
