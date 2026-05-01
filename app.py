@@ -1024,6 +1024,65 @@ def register_routes(app):
     def api_health():
         return jsonify({'ok': True, 'version': Config.APP_VERSION})
 
+    # ── LUKS auto-unlock (v3.0.3) ─────────────────────────────
+    # Lets the user opt out of typing the LUKS passphrase on every
+    # reboot. A small root-owned wrapper (/usr/local/bin/ev-luks-
+    # autounlock) verifies the passphrase against the LUKS volume and
+    # stores it at /etc/ev-tracker/luks-keyfile (mode 0400, root-only)
+    # so ev-unlock-web can use it on the next boot. The trade-off is
+    # explicit in the UI: anyone with disk access can read the
+    # passphrase, so this is for trusted-network deployments only.
+
+    def _luks_autounlock_call(action, passphrase=None):
+        import subprocess as _sp
+        cmd = ['sudo', '-n', '/usr/local/bin/ev-luks-autounlock', action]
+        try:
+            r = _sp.run(
+                cmd,
+                input=(passphrase.encode('utf-8') if passphrase else None),
+                capture_output=True,
+                timeout=20,
+            )
+        except FileNotFoundError:
+            return False, 'helper_missing', ''
+        except Exception as e:
+            return False, str(e), ''
+        out = (r.stdout or b'').decode(errors='replace').strip()
+        err = (r.stderr or b'').decode(errors='replace').strip()
+        return r.returncode == 0, err, out
+
+    @app.route('/api/luks/auto-unlock/status', methods=['GET'])
+    def api_luks_autounlock_status():
+        ok, _err, out = _luks_autounlock_call('status')
+        if not ok:
+            return jsonify({'available': False, 'enabled': False})
+        return jsonify({'available': True, 'enabled': out == 'enabled'})
+
+    @app.route('/api/luks/auto-unlock/enable', methods=['POST'])
+    def api_luks_autounlock_enable():
+        data = request.get_json(silent=True) or {}
+        passphrase = (data.get('passphrase') or '').strip()
+        if not passphrase:
+            return jsonify({'ok': False, 'error': t('err.passphrase_empty')}), 400
+        ok, err, _out = _luks_autounlock_call('enable', passphrase=passphrase)
+        if not ok:
+            low = (err or '').lower()
+            if 'rejected' in low or 'no key' in low:
+                msg = t('err.current_password_wrong')
+            elif 'helper_missing' in low:
+                msg = t('err.luks_helper_missing')
+            else:
+                msg = err or 'unknown'
+            return jsonify({'ok': False, 'error': msg}), 400
+        return jsonify({'ok': True})
+
+    @app.route('/api/luks/auto-unlock/disable', methods=['POST'])
+    def api_luks_autounlock_disable():
+        ok, err, _out = _luks_autounlock_call('disable')
+        if not ok:
+            return jsonify({'ok': False, 'error': err or 'unknown'}), 400
+        return jsonify({'ok': True})
+
     # ── AUTH GUARD (optional web-UI login) ────────────────────
     # Opt-in password gate in front of the app. Owner enables it in
     # Settings → Zugangsschutz; credentials live in AppConfig (hashed).

@@ -1,0 +1,198 @@
+#!/usr/bin/env python3
+"""Web-based LUKS unlock helper for ev-charge-tracker VMs.
+
+If ``/etc/ev-tracker/luks-keyfile`` exists (auto-unlock enabled by the
+user from inside the app), tries to unlock from that file FIRST and
+skips the web UI entirely on success. The ``ev-luks-autounlock``
+wrapper is the only thing that touches the keyfile — this helper just
+calls ``try-unlock`` via sudo and inspects the return code.
+"""
+import html
+import http.server
+import os
+import subprocess
+import threading
+import time
+import urllib.parse
+
+PORT = 7654
+UNLOCK_CMD = ['sudo', '-n', '/usr/local/bin/ev-unlock', '--stdin', '--no-start']
+START_CMD = ['sudo', '-n', '/bin/systemctl', 'restart', 'ev-tracker.service']
+AUTO_UNLOCK_CMD = ['sudo', '-n', '/usr/local/bin/ev-luks-autounlock', 'try-unlock']
+
+HTML_FORM = """<!DOCTYPE html>
+<html lang="de">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>EV Charge Tracker &#8212; Entsperren</title>
+<style>
+body { font-family: -apple-system, Segoe UI, sans-serif; background: linear-gradient(135deg,#0f2a47,#1e4976); min-height: 100vh; display: flex; align-items: center; justify-content: center; margin: 0; color: #333; }
+.card { background: #fff; border-radius: 12px; padding: 32px 28px; max-width: 420px; width: calc(100% - 32px); box-shadow: 0 8px 24px rgba(0,0,0,0.25); }
+h1 { margin: 0 0 6px 0; font-size: 1.25rem; color: #0f2a47; }
+.sub { color: #666; font-size: 0.9rem; margin: 0 0 20px 0; }
+.icon { font-size: 3rem; text-align: center; margin-bottom: 12px; }
+label { display: block; font-size: 0.88rem; color: #555; margin-bottom: 6px; }
+input[type=password] { width: 100%; padding: 12px; font-size: 1rem; border: 1px solid #ccd; border-radius: 6px; box-sizing: border-box; }
+button { width: 100%; padding: 12px; margin-top: 16px; background: #0d6efd; color: #fff; border: 0; border-radius: 6px; font-size: 1rem; font-weight: 500; cursor: pointer; }
+button:hover { background: #0b5ed7; }
+.err { background: #fde; color: #902; padding: 10px 12px; border-radius: 6px; margin-bottom: 14px; font-size: 0.88rem; }
+.firsttime { background: #e7f3ff; color: #0c4b8e; padding: 10px 12px; border-left: 3px solid #0d6efd; border-radius: 4px; margin: 12px 0 16px 0; font-size: 0.85rem; line-height: 1.4; }
+.hint { font-size: 0.8rem; color: #888; margin-top: 14px; text-align: center; }
+</style>
+</head>
+<body>
+<div class="card">
+<div class="icon">&#128274;</div>
+<h1>EV Charge Tracker</h1>
+<p class="sub">Die verschl&#252;sselten Daten deiner VM sind versiegelt. Gib die aktuelle LUKS-Passphrase ein, um zu entsperren.</p>
+<div class="firsttime"><strong>Erstes Mal hier?</strong> Verwende die tempor&#228;re Passphrase von deinem Administrator &#8212; du kannst sie danach im Einrichtungsassistenten durch deine eigene ersetzen.</div>
+__ERROR__
+<form method="POST" action="/unlock">
+<label for="p">LUKS-Passphrase</label>
+<input type="password" id="p" name="passphrase" autofocus required>
+<button type="submit">Entsperren</button>
+</form>
+<p class="hint">Nach dem Entsperren startet die App automatisch (~6 Sekunden).</p>
+</div>
+</body>
+</html>"""
+
+HTML_SUCCESS = """<!DOCTYPE html>
+<html lang="de">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta http-equiv="refresh" content="8;url=/">
+<title>Entsperrt</title>
+<script>
+setTimeout(function(){ try { window.location.replace('/'); } catch(e) {} }, 6000);
+</script>
+<style>
+body { font-family: -apple-system, Segoe UI, sans-serif; background: linear-gradient(135deg,#0f2a47,#1e4976); min-height: 100vh; display: flex; align-items: center; justify-content: center; margin: 0; color: #fff; text-align: center; }
+.spinner { display: inline-block; width: 40px; height: 40px; border: 4px solid rgba(255,255,255,0.3); border-top: 4px solid #fff; border-radius: 50%; animation: s 1s linear infinite; margin-bottom: 16px; }
+@keyframes s { to { transform: rotate(360deg); } }
+h1 { font-size: 1.4rem; margin-bottom: 8px; }
+</style>
+</head>
+<body>
+<div>
+<div class="spinner"></div>
+<h1>Entsperrt.</h1>
+<p>App startet &#8212; Seite l&#228;dt in wenigen Sekunden neu.</p>
+<p><a href="/" style="color:#fff;text-decoration:underline">Oder jetzt klicken</a></p>
+</div>
+</body>
+</html>"""
+
+
+def try_auto_unlock():
+    """Attempt to unlock from the stored keyfile.
+
+    Returns True if the LUKS volume was unlocked + mounted by the call,
+    False otherwise (no keyfile, wrong key, missing helper, etc.). Any
+    exception falls through to the manual web UI — the auto-unlock is
+    only an opt-in convenience.
+    """
+    try:
+        r = subprocess.run(
+            AUTO_UNLOCK_CMD,
+            capture_output=True,
+            timeout=30,
+        )
+        return r.returncode == 0
+    except Exception:
+        return False
+
+
+class UnlockHandler(http.server.BaseHTTPRequestHandler):
+    def log_message(self, fmt, *args):
+        pass
+
+    def do_GET(self):
+        if self.path in ('/', '/unlock'):
+            self._respond(200, HTML_FORM.replace('__ERROR__', ''))
+        else:
+            self._respond(404, '<h1>404</h1>')
+
+    def do_POST(self):
+        if self.path != '/unlock':
+            self._respond(404, '<h1>404</h1>')
+            return
+        length = int(self.headers.get('Content-Length', '0') or '0')
+        body = self.rfile.read(length).decode('utf-8', errors='replace')
+        form = urllib.parse.parse_qs(body)
+        passphrase = (form.get('passphrase') or [''])[0]
+        if not passphrase:
+            self._error('Passphrase darf nicht leer sein.')
+            return
+        try:
+            r = subprocess.run(
+                UNLOCK_CMD,
+                input=passphrase.encode('utf-8'),
+                capture_output=True,
+                timeout=30,
+            )
+        except Exception as e:
+            self._error(f'Interner Fehler: {e}')
+            return
+        if r.returncode != 0:
+            err = (r.stderr or b'').decode(errors='replace').strip()
+            low = err.lower()
+            if 'no key' in low or 'kein schl' in low or 'keine passende' in low:
+                self._error('Passphrase stimmt nicht.')
+            else:
+                self._error(f'Fehler: {err[:200] or "unbekannt"}')
+            return
+        self._respond(200, HTML_SUCCESS)
+        threading.Thread(target=self._handoff, daemon=True).start()
+
+    def _respond(self, code, body):
+        data = body.encode('utf-8')
+        self.send_response(code)
+        self.send_header('Content-Type', 'text/html; charset=utf-8')
+        self.send_header('Content-Length', str(len(data)))
+        self.send_header('Cache-Control', 'no-store')
+        self.end_headers()
+        try:
+            self.wfile.write(data)
+            self.wfile.flush()
+        except Exception:
+            pass
+
+    def _error(self, msg):
+        err_html = f'<div class="err">{html.escape(msg)}</div>'
+        self._respond(400, HTML_FORM.replace('__ERROR__', err_html))
+
+    def _handoff(self):
+        time.sleep(0.8)
+        try:
+            subprocess.Popen(START_CMD)
+        except Exception:
+            pass
+        time.sleep(0.6)
+        os._exit(0)
+
+
+def main():
+    # If the user enabled auto-unlock from inside the app, the keyfile
+    # exists and unlocking is non-interactive. Try it first; on success
+    # start ev-tracker.service and exit without ever serving the web UI.
+    if try_auto_unlock():
+        print('ev-unlock-web: auto-unlock succeeded, handing off', flush=True)
+        try:
+            subprocess.Popen(START_CMD)
+        except Exception as e:
+            print(f'ev-unlock-web: handoff start failed: {e}', flush=True)
+        return
+
+    srv = http.server.ThreadingHTTPServer(('0.0.0.0', PORT), UnlockHandler)
+    print(f'ev-unlock-web: listening on 0.0.0.0:{PORT}', flush=True)
+    try:
+        srv.serve_forever()
+    except KeyboardInterrupt:
+        pass
+
+
+if __name__ == '__main__':
+    main()

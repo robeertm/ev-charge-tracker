@@ -1,0 +1,92 @@
+#!/bin/bash
+# ev-luks-autounlock — manage stored LUKS passphrase for boot-time auto-unlock.
+#
+# Usage:
+#   ev-luks-autounlock enable      (passphrase on stdin; verifies + stores)
+#   ev-luks-autounlock disable     (removes stored passphrase)
+#   ev-luks-autounlock status      (prints "enabled" or "disabled")
+#   ev-luks-autounlock try-unlock  (used by ev-unlock-web at boot)
+#
+# Stored at /etc/ev-tracker/luks-keyfile (mode 0400, root-only).
+# Security trade-off: anyone with disk access can read the passphrase.
+# Equivalent to "no encryption" against a stolen-disk attacker. Suitable
+# for trusted-network deployments where the user wants no LUKS prompt
+# after auto-reboots (e.g. unattended-upgrade).
+
+set -e
+KEYFILE=/etc/ev-tracker/luks-keyfile
+KEYDIR=$(dirname "$KEYFILE")
+
+_detect_data_dev() {
+    local root_src root_dev d
+    root_src=$(findmnt -n -o SOURCE / 2>/dev/null || echo "")
+    root_dev=$(lsblk -no PKNAME "$root_src" 2>/dev/null | head -1)
+    for d in $(lsblk -dno NAME,TYPE | awk '$2=="disk"{print $1}'); do
+        if [ "$d" != "$root_dev" ]; then
+            echo "/dev/$d"
+            return 0
+        fi
+    done
+    return 1
+}
+
+cmd_enable() {
+    local passphrase data_dev
+    passphrase=$(cat)
+    if [ -z "$passphrase" ]; then
+        echo "empty passphrase" >&2
+        exit 1
+    fi
+    data_dev=$(_detect_data_dev) || {
+        echo "no data disk found" >&2
+        exit 2
+    }
+    if ! printf '%s' "$passphrase" | cryptsetup luksOpen --test-passphrase "$data_dev" --key-file - 2>/dev/null; then
+        echo "passphrase rejected by LUKS" >&2
+        exit 3
+    fi
+    install -d -m 0700 -o root -g root "$KEYDIR"
+    # Write atomically: temp file + rename, both with strict perms.
+    local tmp
+    tmp=$(mktemp -p "$KEYDIR" .keyfile-XXXXXX)
+    chmod 0400 "$tmp"
+    printf '%s' "$passphrase" > "$tmp"
+    mv -f "$tmp" "$KEYFILE"
+    chmod 0400 "$KEYFILE"
+    chown root:root "$KEYFILE"
+    echo enabled
+}
+
+cmd_disable() {
+    if [ -f "$KEYFILE" ]; then
+        rm -f "$KEYFILE"
+    fi
+    echo disabled
+}
+
+cmd_status() {
+    if [ -f "$KEYFILE" ] && [ -s "$KEYFILE" ]; then
+        echo enabled
+    else
+        echo disabled
+    fi
+}
+
+cmd_try_unlock() {
+    if [ ! -s "$KEYFILE" ]; then
+        echo "no keyfile" >&2
+        exit 1
+    fi
+    cat "$KEYFILE" | /usr/local/bin/ev-unlock --stdin
+}
+
+case "${1:-}" in
+    enable)     cmd_enable ;;
+    disable)    cmd_disable ;;
+    status)     cmd_status ;;
+    try-unlock) cmd_try_unlock ;;
+    *)
+        echo "usage: $0 {enable|disable|status|try-unlock}" >&2
+        exit 1
+        ;;
+esac

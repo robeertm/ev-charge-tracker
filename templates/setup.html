@@ -110,6 +110,14 @@
                             {{ t('wiz.luks_warning') }}
                         </div>
 
+                        <div class="form-check small mb-3">
+                            <input class="form-check-input" type="checkbox" id="luks-autounlock">
+                            <label class="form-check-label" for="luks-autounlock">
+                                <strong>{{ t('wiz.luks_autounlock_label') }}</strong>
+                                <div class="text-muted small mt-1">{{ t('wiz.luks_autounlock_desc') }}</div>
+                            </label>
+                        </div>
+
                         <div id="luks-error" class="alert alert-danger d-none"></div>
 
                         <div class="d-grid">
@@ -414,6 +422,19 @@
                 });
                 const data = await r.json();
                 if (r.ok && data.ok) {
+                    // v3.0.3 wizard: if user opted in to auto-unlock,
+                    // store the new passphrase so future reboots skip
+                    // the prompt entirely. Failure here is non-fatal —
+                    // user can still set it from Settings later.
+                    if (document.getElementById('luks-autounlock').checked) {
+                        try {
+                            await fetch('/api/luks/auto-unlock/enable', {
+                                method: 'POST',
+                                headers: {'Content-Type': 'application/json'},
+                                body: JSON.stringify({passphrase: newPass}),
+                            });
+                        } catch (_) { /* non-fatal */ }
+                    }
                     SETUP_STATE.luks_done = true;
                     updateProgressPills();
                     showStep('weblogin');

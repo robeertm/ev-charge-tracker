@@ -49,6 +49,7 @@
     ('database',  'bi-database',    t('set.db_title')),
     ('ssl',       'bi-shield-lock', t('set.ssl_title')),
     ('auth',      'bi-shield-lock', t('set.auth_title')),
+    ('autounlock', 'bi-unlock',     t('set.autounlock_title')),
     ('notify',    'bi-bell',        t('set.notify_title')),
     ('sysupd',    'bi-arrow-up-circle', t('set.sysupd_title')),
     ('backup',    'bi-archive',     t('set.backup_title')),
@@ -1668,6 +1669,110 @@
                     </div>
                 </form>
                 {% endif %}
+            </div>
+        </div>
+
+        <!-- LUKS Auto-Unlock (v3.0.3) -->
+        <div class="card mb-4 settings-card" id="sec-autounlock">
+            <div class="card-header bg-white fw-bold">
+                <i class="bi bi-unlock"></i> {{ t('set.autounlock_title') }}
+            </div>
+            <div class="card-body">
+                <p class="small text-muted mb-3">{{ t('set.autounlock_desc') }}</p>
+                <div class="alert alert-warning small mb-3">
+                    <i class="bi bi-exclamation-triangle-fill"></i>
+                    <strong>{{ t('set.autounlock_warn_title') }}</strong>
+                    {{ t('set.autounlock_warn_body') }}
+                </div>
+
+                <div id="autounlockStatus" class="mb-3"></div>
+
+                <div id="autounlockEnableForm" style="display:none">
+                    <label class="form-label small" for="auPassphrase">{{ t('set.autounlock_passphrase_label') }}</label>
+                    <input type="password" class="form-control mb-2" id="auPassphrase" autocomplete="off">
+                    <button type="button" class="btn btn-warning" id="auEnableBtn">
+                        <i class="bi bi-unlock-fill"></i> {{ t('set.autounlock_enable') }}
+                    </button>
+                </div>
+
+                <div id="autounlockDisableForm" style="display:none">
+                    <button type="button" class="btn btn-outline-secondary" id="auDisableBtn">
+                        <i class="bi bi-lock-fill"></i> {{ t('set.autounlock_disable') }}
+                    </button>
+                </div>
+
+                <div id="autounlockUnavailable" class="alert alert-secondary small mb-0" style="display:none">
+                    <i class="bi bi-info-circle"></i> {{ t('set.autounlock_unavailable') }}
+                </div>
+
+                <script>
+                (function () {
+                    const T_AU = {
+                        enabled:  {{ t('set.autounlock_enabled')|tojson }},
+                        disabled: {{ t('set.autounlock_disabled')|tojson }},
+                        ok:       {{ t('set.autounlock_done_enable')|tojson }},
+                        ok_off:   {{ t('set.autounlock_done_disable')|tojson }},
+                        empty:    {{ t('set.autounlock_passphrase_empty')|tojson }},
+                    };
+                    const elStatus = document.getElementById('autounlockStatus');
+                    const elEnable = document.getElementById('autounlockEnableForm');
+                    const elDisable = document.getElementById('autounlockDisableForm');
+                    const elUnavail = document.getElementById('autounlockUnavailable');
+
+                    async function refresh() {
+                        const r = await fetch('/api/luks/auto-unlock/status');
+                        const d = await r.json();
+                        if (!d.available) {
+                            elUnavail.style.display = '';
+                            elStatus.innerHTML = '';
+                            elEnable.style.display = 'none';
+                            elDisable.style.display = 'none';
+                            return;
+                        }
+                        elUnavail.style.display = 'none';
+                        if (d.enabled) {
+                            elStatus.innerHTML = '<span class="badge bg-success"><i class="bi bi-check-lg"></i> ' + T_AU.enabled + '</span>';
+                            elEnable.style.display = 'none';
+                            elDisable.style.display = '';
+                        } else {
+                            elStatus.innerHTML = '<span class="badge bg-secondary"><i class="bi bi-x-lg"></i> ' + T_AU.disabled + '</span>';
+                            elEnable.style.display = '';
+                            elDisable.style.display = 'none';
+                        }
+                    }
+
+                    document.getElementById('auEnableBtn').addEventListener('click', async () => {
+                        const p = document.getElementById('auPassphrase').value;
+                        if (!p) { alert(T_AU.empty); return; }
+                        const r = await fetch('/api/luks/auto-unlock/enable', {
+                            method: 'POST',
+                            headers: {'Content-Type': 'application/json'},
+                            body: JSON.stringify({passphrase: p}),
+                        });
+                        const d = await r.json();
+                        if (d.ok) {
+                            document.getElementById('auPassphrase').value = '';
+                            alert(T_AU.ok);
+                            refresh();
+                        } else {
+                            alert((d.error) || 'Error');
+                        }
+                    });
+
+                    document.getElementById('auDisableBtn').addEventListener('click', async () => {
+                        const r = await fetch('/api/luks/auto-unlock/disable', {method: 'POST'});
+                        const d = await r.json();
+                        if (d.ok) {
+                            alert(T_AU.ok_off);
+                            refresh();
+                        } else {
+                            alert((d.error) || 'Error');
+                        }
+                    });
+
+                    refresh();
+                })();
+                </script>
             </div>
         </div>
 

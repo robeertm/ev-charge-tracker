@@ -1,5 +1,25 @@
 # Changelog
 
+## v3.0.3 (2026-05-01)
+
+### LUKS Auto-Unlock — opt out of the passphrase prompt
+
+For VMs running in trusted environments (home network behind a router, on-prem hosting), the LUKS unlock prompt after every reboot is more friction than security — anyone with disk access in those scenarios is the operator anyway. v3.0.3 adds an opt-in feature to skip the prompt:
+
+**Settings → Auto-Unlock beim Boot** card with a toggle. When enabled the user enters their current LUKS passphrase once, the wrapper verifies it via `cryptsetup --test-passphrase`, then writes it to `/etc/ev-tracker/luks-keyfile` (mode 0400, root-only). On the next boot `ev-unlock-web.service` reads that file and unlocks the volume without showing the web UI at all — `ev-tracker.service` starts immediately, the app is ready in ~10 s instead of waiting for someone to enter the passphrase.
+
+**Setup wizard step 1** now also has a checkbox for the same thing — first-time installers can pick "no passphrase prompt after reboots" right when they set their LUKS passphrase.
+
+**The trade-off is shown explicitly** in the UI: anyone with disk access can now read the passphrase, and the LUKS layer effectively no longer protects data at rest. Suitable for VMs where stolen-disk is not in the threat model.
+
+**Implementation:**
+- New root-owned wrapper `/usr/local/bin/ev-luks-autounlock` with sub-commands `enable | disable | status | try-unlock`. Sudoers grants `ev-tracker` NOPASSWD on each.
+- `/usr/local/bin/ev-unlock-web` patched to call `try-unlock` at boot before serving the web UI; on success it skips the UI entirely.
+- New API: `GET /api/luks/auto-unlock/status`, `POST /api/luks/auto-unlock/enable` (body `{passphrase}`), `POST /api/luks/auto-unlock/disable`.
+- 17 new translation keys across all 6 languages.
+
+System-side scripts (`ev-luks-autounlock`, the patched `ev-unlock-web`) and the sudoers drop-in must be installed once per host with root — they're not part of the standard tar-pipe deploy. The fresh VM image bundled in v3.0.3+ ships with them included.
+
 ## v3.0.2 (2026-05-01)
 
 ### Trip-info reconcile — gap-aware backfill on startup
