@@ -1,5 +1,13 @@
 # Changelog
 
+## v3.0.10 (2026-05-06)
+
+### synthesize_day — distinct marker so cleanup queries don't hit polled-unknown PEs
+
+`synthesize_day` previously stamped `lat=0.0, lon=0.0, label='unknown'` on its synthetic rows. The parking hook's `_open_unknown` placeholder (created when an odo-advance closes the previous PE but no fresh GPS is available to anchor the new location) uses the same sentinel coordinates and label. A cleanup query against `lat=0,0 AND label='unknown'` would silently delete real polled-unknown PEs along with the synth ones.
+
+Synthetic PEs are now tagged `favorite_name='_synth'` in addition to the lat/lon sentinel. The marker is masked out in `_event_to_dict` so it never leaks into the trips API or the template. Cleanup queries can now safely target `favorite_name='_synth'` to drop only the synthetic rows.
+
 ## v3.0.9 (2026-05-06)
 
 ### synthesize_day — anchor selection scoped per target_date

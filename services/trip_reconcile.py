@@ -402,10 +402,15 @@ def synthesize_day(target_date: date, vehicle_id=None,
     orphan_trips.sort(key=lambda t: t.start_time)
     # ParkingEvent.lat/lon are NOT NULL — synthetic stops have no GPS, so
     # we stamp 0.0/0.0 (a sentinel pair the geocoder + map already skip
-    # since it's mid-ocean off Africa) and rely on label='unknown' to
-    # signal the synthesised origin.
+    # since it's mid-ocean off Africa). v3.0.10 also stamps
+    # ``favorite_name='_synth'`` so we can reliably distinguish synth
+    # PEs from polled-unknown placeholders (``_open_unknown`` in
+    # trips_service uses the same lat/lon sentinel) — without this
+    # marker the two are indistinguishable and a cleanup query against
+    # synth-only would also wipe real polled-unknown rows.
     SYNTH_LAT = 0.0
     SYNTH_LON = 0.0
+    SYNTH_NAME = '_synth'
 
     # Walk forward through orphans, keyed off the most recent PE
     # (real or synthesised) to keep odometer continuity:
@@ -475,7 +480,7 @@ def synthesize_day(target_date: date, vehicle_id=None,
             departed_at=None,
             lat=SYNTH_LAT, lon=SYNTH_LON,
             label='unknown',
-            favorite_name=None,
+            favorite_name=SYNTH_NAME,
             address=None,
             odometer_arrived=running_odo,
             odometer_departed=None,

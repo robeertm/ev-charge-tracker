@@ -874,6 +874,9 @@ def _event_to_dict(evt, include_departed: bool = False,
     name = evt.favorite_name
     if evt.label in ('home', 'work'):
         name = None
+    if name == '_synth':
+        # v3.0.10 internal synth marker — never expose to clients.
+        name = None
     out = {
         'id': evt.id,
         'lat': evt.lat, 'lon': evt.lon,
