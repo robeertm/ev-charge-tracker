@@ -1,5 +1,13 @@
 # Changelog
 
+## v3.0.6 (2026-05-06)
+
+### synthesize_day — fix odometer ordering when chaining off a closed PE
+
+The v3.0.5 chain anchor used "the latest PE whose arrived_at ≤ first orphan trip" — which on a real install picked yesterday's home stop as the base, ignored the morning commute (already paired), and produced an odometer regression: synth PE#94 odom=83681 vs real PE#92 odom=83700.
+
+Reworked: walk forward from the **latest** PE (real or synthetic) and skip any orphan trip older than that PE's arrival. Trips chronologically before the latest known PE are dropped — without GPS we can't tell where the car was when the trip started, and inserting them out of order corrupts the chain. They still show up as SDK-only rows in `vehicle_trips` for stats, just not in the Fahrtenbuch.
+
 ## v3.0.5 (2026-05-06)
 
 ### Background sync watchdog + Fahrtenbuch gap-fill from SDK trips

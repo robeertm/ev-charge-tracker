@@ -393,50 +393,63 @@ def synthesize_day(target_date: date, vehicle_id=None,
     if not orphan_trips:
         return out
 
-    # Find an open-ended PE that should be the chain anchor: latest PE
-    # whose arrived_at is BEFORE the first orphan trip's start_time and
-    # whose departed_at is None (or whose stored departed_at is after the
-    # orphan's start, which would also be wrong). The chain closes that
-    # PE and creates synthetic followups.
+    # Restrict orphans to trips that happen AFTER the latest known PE.
+    # Trips chronologically *before* any closed PE are ambiguous (we
+    # can't tell where the car was when the trip started without GPS),
+    # and inserting them would create out-of-order rows that break the
+    # odometer chain. Drop them silently — they'll show up as SDK-only
+    # rows in vehicle_trips for stats, just not in the Fahrtenbuch.
     orphan_trips.sort(key=lambda t: t.start_time)
-    first_orphan = orphan_trips[0]
-    anchor = None
-    for ev in reversed(events):
-        if ev.arrived_at <= first_orphan.start_time:
-            if ev.departed_at is None or ev.departed_at >= first_orphan.start_time:
-                anchor = ev
-            break
+    # ParkingEvent.lat/lon are NOT NULL — synthetic stops have no GPS, so
+    # we stamp 0.0/0.0 (a sentinel pair the geocoder + map already skip
+    # since it's mid-ocean off Africa) and rely on label='unknown' to
+    # signal the synthesised origin.
+    SYNTH_LAT = 0.0
+    SYNTH_LON = 0.0
 
-    last_arr_odo = anchor.odometer_arrived if anchor else None
-    if anchor is not None:
-        if anchor.departed_at is None:
-            anchor.departed_at = first_orphan.start_time
-            if anchor.odometer_departed is None and last_arr_odo is not None:
-                anchor.odometer_departed = last_arr_odo
-            out['closed_open_pe'] += 1
-            out['changes'].append({
-                'action': 'close_open_pe',
-                'pe_id': anchor.id,
-                'departed_at': first_orphan.start_time.isoformat(),
-                'sdk_id': first_orphan.id,
-            })
+    # Walk forward through orphans, keyed off the most recent PE
+    # (real or synthesised) to keep odometer continuity:
+    #  - skip orphans before the latest PE arrival
+    #  - if the latest PE is open, the first valid orphan closes it
+    #  - thereafter each orphan closes the previous synthetic PE
+    if not events:
+        return out
+    latest_pe = events[-1]
+    running_odo = latest_pe.odometer_arrived
+    prev_pe = latest_pe if latest_pe.departed_at is None else None
+    cursor_time = latest_pe.arrived_at
 
-    # Chain: each orphan trip closes the previous synthetic PE and opens
-    # a new one. The last orphan stays open (no departed_at) — the next
-    # real sync (or a later reconcile) will close it.
-    prev_arr_time = None
-    prev_pe = None
-    running_odo = last_arr_odo
-    for i, t in enumerate(orphan_trips):
+    for t in orphan_trips:
+        if t.start_time < cursor_time:
+            # Trip is older than the most recent known PE; can't safely
+            # insert it without breaking chronological order.
+            continue
         end_time = t.start_time + timedelta(
             minutes=(t.drive_minutes or 0) + (t.idle_minutes or 0)
         )
+        # Close the previous open PE (real or synthetic) with this
+        # orphan's start_time.
+        if prev_pe is not None:
+            if prev_pe.departed_at is None:
+                prev_pe.departed_at = t.start_time
+                if prev_pe.odometer_departed is None and prev_pe.odometer_arrived is not None:
+                    prev_pe.odometer_departed = prev_pe.odometer_arrived
+                if prev_pe is latest_pe:
+                    out['closed_open_pe'] += 1
+                    out['changes'].append({
+                        'action': 'close_open_pe',
+                        'pe_id': latest_pe.id,
+                        'departed_at': t.start_time.isoformat(),
+                        'sdk_id': t.id,
+                    })
+
         if running_odo is not None and t.distance_km is not None:
             running_odo = int(round(running_odo + float(t.distance_km)))
+
         new_pe = ParkingEvent(
             arrived_at=end_time,
             departed_at=None,
-            lat=None, lon=None,
+            lat=SYNTH_LAT, lon=SYNTH_LON,
             label='unknown',
             favorite_name=None,
             address=None,
@@ -448,7 +461,7 @@ def synthesize_day(target_date: date, vehicle_id=None,
             vehicle_id=vehicle_id,
         )
         db.session.add(new_pe)
-        db.session.flush()  # populate new_pe.id
+        db.session.flush()
         out['created_pes'] += 1
         out['changes'].append({
             'action': 'create_synth_pe',
@@ -458,11 +471,8 @@ def synthesize_day(target_date: date, vehicle_id=None,
             'sdk_km': float(t.distance_km) if t.distance_km is not None else None,
             'odometer_arrived': running_odo,
         })
-        # Close the previous synthetic PE with this orphan's start_time.
-        if prev_pe is not None:
-            prev_pe.departed_at = t.start_time
-            prev_pe.odometer_departed = prev_pe.odometer_arrived
         prev_pe = new_pe
+        cursor_time = end_time
 
     if out['closed_open_pe'] or out['created_pes']:
         db.session.commit()
