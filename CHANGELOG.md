@@ -1,5 +1,17 @@
 # Changelog
 
+## v3.0.5 (2026-05-06)
+
+### Background sync watchdog + Fahrtenbuch gap-fill from SDK trips
+
+A wedged BlueLink/UVO `force_refresh` call on a Kia install left the background sync thread silently hung for two days — no crash, no log, just no more polling. With polling stopped, ParkingEvent transitions are no longer detected and the Fahrtenbuch shows only whatever pairs were closed before the hang.
+
+**Watchdog around `force_refresh_vehicle_state`** — the SDK call now runs in a long-lived `ThreadPoolExecutor` with a 120 s timeout. On timeout we log a warning, fall back to cached state, and the bg-sync loop continues on the next tick. The runaway worker thread leaks (the SDK has no cancellation hook) but the loop is no longer wedged.
+
+**Dashboard sync-health badge** — small chip next to the live/cached buttons that polls `/api/sync/health` every minute. Green when the bg-loop ticked recently and no recent timeouts, yellow on overdue ticks or a recent timeout, red when the loop has been silent for >60 min. Tooltip carries the full payload (last tick age, last force-refresh outcome, 24 h timeout count) so the user can see at a glance what the watchdog is doing.
+
+**Fahrtenbuch gap-fill from SDK trips** — when the SDK has trips that no PE pair can claim (because polling missed the transitions), `synthesize_day` now chains synthetic PE rows with `label='unknown'`. No GPS, but the times and distances are minute-accurate, so the missing drives at least show up in the Fahrtenbuch. Phantoms (0 km / sub-2-min ignition cycles) are filtered out. Hooked into the daily reconcile so it runs automatically each night and on every gap-aware backfill.
+
 ## v3.0.4 (2026-05-01)
 
 ### Settings → LUKS-Passphrase ändern

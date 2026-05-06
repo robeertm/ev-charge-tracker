@@ -13,8 +13,64 @@ At the API-call level though, both end up calling
 `hyundai_kia_connect_api.VehicleManager` with the refresh_token in the
 password parameter.
 """
+import concurrent.futures
 import logging
 from datetime import datetime, date as _date
+
+# BlueLink/UVO force_refresh wakes the car's AVN over cellular and waits
+# for the response. The SDK has no socket-level timeout, so a stalled
+# server-side response wedges the calling thread forever. v3.0.5 wraps
+# the call in a watchdog so the bg-sync loop can recover.
+#
+# We use a module-level executor instead of a per-call ``with`` block:
+# ``ThreadPoolExecutor.__exit__`` runs ``shutdown(wait=True)``, which would
+# block on the runaway thread and re-create the original hang. With a
+# long-lived executor we abandon the future on timeout (the rogue thread
+# leaks until the SDK eventually errors out, but the bg-loop continues).
+_FORCE_REFRESH_TIMEOUT_SEC = 120
+_force_refresh_executor = concurrent.futures.ThreadPoolExecutor(
+    max_workers=2, thread_name_prefix='hkc-force-refresh'
+)
+
+# Watchdog telemetry — read by the dashboard health badge so the user can
+# tell at a glance whether the BlueLink/UVO call path is healthy.
+_force_refresh_stats: dict = {
+    'last_attempt_at': None,   # datetime of most recent force_refresh
+    'last_outcome': None,      # 'ok' | 'timeout' | 'error' | None
+    'last_outcome_at': None,   # datetime when outcome was recorded
+    'last_error': None,        # short error message for 'error' outcome
+    'timeout_count_24h': 0,    # rolling timeout counter (reset >24h)
+}
+
+
+def _record_force_refresh_attempt() -> None:
+    _force_refresh_stats['last_attempt_at'] = datetime.now()
+
+
+def _record_force_refresh_outcome(outcome: str, error: str = '') -> None:
+    now = datetime.now()
+    _force_refresh_stats['last_outcome'] = outcome
+    _force_refresh_stats['last_outcome_at'] = now
+    _force_refresh_stats['last_error'] = error or None
+    last_to = _force_refresh_stats.get('_last_timeout_window_start')
+    if outcome == 'timeout':
+        if last_to is None or (now - last_to).total_seconds() > 86400:
+            _force_refresh_stats['_last_timeout_window_start'] = now
+            _force_refresh_stats['timeout_count_24h'] = 1
+        else:
+            _force_refresh_stats['timeout_count_24h'] += 1
+
+
+def get_force_refresh_health() -> dict:
+    """Snapshot of the watchdog state for the dashboard badge."""
+    return {
+        'last_attempt_at': _force_refresh_stats.get('last_attempt_at'),
+        'last_outcome': _force_refresh_stats.get('last_outcome'),
+        'last_outcome_at': _force_refresh_stats.get('last_outcome_at'),
+        'last_error': _force_refresh_stats.get('last_error'),
+        'timeout_count_24h': _force_refresh_stats.get('timeout_count_24h', 0),
+        'timeout_threshold_sec': _FORCE_REFRESH_TIMEOUT_SEC,
+    }
 
 try:
     from hyundai_kia_connect_api import VehicleManager, Vehicle
@@ -186,7 +242,23 @@ class _HyundaiKiaBase(VehicleConnector):
             cached_odometer = vehicle.odometer
             cached_range = vehicle.ev_driving_range
             cached_12v = vehicle.car_battery_percentage
-            mgr.force_refresh_vehicle_state(vehicle.id)
+            _record_force_refresh_attempt()
+            _fut = _force_refresh_executor.submit(
+                mgr.force_refresh_vehicle_state, vehicle.id
+            )
+            try:
+                _fut.result(timeout=_FORCE_REFRESH_TIMEOUT_SEC)
+                _record_force_refresh_outcome('ok')
+            except concurrent.futures.TimeoutError:
+                logger.warning(
+                    f"force_refresh_vehicle_state timed out after "
+                    f"{_FORCE_REFRESH_TIMEOUT_SEC}s — falling back to cached state"
+                )
+                _record_force_refresh_outcome('timeout')
+                mgr.update_vehicle_with_cached_state(vehicle.id)
+            except Exception as _e:
+                _record_force_refresh_outcome('error', str(_e))
+                raise
             # Restore missing values from cache
             if vehicle.odometer is None and cached_odometer is not None:
                 vehicle.odometer = cached_odometer

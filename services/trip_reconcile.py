@@ -246,7 +246,8 @@ def reconcile_range(days: int = 7, vehicle_id=None) -> dict:
     AppConfig.vehicle_api_brand was set anyway.
     """
     out = {'days_attempted': 0, 'total_applied': 0, 'total_arr_applied': 0,
-           'total_conflicts': 0, 'per_day': [], 'vehicle_id': vehicle_id}
+           'total_conflicts': 0, 'total_synth_pes': 0, 'total_closed_pes': 0,
+           'per_day': [], 'vehicle_id': vehicle_id}
     if not _brand_supports_trip_info(vehicle_id):
         out['skipped_reason'] = 'brand_unsupported'
         return out
@@ -254,10 +255,17 @@ def reconcile_range(days: int = 7, vehicle_id=None) -> dict:
     for i in range(days):
         d = today - timedelta(days=i)
         r = reconcile_day(d, vehicle_id=vehicle_id)
+        # v3.0.5: after the alignment pass, synthesize PE pairs for SDK
+        # trips that have no PE counterpart at all — covers gaps left by
+        # a wedged bg-loop (e.g., the BlueLink force_refresh hang).
+        s = synthesize_day(d, vehicle_id=vehicle_id)
+        r['synth'] = s
         out['per_day'].append(r)
         out['total_applied'] += r.get('applied', 0)
         out['total_arr_applied'] += r.get('arr_applied', 0)
         out['total_conflicts'] += r.get('skipped_conflict', 0)
+        out['total_synth_pes'] += s.get('created_pes', 0)
+        out['total_closed_pes'] += s.get('closed_open_pe', 0)
         out['days_attempted'] += 1
     if vehicle_id is None or vehicle_id == 1:
         AppConfig.set('last_reconcile_at', datetime.now().isoformat())
@@ -295,6 +303,170 @@ def should_run_daily(vehicle_id=None) -> bool:
     except ValueError:
         return True
     return last_dt.date() < date.today()
+
+
+def synthesize_day(target_date: date, vehicle_id=None,
+                   min_drive_min: int = 2,
+                   min_distance_km: float = 0.5) -> dict:
+    """Build synthetic PE pairs for SDK trips that have no matching PE.
+
+    Use case (v3.0.5): the bg-sync loop wedged for a stretch (BlueLink
+    force_refresh hang), so polling-based ParkingEvents are missing for
+    several drives. The SDK's ``day_trip_info`` endpoint still has those
+    trips with minute-accurate timestamps and distance — just no GPS.
+    We can chain them into PE rows with ``label='unknown'`` so the
+    Fahrtenbuch at least shows the drives happened, even if it can't
+    name the locations.
+
+    Phantoms (0 km / very short ignition cycles) are skipped — they're
+    almost always BlueLink registering an AVN wake-up, not an actual
+    drive.
+
+    Returns ``{'date', 'closed_open_pe', 'created_pes', 'skipped_phantoms',
+    'changes': [...]}``.
+    """
+    out = {
+        'date': target_date.isoformat(),
+        'closed_open_pe': 0,
+        'created_pes': 0,
+        'skipped_phantoms': 0,
+        'changes': [],
+        'skipped_reason': None,
+    }
+    if not _brand_supports_trip_info(vehicle_id):
+        out['skipped_reason'] = 'brand_unsupported'
+        return out
+
+    _ev_q = ParkingEvent.query
+    if vehicle_id is not None:
+        _ev_q = _ev_q.filter_by(vehicle_id=vehicle_id)
+    events = list(_ev_q.order_by(ParkingEvent.arrived_at.asc()).all())
+
+    _sdk_q = VehicleTrip.query.filter_by(trip_date=target_date)
+    if vehicle_id is not None:
+        _sdk_q = _sdk_q.filter_by(vehicle_id=vehicle_id)
+    sdk_rows = list(_sdk_q.order_by(VehicleTrip.start_time.asc()).all())
+
+    # Filter phantoms — 0 km / 1-min ignition cycles aren't drives.
+    real_trips = []
+    for t in sdk_rows:
+        if (t.distance_km or 0) < min_distance_km or (t.drive_minutes or 0) < min_drive_min:
+            out['skipped_phantoms'] += 1
+            continue
+        real_trips.append(t)
+
+    # Which SDK trips already pair to an existing PE pair? Re-use the
+    # arrival/distance scoring from reconcile_day so we don't double-
+    # count drives that the polling chain already captured.
+    paired_sdk_ids: set = set()
+    pairs = []
+    for prev, curr in zip(events, events[1:]):
+        if prev.departed_at is None:
+            continue
+        if (prev.departed_at.date() != target_date
+                and curr.arrived_at.date() != target_date):
+            continue
+        if prev.odometer_departed is not None and curr.odometer_arrived is not None:
+            km = max(curr.odometer_arrived - prev.odometer_departed, 0)
+        elif prev.odometer_arrived is not None and curr.odometer_arrived is not None:
+            km = max(curr.odometer_arrived - prev.odometer_arrived, 0)
+        else:
+            km = None
+        pairs.append((prev, curr, km))
+    for prev, curr, km in pairs:
+        for t in real_trips:
+            total_min = (t.drive_minutes or 0) + (t.idle_minutes or 0)
+            sdk_arrived = t.start_time + timedelta(minutes=total_min)
+            delta_min = abs((sdk_arrived - curr.arrived_at).total_seconds()) / 60.0
+            if delta_min > _ARRIVAL_TOL_MIN:
+                continue
+            sdk_km = float(t.distance_km) if t.distance_km is not None else None
+            if km is not None and sdk_km is not None:
+                diff_abs = abs(km - sdk_km)
+                diff_rel = diff_abs / max(km, sdk_km, 1.0)
+                if diff_abs > _KM_TOL_ABS and diff_rel > _KM_TOL_REL:
+                    continue
+            paired_sdk_ids.add(t.id)
+            break
+
+    orphan_trips = [t for t in real_trips if t.id not in paired_sdk_ids]
+    if not orphan_trips:
+        return out
+
+    # Find an open-ended PE that should be the chain anchor: latest PE
+    # whose arrived_at is BEFORE the first orphan trip's start_time and
+    # whose departed_at is None (or whose stored departed_at is after the
+    # orphan's start, which would also be wrong). The chain closes that
+    # PE and creates synthetic followups.
+    orphan_trips.sort(key=lambda t: t.start_time)
+    first_orphan = orphan_trips[0]
+    anchor = None
+    for ev in reversed(events):
+        if ev.arrived_at <= first_orphan.start_time:
+            if ev.departed_at is None or ev.departed_at >= first_orphan.start_time:
+                anchor = ev
+            break
+
+    last_arr_odo = anchor.odometer_arrived if anchor else None
+    if anchor is not None:
+        if anchor.departed_at is None:
+            anchor.departed_at = first_orphan.start_time
+            if anchor.odometer_departed is None and last_arr_odo is not None:
+                anchor.odometer_departed = last_arr_odo
+            out['closed_open_pe'] += 1
+            out['changes'].append({
+                'action': 'close_open_pe',
+                'pe_id': anchor.id,
+                'departed_at': first_orphan.start_time.isoformat(),
+                'sdk_id': first_orphan.id,
+            })
+
+    # Chain: each orphan trip closes the previous synthetic PE and opens
+    # a new one. The last orphan stays open (no departed_at) — the next
+    # real sync (or a later reconcile) will close it.
+    prev_arr_time = None
+    prev_pe = None
+    running_odo = last_arr_odo
+    for i, t in enumerate(orphan_trips):
+        end_time = t.start_time + timedelta(
+            minutes=(t.drive_minutes or 0) + (t.idle_minutes or 0)
+        )
+        if running_odo is not None and t.distance_km is not None:
+            running_odo = int(round(running_odo + float(t.distance_km)))
+        new_pe = ParkingEvent(
+            arrived_at=end_time,
+            departed_at=None,
+            lat=None, lon=None,
+            label='unknown',
+            favorite_name=None,
+            address=None,
+            odometer_arrived=running_odo,
+            odometer_departed=None,
+            soc_arrived=None,
+            soc_departed=None,
+            last_seen_at=end_time,
+            vehicle_id=vehicle_id,
+        )
+        db.session.add(new_pe)
+        db.session.flush()  # populate new_pe.id
+        out['created_pes'] += 1
+        out['changes'].append({
+            'action': 'create_synth_pe',
+            'pe_id': new_pe.id,
+            'arrived_at': end_time.isoformat(),
+            'sdk_id': t.id,
+            'sdk_km': float(t.distance_km) if t.distance_km is not None else None,
+            'odometer_arrived': running_odo,
+        })
+        # Close the previous synthetic PE with this orphan's start_time.
+        if prev_pe is not None:
+            prev_pe.departed_at = t.start_time
+            prev_pe.odometer_departed = prev_pe.odometer_arrived
+        prev_pe = new_pe
+
+    if out['closed_open_pe'] or out['created_pes']:
+        db.session.commit()
+    return out
 
 
 def gap_days_since_last_reconcile(vehicle_id=None,

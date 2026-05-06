@@ -40,9 +40,16 @@
 {% if vehicle_configured %}
 <div class="card mb-3 border-info" id="vehicleLiveCard">
     <div class="card-body p-2">
-        <div class="d-flex align-items-center justify-content-between mb-2">
+        <div class="d-flex align-items-center justify-content-between mb-2 flex-wrap gap-2">
             <span class="fw-bold small"><i class="bi bi-car-front"></i> <span id="vName">{{ car_model }}</span></span>
-            <span>
+            <span class="d-flex align-items-center gap-2">
+                <span id="syncHealthChip" class="badge rounded-pill bg-secondary"
+                      style="font-size:0.65rem; cursor:pointer;"
+                      data-bs-toggle="tooltip" data-bs-placement="bottom"
+                      title="{{ t('dash.sync_health_loading') }}">
+                    <i class="bi bi-circle-fill" id="syncHealthDot"></i>
+                    <span id="syncHealthLabel">{{ t('dash.sync_health_loading') }}</span>
+                </span>
                 <button class="btn btn-outline-info btn-sm py-0 px-2" id="btnRefreshVehicle" style="font-size:0.75rem" title="{{ t('dash.cached_title') }}">
                     <i class="bi bi-arrow-repeat"></i> {{ t('dash.cached') }}
                 </button>
@@ -299,6 +306,58 @@
     }
     btn.addEventListener('click', () => loadVehicle(false));
     btnForce.addEventListener('click', () => loadVehicle(true));
+
+    // Sync-health badge (v3.0.5). Polls /api/sync/health every 60 s. The
+    // server returns green / yellow / red plus a structured payload; we
+    // colour the chip and stick the detail into the tooltip so the user
+    // can see exactly what the watchdog is reporting.
+    const SYNC_HEALTH_LABELS = {
+        green:  '{{ t("dash.sync_health_ok") }}',
+        yellow: '{{ t("dash.sync_health_warn") }}',
+        red:    '{{ t("dash.sync_health_err") }}',
+    };
+    async function pollSyncHealth() {
+        const chip = document.getElementById('syncHealthChip');
+        const dot  = document.getElementById('syncHealthDot');
+        const lbl  = document.getElementById('syncHealthLabel');
+        if (!chip) return;
+        try {
+            const r = await fetch('/api/sync/health', { cache: 'no-store' });
+            const d = await r.json();
+            const cls = { green: 'bg-success', yellow: 'bg-warning text-dark', red: 'bg-danger' }[d.status] || 'bg-secondary';
+            chip.className = 'badge rounded-pill ' + cls;
+            chip.style.fontSize = '0.65rem';
+            chip.style.cursor = 'pointer';
+            lbl.textContent = SYNC_HEALTH_LABELS[d.status] || d.status;
+            const parts = [];
+            if (d.bg_loop && d.bg_loop.age_minutes !== null && d.bg_loop.age_minutes !== undefined) {
+                parts.push('{{ t("dash.sync_health_bg_age") }}: ' + d.bg_loop.age_minutes + ' min');
+            }
+            if (d.bg_loop && d.bg_loop.last_outcome) {
+                parts.push('{{ t("dash.sync_health_bg_outcome") }}: ' + d.bg_loop.last_outcome);
+            }
+            if (d.force_refresh && d.force_refresh.last_outcome) {
+                parts.push('{{ t("dash.sync_health_fr_outcome") }}: ' + d.force_refresh.last_outcome);
+            }
+            if (d.force_refresh && d.force_refresh.timeout_count_24h) {
+                parts.push('{{ t("dash.sync_health_fr_timeouts_24h") }}: ' + d.force_refresh.timeout_count_24h);
+            }
+            if (d.reason) parts.push(d.reason);
+            const tipText = parts.length ? parts.join(' • ') : SYNC_HEALTH_LABELS[d.status];
+            chip.setAttribute('title', tipText);
+            chip.setAttribute('data-bs-original-title', tipText);
+            try {
+                const tip = bootstrap.Tooltip.getOrCreateInstance(chip);
+                tip.setContent({ '.tooltip-inner': tipText });
+            } catch(e) {}
+        } catch (e) {
+            chip.className = 'badge rounded-pill bg-secondary';
+            lbl.textContent = '?';
+        }
+    }
+    try { new bootstrap.Tooltip(document.getElementById('syncHealthChip')); } catch(e) {}
+    pollSyncHealth();
+    setInterval(pollSyncHealth, 60000);
 })();
 </script>
 {% endif %}

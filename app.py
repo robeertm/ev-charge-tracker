@@ -1024,6 +1024,81 @@ def register_routes(app):
     def api_health():
         return jsonify({'ok': True, 'version': Config.APP_VERSION})
 
+    @app.route('/api/sync/health', methods=['GET'])
+    def api_sync_health():
+        """Watchdog snapshot for the dashboard badge.
+
+        Status calculation:
+          green  — bg-loop ticked recently, no recent timeout
+          yellow — bg-loop overdue (active window) or a recent timeout
+          red    — last force_refresh hung past the 120 s threshold and
+                   no successful tick since
+        """
+        from services.vehicle.sync_service import get_bg_loop_health
+        from datetime import datetime as _dt, timedelta as _td
+
+        bg = get_bg_loop_health()
+        try:
+            from services.vehicle.connector_hyundai_kia import get_force_refresh_health
+            fr = get_force_refresh_health()
+        except Exception:
+            fr = {'last_attempt_at': None, 'last_outcome': None,
+                  'last_outcome_at': None, 'last_error': None,
+                  'timeout_count_24h': 0, 'timeout_threshold_sec': 120}
+
+        now = _dt.now()
+        status = 'green'
+        reason = ''
+        last_tick = bg.get('last_tick_at')
+        # Bg-loop tick freshness check — smart window samples every 10
+        # min by default; we allow 30 min of grace before yellow.
+        if last_tick is None:
+            status = 'yellow'
+            reason = 'bg_loop_not_yet_ticked'
+        else:
+            age_min = (now - last_tick).total_seconds() / 60
+            if age_min > 60:
+                status = 'red'
+                reason = f'bg_loop_silent_for_{int(age_min)}min'
+            elif age_min > 30:
+                status = 'yellow'
+                reason = f'bg_loop_overdue_{int(age_min)}min'
+
+        # Recent timeout escalates the badge (overrides green).
+        if fr.get('last_outcome') == 'timeout' and fr.get('last_outcome_at'):
+            to_age = (now - fr['last_outcome_at']).total_seconds() / 60
+            if to_age < 30 and status == 'green':
+                status = 'yellow'
+                reason = f'force_refresh_timed_out_{int(to_age)}min_ago'
+
+        return jsonify({
+            'status': status,
+            'reason': reason,
+            'bg_loop': {
+                'running': bg.get('running'),
+                'last_tick_at': last_tick.isoformat() if last_tick else None,
+                'last_outcome': bg.get('last_outcome'),
+                'age_minutes': (
+                    int((now - last_tick).total_seconds() / 60)
+                    if last_tick else None
+                ),
+            },
+            'force_refresh': {
+                'last_attempt_at': (
+                    fr['last_attempt_at'].isoformat()
+                    if fr.get('last_attempt_at') else None
+                ),
+                'last_outcome': fr.get('last_outcome'),
+                'last_outcome_at': (
+                    fr['last_outcome_at'].isoformat()
+                    if fr.get('last_outcome_at') else None
+                ),
+                'last_error': fr.get('last_error'),
+                'timeout_count_24h': fr.get('timeout_count_24h', 0),
+                'timeout_threshold_sec': fr.get('timeout_threshold_sec', 120),
+            },
+        })
+
     # ── LUKS auto-unlock (v3.0.3) ─────────────────────────────
     # Lets the user opt out of typing the LUKS passphrase on every
     # reboot. A small root-owned wrapper (/usr/local/bin/ev-luks-

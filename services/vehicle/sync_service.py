@@ -69,6 +69,19 @@ MIN_SMART_INTERVAL_MIN = 5
 DEFAULT_SMART_START_HOUR = 6
 DEFAULT_SMART_END_HOUR = 22
 
+# Bg-loop heartbeat — the dashboard health badge reads this to detect
+# wedged sync threads (the v3.0.5 BlueLink hang). Updated every tick.
+_last_bg_loop_tick: datetime | None = None
+_last_bg_loop_outcome: str | None = None  # 'sync' | 'sleep' | 'error'
+
+
+def get_bg_loop_health() -> dict:
+    return {
+        'last_tick_at': _last_bg_loop_tick,
+        'last_outcome': _last_bg_loop_outcome,
+        'running': _sync_running,
+    }
+
 
 def log_sync_result(status, mode_label: str, source: str) -> None:
     """Unified one-line summary of a completed vehicle sync.
@@ -429,18 +442,23 @@ def _sync_loop(app):
     logger.info("Vehicle sync service started")
 
     while _sync_running:
+        global _last_bg_loop_tick, _last_bg_loop_outcome
+        _last_bg_loop_tick = datetime.now()
         sleep_secs, should_sync = _compute_sleep_secs(app)
         if should_sync:
             try:
                 _do_sync(app)
+                _last_bg_loop_outcome = 'sync'
             except Exception as e:
                 logger.error(f"Vehicle sync error: {e}")
+                _last_bg_loop_outcome = 'error'
             # Daily trip reconcile no longer rides on the sync tick —
             # it has a dedicated 03:00 thread (_nightly_maintenance_loop)
             # so it fires at a predictable time instead of "whenever the
             # smart window opens".
             _maybe_post_move_reconcile(app)
         else:
+            _last_bg_loop_outcome = 'sleep'
             logger.info(
                 f"Vehicle sync: outside smart-mode active window, "
                 f"sleeping {sleep_secs // 60} min"
