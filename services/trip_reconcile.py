@@ -412,9 +412,33 @@ def synthesize_day(target_date: date, vehicle_id=None,
     #  - skip orphans before the latest PE arrival
     #  - if the latest PE is open, the first valid orphan closes it
     #  - thereafter each orphan closes the previous synthetic PE
+    #
+    # v3.0.9: anchor selection is now scoped per ``target_date``. The
+    # original ``events[-1]`` worked for the wedged-mid-day case but
+    # broke lock-gap backfills: when target_date is BEFORE the latest
+    # known PE (e.g. backfilling a day the VM was LUKS-locked, with
+    # polling resuming days later), ``events[-1]`` lives in the future
+    # relative to the day's orphan trips, so the cursor-time skip drops
+    # every orphan and nothing gets synthesised.
+    #
+    # The right anchor is the latest PE whose ``arrived_at`` is on or
+    # before ``target_date``'s end-of-day:
+    #  1. Prefer a PE that *already exists on target_date* (real or
+    #     synth from a prior run) — handles wedged-mid-day.
+    #  2. Otherwise fall back to the latest PE strictly before
+    #     target_date — handles lock-gap days.
     if not events:
         return out
-    latest_pe = events[-1]
+    target_sod = datetime.combine(target_date, datetime.min.time())
+    target_eod = target_sod + timedelta(days=1)
+    events_on_day = [ev for ev in events if target_sod <= ev.arrived_at < target_eod]
+    events_before_day = [ev for ev in events if ev.arrived_at < target_sod]
+    if events_on_day:
+        latest_pe = events_on_day[-1]
+    elif events_before_day:
+        latest_pe = events_before_day[-1]
+    else:
+        return out  # nothing to anchor against
     running_odo = latest_pe.odometer_arrived
     prev_pe = latest_pe if latest_pe.departed_at is None else None
     cursor_time = latest_pe.arrived_at

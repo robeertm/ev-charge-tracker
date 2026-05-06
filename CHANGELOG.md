@@ -1,5 +1,13 @@
 # Changelog
 
+## v3.0.9 (2026-05-06)
+
+### synthesize_day — anchor selection scoped per target_date
+
+The v3.0.6 anchor logic used `events[-1]` (the chronologically latest PE) regardless of which day was being reconciled. That works for the wedged-mid-day case (where the latest PE is on the target_date) but silently no-ops for lock-gap backfills: when reconciling a day the VM was LUKS-locked, the latest PE is days in the future, so the cursor-time skip drops every orphan and nothing gets synthesised.
+
+Reworked: prefer the latest PE that already exists ON `target_date`, fall back to the latest PE strictly BEFORE `target_date`, and only then bail out. With this fix, running `synthesize_day` for an old offline-day correctly chains off the last pre-lock PE.
+
 ## v3.0.8 (2026-05-06)
 
 ### Fahrtenbuch — gap-aware regen / SoC estimation, consistent home/work labels
