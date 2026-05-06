@@ -950,32 +950,47 @@ def get_trips(limit: Optional[int] = None,
 
         regen_kwh = None
         regen_estimated = False
-        # Anchor regen lookup on ``prev.departed_at`` only — never
-        # ``last_seen_at``. The pair-iteration loop already skips
-        # pairs where ``prev.departed_at is None`` (see earlier
-        # ``if prev.departed_at is None: continue``), so the old
-        # ``or prev.last_seen_at`` fallback was never reached in
-        # practice. Explicit now that this lookup path doesn't touch
-        # last_seen_at — the field is allowed to drift without
-        # affecting Fahrtenbuch arithmetic. ``strict=True`` picks the
-        # last sync STRICTLY BEFORE the drive began.
-        dep_ts = prev.departed_at
-        cum_dep = _cum_regen_at(regen_lookup, dep_ts, strict=True)
-        cum_arr = _cum_regen_at_or_after(regen_lookup, curr.arrived_at)
-        if cum_dep is not None and cum_arr is not None:
-            regen_kwh = round(max(cum_arr - cum_dep, 0), 2)
-        # Fallback to km × configured static rate when measurement is
-        # unavailable OR comes back as a flat zero. Zero on a real drive
-        # is broken-measurement-shaped (e.g. cum_dep snapped to a sync
-        # AFTER drive start, so cum_arr - cum_dep collapsed to 0); any
-        # real km of driving recuperates non-zero. The user's morning
-        # commute on 2026-04-27 surfaced this: km=18, measured regen 0,
-        # so the original ``regen is None`` guard didn't kick in. Cell
-        # stays empty only when km itself is unknown — never both blank
-        # for a real drive.
-        if (regen_kwh is None or regen_kwh == 0) and km:
-            regen_kwh = round(km * static_recup_rate, 2)
-            regen_estimated = True
+        # v3.0.6: synthetic PEs from synthesize_day have no nearby sync
+        # row backing them — they were created precisely because the
+        # bg-loop was wedged. The cum-delta lookup would snap to the
+        # last pre-hang sync and the first post-hang sync, attributing
+        # the ENTIRE between-syncs regen to whichever synthetic trip
+        # happens to span those endpoints (effectively "distribute the
+        # last cumulative reading across all trips"). Skip the cum
+        # lookup for synthetic endpoints and go straight to km × rate.
+        prev_synth = (prev.label == 'unknown')
+        curr_synth = (curr.label == 'unknown')
+        if prev_synth or curr_synth:
+            if km:
+                regen_kwh = round(km * static_recup_rate, 2)
+                regen_estimated = True
+        else:
+            # Anchor regen lookup on ``prev.departed_at`` only — never
+            # ``last_seen_at``. The pair-iteration loop already skips
+            # pairs where ``prev.departed_at is None`` (see earlier
+            # ``if prev.departed_at is None: continue``), so the old
+            # ``or prev.last_seen_at`` fallback was never reached in
+            # practice. Explicit now that this lookup path doesn't touch
+            # last_seen_at — the field is allowed to drift without
+            # affecting Fahrtenbuch arithmetic. ``strict=True`` picks the
+            # last sync STRICTLY BEFORE the drive began.
+            dep_ts = prev.departed_at
+            cum_dep = _cum_regen_at(regen_lookup, dep_ts, strict=True)
+            cum_arr = _cum_regen_at_or_after(regen_lookup, curr.arrived_at)
+            if cum_dep is not None and cum_arr is not None:
+                regen_kwh = round(max(cum_arr - cum_dep, 0), 2)
+            # Fallback to km × configured static rate when measurement is
+            # unavailable OR comes back as a flat zero. Zero on a real drive
+            # is broken-measurement-shaped (e.g. cum_dep snapped to a sync
+            # AFTER drive start, so cum_arr - cum_dep collapsed to 0); any
+            # real km of driving recuperates non-zero. The user's morning
+            # commute on 2026-04-27 surfaced this: km=18, measured regen 0,
+            # so the original ``regen is None`` guard didn't kick in. Cell
+            # stays empty only when km itself is unknown — never both blank
+            # for a real drive.
+            if (regen_kwh is None or regen_kwh == 0) and km:
+                regen_kwh = round(km * static_recup_rate, 2)
+                regen_estimated = True
 
         trip = {
             'from': _event_to_dict(prev, include_departed=True),

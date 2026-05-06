@@ -1,5 +1,13 @@
 # Changelog
 
+## v3.0.7 (2026-05-06)
+
+### Fahrtenbuch — use km × rate for synthetic-PE trips, not the cumulative delta
+
+When a Fahrtenbuch trip touches a synthetic PE (label='unknown' from `synthesize_day`), the cum-regen delta lookup snaps to the last pre-hang sync and the first post-hang sync, so the entire afternoon's recuperation gets attributed to whichever single synthetic trip happens to span that window. The other synthetic trips end up with the same delta or zero.
+
+For trip pairs where either endpoint is synthetic, skip the cum-delta path entirely and use km × the configured per-vehicle recuperation rate. That's the canonical regen value when there's no nearby sync to measure against — same fallback the existing logic already applies when measurement comes back as zero, just enforced earlier so the wrong delta never gets stored.
+
 ## v3.0.6 (2026-05-06)
 
 ### synthesize_day — fix odometer ordering when chaining off a closed PE
