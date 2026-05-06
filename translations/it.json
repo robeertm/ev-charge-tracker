@@ -705,6 +705,7 @@
   "trips.list_title": "Viaggi",
   "trips.map_title": "Mappa di tutte le posizioni",
   "trips.regen_estimated": "Stimato da km × tasso di recupero (nessuna misura disponibile)",
+  "trips.soc_estimated": "Stimato da km × consumo / batteria (nessuna misura disponibile)",
   "trips.resolving": "Ricerca indirizzo…",
   "trips.sync_now": "Sincronizza ora",
   "trips.tb_backfill_confirm": "Eliminare gli eventi di parcheggio esistenti e ricostruire dalla cronologia sync?",

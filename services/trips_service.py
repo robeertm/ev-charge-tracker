@@ -680,6 +680,20 @@ def _cum_regen_at(lookup, ts, strict=False):
     return lookup[idx][1]
 
 
+def _cum_regen_at_with_ts(lookup, ts, strict=False):
+    """Same as ``_cum_regen_at`` but also returns the snapped row's
+    timestamp so callers can detect a wide gap between the trip endpoint
+    and the sync row backing the cumulative reading. (None, None) when
+    no row qualifies."""
+    if not lookup or ts is None:
+        return (None, None)
+    keys = [r[0] for r in lookup]
+    idx = (bisect.bisect_left(keys, ts) if strict else bisect.bisect_right(keys, ts)) - 1
+    if idx < 0:
+        return (None, None)
+    return lookup[idx]
+
+
 def _cum_regen_at_or_after(lookup, ts):
     """Return cumulative regen at the first sync with ts >= ``ts``.
 
@@ -696,6 +710,17 @@ def _cum_regen_at_or_after(lookup, ts):
     if idx >= len(lookup):
         return None
     return lookup[idx][1]
+
+
+def _cum_regen_at_or_after_with_ts(lookup, ts):
+    """Tuple variant of ``_cum_regen_at_or_after`` for gap detection."""
+    if not lookup or ts is None:
+        return (None, None)
+    keys = [r[0] for r in lookup]
+    idx = bisect.bisect_left(keys, ts)
+    if idx >= len(lookup):
+        return (None, None)
+    return lookup[idx]
 
 
 def _load_soc_lookup():
@@ -721,6 +746,17 @@ def _soc_before(lookup, ts):
     if idx < 0:
         return None
     return lookup[idx][1]
+
+
+def _soc_before_with_ts(lookup, ts):
+    """Tuple variant of ``_soc_before`` for gap detection."""
+    if not lookup or ts is None:
+        return (None, None)
+    keys = [r[0] for r in lookup]
+    idx = bisect.bisect_left(keys, ts) - 1
+    if idx < 0:
+        return (None, None)
+    return lookup[idx]
 
 
 def _soc_min_in(lookup, start_ts, end_ts):
@@ -749,8 +785,30 @@ def _soc_min_in(lookup, start_ts, end_ts):
     return min(lookup[i][1] for i in range(lo, hi))
 
 
+def _soc_min_in_with_ts(lookup, start_ts, end_ts):
+    """Tuple variant of ``_soc_min_in`` for gap detection. Returns
+    (timestamp, soc) of the row that produced the minimum. (None, None)
+    if the window is empty."""
+    if not lookup or start_ts is None or end_ts is None:
+        return (None, None)
+    keys = [r[0] for r in lookup]
+    lo = bisect.bisect_left(keys, start_ts)
+    hi = bisect.bisect_right(keys, end_ts)
+    if lo >= hi:
+        return (None, None)
+    best_idx = min(range(lo, hi), key=lambda i: lookup[i][1])
+    return lookup[best_idx]
+
+
 _SDK_STATS_MATCH_TOLERANCE_MIN = 20
 _ARRIVAL_SOC_WINDOW_MIN = 30
+# Beyond this gap between a trip endpoint and the nearest sync row, the
+# cum-regen / SoC measurements are too far apart from the actual drive
+# moment to be trustworthy — we estimate from km × static rate instead.
+# 30 min covers normal smart-mode 10-min cadence with two missed samples;
+# a longer gap usually means the bg-loop was wedged or the sync stream
+# was otherwise interrupted.
+_SYNC_GAP_TOLERANCE_MIN = 30
 
 
 def _find_sdk_stats(sdk_rows, pe_departed_at, exclude_ids=None):
@@ -805,10 +863,21 @@ def _event_to_dict(evt, include_departed: bool = False,
     from the SDK trip, not the PE (e.g. a round trip within one Home
     PE where the car left and returned without generating a new PE).
     """
+    # v3.0.8: home / work labels are translated at render time
+    # (``t('trips.home')`` / ``t('trips.work')``) so the UI stays
+    # consistent with the active language. Old PEs still carry the
+    # historical ``favorite_name`` ("Home" / "Zu Hause" / "Arbeit"),
+    # which produced a mix of languages on a single page when the user
+    # switched UI language or migrated installs. Drop the stored name
+    # for these two labels so the template's translation fallback
+    # always wins; ``label='favorite'`` keeps its name (user-defined).
+    name = evt.favorite_name
+    if evt.label in ('home', 'work'):
+        name = None
     out = {
         'id': evt.id,
         'lat': evt.lat, 'lon': evt.lon,
-        'label': evt.label, 'name': evt.favorite_name,
+        'label': evt.label, 'name': name,
         'address': evt.address,
         'arrived_at': (time_override.isoformat() if time_override is not None
                        else (evt.arrived_at.isoformat() if evt.arrived_at else None)),
@@ -879,21 +948,37 @@ def get_trips(limit: Optional[int] = None,
     # rate. v2.29: per-vehicle when scoped, else first non-archived
     # vehicle's rate, else legacy AppConfig.
     static_recup_rate = 0.086
+    static_battery_kwh = 64.0   # Niro EV default; overridden by Vehicle.battery_kwh
+    static_consumption_kwh_per_km = 0.18  # ~18 kWh/100km, typical EV
     try:
-        from models.database import Vehicle
+        from models.database import Vehicle, VehicleSync
+        _vrow = None
         if vehicle_id is not None:
             _vrow = Vehicle.query.get(vehicle_id)
-            if _vrow is not None and _vrow.recuperation_kwh_per_km:
-                static_recup_rate = float(_vrow.recuperation_kwh_per_km)
-            elif AppConfig.get('recuperation_kwh_per_km'):
-                static_recup_rate = float(AppConfig.get('recuperation_kwh_per_km', '0.086'))
         else:
             _vrow = (Vehicle.query.filter_by(is_archived=False)
                      .order_by(Vehicle.id.asc()).first())
-            if _vrow is not None and _vrow.recuperation_kwh_per_km:
-                static_recup_rate = float(_vrow.recuperation_kwh_per_km)
-            elif AppConfig.get('recuperation_kwh_per_km'):
-                static_recup_rate = float(AppConfig.get('recuperation_kwh_per_km', '0.086'))
+        if _vrow is not None and _vrow.recuperation_kwh_per_km:
+            static_recup_rate = float(_vrow.recuperation_kwh_per_km)
+        elif AppConfig.get('recuperation_kwh_per_km'):
+            static_recup_rate = float(AppConfig.get('recuperation_kwh_per_km', '0.086'))
+        if _vrow is not None and _vrow.battery_kwh:
+            static_battery_kwh = float(_vrow.battery_kwh)
+        # Live consumption rate: prefer the most recent SDK 30-day rolling
+        # average for the active vehicle, fall back to the global default.
+        # The 30-day SDK value already smooths over weather / driving-style
+        # variance, so it's the closest proxy we have to the trip's
+        # actual energy consumption when no near-trip sync row is
+        # available to read SoC delta from.
+        sync_q = VehicleSync.query.filter(
+            VehicleSync.consumption_30d_kwh_per_100km.isnot(None)
+        )
+        if vehicle_id is not None:
+            sync_q = sync_q.filter(VehicleSync.vehicle_id == vehicle_id)
+        latest_with_consumption = (sync_q.order_by(VehicleSync.timestamp.desc())
+                                   .first())
+        if latest_with_consumption is not None and latest_with_consumption.consumption_30d_kwh_per_100km:
+            static_consumption_kwh_per_km = float(latest_with_consumption.consumption_30d_kwh_per_100km) / 100.0
     except (ValueError, TypeError, Exception):
         pass
 
@@ -916,6 +1001,38 @@ def get_trips(limit: Optional[int] = None,
         if start_km is not None and curr.odometer_arrived is not None:
             km = max(curr.odometer_arrived - start_km, 0)
 
+        # SoC / regen reliability check — both readings depend on a
+        # vehicle_sync row landing reasonably close to each trip endpoint.
+        # When the bg-loop is wedged or the smart window is closed for
+        # other reasons, sync rows are absent across the whole drive
+        # window and the snapped readings end up referring to syncs that
+        # are *hours* away from the actual trip moment. The cum-regen
+        # delta then represents many trips' worth of regen, which gets
+        # attributed to whichever single trip happens to span that
+        # multi-hour window. Same for SoC. v3.0.8 detects this by
+        # checking how far the snapped sync row is from the trip
+        # endpoint; beyond ``_SYNC_GAP_TOLERANCE_MIN`` we fall back to
+        # km × static rate / km × static consumption.
+        ts_dep_regen, cum_dep = _cum_regen_at_with_ts(
+            regen_lookup, prev.departed_at, strict=True
+        )
+        ts_arr_regen, cum_arr = _cum_regen_at_or_after_with_ts(
+            regen_lookup, curr.arrived_at
+        )
+        regen_dep_gap = (
+            (prev.departed_at - ts_dep_regen).total_seconds() / 60.0
+            if ts_dep_regen is not None else None
+        )
+        regen_arr_gap = (
+            (ts_arr_regen - curr.arrived_at).total_seconds() / 60.0
+            if ts_arr_regen is not None else None
+        )
+        regen_unreliable = (
+            cum_dep is None or cum_arr is None
+            or (regen_dep_gap is not None and regen_dep_gap > _SYNC_GAP_TOLERANCE_MIN)
+            or (regen_arr_gap is not None and regen_arr_gap > _SYNC_GAP_TOLERANCE_MIN)
+        )
+
         # Trip SoC consumption: _soc_before(departed_at) is primary.
         # Reads from VehicleSync directly — catches SoC updates that the
         # v2.28.11 staleness filter blocked from advancing PE.soc_departed
@@ -925,7 +1042,7 @@ def get_trips(limit: Optional[int] = None,
         # start_soc would be stuck on the arrival SoC and a 100→85 %
         # drive after overnight charge would render as 0 % consumption.
         # Fallbacks kick in only when no earlier sync row exists at all.
-        start_soc = _soc_before(soc_lookup, prev.departed_at)
+        ts_start_soc, start_soc = _soc_before_with_ts(soc_lookup, prev.departed_at)
         if start_soc is None:
             start_soc = prev.soc_departed
         if start_soc is None:
@@ -934,61 +1051,50 @@ def get_trips(limit: Optional[int] = None,
         # just the arrival sync. First arrival sync often carries a
         # stale cache-echo SoC (same value the car had before the drive)
         # while the true post-drive SoC lands 1–10 min later. See
-        # _soc_min_in docstring. Fallback to curr.soc_arrived when the
-        # destination has no sync rows in the window (shouldn't happen
-        # in practice, but keeps the read resilient).
-        end_soc = _soc_min_in(
+        # _soc_min_in docstring.
+        ts_end_soc, end_soc = _soc_min_in_with_ts(
             soc_lookup,
             curr.arrived_at,
             curr.arrived_at + timedelta(minutes=_ARRIVAL_SOC_WINDOW_MIN),
         )
         if end_soc is None:
             end_soc = curr.soc_arrived
+        soc_dep_gap = (
+            (prev.departed_at - ts_start_soc).total_seconds() / 60.0
+            if ts_start_soc is not None else None
+        )
+        soc_unreliable = (
+            ts_start_soc is None or ts_end_soc is None
+            or (soc_dep_gap is not None and soc_dep_gap > _SYNC_GAP_TOLERANCE_MIN)
+        )
+
         soc_used = None
-        if start_soc is not None and end_soc is not None:
+        soc_estimated = False
+        if soc_unreliable:
+            if km and static_battery_kwh:
+                soc_used = round(
+                    km * static_consumption_kwh_per_km / static_battery_kwh * 100.0,
+                    1,
+                )
+                soc_estimated = True
+        elif start_soc is not None and end_soc is not None:
             soc_used = max(start_soc - end_soc, 0)
 
         regen_kwh = None
         regen_estimated = False
-        # v3.0.6: synthetic PEs from synthesize_day have no nearby sync
-        # row backing them — they were created precisely because the
-        # bg-loop was wedged. The cum-delta lookup would snap to the
-        # last pre-hang sync and the first post-hang sync, attributing
-        # the ENTIRE between-syncs regen to whichever synthetic trip
-        # happens to span those endpoints (effectively "distribute the
-        # last cumulative reading across all trips"). Skip the cum
-        # lookup for synthetic endpoints and go straight to km × rate.
-        prev_synth = (prev.label == 'unknown')
-        curr_synth = (curr.label == 'unknown')
-        if prev_synth or curr_synth:
+        if regen_unreliable:
             if km:
                 regen_kwh = round(km * static_recup_rate, 2)
                 regen_estimated = True
         else:
-            # Anchor regen lookup on ``prev.departed_at`` only — never
-            # ``last_seen_at``. The pair-iteration loop already skips
-            # pairs where ``prev.departed_at is None`` (see earlier
-            # ``if prev.departed_at is None: continue``), so the old
-            # ``or prev.last_seen_at`` fallback was never reached in
-            # practice. Explicit now that this lookup path doesn't touch
-            # last_seen_at — the field is allowed to drift without
-            # affecting Fahrtenbuch arithmetic. ``strict=True`` picks the
-            # last sync STRICTLY BEFORE the drive began.
-            dep_ts = prev.departed_at
-            cum_dep = _cum_regen_at(regen_lookup, dep_ts, strict=True)
-            cum_arr = _cum_regen_at_or_after(regen_lookup, curr.arrived_at)
-            if cum_dep is not None and cum_arr is not None:
-                regen_kwh = round(max(cum_arr - cum_dep, 0), 2)
-            # Fallback to km × configured static rate when measurement is
-            # unavailable OR comes back as a flat zero. Zero on a real drive
-            # is broken-measurement-shaped (e.g. cum_dep snapped to a sync
-            # AFTER drive start, so cum_arr - cum_dep collapsed to 0); any
-            # real km of driving recuperates non-zero. The user's morning
-            # commute on 2026-04-27 surfaced this: km=18, measured regen 0,
-            # so the original ``regen is None`` guard didn't kick in. Cell
-            # stays empty only when km itself is unknown — never both blank
-            # for a real drive.
-            if (regen_kwh is None or regen_kwh == 0) and km:
+            regen_kwh = round(max(cum_arr - cum_dep, 0), 2)
+            # Fallback to km × configured static rate when measurement
+            # comes back as a flat zero. Zero on a real drive is
+            # broken-measurement-shaped (e.g. cum_dep snapped to a sync
+            # AFTER drive start, so cum_arr - cum_dep collapsed to 0);
+            # any real km of driving recuperates non-zero. Cell stays
+            # empty only when km itself is unknown.
+            if regen_kwh == 0 and km:
                 regen_kwh = round(km * static_recup_rate, 2)
                 regen_estimated = True
 
@@ -997,6 +1103,7 @@ def get_trips(limit: Optional[int] = None,
             'to':   _event_to_dict(curr),
             'km': km,
             'soc_used': soc_used,
+            'soc_estimated': soc_estimated,
             'regen_kwh': regen_kwh,
             'regen_estimated': regen_estimated,
             'source': 'polled',

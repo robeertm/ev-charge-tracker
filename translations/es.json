@@ -705,6 +705,7 @@
   "trips.list_title": "Viajes",
   "trips.map_title": "Mapa de todas las ubicaciones",
   "trips.regen_estimated": "Estimado a partir de km × tasa de recuperación (sin medición disponible)",
+  "trips.soc_estimated": "Estimado a partir de km × consumo / batería (sin medición disponible)",
   "trips.resolving": "Resolviendo dirección…",
   "trips.sync_now": "Sincronizar ahora",
   "trips.tb_backfill_confirm": "¿Eliminar eventos de aparcamiento existentes y reconstruir desde la historia de sync?",

@@ -1,5 +1,19 @@
 # Changelog
 
+## v3.0.8 (2026-05-06)
+
+### Fahrtenbuch — gap-aware regen / SoC estimation, consistent home/work labels
+
+The v3.0.7 regen fix only kicked in when the trip's PE rows still had `label='unknown'`. Polling re-classifies synthetic PEs as soon as new GPS lands at one of their coordinates — within minutes of a sync resuming, all the synth labels become `home`/`work`/`other`/`favorite`, the predicate stops matching, and the broken cum-delta path takes over again. Each trip in the wedged window then gets the same multi-hour regen attributed to it (~4.23 kWh in the test data).
+
+Replaced the label check with a **sync-gap check**. Pull the snapped sync-row timestamp at each trip endpoint; if either gap exceeds 30 min, the cum-delta is treated as unreliable and the trip falls back to km × recuperation rate. Same gap logic now drives **SoC estimation** — when the start-of-trip sync is more than 30 min before the actual departure, we estimate `soc_used` from `km × consumption_kwh_per_km / battery_kwh × 100`. Consumption rate comes from the most recent SDK 30-day rolling average for the active vehicle, or 0.18 kWh/km as global fallback.
+
+Trips show an asterisk indicator when either value is estimated, with localised tooltips in all six languages.
+
+### Fahrtenbuch — translate home/work labels at render time
+
+Old PEs carry the historical `home_label` / `work_label` strings from when the user first set them up ("Home" / "Work" / "Zu Hause" / "Arbeit"), which produced a mix of languages on a single page when the user later switched UI language or was looking at data from multiple installs. Drop the stored name for `label='home'` and `label='work'` so the template's translation fallback (`t('trips.home')` / `t('trips.work')`) always wins. `label='favorite'` keeps its user-defined name.
+
 ## v3.0.7 (2026-05-06)
 
 ### Fahrtenbuch — use km × rate for synthetic-PE trips, not the cumulative delta

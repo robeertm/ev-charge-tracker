@@ -991,6 +991,7 @@
   "trips.list_title": "Fahrten",
   "trips.map_title": "Karte aller Standorte",
   "trips.regen_estimated": "Geschätzt aus km × Rekuperationsrate (kein Messwert vorhanden)",
+  "trips.soc_estimated": "Geschätzt aus km × Verbrauch / Akku (kein Messwert vorhanden)",
   "trips.resolving": "Adresse wird ermittelt…",
   "trips.sdk_backfill": "Vom Fahrzeug-Server laden",
   "trips.sdk_backfill_title": "Fahrten der letzten 30 Tage direkt vom Kia/Hyundai-Server holen (keine Wecksignale, keine 12V-Belastung)",

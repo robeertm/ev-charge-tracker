@@ -705,6 +705,7 @@
   "trips.list_title": "Trajets",
   "trips.map_title": "Carte de tous les emplacements",
   "trips.regen_estimated": "Estimé à partir de km × taux de récupération (aucune mesure disponible)",
+  "trips.soc_estimated": "Estimé à partir de km × consommation / batterie (aucune mesure disponible)",
   "trips.resolving": "Résolution de l'adresse…",
   "trips.sync_now": "Synchroniser maintenant",
   "trips.tb_backfill_confirm": "Supprimer les événements de stationnement existants et reconstruire à partir de la sync ?",

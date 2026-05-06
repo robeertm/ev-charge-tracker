@@ -705,6 +705,7 @@
   "trips.list_title": "Ritten",
   "trips.map_title": "Kaart van alle locaties",
   "trips.regen_estimated": "Geschat uit km × recuperatietempo (geen meting beschikbaar)",
+  "trips.soc_estimated": "Geschat uit km × verbruik / accu (geen meting beschikbaar)",
   "trips.resolving": "Adres ophalen…",
   "trips.sync_now": "Nu synchroniseren",
   "trips.tb_backfill_confirm": "Bestaande parkeerevenementen verwijderen en opnieuw opbouwen uit synchronisatiehistorie?",

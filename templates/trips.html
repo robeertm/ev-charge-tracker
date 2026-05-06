@@ -175,7 +175,7 @@
                             {% else %}<span class="text-muted fst-italic">{{ t('trips.resolving') }}</span>{% endif %}
                         </td>
                         <td class="text-end">{% if tr.km %}{{ tr.km }}{% endif %}</td>
-                        <td class="text-end">{% if tr.soc_used %}−{{ tr.soc_used }}%{% endif %}</td>
+                        <td class="text-end">{% if tr.soc_used %}{% if tr.soc_estimated %}<i class="bi bi-asterisk small text-muted" title="{{ t('trips.soc_estimated') }}"></i> {% endif %}−{{ tr.soc_used }}%{% endif %}</td>
                         <td class="text-end {% if tr.regen_estimated %}text-success-emphasis{% else %}text-success{% endif %}">
                             {% if tr.regen_kwh %}
                                 {% if tr.regen_estimated %}<i class="bi bi-asterisk small" title="{{ t('trips.regen_estimated') }}"></i> {% endif %}+{{ "%.1f"|format(tr.regen_kwh) }}

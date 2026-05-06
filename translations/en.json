@@ -991,6 +991,7 @@
   "trips.list_title": "Trips",
   "trips.map_title": "Map of all locations",
   "trips.regen_estimated": "Estimated from km × recuperation rate (no measurement available)",
+  "trips.soc_estimated": "Estimated from km × consumption / battery (no measurement available)",
   "trips.resolving": "Resolving address…",
   "trips.sdk_backfill": "Load from vehicle server",
   "trips.sdk_backfill_title": "Pull the last 30 days of trips from the Kia/Hyundai server (no wake-up, no 12V drain)",
