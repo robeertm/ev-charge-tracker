@@ -65,6 +65,7 @@
   "dash.low_12v_modal_body_post": " — un force-refresh sveglia l'auto e la scarica ulteriormente.",
   "dash.low_12v_modal_explain": "La 12 V viene ricaricata solo sporadicamente dalla batteria principale quando l'auto è parcheggiata. Risvegli ripetuti possono farla scendere sotto la soglia di avviamento.",
   "dash.low_12v_modal_confirm": "Force-refresh comunque",
+  "dash.low_12v_threshold_label": "Soglia 70 % (blocco force-refresh)",
   "common.cancel": "Annulla",
   "dash.no_data_hint": "Importa i dati da Google Sheet o registra la tua prima ricarica.",
   "dash.odometer": "Contachilometri",

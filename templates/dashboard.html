@@ -544,7 +544,7 @@
         { id: 'vhSoc',   field: 'soc',             color: 'rgba(76, 175, 80, 1)',  fmt: v => v + '%',             label: {{ t('dash.battery')|tojson }} + ' (SoC %)' },
         { id: 'vhRange', field: 'range_km',        color: 'rgba(33, 150, 243, 1)', fmt: v => v + ' km',           label: {{ t('dash.range')|tojson }} + ' (km)' },
         { id: 'vhOdo',   field: 'odometer_km',     color: 'rgba(96, 125, 139, 1)', fmt: v => v.toLocaleString('de'), label: {{ t('dash.odometer')|tojson }} + ' (km)' },
-        { id: 'vh12v',   field: 'battery_12v',     color: 'rgba(255, 193, 7, 1)',  fmt: v => v + '%',             label: {{ t('dash.v12')|tojson }} + ' (%)' },
+        { id: 'vh12v',   field: 'battery_12v',     color: 'rgba(255, 193, 7, 1)',  fmt: v => v + '%',             label: {{ t('dash.v12')|tojson }} + ' (%)', threshold: { value: 70, color: 'rgba(220, 53, 69, 0.9)', label: {{ t('dash.low_12v_threshold_label')|tojson }} } },
         { id: 'vhSoh',   field: 'soh',             color: 'rgba(244, 67, 54, 1)',  fmt: v => v + '%',             label: {{ t('dash.soh')|tojson }} + ' (%)', withAvg: true },
         { id: 'vhRegen', field: 'regen_kwh',       color: 'rgba(0, 188, 212, 1)',  fmt: v => v.toFixed(0),        label: {{ t('dash.regenerated')|tojson }} },
         { id: 'vhCons',  field: 'consumption_30d', color: 'rgba(255, 152, 0, 1)',  fmt: v => v.toFixed(1),        label: {{ t('dash.avg_30d')|tojson }} + ' (kWh/100km)' },
@@ -596,6 +596,38 @@
         const cfg = baseOpts(def.color, def.fmt, opts);
         const data = pairs(ts, values);
         cfg.data.datasets[0].data = data;
+        // v3.0.13: optional horizontal threshold line (e.g. 12 V lockout
+        // threshold at 70 %). Drawn as a flat dashed dataset spanning
+        // the full visible time range so it lines up with the chart's
+        // own time axis without needing the chartjs-annotation plugin.
+        if (def.threshold && data.length >= 1) {
+            const x0 = data[0].x;
+            const x1 = data[data.length - 1].x;
+            cfg.data.datasets.push({
+                label: def.threshold.label || (def.threshold.value + '%'),
+                data: [
+                    { x: x0, y: def.threshold.value },
+                    { x: x1, y: def.threshold.value },
+                ],
+                borderColor: def.threshold.color,
+                borderWidth: 1.5,
+                borderDash: [4, 4],
+                pointRadius: 0,
+                fill: false,
+                tension: 0,
+            });
+            cfg.options.plugins.legend = {
+                display: true,
+                position: 'bottom',
+                labels: {
+                    filter: item => item.datasetIndex === 1,
+                    font: { size: opts.fullscreen ? 12 : 9 },
+                    boxWidth: 18,
+                    padding: 2,
+                    color: def.threshold.color,
+                },
+            };
+        }
         if (def.withAvg && data.length >= 3) {
             const avg = data.reduce((s, p) => s + p.y, 0) / data.length;
             cfg.data.datasets.push({

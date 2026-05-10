@@ -65,6 +65,7 @@
   "dash.low_12v_modal_body_post": " — un force-refresh despierta el coche y la descarga más.",
   "dash.low_12v_modal_explain": "La 12 V solo se recarga esporádicamente desde la batería principal cuando el coche está aparcado. Despertar repetidamente puede bajarla del umbral de arranque.",
   "dash.low_12v_modal_confirm": "Force-refresh igualmente",
+  "dash.low_12v_threshold_label": "Umbral 70 % (bloqueo de force-refresh)",
   "common.cancel": "Cancelar",
   "dash.no_data_hint": "Importa tus datos de Google Sheet o registra tu primera carga.",
   "dash.odometer": "Odómetro",

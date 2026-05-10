@@ -65,6 +65,7 @@
   "dash.low_12v_modal_body_post": " — un force-refresh réveille la voiture et la décharge davantage.",
   "dash.low_12v_modal_explain": "La 12 V n'est rechargée que par intermittence depuis la batterie principale à l'arrêt. Des réveils répétés peuvent la faire passer sous le seuil de démarrage.",
   "dash.low_12v_modal_confirm": "Force-refresh quand même",
+  "dash.low_12v_threshold_label": "Seuil 70 % (blocage force-refresh)",
   "common.cancel": "Annuler",
   "dash.no_data_hint": "Importez vos données Google Sheet ou enregistrez votre première charge.",
   "dash.odometer": "Odomètre",

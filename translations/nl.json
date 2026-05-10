@@ -65,6 +65,7 @@
   "dash.low_12v_modal_body_post": " — een force-refresh wekt de auto en ontlaadt deze verder.",
   "dash.low_12v_modal_explain": "De 12 V wordt alleen sporadisch bijgeladen vanuit de hoofdaccu wanneer de auto geparkeerd is. Herhaalde wakes kunnen deze onder de startdrempel brengen.",
   "dash.low_12v_modal_confirm": "Toch force-refresh",
+  "dash.low_12v_threshold_label": "Drempel 70 % (force-refresh-blokkering)",
   "common.cancel": "Annuleren",
   "dash.no_data_hint": "Importeer je Google Sheet-gegevens of registreer je eerste laadbeurt.",
   "dash.odometer": "Kilometerteller",

@@ -115,6 +115,7 @@
   "dash.low_12v_modal_body_post": " — ein Force-Refresh weckt das Auto und entlädt sie weiter.",
   "dash.low_12v_modal_explain": "Die 12 V wird nur sporadisch von der Hauptbatterie nachgeladen, wenn das Auto parkt. Wiederholte Wakes können sie unter den Schwellwert zum Starten bringen.",
   "dash.low_12v_modal_confirm": "Trotzdem Force-Refresh",
+  "dash.low_12v_threshold_label": "Schwelle 70 % (Force-Refresh-Sperre)",
   "common.cancel": "Abbrechen",
   "dash.v12": "12V",
   "dash.vehicle_history": "Fahrzeug-Historie",

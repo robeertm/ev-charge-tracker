@@ -1,5 +1,13 @@
 # Changelog
 
+## v3.0.13 (2026-05-10)
+
+### 12 V chart — visualise the 70 % lockout threshold
+
+The 12 V history plot on the dashboard now draws a dashed red line at 70 % so the user can see at a glance how close (or far) the battery is to the force-refresh-lockout threshold introduced in v3.0.12. The legend below the chart names the threshold so it can't be mistaken for some other reference. Same line shows up in the fullscreen / clone view of the chart.
+
+Implemented as a flat dataset spanning the chart's time range (no chartjs-annotation plugin dependency) — the threshold pattern is now generic on every `CHART_DEFS` entry, so adding similar lines to other plots is a one-field change.
+
 ## v3.0.12 (2026-05-10)
 
 ### 12 V battery lockout — block automatic force-refresh below 70 %

@@ -115,6 +115,7 @@
   "dash.low_12v_modal_body_post": " — a force-refresh wakes the car and drains it further.",
   "dash.low_12v_modal_explain": "The 12 V is only topped up sporadically from the main pack while parked. Repeated wakes can drop it below the start threshold.",
   "dash.low_12v_modal_confirm": "Force-refresh anyway",
+  "dash.low_12v_threshold_label": "Threshold 70 % (force-refresh lockout)",
   "common.cancel": "Cancel",
   "dash.v12": "12V",
   "dash.vehicle_history": "Vehicle History",
