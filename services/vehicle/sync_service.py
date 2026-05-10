@@ -260,9 +260,36 @@ def _sync_one_vehicle(app, vehicle):
                 max_hours = float(AppConfig.get('smart_force_max_hours', '6'))
             except (ValueError, TypeError):
                 max_hours = 6.0
+            # v3.0.11: a force_refresh that returns IDENTICAL GPS
+            # (stationary car) would be deduped by ``differs_from`` —
+            # no new VehicleSync row is saved, so ``last_with_gps``
+            # still points to the previous row and its timestamp never
+            # advances. Result: every smart-window tick (every 10 min)
+            # re-decides "stale, force-refresh!" and wakes the AVN
+            # again, draining the 12 V battery overnight. Witnessed:
+            # 17 force_refreshes in 2h47m on a parked Niro.
+            #
+            # Fix: track ``last_gps_poll_ok_at_{vid}`` in AppConfig
+            # whenever a force_refresh returns a valid status. Take
+            # the freshness anchor as MAX(row timestamp, AppConfig).
+            last_gps_anchor_ts = (
+                last_with_gps.timestamp if last_with_gps else None
+            )
+            anchor_key = (
+                'last_gps_poll_ok_at' if vehicle.id == 1
+                else f'last_gps_poll_ok_at_{vehicle.id}'
+            )
+            anchor_raw = AppConfig.get(anchor_key, '')
+            if anchor_raw:
+                try:
+                    anchor_dt = datetime.fromisoformat(anchor_raw)
+                    if last_gps_anchor_ts is None or anchor_dt > last_gps_anchor_ts:
+                        last_gps_anchor_ts = anchor_dt
+                except ValueError:
+                    pass
             stale = True
-            if last_with_gps:
-                age_hours = (datetime.now() - last_with_gps.timestamp).total_seconds() / 3600
+            if last_gps_anchor_ts:
+                age_hours = (datetime.now() - last_gps_anchor_ts).total_seconds() / 3600
                 stale = (age_hours >= max_hours)
             if not is_charging and stale:
                 force = True
@@ -283,6 +310,17 @@ def _sync_one_vehicle(app, vehicle):
 
     if force:
         AppConfig.set('last_force_refresh_at', datetime.now().isoformat())
+        # v3.0.11: also bump the per-vehicle GPS-freshness anchor when
+        # the force_refresh actually returned a GPS fix — independent
+        # of whether ``differs_from`` will dedupe the resulting row.
+        # The smart→force decision above reads this to break the
+        # stationary-car force-refresh loop.
+        if status is not None and getattr(status, 'location_lat', None) is not None:
+            anchor_key = (
+                'last_gps_poll_ok_at' if vehicle.id == 1
+                else f'last_gps_poll_ok_at_{vehicle.id}'
+            )
+            AppConfig.set(anchor_key, datetime.now().isoformat())
 
     from app import _save_vehicle_sync
     battery_kwh = float(vehicle.battery_kwh) if vehicle.battery_kwh else 64.0

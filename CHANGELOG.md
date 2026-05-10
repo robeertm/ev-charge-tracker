@@ -1,5 +1,15 @@
 # Changelog
 
+## v3.0.11 (2026-05-07)
+
+### Stop the stationary-car force_refresh loop (12 V battery saver)
+
+Severe bug: an overnight-parked car had its AVN woken **17 times in 2 h 47 min** the morning after the smart window opened — every 10 min, on the dot.
+
+Root cause: the smart→force decision uses the timestamp of the most recent GPS-bearing `VehicleSync` row to compute staleness. A force_refresh on a stationary car returns *identical* values (same SoC, same odo, same GPS coords), so `_save_vehicle_sync.differs_from(last)` skips the insert and no new row is written. The "last GPS row" timestamp therefore never advances, every subsequent 10-min tick re-evaluates as "stale", and the loop fires the force_refresh again. AVN wake-up = 12 V drain — overnight this can flat-batter a car.
+
+Fix: a per-vehicle `last_gps_poll_ok_at` AppConfig anchor is now stamped whenever a force_refresh returns a status with GPS, regardless of whether the resulting row is deduped. The staleness check anchors on `MAX(row timestamp, AppConfig timestamp)` so the loop breaks after the first successful force_refresh of the morning.
+
 ## v3.0.10 (2026-05-06)
 
 ### synthesize_day — distinct marker so cleanup queries don't hit polled-unknown PEs
