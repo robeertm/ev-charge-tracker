@@ -1034,10 +1034,23 @@ def register_routes(app):
           red    — last force_refresh hung past the 120 s threshold and
                    no successful tick since
         """
-        from services.vehicle.sync_service import get_bg_loop_health
+        from services.vehicle.sync_service import (
+            get_bg_loop_health, is_12v_low, _latest_12v_percent,
+            LOW_12V_THRESHOLD_PERCENT,
+        )
         from datetime import datetime as _dt, timedelta as _td
 
         bg = get_bg_loop_health()
+        # 12 V lockout signal for the active vehicle.
+        _picker_h = _active_vehicle_id()
+        _vid_h = _picker_h if isinstance(_picker_h, int) else None
+        if _vid_h is None:
+            from models.database import Vehicle as _Vh
+            _vh = (_Vh.query.filter_by(is_archived=False)
+                   .order_by(_Vh.id.asc()).first())
+            _vid_h = _vh.id if _vh else None
+        battery_12v = _latest_12v_percent(_vid_h) if _vid_h else None
+        low_12v_lockout = bool(_vid_h and is_12v_low(_vid_h))
         try:
             from services.vehicle.connector_hyundai_kia import get_force_refresh_health
             fr = get_force_refresh_health()
@@ -1071,6 +1084,13 @@ def register_routes(app):
                 status = 'yellow'
                 reason = f'force_refresh_timed_out_{int(to_age)}min_ago'
 
+        # 12 V lockout escalates to yellow (and overrides green) so the
+        # user sees the dashboard chip change colour without having to
+        # open the trips page.
+        if low_12v_lockout and status == 'green':
+            status = 'yellow'
+            reason = f'low_12v_lockout_{battery_12v}pct'
+
         return jsonify({
             'status': status,
             'reason': reason,
@@ -1097,6 +1117,9 @@ def register_routes(app):
                 'timeout_count_24h': fr.get('timeout_count_24h', 0),
                 'timeout_threshold_sec': fr.get('timeout_threshold_sec', 120),
             },
+            'battery_12v': battery_12v,
+            'low_12v_lockout': low_12v_lockout,
+            'low_12v_threshold': LOW_12V_THRESHOLD_PERCENT,
         })
 
     # ── LUKS auto-unlock (v3.0.3) ─────────────────────────────
@@ -2895,6 +2918,7 @@ def register_routes(app):
             return jsonify({'error': 'not_configured'}), 400
 
         force = request.args.get('force', '0') == '1'
+        confirm_low_12v = request.args.get('confirm_low_12v', '0') == '1'
 
         # Validate token format for Kia/Hyundai
         if brand in ('kia', 'hyundai'):
@@ -2902,6 +2926,29 @@ def register_routes(app):
             token = AppConfig.get('vehicle_api_password', '')
             if not _re.match(r'^[A-Z0-9]{48}$', token):
                 return jsonify({'error': 'Ungültiger Token. Bitte unter Einstellungen → Token holen.'}), 400
+
+        # v3.0.12: 12 V lockout — block manual force-refresh when the
+        # last reading is below threshold, unless the caller has
+        # acknowledged the warning (confirm_low_12v=1). The frontend
+        # surfaces a modal that supplies the flag on user confirm.
+        if force and not confirm_low_12v:
+            from services.vehicle.sync_service import (
+                is_12v_low, _latest_12v_percent, LOW_12V_THRESHOLD_PERCENT
+            )
+            _picker_low = _active_vehicle_id()
+            _vid_low = _picker_low if isinstance(_picker_low, int) else None
+            if _vid_low is None:
+                from models.database import Vehicle as _Vlow
+                _vlow = (_Vlow.query.filter_by(is_archived=False)
+                         .order_by(_Vlow.id.asc()).first())
+                _vid_low = _vlow.id if _vlow else None
+            if _vid_low and is_12v_low(_vid_low):
+                return jsonify({
+                    'error': 'low_12v',
+                    'battery_12v': _latest_12v_percent(_vid_low),
+                    'threshold': LOW_12V_THRESHOLD_PERCENT,
+                    'message': 'low_12v_confirmation_required',
+                }), 423
 
         # Rate limiter: max 200 calls/day (Kia EU), track usage
         today_str = date.today().isoformat()
@@ -3614,6 +3661,29 @@ def register_routes(app):
         brand = AppConfig.get('vehicle_api_brand', '')
         if not brand:
             return jsonify({'error': 'no_brand'}), 400
+
+        confirm_low_12v_t = (
+            request.args.get('confirm_low_12v', '0') == '1'
+            or request.form.get('confirm_low_12v', '0') == '1'
+        )
+        if not confirm_low_12v_t:
+            from services.vehicle.sync_service import (
+                is_12v_low, _latest_12v_percent, LOW_12V_THRESHOLD_PERCENT
+            )
+            _picker_t = _active_vehicle_id()
+            _vid_t = _picker_t if isinstance(_picker_t, int) else None
+            if _vid_t is None:
+                from models.database import Vehicle as _Vt
+                _vt = (_Vt.query.filter_by(is_archived=False)
+                       .order_by(_Vt.id.asc()).first())
+                _vid_t = _vt.id if _vt else None
+            if _vid_t and is_12v_low(_vid_t):
+                return jsonify({
+                    'error': 'low_12v',
+                    'battery_12v': _latest_12v_percent(_vid_t),
+                    'threshold': LOW_12V_THRESHOLD_PERCENT,
+                    'message': 'low_12v_confirmation_required',
+                }), 423
 
         # Rate limiter check (Kia EU 200/day)
         today_str = date.today().isoformat()

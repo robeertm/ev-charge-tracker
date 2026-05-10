@@ -1,5 +1,19 @@
 # Changelog
 
+## v3.0.12 (2026-05-10)
+
+### 12 V battery lockout — block automatic force-refresh below 70 %
+
+Each force-refresh wakes the AVN over cellular and pulls non-trivial current from the 12 V auxiliary battery. The main pack only top-charges the 12 V intermittently while parked, so a stretch of repeated force-refreshes (witnessed in v3.0.10 — 17 wakes in 2 h 47 min on a stationary car) can flat-batter it. v3.0.11 fixed the underlying loop trigger; v3.0.12 adds a hard floor in case any other code path produces too many force-refreshes.
+
+**Backend lock**: when the latest sync's `battery_12v_percent` is below 70 %, the bg-sync loop demotes any `force=True` decision (smart→force OR queued triggered-force) to a cached sync and logs the suppression. `last_12v_lockout_at` is stamped in AppConfig for visibility. The threshold is a const for now (`LOW_12V_THRESHOLD_PERCENT = 70` in `services/vehicle/sync_service.py`).
+
+**API gating**: `/api/vehicle/status?force=1` and `/api/trips/sync_now` now return `423 Locked` with `{error: 'low_12v', battery_12v: N, threshold: 70}` when 12 V is below threshold and the caller hasn't passed `confirm_low_12v=1`. Any other code that wants to wake the car has to surface the warning to the user explicitly.
+
+**Dashboard UX**: a yellow banner appears at the top of the dashboard when the lockout is active (12 V %, hint that automatic force-refreshes are paused). The "Live" button still works, but on click it now catches the 423 response, opens a confirmation modal explaining the trade-off, and only re-fires the force-refresh with `confirm_low_12v=1` after the user clicks through. The sync-health chip escalates to yellow with a `low_12v_lockout_Npct` reason so it's visible from any page where the chip renders.
+
+8 new translation keys (`dash.low_12v_*` and `common.cancel`) in all six language files.
+
 ## v3.0.11 (2026-05-07)
 
 ### Stop the stationary-car force_refresh loop (12 V battery saver)

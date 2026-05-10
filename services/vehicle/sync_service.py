@@ -63,6 +63,37 @@ def request_post_move_reconcile() -> None:
 MIN_INTERVAL_HOURS = 1  # cached/force modes: 1 hour minimum
 DEFAULT_INTERVAL_HOURS = 4
 
+# v3.0.12: hard floor on the 12 V auxiliary battery. Force-refresh wakes
+# the AVN over cellular and draws non-trivial current; doing that on a
+# car whose 12 V is already low can flat-batter it (the EV's main pack
+# only top-charges the 12 V intermittently while parked). Below this %
+# the bg-loop falls back to cached-only and queued forces are dropped.
+# Manual UI force-refresh still possible but requires the user to
+# confirm an explicit override prompt.
+LOW_12V_THRESHOLD_PERCENT = 70
+
+
+def _latest_12v_percent(vehicle_id: int) -> int | None:
+    """Return the most recently observed 12 V battery % for a vehicle,
+    or None if no sync has captured it yet."""
+    from models.database import VehicleSync
+    row = (VehicleSync.query
+           .filter(VehicleSync.vehicle_id == vehicle_id)
+           .filter(VehicleSync.battery_12v_percent.isnot(None))
+           .order_by(VehicleSync.timestamp.desc())
+           .first())
+    return row.battery_12v_percent if row is not None else None
+
+
+def is_12v_low(vehicle_id: int) -> bool:
+    """True when the latest known 12 V reading is below the lockout
+    threshold. Returns False when no reading exists yet (don't block
+    the very first sync of a fresh install)."""
+    pct = _latest_12v_percent(vehicle_id)
+    if pct is None:
+        return False
+    return pct < LOW_12V_THRESHOLD_PERCENT
+
 # Smart mode defaults: sample every 10 min between 06:00 and 22:00, sleep at night.
 DEFAULT_SMART_INTERVAL_MIN = 10
 MIN_SMART_INTERVAL_MIN = 5
@@ -304,6 +335,21 @@ def _sync_one_vehicle(app, vehicle):
             )
             force = False
             mode_label = 'smart->cached'
+
+    # v3.0.12: 12 V battery lockout — never wake the AVN automatically
+    # when 12 V is below the threshold. Catches both smart→force and
+    # any queued triggered-force from this branch. Manual force from
+    # the UI bypasses via api_vehicle_status's confirm_low_12v flow.
+    if force and is_12v_low(vehicle.id):
+        pct_now = _latest_12v_percent(vehicle.id)
+        logger.warning(
+            f"Vehicle sync [{vehicle.name}]: force-refresh suppressed — "
+            f"12 V at {pct_now}% (< {LOW_12V_THRESHOLD_PERCENT}% threshold). "
+            f"Falling back to cached."
+        )
+        force = False
+        mode_label = f'{mode_label}->blocked_12v'
+        AppConfig.set('last_12v_lockout_at', datetime.now().isoformat())
 
     connector = get_connector(brand, creds)
     status = connector.get_status(force=force)

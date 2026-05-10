@@ -26,6 +26,35 @@
     </div>
     <button type="button" class="btn-close" id="rollbackBannerClose" aria-label="Close"></button>
 </div>
+<div id="low12vBanner" class="alert alert-warning mb-3 d-none d-flex align-items-start gap-2" style="border-left: 5px solid #ff9500;">
+    <i class="bi bi-battery-half fs-4 text-warning"></i>
+    <div class="flex-grow-1">
+        <div class="fw-bold text-dark">{{ t('dash.low_12v_title') }} <span id="low12vPct" class="badge bg-warning text-dark"></span></div>
+        <div class="small text-muted">{{ t('dash.low_12v_hint') }}</div>
+    </div>
+</div>
+
+<!-- 12V low confirmation modal -->
+<div class="modal fade" id="low12vConfirmModal" tabindex="-1">
+    <div class="modal-dialog modal-dialog-centered">
+        <div class="modal-content">
+            <div class="modal-header bg-warning-subtle">
+                <h5 class="modal-title"><i class="bi bi-battery-half text-warning"></i> {{ t('dash.low_12v_modal_title') }}</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body">
+                <p class="mb-2">{{ t('dash.low_12v_modal_body_pre') }} <strong><span id="low12vModalPct"></span></strong> {{ t('dash.low_12v_modal_body_post') }}</p>
+                <p class="small text-muted mb-0">{{ t('dash.low_12v_modal_explain') }}</p>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">{{ t('common.cancel') }}</button>
+                <button type="button" class="btn btn-warning" id="low12vModalConfirm">
+                    <i class="bi bi-broadcast"></i> {{ t('dash.low_12v_modal_confirm') }}
+                </button>
+            </div>
+        </div>
+    </div>
+</div>
 {% if not stats %}
 <div class="text-center py-5">
     <i class="bi bi-database-x display-1 text-muted"></i>
@@ -284,13 +313,26 @@
     // Always auto-fetch cached (non-force) data on page load to stay current
     loadVehicle(false);
 
-    async function loadVehicle(force) {
+    async function loadVehicle(force, confirmLow12v) {
         btn.disabled = true; btnForce.disabled = true;
         const activeBtn = force ? btnForce : btn;
         const origHtml = activeBtn.innerHTML;
         activeBtn.innerHTML = '<span class="spinner-border spinner-border-sm"></span>';
         try {
-            const r = await fetch('/api/vehicle/status' + (force ? '?force=1' : ''));
+            const qs = [];
+            if (force) qs.push('force=1');
+            if (confirmLow12v) qs.push('confirm_low_12v=1');
+            const r = await fetch('/api/vehicle/status' + (qs.length ? '?' + qs.join('&') : ''));
+            // 423 Locked → 12 V lockout, prompt the user.
+            if (r.status === 423) {
+                const lj = await r.json();
+                btn.disabled = false; btnForce.disabled = false;
+                activeBtn.innerHTML = origHtml;
+                if (lj && lj.error === 'low_12v') {
+                    openLow12vModal(lj.battery_12v);
+                    return;
+                }
+            }
             const d = await r.json();
             if (d.error) { activeBtn.innerHTML = '<i class="bi bi-exclamation-triangle"></i> ' + d.error; btn.disabled = false; btnForce.disabled = false; return; }
             // Merge with cached data so null values don't blank out fields
@@ -305,7 +347,26 @@
         activeBtn.innerHTML = origHtml;
     }
     btn.addEventListener('click', () => loadVehicle(false));
-    btnForce.addEventListener('click', () => loadVehicle(true));
+    // v3.0.12: 12 V lockout flow. The status fetch already returns 423
+    // with `error: 'low_12v'` when the latest reading is below
+    // threshold and `confirm_low_12v=1` wasn't set. Catch that here,
+    // surface the modal, and on user confirm re-call with the override.
+    let _pending12vConfirmPct = null;
+    function openLow12vModal(pct) {
+        _pending12vConfirmPct = pct;
+        document.getElementById('low12vModalPct').textContent = pct + '%';
+        const m = bootstrap.Modal.getOrCreateInstance(document.getElementById('low12vConfirmModal'));
+        m.show();
+    }
+    document.getElementById('low12vModalConfirm').addEventListener('click', () => {
+        const m = bootstrap.Modal.getOrCreateInstance(document.getElementById('low12vConfirmModal'));
+        m.hide();
+        loadVehicle(true, true);  // confirmed
+    });
+    btnForce.addEventListener('click', async () => {
+        // Fast path: ask the API; let the 423 trigger the modal.
+        loadVehicle(true, false);
+    });
 
     // Sync-health badge (v3.0.5). Polls /api/sync/health every 60 s. The
     // server returns green / yellow / red plus a structured payload; we
@@ -324,6 +385,19 @@
         try {
             const r = await fetch('/api/sync/health', { cache: 'no-store' });
             const d = await r.json();
+            // 12 V lockout banner + button gating live-update from the
+            // poll, so the user doesn't need to refresh when 12 V dips.
+            try {
+                const banner = document.getElementById('low12vBanner');
+                if (banner) {
+                    if (d.low_12v_lockout) {
+                        document.getElementById('low12vPct').textContent = (d.battery_12v ?? '?') + '%';
+                        banner.classList.remove('d-none');
+                    } else {
+                        banner.classList.add('d-none');
+                    }
+                }
+            } catch (e) {}
             const cls = { green: 'bg-success', yellow: 'bg-warning text-dark', red: 'bg-danger' }[d.status] || 'bg-secondary';
             chip.className = 'badge rounded-pill ' + cls;
             chip.style.fontSize = '0.65rem';
