@@ -470,9 +470,16 @@ function calcKwh() {
     const type = document.getElementById('chargeTypeHidden').value;
 
     if (!isNaN(socFrom) && !isNaN(socTo) && socTo > socFrom) {
-        // From SoC: kWh = (socTo - socFrom) / 100 * battery_kwh
+        // From SoC: kWh = (socTo - socFrom) / 100 * battery_kwh.
+        // This is the THEORETICAL, loss-free energy that landed in the
+        // pack. It is only ever a placeholder for when the user has no
+        // meter reading — if they type the real charger kWh we must NOT
+        // clobber it, otherwise loss = real − theoretical collapses to
+        // 0 and the Ladeverlust auto-calc silently stops working.
+        const kwhField = document.getElementById('kwh_loaded');
+        if (kwhField.dataset.manual) return;
         const kwh = (socTo - socFrom) / 100 * BATTERY_KWH;
-        document.getElementById('kwh_loaded').value = kwh.toFixed(3);
+        kwhField.value = kwh.toFixed(3);
         document.getElementById('kwhHint').textContent = '(' + T.from_soc + ')';
         updateCalcPrice();
     }

@@ -1,5 +1,15 @@
 # Changelog
 
+## v3.0.14 (2026-05-10)
+
+### Fix: charge-loss auto-calc no longer silently zeroed
+
+`calcKwh()` on the input form filled `kwh_loaded` with the theoretical loss-free energy `(socTo − socFrom)/100 × battery_kwh` and overwrote it on **every** SoC change — with no `dataset.manual` guard, unlike the time-based estimator right next to it. So if the user typed the real charger kWh and then nudged a SoC field, their value was clobbered with the theoretical one, and `loss = real − theoretical` collapsed to exactly 0. Auto-loss now survives a manual kWh entry: `calcKwh()` bails out when `kwh_loaded` was hand-edited.
+
+### Settings → operator list readable on mobile, no more horizontal scrollbar
+
+The operator/CPO editor was a 4-column table wrapped in `table-responsive`. The `€/kWh` / `€/Mon.` input-group suffixes ate so much width that the price fields were unreadable on a phone, and `overflow-x:auto` produced the intermittent horizontal scrollbar. Replaced with a wrapping grid: operator name on its own line, price and monthly fee side-by-side at half width each, units moved into the field labels. No fixed widths, no `table-responsive`, so it reflows down to ~320 px without a scrollbar. Add/remove-custom-row JS updated for the new DOM (div list instead of `<tbody>`).
+
 ## v3.0.13 (2026-05-10)
 
 ### 12 V chart — visualise the 70 % lockout threshold

@@ -1142,75 +1142,63 @@
                 <p class="text-muted small mb-3">{{ t('set.operators_desc') }}</p>
                 <form method="POST" id="operatorsForm">
                     <input type="hidden" name="action" value="save_operators">
-                    <div class="table-responsive">
-                        <table class="table table-sm align-middle mb-2" id="operatorsTable">
-                            <thead>
-                                <tr>
-                                    <th style="width:35%">{{ t('set.operators_col_name') }}</th>
-                                    <th style="width:25%">{{ t('set.operators_col_price') }}</th>
-                                    <th style="width:25%">{{ t('set.operators_col_monthly') }}</th>
-                                    <th style="width:15%"></th>
-                                </tr>
-                            </thead>
-                            <tbody id="operatorsTbody">
-                                {% for op in operators_builtin %}
-                                <tr>
-                                    <td>
-                                        <input type="hidden" name="op_builtin" value="1">
-                                        <input type="text" class="form-control form-control-sm" name="op_name"
-                                               value="{{ op }}" readonly>
-                                    </td>
-                                    <td>
-                                        <div class="input-group input-group-sm">
-                                            <input type="number" step="0.0001" min="0" name="op_price"
-                                                   class="form-control" value="{{ '%.4f' % operator_prices[op] if op in operator_prices else '' }}"
-                                                   placeholder="0.00">
-                                            <span class="input-group-text">€/kWh</span>
-                                        </div>
-                                    </td>
-                                    <td>
-                                        <div class="input-group input-group-sm">
-                                            <input type="number" step="0.01" min="0" name="op_monthly_fee"
-                                                   class="form-control" value="{{ '%.2f' % operator_monthly_fees[op] if op in operator_monthly_fees else '' }}"
-                                                   placeholder="0.00">
-                                            <span class="input-group-text">€/Mon.</span>
-                                        </div>
-                                    </td>
-                                    <td class="text-muted small">{{ t('set.operators_builtin_badge') }}</td>
-                                </tr>
-                                {% endfor %}
-                                {% for op in operators_custom %}
-                                <tr class="operator-custom-row">
-                                    <td>
-                                        <input type="hidden" name="op_builtin" value="0">
-                                        <input type="text" class="form-control form-control-sm" name="op_name"
-                                               value="{{ op }}" placeholder="{{ t('set.operators_custom_ph_inline') }}">
-                                    </td>
-                                    <td>
-                                        <div class="input-group input-group-sm">
-                                            <input type="number" step="0.0001" min="0" name="op_price"
-                                                   class="form-control" value="{{ '%.4f' % operator_prices[op] if op in operator_prices else '' }}"
-                                                   placeholder="0.00">
-                                            <span class="input-group-text">€/kWh</span>
-                                        </div>
-                                    </td>
-                                    <td>
-                                        <div class="input-group input-group-sm">
-                                            <input type="number" step="0.01" min="0" name="op_monthly_fee"
-                                                   class="form-control" value="{{ '%.2f' % operator_monthly_fees[op] if op in operator_monthly_fees else '' }}"
-                                                   placeholder="0.00">
-                                            <span class="input-group-text">€/Mon.</span>
-                                        </div>
-                                    </td>
-                                    <td>
-                                        <button type="button" class="btn btn-sm btn-outline-danger btn-remove-operator" title="{{ t('set.operators_remove') }}">
-                                            <i class="bi bi-trash"></i>
-                                        </button>
-                                    </td>
-                                </tr>
-                                {% endfor %}
-                            </tbody>
-                        </table>
+                    {# v3.0.14: replaced the 4-col table (input-group
+                       suffixes squeezed the price field to nothing on
+                       mobile and table-responsive added a horizontal
+                       scrollbar). Now a wrapping grid: name on its own
+                       line, price + monthly side-by-side, units in the
+                       per-field label so the input keeps full width. #}
+                    <div id="operatorsList" class="vstack gap-2 mb-2">
+                        {% for op in operators_builtin %}
+                        <div class="operator-row border rounded p-2">
+                            <input type="hidden" name="op_builtin" value="1">
+                            <div class="d-flex align-items-center gap-2 mb-2">
+                                <input type="text" class="form-control form-control-sm fw-semibold" name="op_name"
+                                       value="{{ op }}" readonly style="background:#f8f9fa;">
+                                <span class="badge bg-light text-muted border flex-shrink-0">{{ t('set.operators_builtin_badge') }}</span>
+                            </div>
+                            <div class="row g-2">
+                                <div class="col-6">
+                                    <label class="form-label small text-muted mb-1">{{ t('set.operators_col_price') }} (€/kWh)</label>
+                                    <input type="number" step="0.0001" min="0" name="op_price"
+                                           class="form-control form-control-sm" value="{{ '%.4f' % operator_prices[op] if op in operator_prices else '' }}"
+                                           placeholder="0.0000" inputmode="decimal">
+                                </div>
+                                <div class="col-6">
+                                    <label class="form-label small text-muted mb-1">{{ t('set.operators_col_monthly') }} (€/Mon.)</label>
+                                    <input type="number" step="0.01" min="0" name="op_monthly_fee"
+                                           class="form-control form-control-sm" value="{{ '%.2f' % operator_monthly_fees[op] if op in operator_monthly_fees else '' }}"
+                                           placeholder="0.00" inputmode="decimal">
+                                </div>
+                            </div>
+                        </div>
+                        {% endfor %}
+                        {% for op in operators_custom %}
+                        <div class="operator-row operator-custom-row border rounded p-2">
+                            <input type="hidden" name="op_builtin" value="0">
+                            <div class="d-flex align-items-center gap-2 mb-2">
+                                <input type="text" class="form-control form-control-sm fw-semibold" name="op_name"
+                                       value="{{ op }}" placeholder="{{ t('set.operators_custom_ph_inline') }}">
+                                <button type="button" class="btn btn-sm btn-outline-danger btn-remove-operator flex-shrink-0" title="{{ t('set.operators_remove') }}">
+                                    <i class="bi bi-trash"></i>
+                                </button>
+                            </div>
+                            <div class="row g-2">
+                                <div class="col-6">
+                                    <label class="form-label small text-muted mb-1">{{ t('set.operators_col_price') }} (€/kWh)</label>
+                                    <input type="number" step="0.0001" min="0" name="op_price"
+                                           class="form-control form-control-sm" value="{{ '%.4f' % operator_prices[op] if op in operator_prices else '' }}"
+                                           placeholder="0.0000" inputmode="decimal">
+                                </div>
+                                <div class="col-6">
+                                    <label class="form-label small text-muted mb-1">{{ t('set.operators_col_monthly') }} (€/Mon.)</label>
+                                    <input type="number" step="0.01" min="0" name="op_monthly_fee"
+                                           class="form-control form-control-sm" value="{{ '%.2f' % operator_monthly_fees[op] if op in operator_monthly_fees else '' }}"
+                                           placeholder="0.00" inputmode="decimal">
+                                </div>
+                            </div>
+                        </div>
+                        {% endfor %}
                     </div>
                     <div class="d-flex gap-2 flex-wrap">
                         <button type="button" class="btn btn-outline-secondary btn-sm" id="btnAddOperator">
@@ -1227,31 +1215,29 @@
 
         <!-- Hidden template row for JS-added custom operators -->
         <template id="operatorRowTemplate">
-            <tr class="operator-custom-row">
-                <td>
-                    <input type="hidden" name="op_builtin" value="0">
-                    <input type="text" class="form-control form-control-sm" name="op_name"
+            <div class="operator-row operator-custom-row border rounded p-2">
+                <input type="hidden" name="op_builtin" value="0">
+                <div class="d-flex align-items-center gap-2 mb-2">
+                    <input type="text" class="form-control form-control-sm fw-semibold" name="op_name"
                            placeholder="{{ t('set.operators_custom_ph_inline') }}">
-                </td>
-                <td>
-                    <div class="input-group input-group-sm">
-                        <input type="number" step="0.0001" min="0" name="op_price" class="form-control" placeholder="0.00">
-                        <span class="input-group-text">€/kWh</span>
-                    </div>
-                </td>
-                <td>
-                    <div class="input-group input-group-sm">
-                        <input type="number" step="0.01" min="0" name="op_monthly_fee" class="form-control" placeholder="0.00">
-                        <span class="input-group-text">€/Mon.</span>
-                    </div>
-                </td>
-                <td>
-                    <button type="button" class="btn btn-sm btn-outline-danger btn-remove-operator"
+                    <button type="button" class="btn btn-sm btn-outline-danger btn-remove-operator flex-shrink-0"
                             title="{{ t('set.operators_remove') }}">
                         <i class="bi bi-trash"></i>
                     </button>
-                </td>
-            </tr>
+                </div>
+                <div class="row g-2">
+                    <div class="col-6">
+                        <label class="form-label small text-muted mb-1">{{ t('set.operators_col_price') }} (€/kWh)</label>
+                        <input type="number" step="0.0001" min="0" name="op_price"
+                               class="form-control form-control-sm" placeholder="0.0000" inputmode="decimal">
+                    </div>
+                    <div class="col-6">
+                        <label class="form-label small text-muted mb-1">{{ t('set.operators_col_monthly') }} (€/Mon.)</label>
+                        <input type="number" step="0.01" min="0" name="op_monthly_fee"
+                               class="form-control form-control-sm" placeholder="0.00" inputmode="decimal">
+                    </div>
+                </div>
+            </div>
         </template>
 
         <!-- Database Info -->
@@ -2292,20 +2278,20 @@
 <script>
 // ── Operators editor: add/remove custom rows in the settings table ──
 (function() {
-    const tbody = document.getElementById('operatorsTbody');
+    const list = document.getElementById('operatorsList');
     const template = document.getElementById('operatorRowTemplate');
     const addBtn = document.getElementById('btnAddOperator');
-    if (!tbody || !template || !addBtn) return;
+    if (!list || !template || !addBtn) return;
 
     function wireRemove(row) {
         const btn = row.querySelector('.btn-remove-operator');
         if (btn) btn.addEventListener('click', () => row.remove());
     }
-    tbody.querySelectorAll('.operator-custom-row').forEach(wireRemove);
+    list.querySelectorAll('.operator-custom-row').forEach(wireRemove);
 
     addBtn.addEventListener('click', () => {
         const clone = template.content.firstElementChild.cloneNode(true);
-        tbody.appendChild(clone);
+        list.appendChild(clone);
         wireRemove(clone);
         const nameInput = clone.querySelector('input[name="op_name"]');
         if (nameInput) nameInput.focus();
