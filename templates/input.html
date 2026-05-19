@@ -343,6 +343,13 @@
 // downstream pick up the new values automatically).
 let MAX_AC_KW = {{ max_ac_kw or 11 }};
 let BATTERY_KWH = {{ battery_kwh }};
+// v3.0.16: self-calibrated per-vehicle AC/PV charge efficiency
+// (net energy in pack ÷ gross energy from the wall). Used so the live
+// counter records GROSS kWh (incl. loss) and projects SoC from the net
+// fraction. DC is intentionally excluded — its current swings too much
+// for a fixed-efficiency estimate to be meaningful.
+let CHARGE_EFF = {{ charge_efficiency if charge_efficiency else 0.88 }};
+if (!(CHARGE_EFF > 0.4 && CHARGE_EFF < 1)) CHARGE_EFF = 0.88;
 const pvCo2 = {{ pv_co2 }};
 const pvPrice = {{ pv_price }};
 let chargeStartTime = null;
@@ -354,6 +361,7 @@ const T = {
     low_12v_confirm: {{ t('input.low_12v_confirm')|tojson }},
     low_12v_skipped: {{ t('input.low_12v_skipped')|tojson }},
     save_label: {{ t('input.save')|tojson }},
+    loss_label: {{ t('input.loss_label')|tojson }},
     no_data: {{ t('input.no_data')|tojson }},
     started: {{ t('input.started')|tojson }},
     stopped: {{ t('input.stopped')|tojson }},
@@ -473,17 +481,21 @@ function calcKwh() {
     const type = document.getElementById('chargeTypeHidden').value;
 
     if (!isNaN(socFrom) && !isNaN(socTo) && socTo > socFrom) {
-        // From SoC: kWh = (socTo - socFrom) / 100 * battery_kwh.
-        // This is the THEORETICAL, loss-free energy that landed in the
-        // pack. It is only ever a placeholder for when the user has no
-        // meter reading — if they type the real charger kWh we must NOT
-        // clobber it, otherwise loss = real − theoretical collapses to
-        // 0 and the Ladeverlust auto-calc silently stops working.
+        // From SoC the net energy that landed in the pack is
+        // (socTo-socFrom)/100*battery. v3.0.16: for AC/PV we record
+        // GROSS (what the meter/charger shows) = net ÷ efficiency, so
+        // the charge-loss is already baked into kwh_loaded instead of
+        // collapsing to 0. DC keeps the raw net placeholder (its
+        // efficiency is too variable to estimate). A real typed meter
+        // reading still wins (dataset.manual).
         const kwhField = document.getElementById('kwh_loaded');
         if (kwhField.dataset.manual) return;
-        const kwh = (socTo - socFrom) / 100 * BATTERY_KWH;
+        const net = (socTo - socFrom) / 100 * BATTERY_KWH;
+        const useEff = (type === 'AC' || type === 'PV') && CHARGE_EFF > 0;
+        const kwh = useEff ? net / CHARGE_EFF : net;
         kwhField.value = kwh.toFixed(3);
-        document.getElementById('kwhHint').textContent = '(' + T.from_soc + ')';
+        document.getElementById('kwhHint').textContent =
+            '(' + T.from_soc + (useEff ? ' · ' + Math.round((1/CHARGE_EFF-1)*100) + '% ' + (T.loss_label || 'Verlust') : '') + ')';
         updateCalcPrice();
     }
 }
@@ -642,26 +654,32 @@ function startTimer() {
         const m = Math.floor((elapsed % 3600) / 60);
         timerDisplay.textContent = (h > 0 ? h + 'h ' : '') + String(m).padStart(2, '0') + 'min';
 
-        // Live kWh estimate from time + AC power
+        // Live kWh estimate from time + AC power. estKwhNum is GROSS
+        // wall energy (time × charger power) — that's exactly what the
+        // meter shows and what kwh_loaded should hold. v3.0.16: the SoC
+        // projection now applies the charge efficiency, because only
+        // CHARGE_EFF of that wall energy actually reaches the pack —
+        // before this the running SoC over-stated by the loss amount.
         const type = document.getElementById('chargeTypeHidden').value;
         if (type === 'AC') {
             const hours = elapsed / 3600;
-            const estKwhNum = hours * MAX_AC_KW;
+            const estKwhNum = hours * MAX_AC_KW;          // gross (wall)
             const estKwh = estKwhNum.toFixed(3);
+            const netKwh = estKwhNum * CHARGE_EFF;         // into the pack
             const kwhField = document.getElementById('kwh_loaded');
             // Only auto-fill if not manually changed
             if (!kwhField.dataset.manual) {
                 kwhField.value = estKwh;
-                document.getElementById('kwhHint').textContent = '(~' + estKwh + ' kWh bei ' + MAX_AC_KW + ' kW)';
+                const lossPctTxt = Math.round((1 - CHARGE_EFF) * 100);
+                document.getElementById('kwhHint').textContent =
+                    '(~' + estKwh + ' kWh @ ' + MAX_AC_KW + ' kW · −' + lossPctTxt + '% ' + (T.loss_label || 'Verlust') + ')';
                 updateCalcPrice();
             }
-            // Mirror SoC-to from the same time-based estimate so the user
-            // sees an evolving target value while the charge runs. Capped
-            // at 100 %; manual edits stick (dataset.manual on soc_to).
+            // Evolving SoC target from the NET energy (gross × eff).
             const socToField = document.getElementById('soc_to');
             const socFromVal = parseInt(document.getElementById('soc_from').value);
             if (!socToField.dataset.manual && !isNaN(socFromVal) && BATTERY_KWH > 0) {
-                const estSoc = Math.min(100, Math.round(socFromVal + (estKwhNum / BATTERY_KWH) * 100));
+                const estSoc = Math.min(100, Math.round(socFromVal + (netKwh / BATTERY_KWH) * 100));
                 socToField.value = estSoc;
             }
         }
@@ -931,10 +949,17 @@ async function doStop(data) {
     // Calculate kWh from SoC if available
     const socFrom = parseInt(document.getElementById('soc_from').value);
     const socTo = parseInt(document.getElementById('soc_to').value);
+    const stopType = document.getElementById('chargeTypeHidden').value;
     if (!isNaN(socFrom) && !isNaN(socTo) && socTo > socFrom) {
-        const kwh = (socTo - socFrom) / 100 * BATTERY_KWH;
+        // v3.0.16: record GROSS for AC/PV (net ÷ eff) so the recorded
+        // kwh_loaded already includes the charge loss instead of being
+        // the loss-free theoretical figure that froze loss at 0.
+        const net = (socTo - socFrom) / 100 * BATTERY_KWH;
+        const useEff = (stopType === 'AC' || stopType === 'PV') && CHARGE_EFF > 0;
+        const kwh = useEff ? net / CHARGE_EFF : net;
         document.getElementById('kwh_loaded').value = kwh.toFixed(3);
-        document.getElementById('kwhHint').textContent = '(' + T.from_soc + ')';
+        document.getElementById('kwhHint').textContent =
+            '(' + T.from_soc + (useEff ? ' · −' + Math.round((1-CHARGE_EFF)*100) + '% ' + (T.loss_label || 'Verlust') : '') + ')';
     } else if (chargeStartTime) {
         const type = document.getElementById('chargeTypeHidden').value;
         if (type === 'AC') {

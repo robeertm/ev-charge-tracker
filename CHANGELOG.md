@@ -1,5 +1,18 @@
 # Changelog
 
+## v3.0.16 (2026-05-19)
+
+### Live charge counter now counts GROSS (loss included) for AC/PV
+
+The running counter in the new-charge form recorded the loss-free theoretical energy and projected SoC as if 100 % of the wall energy reached the pack — so `kwh_loaded` collapsed the loss to 0 and the live SoC over-stated.
+
+Using the v3.0.15 self-calibrated per-vehicle charge efficiency (`CHARGE_EFF`), for AC/PV:
+- **`kwh_loaded` is now GROSS** (meter/wall energy). The SoC-delta paths (`calcKwh`, `doStop`) compute `net ÷ efficiency`; the live AC timer already used time × charger power (gross) and now labels the implied loss %.
+- **SoC projection uses the NET fraction** (`gross × efficiency`) so the evolving SoC target during a charge no longer over-states.
+- The kWh hint shows the applied loss %, e.g. `(~12.3 kWh @ 11 kW · −15% Verlust)`.
+
+DC is intentionally excluded (current swings too much for a fixed-efficiency estimate). A manually typed meter reading still wins over the estimate. New `input.loss_label` key in all six languages.
+
 ## v3.0.15 (2026-05-19)
 
 ### Charge flow hardening — loss, double-submit, 12 V stop, CO₂, operator list
