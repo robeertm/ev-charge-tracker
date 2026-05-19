@@ -425,6 +425,40 @@ def _get_battery_kwh(vehicle_id=None):
         return Config.BATTERY_CAPACITY_KWH
 
 
+def _get_charge_efficiency(vehicle_id=None):
+    """Self-calibrating AC/PV charge efficiency for a vehicle.
+
+    v3.0.15: median of (net ÷ gross) over the vehicle's recent *real*
+    AC/PV charges — i.e. ones where the user entered a genuine metered
+    ``kwh_loaded`` so the recorded loss is real (loss_pct in a sane
+    2–40 % band). Used as the fallback when a new charge's loss would
+    otherwise collapse to a false zero. 0.88 (≈12 % loss) when there's
+    not enough history yet — matches the observed fleet average.
+    """
+    from models.database import Charge
+    q = Charge.query.filter(
+        Charge.charge_type.in_(('AC', 'PV')),
+        Charge.loss_pct.isnot(None),
+        Charge.loss_pct >= 2.0,
+        Charge.loss_pct <= 40.0,
+    )
+    if vehicle_id is not None:
+        q = q.filter(Charge.vehicle_id == vehicle_id)
+    rows = (q.order_by(Charge.date.desc()).limit(30).all())
+    effs = []
+    for c in rows:
+        if c.loss_pct is not None and 0 < c.loss_pct < 100:
+            effs.append(1.0 - c.loss_pct / 100.0)
+    if len(effs) < 3:
+        return 0.88
+    effs.sort()
+    mid = len(effs) // 2
+    median = (effs[mid] if len(effs) % 2 == 1
+              else (effs[mid - 1] + effs[mid]) / 2.0)
+    # Clamp to a physically sane band so one outlier can't poison it.
+    return max(0.70, min(0.97, round(median, 4)))
+
+
 # Built-in Anbieter/CPO list — the common German + European operators.
 # Users can add custom entries via /api/providers/custom which are stored
 # in AppConfig as a JSON list and merged in.
@@ -611,19 +645,45 @@ def _json_logical_field_labels_for_ui():
     return {f: t(f'set.field_{f}') for f in ALL_LOGICAL_FIELDS}
 
 
-def _get_operator_list():
-    """Return the deduplicated union of built-in and user-defined Anbieter
-    names for the dropdown. Built-in order is preserved so the common
-    names show first."""
+def _get_operator_list(selected=None):
+    """Operators for the charge-form dropdown.
+
+    v3.0.15 behaviour (per user request):
+      * The localised home / work generics ("Zuhause", "Arbeit") are
+        pinned to the TOP as favourites — they're the everyday choices.
+      * Third-party branded operators are HIDDEN unless they have a
+        configured €/kWh price in settings (you shouldn't be able to
+        pick a provider whose price isn't maintained — it would silently
+        record a €0 charge). The localised generics + "Sonstiges" are
+        always kept (they're location categories, legitimately €0 e.g.
+        PV at home). The currently-selected operator (edit of an old
+        charge) is also always kept so it never silently vanishes.
+    """
+    from services.i18n import t as _t
+    prices = _get_operator_prices()  # only entries with price > 0
+    generics = [_t(f'set.{k}') for k in _DEFAULT_OPERATOR_GENERICS]
+    generic_lc = {g.lower() for g in generics}
+    fav_lc = {_t('set.op_home_private').lower(), _t('set.op_work').lower()}
+    sel_lc = (selected or '').strip().lower()
+
     seen = set()
-    out = []
+    favs, generics_rest, priced = [], [], []
     for name in get_default_operators() + _get_custom_operators():
         key = name.lower()
         if key in seen:
             continue
         seen.add(key)
-        out.append(name)
-    return out
+        is_generic = key in generic_lc
+        keep = is_generic or (name in prices) or (sel_lc and key == sel_lc)
+        if not keep:
+            continue
+        if key in fav_lc:
+            favs.append(name)
+        elif is_generic:
+            generics_rest.append(name)
+        else:
+            priced.append(name)
+    return favs + generics_rest + priced
 
 
 def _calc_soh_percent(status, battery_kwh):
@@ -1847,6 +1907,44 @@ def register_routes(app):
                 existing_id = _int(request.form.get('charge_id'))
                 charge = Charge.query.get(existing_id) if existing_id else None
                 is_update = charge is not None
+                # v3.0.15: server-side double-submit guard. The Stop +
+                # Save buttons had no debounce, so a 3× tap (the user's
+                # report) inserted 2-3 near-identical rows before the
+                # redirect landed. If the form carries no charge_id but
+                # an almost-identical charge was created in the last 90 s
+                # (same vehicle/date/SoC window, kWh within 0.5), fold
+                # this submit into that row instead of inserting again.
+                if not is_update:
+                    from datetime import timedelta as _tdelta
+                    _vid_g = _active_vehicle_id()
+                    _vid_g = _vid_g if isinstance(_vid_g, int) else None
+                    try:
+                        _d_g = datetime.strptime(request.form['date'], '%Y-%m-%d').date()
+                        _sf_g = _int(request.form.get('soc_from'))
+                        _st_g = _int(request.form.get('soc_to'))
+                        _kwh_g = _float(request.form.get('kwh_loaded'))
+                        _since = datetime.now() - _tdelta(seconds=90)
+                        _dupe_q = Charge.query.filter(
+                            Charge.date == _d_g,
+                            Charge.soc_from == _sf_g,
+                            Charge.soc_to == _st_g,
+                            Charge.created_at >= _since,
+                        )
+                        if _vid_g is not None:
+                            _dupe_q = _dupe_q.filter(Charge.vehicle_id == _vid_g)
+                        for _cand in _dupe_q.order_by(Charge.id.desc()).all():
+                            _ck = _cand.kwh_loaded
+                            if (_kwh_g is None or _ck is None
+                                    or abs((_ck or 0) - (_kwh_g or 0)) < 0.5):
+                                charge = _cand
+                                is_update = True
+                                logger.info(
+                                    f"Charge double-submit folded into "
+                                    f"id={_cand.id} (≤90 s, same SoC window)"
+                                )
+                                break
+                    except (ValueError, KeyError):
+                        pass
                 if not is_update:
                     charge = Charge()
 
@@ -1882,24 +1980,49 @@ def register_routes(app):
                               or Vehicle.query.order_by(Vehicle.id.asc()).first())
                         if _v is not None:
                             charge.vehicle_id = _v.id
-                charge.calculate_fields(_get_battery_kwh())
+                _bk = _get_battery_kwh(vehicle_id=charge.vehicle_id)
+                _eff = _get_charge_efficiency(vehicle_id=charge.vehicle_id)
+                charge.calculate_fields(_bk, _eff)
 
                 # If no CO2 provided, set automatically
                 if charge.co2_g_per_kwh is None:
                     if charge.charge_type == 'PV':
                         charge.co2_g_per_kwh = _get_pv_co2()
-                        charge.calculate_fields(_get_battery_kwh())
+                        charge.calculate_fields(_bk, _eff)
                         flash(t('flash.pv_co2_set', value=charge.co2_g_per_kwh), 'info')
                     else:
                         api_key = AppConfig.get('entsoe_api_key', Config.ENTSOE_API_KEY)
+                        co2 = None
                         if api_key:
                             from services.entsoe_service import get_co2_intensity
                             co2 = get_co2_intensity(api_key, datetime.combine(charge.date, datetime.min.time()), hour=charge.charge_hour)
-                            if co2:
-                                charge.co2_g_per_kwh = co2
-                                charge.calculate_fields(_get_battery_kwh())
-                                hour_label = f" ({charge.charge_hour}:00 Uhr)" if charge.charge_hour is not None else ""
-                                flash(t('flash.co2_fetched', value=co2, hour=hour_label), 'info')
+                        if co2:
+                            charge.co2_g_per_kwh = co2
+                            charge.calculate_fields(_bk, _eff)
+                            hour_label = f" ({charge.charge_hour}:00 Uhr)" if charge.charge_hour is not None else ""
+                            flash(t('flash.co2_fetched', value=co2, hour=hour_label), 'info')
+                        else:
+                            # v3.0.15: ENTSO-E often has no intensity for
+                            # the current hour yet during an active /
+                            # just-finished charge — that's why CO2 was
+                            # "sometimes missing". Fall back to the most
+                            # recent charge that does have a CO2 value
+                            # (same vehicle preferred) so the field is
+                            # never left empty; the nightly job can still
+                            # refine it later.
+                            _fb_q = Charge.query.filter(
+                                Charge.co2_g_per_kwh.isnot(None),
+                                Charge.charge_type != 'PV',
+                            )
+                            if charge.vehicle_id is not None:
+                                _fb_q = _fb_q.filter(
+                                    Charge.vehicle_id == charge.vehicle_id)
+                            _fb = _fb_q.order_by(Charge.date.desc()).first()
+                            if _fb is not None and _fb.co2_g_per_kwh:
+                                charge.co2_g_per_kwh = _fb.co2_g_per_kwh
+                                charge.calculate_fields(_bk, _eff)
+                                flash(t('flash.co2_estimated',
+                                        value=_fb.co2_g_per_kwh), 'info')
 
                 if not is_update:
                     db.session.add(charge)
@@ -1933,6 +2056,8 @@ def register_routes(app):
             _build_charges_query(request.args)
         return render_template('input.html',
                                today=date.today().isoformat(),
+                               charge_efficiency=_get_charge_efficiency(
+                                   _active_vehicle_id() if isinstance(_active_vehicle_id(), int) else None),
                                last_charge=last_charge,
                                pre_charge=pre_charge,
                                active_session=active_session,
@@ -1947,7 +2072,8 @@ def register_routes(app):
                                work_lat=AppConfig.get('work_lat', ''),
                                work_lon=AppConfig.get('work_lon', ''),
                                work_label=AppConfig.get('work_label', ''),
-                               operators=_get_operator_list(),
+                               operators=_get_operator_list(
+                                   selected=(pre_charge.operator if pre_charge else None)),
                                operator_prices=_get_operator_prices(),
                                charges=charges,
                                charge_type=charge_type,
@@ -2039,7 +2165,10 @@ def register_routes(app):
                 charge.operator = request.form.get('operator', '').strip() or None
                 charge.start_fee_eur = _float(request.form.get('start_fee_eur'))
                 charge.blocking_fee_eur = _float(request.form.get('blocking_fee_eur'))
-                charge.calculate_fields(_get_battery_kwh())
+                charge.calculate_fields(
+                    _get_battery_kwh(vehicle_id=charge.vehicle_id),
+                    _get_charge_efficiency(vehicle_id=charge.vehicle_id),
+                )
                 db.session.commit()
                 flash(t('flash.entry_updated'), 'success')
                 return redirect(url_for('history'))
@@ -2047,7 +2176,8 @@ def register_routes(app):
                 flash(t('flash.error', error=e), 'danger')
 
         return render_template('edit.html', charge=charge,
-                               operators=_get_operator_list(),
+                               operators=_get_operator_list(
+                                   selected=charge.operator),
                                operator_prices=_get_operator_prices(),
                                home_lat=AppConfig.get('home_lat', ''),
                                home_lon=AppConfig.get('home_lon', ''),

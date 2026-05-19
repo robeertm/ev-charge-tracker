@@ -117,8 +117,17 @@ class Charge(db.Model):
     blocking_fee_eur = db.Column(db.Float)  # Strafgebühr fürs Blockieren
     created_at = db.Column(db.DateTime, default=datetime.now)
 
-    def calculate_fields(self, battery_kwh=None):
-        """Auto-calculate derived fields."""
+    def calculate_fields(self, battery_kwh=None, efficiency=None):
+        """Auto-calculate derived fields.
+
+        ``efficiency`` (0<e<1) is the per-vehicle AC/PV charge efficiency
+        (net energy in battery ÷ gross energy from the wall). v3.0.15
+        uses it to recover a sensible loss when ``kwh_loaded`` was filled
+        from the *theoretical* SoC delta (live timer / SoC-delta path
+        write the loss-free figure, so ``gross − net`` collapses to ~0
+        and the old guard then froze a false ``loss_kwh = 0.0`` in place
+        forever via the intermediate-save round-trip).
+        """
         if self.eur_per_kwh is not None and self.kwh_loaded is not None:
             base_cost = self.eur_per_kwh * self.kwh_loaded
             base_cost += float(self.start_fee_eur or 0)
@@ -132,10 +141,23 @@ class Charge(db.Model):
             )
         if self.soc_from is not None and self.soc_to is not None:
             self.soc_charged = self.soc_to - self.soc_from
-            # Auto-calculate loss if not manually provided
-            if self.loss_kwh is None and battery_kwh and self.kwh_loaded and self.soc_charged > 0:
+            # v3.0.15: treat a stored 0.0 as "not set". A real charge
+            # never has exactly zero loss; the only way loss_kwh becomes
+            # 0.0 is the auto-calc collapsing (theoretical kwh_loaded) —
+            # so re-deriving is strictly better than freezing a false 0.
+            loss_unset = self.loss_kwh is None or self.loss_kwh == 0.0
+            if loss_unset and battery_kwh and self.kwh_loaded and self.soc_charged and self.soc_charged > 0:
                 kwh_in_battery = self.soc_charged / 100 * battery_kwh
                 calculated_loss = round(self.kwh_loaded - kwh_in_battery, 3)
+                if (calculated_loss <= 0.05
+                        and efficiency and 0.0 < efficiency < 1.0
+                        and (self.charge_type or 'AC') in ('AC', 'PV')):
+                    # kwh_loaded ≈ theoretical net → derive gross loss
+                    # from the vehicle's measured charge efficiency
+                    # instead of recording a physically-impossible 0.
+                    calculated_loss = round(
+                        kwh_in_battery * (1.0 / efficiency - 1.0), 3
+                    )
                 self.loss_kwh = max(calculated_loss, 0.0)
         if self.loss_kwh is not None and self.kwh_loaded and self.kwh_loaded > 0:
             self.loss_pct = round(self.loss_kwh / self.kwh_loaded * 100, 2)

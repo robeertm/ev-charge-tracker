@@ -1,5 +1,21 @@
 # Changelog
 
+## v3.0.15 (2026-05-19)
+
+### Charge flow hardening — loss, double-submit, 12 V stop, CO₂, operator list
+
+A batch of fixes after field reports that the new-charge flow misbehaved (loss not calculated, duplicate rows from triple-tapping Stop, missing CO₂, unusable provider dropdown).
+
+**Charge-loss auto-calc (real root cause).** `calculate_fields` now treats a stored `loss_kwh = 0.0` as "unset" and re-derives it (a real charge never has exactly zero loss — 0.0 only ever came from the auto-calc collapsing when `kwh_loaded` was filled with the *theoretical* SoC-delta and then freezing via the intermediate-save round-trip). When the gross−net difference collapses, loss is recovered from a **self-calibrating per-vehicle charge efficiency**: the median net÷gross of that vehicle's recent real AC/PV charges (2–40 % band), clamped 70–97 %, default 0.88 until there's enough history.
+
+**Double-submit guard.** The Stop+Save buttons had no debounce, so a 3× tap inserted 2–3 near-identical rows. Now: the Save button disables on first submit with a spinner (re-enables after 8 s as a safety net), and the server folds any second submit without a `charge_id` into a row created in the last 90 s with the same vehicle/date/SoC window — so even racing requests can't duplicate.
+
+**12 V lockout no longer "kills" the Stop button.** With the v3.0.12 lockout, `POST /api/vehicle/status?force=1` returns 423 when 12 V < 70 %. The input page didn't handle that, so the Stop button appeared dead (the user's "had to tap 3×"). Now it surfaces a confirm ("12 V low — fetch anyway?") and on decline falls back to the last cached SoC so the charge can still be stopped and saved manually.
+
+**CO₂ never empty.** ENTSO-E often has no intensity for the current hour yet during an active charge — that's why CO₂ was "sometimes missing". When the lookup yields nothing, the charge now inherits the CO₂ value of the vehicle's most recent non-PV charge (flagged as estimated) instead of being left blank.
+
+**Operator dropdown.** Favorites ("Zuhause"/"Arbeit") are pinned to the top; third-party operators without a configured €/kWh price are hidden (you can't pick a provider whose price isn't maintained — it would silently log a €0 charge). The location generics and the currently-selected operator on an edit are always kept.
+
 ## v3.0.14 (2026-05-10)
 
 ### Fix: charge-loss auto-calc no longer silently zeroed

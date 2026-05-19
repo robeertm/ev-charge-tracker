@@ -351,6 +351,9 @@ let timerInterval = null;
 const T = {
     enter_date_first: {{ t('input.enter_date_first')|tojson }},
     error_prefix: {{ t('input.error_prefix')|tojson }},
+    low_12v_confirm: {{ t('input.low_12v_confirm')|tojson }},
+    low_12v_skipped: {{ t('input.low_12v_skipped')|tojson }},
+    save_label: {{ t('input.save')|tojson }},
     no_data: {{ t('input.no_data')|tojson }},
     started: {{ t('input.started')|tojson }},
     stopped: {{ t('input.stopped')|tojson }},
@@ -689,23 +692,47 @@ FORM_FIELD_IDS.forEach(id => {
     }
 });
 
+// Shared status fetch with 12 V-lockout (HTTP 423) handling. On 423 the
+// server refuses an automatic AVN wake; we ask the user once, and on
+// confirm retry with the override flag. Returns the status object, or
+// throws a typed error the callers turn into a graceful fallback (use
+// the last cached SoC instead of leaving the Stop button "dead" — the
+// user reported having to tap Stop 3× because the raw 423 error just
+// bounced back with no explanation).
+async function _statusFetch(allowConfirm) {
+    let r = await fetch('/api/vehicle/status?force=1');
+    if (r.status === 423) {
+        let lj = {};
+        try { lj = await r.json(); } catch(e) {}
+        if (lj && lj.error === 'low_12v') {
+            if (allowConfirm && window.confirm(
+                    T.low_12v_confirm.replace('%pct%', lj.battery_12v ?? '?'))) {
+                r = await fetch('/api/vehicle/status?force=1&confirm_low_12v=1');
+            } else {
+                const err = new Error(T.low_12v_skipped);
+                err.code = 'low_12v_skipped';
+                throw err;
+            }
+        }
+    }
+    const d = await r.json();
+    if (d.error) throw new Error(d.error);
+    const dashCache = JSON.parse(localStorage.getItem('ev_vehicle_data') || '{}');
+    for (const key in dashCache) {
+        if (d[key] === null || d[key] === undefined) d[key] = dashCache[key];
+    }
+    localStorage.setItem('ev_vehicle_data', JSON.stringify(d));
+    return d;
+}
+
 async function fetchVehicle(btn) {
     const origHtml = btn.innerHTML;
     btn.innerHTML = '<span class="spinner-border spinner-border-sm"></span>';
     btn.disabled = true;
     try {
-        const r = await fetch('/api/vehicle/status?force=1');
-        const d = await r.json();
+        const d = await _statusFetch(true);
         btn.innerHTML = origHtml;
         btn.disabled = false;
-        if (d.error) throw new Error(d.error);
-        // Merge with previous dashboard data so null values get filled
-        const dashCache = JSON.parse(localStorage.getItem('ev_vehicle_data') || '{}');
-        for (const key in dashCache) {
-            if (d[key] === null || d[key] === undefined) d[key] = dashCache[key];
-        }
-        // Update dashboard localStorage so it shows fresh data when switching back
-        localStorage.setItem('ev_vehicle_data', JSON.stringify(d));
         return d;
     } catch(e) {
         btn.innerHTML = origHtml;
@@ -716,16 +743,9 @@ async function fetchVehicle(btn) {
 
 // Quiet status fetch — like fetchVehicle but doesn't touch the button UI
 // so the retry loop can manage its own spinner/label without races.
+// allowConfirm=false: background poll must never pop a blocking confirm.
 async function fetchVehicleQuiet() {
-    const r = await fetch('/api/vehicle/status?force=1');
-    const d = await r.json();
-    if (d.error) throw new Error(d.error);
-    const dashCache = JSON.parse(localStorage.getItem('ev_vehicle_data') || '{}');
-    for (const key in dashCache) {
-        if (d[key] === null || d[key] === undefined) d[key] = dashCache[key];
-    }
-    localStorage.setItem('ev_vehicle_data', JSON.stringify(d));
-    return d;
+    return await _statusFetch(false);
 }
 
 // Start-with-retry: the click timestamp is ALWAYS the charge start — if
@@ -955,13 +975,31 @@ async function doStop(data) {
     timerDisplay.insertAdjacentHTML('afterend', ' <span class="badge bg-info">' + T.ready_to_save + '</span>');
 }
 
+let _stopInFlight = false;
 btnStop.addEventListener('click', async () => {
-    // Manual stop: do force fetch
+    // Guard against the 3×-tap the user reported: ignore re-clicks while
+    // a stop is already running.
+    if (_stopInFlight) return;
+    _stopInFlight = true;
     try {
         const data = await fetchVehicle(btnStop);
         await doStop(data);
     } catch(e) {
-        alert(T.error_prefix + e.message);
+        if (e && e.code === 'low_12v_skipped') {
+            // 12 V too low to wake the car AND the user declined the
+            // override. Don't leave Stop "dead" — stop the session on
+            // the last cached SoC so the charge can still be saved
+            // manually. doStop() handles a partial/cached snapshot.
+            try {
+                const cached = JSON.parse(localStorage.getItem('ev_vehicle_data') || '{}');
+                await doStop(cached || {});
+            } catch(e2) {}
+            alert(T.low_12v_skipped);
+        } else {
+            alert(T.error_prefix + e.message);
+        }
+    } finally {
+        _stopInFlight = false;
     }
 });
 
@@ -970,7 +1008,25 @@ btnStop.addEventListener('click', async () => {
 // session in localStorage and tell the server to redirect with the new
 // charge_id so we don't re-insert on the next save. Stopped or
 // non-session saves fall through to the old "wipe and start fresh" path.
-document.getElementById('chargeForm').addEventListener('submit', () => {
+let _formSubmitted = false;
+document.getElementById('chargeForm').addEventListener('submit', (ev) => {
+    // v3.0.15 client-side double-submit guard. The btnSave had no
+    // debounce — a 3× tap fired three POSTs before the redirect landed,
+    // each inserting a fresh row (server-side 90 s fold is the backstop;
+    // this avoids even sending the extra requests).
+    if (_formSubmitted) { ev.preventDefault(); return; }
+    _formSubmitted = true;
+    const sb = document.getElementById('btnSave');
+    if (sb) {
+        sb.disabled = true;
+        const lbl = document.getElementById('btnSaveLabel');
+        if (lbl) lbl.innerHTML = '<span class="spinner-border spinner-border-sm"></span>';
+        // Safety net: if navigation somehow doesn't happen (validation
+        // error kept us on the page), re-enable after 8 s so the user
+        // isn't stuck with a dead button.
+        setTimeout(() => { _formSubmitted = false; sb.disabled = false;
+            if (lbl) lbl.textContent = T.save_label; }, 8000);
+    }
     try {
         const saved = JSON.parse(localStorage.getItem(CHARGE_KEY) || 'null');
         const activeFlag = document.getElementById('sessionActiveHidden');
