@@ -998,7 +998,26 @@ async function doStop(data) {
     btnStop.innerHTML = '<i class="bi bi-check-circle"></i> ' + T.stopped;
     btnStop.classList.replace('btn-danger', 'btn-secondary');
     timerDisplay.insertAdjacentHTML('afterend', ' <span class="badge bg-info">' + T.ready_to_save + '</span>');
+
+    // v3.0.17: AUTO-PERSIST ON STOP. The #1 data-loss trap was that
+    // Start/Stop are client-only — a charge was never written to the DB
+    // until the user also pressed the green Save button. Users (rightly)
+    // assumed Stop = saved and lost charges. Now stopping immediately
+    // submits an intermediate save so the row lands in the DB; the form
+    // is restored after the redirect so the user can still refine the
+    // operator/price/notes and Save again (folds into the same row).
+    if (!_autoPersisted) {
+        _autoPersisted = true;
+        _persistOnStop = true;
+        // Defer so the field writes above are committed to the DOM first.
+        setTimeout(() => {
+            try { document.getElementById('chargeForm').requestSubmit(); }
+            catch(e) { document.getElementById('chargeForm').submit(); }
+        }, 50);
+    }
 }
+let _autoPersisted = false;
+let _persistOnStop = false;
 
 let _stopInFlight = false;
 btnStop.addEventListener('click', async () => {
@@ -1055,10 +1074,11 @@ document.getElementById('chargeForm').addEventListener('submit', (ev) => {
     try {
         const saved = JSON.parse(localStorage.getItem(CHARGE_KEY) || 'null');
         const activeFlag = document.getElementById('sessionActiveHidden');
-        if (saved && saved.startTime && !saved.stopped) {
+        // Persist-on-stop OR a still-running session → intermediate save:
+        // keep the session + tell the server to redirect with the new
+        // charge_id so the next Save folds into the same row.
+        if (_persistOnStop || (saved && saved.startTime && !saved.stopped)) {
             if (activeFlag) activeFlag.value = '1';
-            // Keep the session record intact so the redirected /input page
-            // can restore timer/SoC-from/etc on the next render.
             return;
         }
     } catch(e) {}

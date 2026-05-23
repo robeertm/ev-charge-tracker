@@ -1,5 +1,15 @@
 # Changelog
 
+## v3.0.17 (2026-05-23)
+
+### Auto-persist on Stop — charges can no longer be lost
+
+The biggest data-loss trap in the charge flow: **Start and Stop are client-only**. A charge was never written to the database until the user *also* pressed the green Save button. Users reasonably assumed Stop = saved and lost whole charges (field report: an 82→94 % home charge with Start+Stop pressed but no row in the DB — confirmed by zero `/input` POSTs in the logs).
+
+Now clicking Stop (or an automatic stop at the SoC limit) immediately submits an intermediate save, so the charge lands in the DB the moment it ends. The form is restored after the redirect so the user can still refine operator/price/notes and Save again — that folds into the same row (charge_id round-trip + the v3.0.15 90 s server-side dedup). One-shot guard (`_autoPersisted`) prevents a resubmit loop.
+
+The lost charge from the field report was reconstructed from the vehicle sync history (SoC 82→94, 15:38–16:57, home, 9.13 kWh gross / 1.45 kWh loss).
+
 ## v3.0.16 (2026-05-19)
 
 ### Live charge counter now counts GROSS (loss included) for AC/PV
