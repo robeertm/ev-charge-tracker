@@ -119,6 +119,15 @@ def create_app(config_class=Config):
         if 'blocking_fee_eur' not in columns:
             db.session.execute(text('ALTER TABLE charges ADD COLUMN blocking_fee_eur REAL'))
 
+        # Migrate: needs_review flag (v3.0.18) — set on auto-detected
+        # charges (car charged somewhere but the user forgot to start a
+        # session in the app). The row is created from the is_charging
+        # window so the user can correct/confirm it; the History view
+        # highlights it red until edited+saved.
+        if 'needs_review' not in columns:
+            db.session.execute(text(
+                'ALTER TABLE charges ADD COLUMN needs_review BOOLEAN DEFAULT 0'))
+
         # Migrate: add last_seen_at to parking_events
         try:
             parking_columns = [c['name'] for c in inspector.get_columns('parking_events')]
@@ -823,6 +832,9 @@ def _save_vehicle_sync(status, battery_kwh, raw_json='', vehicle_id=None):
     if vehicle_id is not None:
         _last_q = _last_q.filter(VehicleSync.vehicle_id == vehicle_id)
     last = _last_q.order_by(VehicleSync.timestamp.desc()).first()
+    # v3.0.18: remember the previous charging state so we can detect a
+    # charge-end transition (1→0) after the new row is persisted.
+    _prev_is_charging = bool(last.is_charging) if last is not None else False
 
     # Compute monotonic cumulative regen from the rolling 3-month raw value
     if new_sync.total_regenerated_kwh is not None:
@@ -887,7 +899,143 @@ def _save_vehicle_sync(status, battery_kwh, raw_json='', vehicle_id=None):
     except Exception as e:
         logger.warning(f"Failed to update parking event: {e}")
 
+    # v3.0.18: auto-detect a charge the user forgot to log. When charging
+    # just ended (is_charging 1→0) and SoC rose by the threshold over the
+    # session, create a needs_review Charge from the is_charging window.
+    try:
+        if (result is not None and result is new_sync
+                and _prev_is_charging and not result.is_charging):
+            _detect_auto_charge(result)
+    except Exception as e:
+        logger.warning(f"Auto-charge detection failed: {e}")
+
     return result
+
+
+# Minimum SoC gain over a charging session before we auto-create a
+# charge. Below this it's almost always the car recalibrating its SoC
+# estimate while parked (which never sets is_charging anyway, so this is
+# a belt-and-braces second guard).
+_AUTO_CHARGE_MIN_SOC_GAIN = 3
+
+
+def _detect_auto_charge(end_sync):
+    """Reconstruct a charge from the just-closed is_charging window and
+    insert it flagged needs_review, unless the user already logged one
+    that overlaps. Called only on a charge-end (1→0) transition."""
+    vid = end_sync.vehicle_id
+    # Walk back over the contiguous is_charging=1 run that just ended to
+    # find where charging began (and the SoC just before it started).
+    q = VehicleSync.query
+    if vid is not None:
+        q = q.filter(VehicleSync.vehicle_id == vid)
+    recent = (q.filter(VehicleSync.timestamp <= end_sync.timestamp)
+              .order_by(VehicleSync.timestamp.desc())
+              .limit(200).all())
+    # recent[0] == end_sync (is_charging False). Skip it, then collect the
+    # leading block of is_charging=True rows.
+    charging_rows = []
+    pre_charge_row = None
+    for r in recent[1:]:
+        if r.is_charging:
+            charging_rows.append(r)
+        else:
+            pre_charge_row = r  # first non-charging row before the run
+            break
+    if not charging_rows:
+        return
+    start_row = charging_rows[-1]   # first sync of the charging run
+    # SoC at charge start: prefer the pre-charge row (true starting SoC),
+    # else the first charging sample.
+    soc_from = (pre_charge_row.soc_percent if pre_charge_row
+                and pre_charge_row.soc_percent is not None
+                else start_row.soc_percent)
+    soc_to = end_sync.soc_percent
+    if soc_from is None or soc_to is None:
+        return
+    if (soc_to - soc_from) < _AUTO_CHARGE_MIN_SOC_GAIN:
+        return
+
+    start_ts = start_row.timestamp
+    charge_date = start_ts.date()
+
+    # Dedup: skip if a charge already overlaps this SoC window on this
+    # date (manually logged, auto-persisted on Stop, or a prior detection).
+    existing = Charge.query.filter(
+        Charge.vehicle_id == vid,
+        Charge.date == charge_date,
+    ).all()
+    for c in existing:
+        if c.soc_from is None or c.soc_to is None:
+            # Same-day charge without SoC bounds — be conservative, skip.
+            return
+        # Overlapping SoC ranges → treat as already-logged.
+        if not (c.soc_to <= soc_from or c.soc_from >= soc_to):
+            return
+
+    bk = _get_battery_kwh(vehicle_id=vid)
+    eff = _get_charge_efficiency(vehicle_id=vid)
+
+    # Charge type from observed power if available, else AC (home/dest).
+    powers = [r.charge_power_kw for r in charging_rows
+              if r.charge_power_kw is not None]
+    max_kw = max(powers) if powers else None
+    charge_type = 'DC' if (max_kw is not None and max_kw > 25) else 'AC'
+
+    # gross kWh incl. loss for AC; DC keeps the raw net (variable eff).
+    net = (soc_to - soc_from) / 100.0 * bk
+    gross = round(net / eff, 2) if charge_type == 'AC' else round(net, 2)
+
+    # Location + operator/price from the start sync's GPS.
+    lat = start_row.location_lat or end_sync.location_lat
+    lon = start_row.location_lon or end_sync.location_lon
+    op = None
+    eur = None
+    loc_name = None
+    if lat is not None and lon is not None:
+        from services.trips_service import _classify_location
+        label, fav_name = _classify_location(lat, lon)
+        prices = _get_operator_prices()
+        if label == 'home':
+            op = AppConfig.get('home_label', 'Home') or 'Home'
+            loc_name = op
+        elif label == 'work':
+            op = AppConfig.get('work_label', 'Work') or 'Work'
+            loc_name = op
+        elif label == 'favorite' and fav_name:
+            loc_name = fav_name
+        # Map to a configured operator price where the name matches.
+        from services.i18n import t as _t
+        if label == 'home':
+            op = _t('set.op_home_private')
+        elif label == 'work':
+            op = _t('set.op_work')
+        if op and op in prices:
+            eur = prices[op]
+
+    # CO2 fallback to the vehicle's most recent non-PV charge.
+    fb = (Charge.query.filter(Charge.co2_g_per_kwh.isnot(None),
+                              Charge.charge_type != 'PV',
+                              Charge.vehicle_id == vid)
+          .order_by(Charge.date.desc()).first())
+    co2 = fb.co2_g_per_kwh if fb else None
+
+    c = Charge(
+        vehicle_id=vid, date=charge_date, charge_hour=start_ts.hour,
+        charge_type=charge_type, soc_from=soc_from, soc_to=soc_to,
+        kwh_loaded=gross, eur_per_kwh=eur, operator=op,
+        odometer=end_sync.odometer_km,
+        location_lat=lat, location_lon=lon, location_name=loc_name,
+        co2_g_per_kwh=co2, needs_review=True, created_at=end_sync.timestamp,
+        notes='Automatisch erkannt (keine App-Session) — bitte prüfen',
+    )
+    c.calculate_fields(bk, eff)
+    db.session.add(c)
+    db.session.commit()
+    logger.info(
+        f"Auto-detected charge id={c.id}: {charge_type} {soc_from}->{soc_to}% "
+        f"{gross}kWh @ {loc_name or 'unknown'} (needs_review)"
+    )
 
 
 def register_routes(app):
@@ -2165,6 +2313,9 @@ def register_routes(app):
                 charge.operator = request.form.get('operator', '').strip() or None
                 charge.start_fee_eur = _float(request.form.get('start_fee_eur'))
                 charge.blocking_fee_eur = _float(request.form.get('blocking_fee_eur'))
+                # v3.0.18: editing+saving an auto-detected charge confirms
+                # it — clear the red needs_review flag.
+                charge.needs_review = False
                 charge.calculate_fields(
                     _get_battery_kwh(vehicle_id=charge.vehicle_id),
                     _get_charge_efficiency(vehicle_id=charge.vehicle_id),

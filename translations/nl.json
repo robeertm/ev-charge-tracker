@@ -213,6 +213,8 @@
   "hist.km": "km",
   "hist.kwh": "kWh",
   "hist.loss": "Verliezen",
+  "hist.needs_review": "Controleren",
+  "hist.needs_review_hint": "Automatisch gedetecteerde laadbeurt — tik om te bewerken/bevestigen",
   "hist.per_page": "Items per pagina",
   "hist.per_page_all": "Alle",
   "hist.reset": "Herstellen",

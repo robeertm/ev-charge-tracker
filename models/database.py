@@ -115,6 +115,10 @@ class Charge(db.Model):
     # and similar aggregates reflect the true wallet impact.
     start_fee_eur = db.Column(db.Float)     # Vorgangs- oder Grundgebührenanteil
     blocking_fee_eur = db.Column(db.Float)  # Strafgebühr fürs Blockieren
+    # v3.0.18: True on auto-detected charges (user forgot to start a
+    # session; reconstructed from the is_charging window). The History
+    # view marks these red and editing+saving clears the flag.
+    needs_review = db.Column(db.Boolean, default=False)
     created_at = db.Column(db.DateTime, default=datetime.now)
 
     def calculate_fields(self, battery_kwh=None, efficiency=None):

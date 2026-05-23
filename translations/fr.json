@@ -213,6 +213,8 @@
   "hist.km": "km",
   "hist.kwh": "kWh",
   "hist.loss": "Pertes",
+  "hist.needs_review": "Vérifier",
+  "hist.needs_review_hint": "Charge détectée automatiquement — touchez pour modifier/confirmer",
   "hist.per_page": "Entrées par page",
   "hist.per_page_all": "Toutes",
   "hist.reset": "Réinitialiser",

@@ -99,11 +99,16 @@
         </thead>
         <tbody>
             {% for c in charges.items %}
-            <tr class="{{ 'table-success' if c.charge_type == 'AC' else ('table-info' if c.charge_type == 'PV' else 'table-warning') }}"
+            <tr class="{{ 'table-danger' if c.needs_review else ('table-success' if c.charge_type == 'AC' else ('table-info' if c.charge_type == 'PV' else 'table-warning')) }}"
                 style="--bs-table-bg-factor: 0.15;">
                 <td><input type="checkbox" class="form-check-input row-select" data-id="{{ c.id }}"></td>
                 <td>
                     {{ c.date.strftime('%d.%m.%Y') }}
+                    {% if c.needs_review %}
+                    <a href="{{ url_for('edit_charge', charge_id=c.id) }}" class="badge bg-danger text-decoration-none d-inline-flex align-items-center gap-1" title="{{ t('hist.needs_review_hint') }}">
+                        <i class="bi bi-exclamation-triangle-fill"></i> {{ t('hist.needs_review') }}
+                    </a>
+                    {% endif %}
                     {% if c.operator or c.location_name %}
                     <div class="small text-muted text-truncate" style="max-width: 180px;"
                          title="{{ c.operator }}{% if c.operator and c.location_name %} · {% endif %}{{ c.location_name }}">

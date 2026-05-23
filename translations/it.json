@@ -213,6 +213,8 @@
   "hist.km": "km",
   "hist.kwh": "kWh",
   "hist.loss": "Perdite",
+  "hist.needs_review": "Verifica",
+  "hist.needs_review_hint": "Ricarica rilevata automaticamente — tocca per modificare/confermare",
   "hist.per_page": "Voci per pagina",
   "hist.per_page_all": "Tutte",
   "hist.reset": "Reimposta",

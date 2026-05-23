@@ -259,6 +259,8 @@
   "hist.km": "km",
   "hist.kwh": "kWh",
   "hist.loss": "Losses",
+  "hist.needs_review": "Review",
+  "hist.needs_review_hint": "Auto-detected charge — tap to edit/confirm",
   "hist.per_page": "Entries per page",
   "hist.per_page_all": "All",
   "hist.reset": "Reset",

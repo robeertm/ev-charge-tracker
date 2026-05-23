@@ -259,6 +259,8 @@
   "hist.km": "km",
   "hist.kwh": "kWh",
   "hist.loss": "Verluste",
+  "hist.needs_review": "Prüfen",
+  "hist.needs_review_hint": "Automatisch erkannte Ladung — zum Bearbeiten/Bestätigen tippen",
   "hist.per_page": "Einträge pro Seite",
   "hist.per_page_all": "Alle",
   "hist.reset": "Reset",

@@ -1,5 +1,15 @@
 # Changelog
 
+## v3.0.18 (2026-05-23)
+
+### Auto-detect forgotten charges (red "review" entries)
+
+If the car charges somewhere but you forget to start a session in the app, the charge is now detected automatically and added to the history — flagged red ("Prüfen") so you edit/confirm it before it counts as final.
+
+Detection runs on the `is_charging` 1→0 transition (charge just ended): it walks back over the charging run, takes SoC-before-charge → SoC-at-end, and only fires when the gain is ≥ 3 %. Using the `is_charging` flag as the trigger inherently filters out the stationary SoC re-calibration the cars occasionally do (that never sets `is_charging`); the 3 % floor is a second guard.
+
+The reconstructed entry derives: charge type (DC if observed power > 25 kW, else AC), gross kWh (incl. loss via the per-vehicle efficiency for AC), location + operator/price from the start GPS (home/work/favorite), and a CO₂ fallback. It's de-duplicated against any charge already overlapping that day's SoC window, so a manually-logged or auto-persisted charge is never doubled. Editing + saving the entry clears the red flag.
+
 ## v3.0.17 (2026-05-23)
 
 ### Auto-persist on Stop — charges can no longer be lost
