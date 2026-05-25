@@ -1,5 +1,15 @@
 # Changelog
 
+## v3.0.19 (2026-05-25)
+
+### Auto-detect: one charge per session, realistic loss
+
+Two fixes to the v3.0.18 auto-detection:
+
+**Triple entries for a single charge.** A single physical charge often reports several `is_charging` 1→0 blips — the cloud briefly says "not charging" mid-session while the SoC keeps climbing. Each blip fired the detector with a fresh, *non-overlapping* SoC slice (e.g. 63→78, 78→92, 92→99), and the old overlap-only de-dup never caught them, so one charge became three rows. The detector now folds a new slice into a recent un-reviewed auto charge when their SoC ranges are contiguous (within 5 %) and they're within 90 min of each other — extending the existing row instead of adding another. Reviewed/manually-logged charges are still never touched.
+
+**Implausibly low loss.** When slices were merged (or an auto entry was edited), `loss_kwh` could keep a stale per-fragment value, leaving a charge showing ~6 % loss against a far larger gross. Merging now resets the loss and re-derives it over the full span. The self-calibrating efficiency baseline also no longer learns from un-reviewed auto entries (whose loss is itself an estimate), so it can't drift.
+
 ## v3.0.18 (2026-05-23)
 
 ### Auto-detect forgotten charges (red "review" entries)

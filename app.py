@@ -450,6 +450,10 @@ def _get_charge_efficiency(vehicle_id=None):
         Charge.loss_pct.isnot(None),
         Charge.loss_pct >= 2.0,
         Charge.loss_pct <= 40.0,
+        # Un-reviewed auto-detected charges carry an *estimated* loss
+        # (= 1 − this very efficiency); feeding them back in would let the
+        # estimate drift. Only learn from reviewed/manual charges.
+        Charge.needs_review.isnot(True),
     )
     if vehicle_id is not None:
         q = q.filter(Charge.vehicle_id == vehicle_id)
@@ -917,6 +921,14 @@ def _save_vehicle_sync(status, battery_kwh, raw_json='', vehicle_id=None):
 # estimate while parked (which never sets is_charging anyway, so this is
 # a belt-and-braces second guard).
 _AUTO_CHARGE_MIN_SOC_GAIN = 3
+# A single physical charge often reports several is_charging 1→0 blips
+# (the cloud briefly says "not charging" mid-session), each firing the
+# detector with a fresh, non-overlapping SoC slice. We fold a new slice
+# into a recent un-reviewed auto charge when its SoC range touches the
+# existing one (within this %) AND it resumes within the time window —
+# i.e. the same session continuing, not a different forgotten charge.
+_AUTO_CHARGE_SOC_MERGE_GAP = 5        # %
+_AUTO_CHARGE_MERGE_WINDOW_MIN = 90    # minutes
 
 
 def _detect_auto_charge(end_sync):
@@ -959,20 +971,6 @@ def _detect_auto_charge(end_sync):
     start_ts = start_row.timestamp
     charge_date = start_ts.date()
 
-    # Dedup: skip if a charge already overlaps this SoC window on this
-    # date (manually logged, auto-persisted on Stop, or a prior detection).
-    existing = Charge.query.filter(
-        Charge.vehicle_id == vid,
-        Charge.date == charge_date,
-    ).all()
-    for c in existing:
-        if c.soc_from is None or c.soc_to is None:
-            # Same-day charge without SoC bounds — be conservative, skip.
-            return
-        # Overlapping SoC ranges → treat as already-logged.
-        if not (c.soc_to <= soc_from or c.soc_from >= soc_to):
-            return
-
     bk = _get_battery_kwh(vehicle_id=vid)
     eff = _get_charge_efficiency(vehicle_id=vid)
 
@@ -982,9 +980,36 @@ def _detect_auto_charge(end_sync):
     max_kw = max(powers) if powers else None
     charge_type = 'DC' if (max_kw is not None and max_kw > 25) else 'AC'
 
-    # gross kWh incl. loss for AC; DC keeps the raw net (variable eff).
-    net = (soc_to - soc_from) / 100.0 * bk
-    gross = round(net / eff, 2) if charge_type == 'AC' else round(net, 2)
+    # Reconcile with existing same-day charges. A single physical charge
+    # can fire this detector several times (is_charging blips), each with a
+    # different, non-overlapping SoC slice — so plain overlap-dedup would
+    # create one row per blip (the v3.0.18 triple-event bug). Instead:
+    #   • overlap with a reviewed/manual charge → bail, the user owns it
+    #   • SoC-contiguous + time-close to an un-reviewed auto charge
+    #     → extend that one row rather than adding another
+    existing = Charge.query.filter(
+        Charge.vehicle_id == vid,
+        Charge.date == charge_date,
+    ).all()
+    merge_target = None
+    for c in existing:
+        if c.soc_from is None or c.soc_to is None:
+            # Same-day charge without SoC bounds — be conservative, skip.
+            return
+        overlaps = not (c.soc_to <= soc_from or c.soc_from >= soc_to)
+        if not c.needs_review:
+            # Reviewed/manually-logged charge wins — never touch it.
+            if overlaps:
+                return
+            continue
+        # Un-reviewed auto charge: same session resuming?
+        soc_touch = (soc_from <= c.soc_to + _AUTO_CHARGE_SOC_MERGE_GAP and
+                     soc_to >= c.soc_from - _AUTO_CHARGE_SOC_MERGE_GAP)
+        gap_min = (abs((start_ts - c.created_at).total_seconds()) / 60.0
+                   if c.created_at else 1e9)
+        if soc_touch and gap_min <= _AUTO_CHARGE_MERGE_WINDOW_MIN:
+            merge_target = c
+            break
 
     # Location + operator/price from the start sync's GPS.
     lat = start_row.location_lat or end_sync.location_lat
@@ -1020,6 +1045,41 @@ def _detect_auto_charge(end_sync):
           .order_by(Charge.date.desc()).first())
     co2 = fb.co2_g_per_kwh if fb else None
 
+    def _gross_for(span_from, span_to, ctype):
+        n = (span_to - span_from) / 100.0 * bk
+        return round(n, 2) if ctype == 'DC' else round(n / eff, 2)
+
+    if merge_target is not None:
+        # Extend the session to the union of both SoC windows and recompute
+        # everything from the full span. Reset loss_kwh so calculate_fields
+        # re-derives it from the measured efficiency rather than freezing a
+        # stale per-fragment value (the cause of the bogus 6 % loss).
+        new_from = min(merge_target.soc_from, soc_from)
+        new_to = max(merge_target.soc_to, soc_to)
+        if charge_type == 'DC':
+            merge_target.charge_type = 'DC'
+        merge_target.soc_from = new_from
+        merge_target.soc_to = new_to
+        merge_target.kwh_loaded = _gross_for(new_from, new_to,
+                                             merge_target.charge_type)
+        merge_target.loss_kwh = None          # force re-derive over full span
+        merge_target.odometer = end_sync.odometer_km
+        merge_target.created_at = end_sync.timestamp   # advance merge anchor
+        if loc_name and not merge_target.location_name:
+            merge_target.location_name = loc_name
+            merge_target.operator = merge_target.operator or op
+            merge_target.eur_per_kwh = merge_target.eur_per_kwh or eur
+        if co2 is not None and merge_target.co2_g_per_kwh is None:
+            merge_target.co2_g_per_kwh = co2
+        merge_target.calculate_fields(bk, eff)
+        db.session.commit()
+        logger.info(
+            f"Auto-charge merged into id={merge_target.id}: now "
+            f"{new_from}->{new_to}% {merge_target.kwh_loaded}kWh (needs_review)"
+        )
+        return
+
+    gross = _gross_for(soc_from, soc_to, charge_type)
     c = Charge(
         vehicle_id=vid, date=charge_date, charge_hour=start_ts.hour,
         charge_type=charge_type, soc_from=soc_from, soc_to=soc_to,
