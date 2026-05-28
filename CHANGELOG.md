@@ -1,5 +1,13 @@
 # Changelog
 
+## v3.0.20 (2026-05-28)
+
+### Trip-edit dialog — mobile-focused cleanup
+
+Each endpoint card in the trip editor now shows only the timestamps/odometer/SoC that actually belong to it: **Abgefahren** + departure odometer/SoC on the start card, **Angekommen** + arrival odometer/SoC on the destination card. The other half — the previous parking's arrival on the start side, and the next trip's departure on the destination side — was confusing context for a single trip's editor and is gone from the UI (the underlying values are preserved unchanged on save).
+
+The duplicate "Auf Karte wählen" chip in each card header is removed; the two clearly-labelled "Startpunkt/Zielpunkt auf Karte wählen" buttons below the map remain. The map now caps zoom at 14 when fitting both endpoints, so two close-by markers no longer snap into street-level tree pixels.
+
 ## v3.0.19 (2026-05-25)
 
 ### Auto-detect: one charge per session, realistic loss

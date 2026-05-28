@@ -209,14 +209,9 @@
           {% for side, color_cls, icon_cls in [('from', 'primary', 'bi-play-fill'), ('to', 'danger', 'bi-geo-alt-fill')] %}
           <div class="col-md-6">
             <div class="card h-100 border-{{ color_cls }}">
-              <div class="card-header bg-{{ color_cls }} text-white fw-bold py-2 d-flex justify-content-between align-items-center">
-                <span>
-                  <i class="bi {{ icon_cls }}"></i>
-                  {% if side == 'from' %}{{ t('trips.edit_from') }}{% else %}{{ t('trips.edit_to') }}{% endif %}
-                </span>
-                <button type="button" class="btn btn-light tripEditPickBtn" data-side="{{ side }}">
-                    <i class="bi bi-geo-alt-fill"></i> {{ t('trips.edit_pick_on_map') }}
-                </button>
+              <div class="card-header bg-{{ color_cls }} text-white fw-bold py-2">
+                <i class="bi {{ icon_cls }}"></i>
+                {% if side == 'from' %}{{ t('trips.edit_from') }}{% else %}{{ t('trips.edit_to') }}{% endif %}
               </div>
               <div class="small px-2 py-1 border-bottom bg-body-tertiary">
                 {% if side == 'from' %}
@@ -250,56 +245,42 @@
                   <input type="text" class="form-control form-control-sm tripEditAddress"
                          data-side="{{ side }}" placeholder="{{ t('trips.edit_address_ph') }}">
                 </div>
+                {# Show only the field that matches this side — 'Abgefahren'
+                   on Startpunkt, 'Angekommen' on Zielpunkt. The other inputs
+                   stay in the DOM (d-none) so the save JS preserves the
+                   parking event's other timestamps/odometer/SoC unchanged. #}
                 <div class="row g-1 mb-2">
-                  <div class="col-6">
-                    <label class="form-label small mb-0{% if side == 'to' %} fw-semibold{% endif %}">
-                      {{ t('trips.edit_arrived_at') }}
-                      {% if side == 'to' %}<span class="text-{{ color_cls }}">({{ t('trips.edit_trip_end') }})</span>{% endif %}
-                    </label>
+                  <div class="{% if side == 'from' %}d-none{% else %}col-12{% endif %}">
+                    <label class="form-label small mb-0 fw-semibold">{{ t('trips.edit_arrived_at') }}</label>
                     <input type="datetime-local" class="form-control form-control-sm tripEditArrivedAt"
                            data-side="{{ side }}" step="60">
                   </div>
-                  <div class="col-6">
-                    <label class="form-label small mb-0{% if side == 'from' %} fw-semibold{% endif %}">
-                      {{ t('trips.edit_departed_at') }}
-                      {% if side == 'from' %}<span class="text-{{ color_cls }}">({{ t('trips.edit_trip_start') }})</span>{% endif %}
-                    </label>
+                  <div class="{% if side == 'to' %}d-none{% else %}col-12{% endif %}">
+                    <label class="form-label small mb-0 fw-semibold">{{ t('trips.edit_departed_at') }}</label>
                     <input type="datetime-local" class="form-control form-control-sm tripEditDepartedAt"
                            data-side="{{ side }}" step="60">
                   </div>
                 </div>
                 <div class="row g-1 mb-2">
-                  <div class="col-6">
-                    <label class="form-label small mb-0{% if side == 'to' %} fw-semibold{% endif %}">
-                      {{ t('trips.edit_odometer_arrived') }}
-                      {% if side == 'to' %}<span class="text-{{ color_cls }}">({{ t('trips.edit_trip_end') }})</span>{% endif %}
-                    </label>
+                  <div class="{% if side == 'from' %}d-none{% else %}col-12{% endif %}">
+                    <label class="form-label small mb-0 fw-semibold">{{ t('trips.edit_odometer_arrived') }}</label>
                     <input type="number" class="form-control form-control-sm tripEditOdoArrived"
                            data-side="{{ side }}" step="1" min="0">
                   </div>
-                  <div class="col-6">
-                    <label class="form-label small mb-0{% if side == 'from' %} fw-semibold{% endif %}">
-                      {{ t('trips.edit_odometer_departed') }}
-                      {% if side == 'from' %}<span class="text-{{ color_cls }}">({{ t('trips.edit_trip_start') }})</span>{% endif %}
-                    </label>
+                  <div class="{% if side == 'to' %}d-none{% else %}col-12{% endif %}">
+                    <label class="form-label small mb-0 fw-semibold">{{ t('trips.edit_odometer_departed') }}</label>
                     <input type="number" class="form-control form-control-sm tripEditOdoDeparted"
                            data-side="{{ side }}" step="1" min="0">
                   </div>
                 </div>
                 <div class="row g-1 mb-2">
-                  <div class="col-6">
-                    <label class="form-label small mb-0{% if side == 'to' %} fw-semibold{% endif %}">
-                      {{ t('trips.edit_soc_arrived') }}
-                      {% if side == 'to' %}<span class="text-{{ color_cls }}">({{ t('trips.edit_trip_end') }})</span>{% endif %}
-                    </label>
+                  <div class="{% if side == 'from' %}d-none{% else %}col-12{% endif %}">
+                    <label class="form-label small mb-0 fw-semibold">{{ t('trips.edit_soc_arrived') }}</label>
                     <input type="number" class="form-control form-control-sm tripEditSocArrived"
                            data-side="{{ side }}" step="1" min="0" max="100">
                   </div>
-                  <div class="col-6">
-                    <label class="form-label small mb-0{% if side == 'from' %} fw-semibold{% endif %}">
-                      {{ t('trips.edit_soc_departed') }}
-                      {% if side == 'from' %}<span class="text-{{ color_cls }}">({{ t('trips.edit_trip_start') }})</span>{% endif %}
-                    </label>
+                  <div class="{% if side == 'to' %}d-none{% else %}col-12{% endif %}">
+                    <label class="form-label small mb-0 fw-semibold">{{ t('trips.edit_soc_departed') }}</label>
                     <input type="number" class="form-control form-control-sm tripEditSocDeparted"
                            data-side="{{ side }}" step="1" min="0" max="100">
                   </div>
@@ -713,8 +694,11 @@
                 const m = markers[side];
                 if (m) pts.push(m.getLatLng());
             }
+            // maxZoom keeps fitBounds from snapping to street-level when the
+            // two endpoints are close — the user needs to see a useful chunk
+            // of the surrounding area, not just trees between the markers.
             if (pts.length === 1) map.setView(pts[0], 14);
-            else if (pts.length === 2) map.fitBounds(pts, { padding: [40, 40] });
+            else if (pts.length === 2) map.fitBounds(pts, { padding: [40, 40], maxZoom: 14 });
 
             // Oldest of the two wins — that's the threshold for the warning.
             for (const side of ['from', 'to']) {
