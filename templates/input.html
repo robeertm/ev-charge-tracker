@@ -155,7 +155,7 @@
                             <input type="number" class="form-control form-control-lg" id="eur_per_kwh"
                                    name="eur_per_kwh" step="0.01" min="0" max="2"
                                    placeholder="0.30" inputmode="decimal"
-                                   value="{{ pre_charge.eur_per_kwh if pre_charge and pre_charge.eur_per_kwh is not none else '' }}">
+                                   value="{{ pre_charge.eur_per_kwh if pre_charge and pre_charge.eur_per_kwh is not none else (auto_loc.eur_per_kwh if auto_loc and auto_loc.eur_per_kwh is not none else '') }}">
                         </div>
                         <div class="col-6">
                             <label for="kwh_loaded" class="form-label fw-bold">
@@ -248,7 +248,7 @@
                             <i class="bi bi-building"></i> {{ t('input.operator') }}
                             <small class="text-muted">{{ t('input.optional') }}</small>
                         </label>
-                        {% set pre_op = (pre_charge.operator if pre_charge else '') or '' %}
+                        {% set pre_op = (pre_charge.operator if pre_charge else '') or (auto_loc.operator if auto_loc else '') or '' %}
                         {% set pre_op_in_list = pre_op and pre_op in operators %}
                         <select class="form-select" id="operatorSelect">
                             <option value="" {% if not pre_op %}selected{% endif %}>{{ t('input.operator_none') }}</option>
@@ -272,14 +272,14 @@
                         </label>
                         <input type="text" class="form-control mb-1" id="location_name"
                                name="location_name" placeholder="{{ t('input.location_name_ph') }}"
-                               value="{{ pre_charge.location_name if pre_charge and pre_charge.location_name else '' }}">
+                               value="{{ pre_charge.location_name if pre_charge and pre_charge.location_name else (auto_loc.location_name if auto_loc and auto_loc.location_name else '') }}">
                         <div class="input-group input-group-sm mb-1">
                             <span class="input-group-text">Lat</span>
                             <input type="number" step="0.000001" id="location_lat" name="location_lat" class="form-control"
-                                   value="{{ '%.6f'|format(pre_charge.location_lat) if pre_charge and pre_charge.location_lat is not none else '' }}">
+                                   value="{{ '%.6f'|format(pre_charge.location_lat) if pre_charge and pre_charge.location_lat is not none else ('%.6f'|format(auto_loc.lat) if auto_loc and auto_loc.lat is not none else '') }}">
                             <span class="input-group-text">Lon</span>
                             <input type="number" step="0.000001" id="location_lon" name="location_lon" class="form-control"
-                                   value="{{ '%.6f'|format(pre_charge.location_lon) if pre_charge and pre_charge.location_lon is not none else '' }}">
+                                   value="{{ '%.6f'|format(pre_charge.location_lon) if pre_charge and pre_charge.location_lon is not none else ('%.6f'|format(auto_loc.lon) if auto_loc and auto_loc.lon is not none else '') }}">
                         </div>
                         <div class="d-flex gap-1 flex-wrap">
                             <button type="button" class="btn btn-sm btn-outline-info" id="btnGpsLocation"

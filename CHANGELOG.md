@@ -1,5 +1,11 @@
 # Changelog
 
+## v3.0.21 (2026-05-28)
+
+### New-charge form: location, operator + price pre-filled from GPS
+
+Starting a fresh charge entry now mirrors what the auto-detection (v3.0.18/19) does on charge-end: the latest vehicle sync's GPS is classified against home/work/favorites, and the form arrives with **location name + operator + per-kWh price** already filled in when the car is parked at a known spot. Lat/Lon are always pre-filled when GPS is available (useful at public chargers too), and the operator is only auto-selected when it has a configured price in Settings — otherwise the dropdown filter would hide it. Everything is editable, and an in-progress session's localStorage restore only writes into empty fields, so the pre-fill never overrides what you typed.
+
 ## v3.0.20 (2026-05-28)
 
 ### Trip-edit dialog — mobile-focused cleanup

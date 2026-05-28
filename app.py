@@ -2256,6 +2256,56 @@ def register_routes(app):
         if saved_id:
             pre_charge = Charge.query.get(saved_id)
             active_session = request.args.get('active') == '1'
+        # v3.0.21: prefill location/operator from the latest sync GPS for
+        # a fresh form (no pre_charge round-trip). Mirrors the resolution
+        # that _detect_auto_charge does on charge-end so a manually-started
+        # charge at home/work/a favorite arrives with the right operator,
+        # location name, and configured price already filled in.
+        auto_loc = None
+        if pre_charge is None:
+            try:
+                _vid_pf = _active_vehicle_id()
+                _vid_pf = _vid_pf if isinstance(_vid_pf, int) else None
+                _q_pf = VehicleSync.query.order_by(VehicleSync.timestamp.desc())
+                if _vid_pf is not None:
+                    _q_pf = _q_pf.filter(VehicleSync.vehicle_id == _vid_pf)
+                _last_sync = _q_pf.first()
+                if (_last_sync is not None
+                        and _last_sync.location_lat is not None
+                        and _last_sync.location_lon is not None):
+                    from services.trips_service import _classify_location
+                    from services.i18n import t as _ti
+                    _lbl, _fav = _classify_location(
+                        _last_sync.location_lat, _last_sync.location_lon)
+                    _op_name = None
+                    _loc_name = None
+                    if _lbl == 'home':
+                        _op_name = _ti('set.op_home_private')
+                        _loc_name = (AppConfig.get('home_label', 'Home')
+                                     or 'Home')
+                    elif _lbl == 'work':
+                        _op_name = _ti('set.op_work')
+                        _loc_name = (AppConfig.get('work_label', 'Work')
+                                     or 'Work')
+                    elif _lbl == 'favorite' and _fav:
+                        _loc_name = _fav
+                    _prices_pf = _get_operator_prices()
+                    _eur = (_prices_pf.get(_op_name)
+                            if _op_name and _op_name in _prices_pf else None)
+                    auto_loc = {
+                        'lat': _last_sync.location_lat,
+                        'lon': _last_sync.location_lon,
+                        'location_name': _loc_name or '',
+                        # Only fill operator when it maps to a configured
+                        # price — otherwise the dropdown filter would hide
+                        # it (operators without a price are non-selectable
+                        # since v3.0.14).
+                        'operator': _op_name if _eur is not None else '',
+                        'eur_per_kwh': _eur,
+                    }
+            except Exception as _e:
+                logger.debug(f"auto-loc prefill failed: {_e}")
+
         # Embedded history table — same filter / pagination semantics as
         # /history. The partial template is included after the input form
         # so the user lands on /input and sees recent charges in one view
@@ -2268,6 +2318,7 @@ def register_routes(app):
                                    _active_vehicle_id() if isinstance(_active_vehicle_id(), int) else None),
                                last_charge=last_charge,
                                pre_charge=pre_charge,
+                               auto_loc=auto_loc,
                                active_session=active_session,
                                pv_co2=_get_pv_co2(),
                                pv_price=AppConfig.get('pv_price_eur_per_kwh', '0.00'),
@@ -2281,7 +2332,8 @@ def register_routes(app):
                                work_lon=AppConfig.get('work_lon', ''),
                                work_label=AppConfig.get('work_label', ''),
                                operators=_get_operator_list(
-                                   selected=(pre_charge.operator if pre_charge else None)),
+                                   selected=((pre_charge.operator if pre_charge else None)
+                                             or (auto_loc.get('operator') if auto_loc else None))),
                                operator_prices=_get_operator_prices(),
                                charges=charges,
                                charge_type=charge_type,
