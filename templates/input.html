@@ -161,8 +161,11 @@
                             <label for="kwh_loaded" class="form-label fw-bold">
                                 {{ t('input.kwh_loaded') }} <small class="text-muted fw-normal" id="kwhHint"></small>
                             </label>
+                            {# v3.0.22: cap at battery_kwh × 1.3 (capacity + worst-case
+                               losses + margin). Prevents typos like 333 on a 64 kWh car. #}
                             <input type="number" class="form-control form-control-lg" id="kwh_loaded"
-                                   name="kwh_loaded" step="0.001" min="0" max="200"
+                                   name="kwh_loaded" step="0.001" min="0"
+                                   max="{{ ((battery_kwh|float) * 1.3) | round(1) if battery_kwh else 200 }}"
                                    placeholder="45.000" required inputmode="decimal"
                                    value="{{ pre_charge.kwh_loaded if pre_charge and pre_charge.kwh_loaded is not none else '' }}">
                         </div>
@@ -879,28 +882,30 @@ btnStart.addEventListener('click', () => {
     tryStart(clickTime, 0, deadline);
 });
 
-// === Auto-Polling: check every 5 min if charging stopped or limit reached ===
+// === Auto-Polling: react quickly when the car finishes charging ===
+//
+// v3.0.22: poll the lightweight /api/vehicle/last_sync (DB-only read of
+// the latest VehicleSync row, no cloud call, no API quota) every 60 s.
+// The bg sync loop already polls the cloud on a 10-min cached cadence,
+// so this is the same freshness as the old approach — just free and
+// responsive enough that doStop fires within a minute of the bg loop
+// catching the 1→0 transition, instead of up to 10 min later.
 let pollInterval = null;
-const POLL_MS = 10 * 60 * 1000; // 10 minutes (Kia EU limit: 200/day)
+const POLL_MS = 60 * 1000;
 
 function startAutoPolling() {
     if (pollInterval) clearInterval(pollInterval);
+    // Fire one tick right away so a charge that ended *before* the user
+    // even opened the page gets caught on first load, not 60 s in.
+    autoCheck();
     pollInterval = setInterval(autoCheck, POLL_MS);
 }
 
 async function autoCheck() {
     try {
-        // Use cached check (no force) to avoid draining 12V
-        const r = await fetch('/api/vehicle/status');
+        const r = await fetch('/api/vehicle/last_sync');
         const d = await r.json();
         if (d.error) return;
-
-        // Merge with dashboard cache
-        const dashCache = JSON.parse(localStorage.getItem('ev_vehicle_data') || '{}');
-        for (const key in dashCache) {
-            if (d[key] === null || d[key] === undefined) d[key] = dashCache[key];
-        }
-        localStorage.setItem('ev_vehicle_data', JSON.stringify(d));
 
         // Update SoC live display
         if (d.soc != null) {
@@ -908,7 +913,7 @@ async function autoCheck() {
             // Pin soc_to to the polled value when the user hasn't typed
             // their own. The 1-second timer keeps a time-based estimate
             // running too, but a real SoC reading from the car overrides
-            // it on every 10-min poll for a more accurate live value.
+            // it on every poll for a more accurate live value.
             const socToField = document.getElementById('soc_to');
             const socFromVal = parseInt(document.getElementById('soc_from').value);
             if (!socToField.dataset.manual && (isNaN(socFromVal) || d.soc >= socFromVal)) {
@@ -916,17 +921,16 @@ async function autoCheck() {
             }
         }
 
-        // Auto-stop conditions
-        const chargeType = document.getElementById('chargeTypeHidden').value;
-        const limitAC = d.charge_limit_ac || 100;
-        const limitDC = d.charge_limit_dc || 100;
-        const limit = (chargeType === 'DC') ? limitDC : limitAC;
-
-        const shouldStop = (d.soc != null && d.soc >= limit) ||
-                           (d.is_charging === false && d.soc != null &&
-                            parseInt(document.getElementById('soc_from').value) < d.soc);
-
-        if (shouldStop) {
+        // Auto-stop: trigger when the latest sync says the car is no
+        // longer charging AND SoC has risen since session start (so we
+        // don't mis-fire on a sync that arrived before is_charging
+        // flipped to true). 100 % is treated as a stop signal too in
+        // case the cloud forgets to flip the flag.
+        const socFromVal = parseInt(document.getElementById('soc_from').value);
+        const chargeEnded = (d.is_charging === false && d.soc != null
+                             && !isNaN(socFromVal) && d.soc > socFromVal);
+        const reachedFull = (d.soc != null && d.soc >= 100);
+        if (chargeEnded || reachedFull) {
             await doStop(d);
         }
     } catch(e) { console.error('Auto-poll error:', e); }

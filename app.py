@@ -930,6 +930,12 @@ _AUTO_CHARGE_MIN_SOC_GAIN = 3
 _AUTO_CHARGE_SOC_MERGE_GAP = 5        # %
 _AUTO_CHARGE_MERGE_WINDOW_MIN = 90    # minutes
 
+# Hard cap on a single Charge's kwh_loaded: battery_kwh × this. Covers a
+# full 0→100 % charge plus worst-case AC losses (efficiency 0.80 → 1.25)
+# with a small margin for meter variance. Anything above is a typo
+# (e.g. 333 kWh on a 64 kWh car) and gets rejected on save.
+_CHARGE_KWH_HARD_CAP_MULTIPLIER = 1.3
+
 
 def _detect_auto_charge(end_sync):
     """Reconstruct a charge from the just-closed is_charging window and
@@ -2190,6 +2196,16 @@ def register_routes(app):
                             charge.vehicle_id = _v.id
                 _bk = _get_battery_kwh(vehicle_id=charge.vehicle_id)
                 _eff = _get_charge_efficiency(vehicle_id=charge.vehicle_id)
+                # Hard cap: a single charge can't exceed battery_kwh × the
+                # multiplier (= capacity + worst-case AC losses + margin).
+                # Catches obvious typos that would otherwise wreck stats
+                # and the efficiency baseline.
+                if charge.kwh_loaded is not None and _bk:
+                    _cap = round(_bk * _CHARGE_KWH_HARD_CAP_MULTIPLIER, 1)
+                    if charge.kwh_loaded > _cap:
+                        flash(t('flash.kwh_exceeds_cap',
+                                kwh=charge.kwh_loaded, cap=_cap), 'danger')
+                        return redirect(url_for('input_charge'))
                 charge.calculate_fields(_bk, _eff)
 
                 # If no CO2 provided, set automatically
@@ -3301,6 +3317,33 @@ def register_routes(app):
             'last_soc': last_sync.soc_percent if last_sync else None,
             'last_odometer': last_sync.odometer_km if last_sync else None,
             'is_charging': last_sync.is_charging if last_sync else None,
+        })
+
+    @app.route('/api/vehicle/last_sync')
+    def api_vehicle_last_sync():
+        """Lightweight DB-only read of the latest VehicleSync for the
+        active vehicle. Used by the charge form's auto-stop poll so it
+        can poll on a short interval (~60 s) without burning API quota
+        on cached cloud calls — the bg sync loop already updates the DB
+        every 10 min on a quota-friendly cached read, so a frontend that
+        reads the DB sees the same is_charging flip within the same
+        window, just for free."""
+        _picker = _active_vehicle_id()
+        _vid = _picker if isinstance(_picker, int) else None
+        q = VehicleSync.query.order_by(VehicleSync.timestamp.desc())
+        if _vid is not None:
+            q = q.filter(VehicleSync.vehicle_id == _vid)
+        s = q.first()
+        if s is None:
+            return jsonify({'soc': None, 'is_charging': None})
+        age = (datetime.now() - s.timestamp).total_seconds()
+        return jsonify({
+            'soc': s.soc_percent,
+            'is_charging': bool(s.is_charging) if s.is_charging is not None else None,
+            'charge_power_kw': s.charge_power_kw,
+            'odometer': s.odometer_km,
+            'timestamp': s.timestamp.isoformat(),
+            'age_seconds': age,
         })
 
     @app.route('/api/vehicle/status')

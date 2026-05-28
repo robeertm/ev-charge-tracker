@@ -161,6 +161,7 @@
   "flash.import_error": "Errore di importazione: {error}",
   "flash.import_errors": "{count} errori.",
   "flash.import_success": "{count} voci importate!",
+  "flash.kwh_exceeds_cap": "La quantità caricata ({kwh} kWh) supera il massimo fisico di questa batteria ({cap} kWh). Verifica il valore.",
   "flash.luks_changed": "Passphrase LUKS cambiata.",
   "flash.luks_changed_autounlock_refreshed": "Passphrase LUKS cambiata e chiave di sblocco automatico aggiornata.",
   "flash.luks_changed_autounlock_stale": "Passphrase cambiata, ma la chiave di sblocco automatico non è stata aggiornata ({error}). Riattiva lo sblocco automatico o sblocca manualmente al prossimo avvio.",

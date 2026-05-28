@@ -161,6 +161,7 @@
   "flash.import_error": "Importfout: {error}",
   "flash.import_errors": "{count} fouten.",
   "flash.import_success": "{count} items geïmporteerd!",
+  "flash.kwh_exceeds_cap": "Geladen hoeveelheid ({kwh} kWh) overschrijdt het fysieke maximum voor deze accu ({cap} kWh). Controleer de waarde.",
   "flash.luks_changed": "LUKS-wachtwoord gewijzigd.",
   "flash.luks_changed_autounlock_refreshed": "LUKS-wachtwoord gewijzigd en auto-ontgrendel-sleutel bijgewerkt.",
   "flash.luks_changed_autounlock_stale": "Wachtwoord gewijzigd, maar de auto-ontgrendel-sleutel kon niet worden bijgewerkt ({error}). Activeer auto-ontgrendelen opnieuw of ontgrendel handmatig bij de volgende opstart.",

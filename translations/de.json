@@ -206,6 +206,7 @@
   "flash.import_skipped_dup": "{count} Duplikate übersprungen (manuelle Einträge wurden geschützt).",
   "flash.import_success": "{count} Einträge importiert!",
   "flash.import_updated": "{count} bestehende Einträge ergänzt.",
+  "flash.kwh_exceeds_cap": "Lademenge ({kwh} kWh) überschreitet das physikalische Maximum für diesen Akku ({cap} kWh). Bitte Wert prüfen.",
   "flash.luks_changed": "LUKS-Passphrase geändert.",
   "flash.luks_changed_autounlock_refreshed": "LUKS-Passphrase geändert und Auto-Unlock-Schlüssel aktualisiert.",
   "flash.luks_changed_autounlock_stale": "Passphrase geändert, aber Auto-Unlock-Schlüssel konnte nicht aktualisiert werden ({error}). Auto-Unlock erst neu aktivieren oder nächsten Boot manuell entsperren.",

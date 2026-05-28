@@ -161,6 +161,7 @@
   "flash.import_error": "Erreur d'import : {error}",
   "flash.import_errors": "{count} erreurs.",
   "flash.import_success": "{count} entrées importées !",
+  "flash.kwh_exceeds_cap": "La quantité chargée ({kwh} kWh) dépasse le maximum physique de cette batterie ({cap} kWh). Vérifie la valeur.",
   "flash.luks_changed": "Passphrase LUKS modifiée.",
   "flash.luks_changed_autounlock_refreshed": "Passphrase LUKS modifiée et clé de déverrouillage auto mise à jour.",
   "flash.luks_changed_autounlock_stale": "Passphrase modifiée, mais la clé de déverrouillage auto n'a pas pu être mise à jour ({error}). Réactive le déverrouillage auto ou déverrouille manuellement au prochain démarrage.",

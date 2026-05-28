@@ -161,6 +161,7 @@
   "flash.import_error": "Error de importación: {error}",
   "flash.import_errors": "{count} errores.",
   "flash.import_success": "¡{count} entradas importadas!",
+  "flash.kwh_exceeds_cap": "La cantidad cargada ({kwh} kWh) supera el máximo físico de esta batería ({cap} kWh). Por favor revisa el valor.",
   "flash.luks_changed": "Frase de paso LUKS cambiada.",
   "flash.luks_changed_autounlock_refreshed": "Frase de paso LUKS cambiada y clave de auto-desbloqueo actualizada.",
   "flash.luks_changed_autounlock_stale": "Frase de paso cambiada, pero la clave de auto-desbloqueo no se pudo actualizar ({error}). Reactiva el auto-desbloqueo o desbloquea manualmente al próximo arranque.",

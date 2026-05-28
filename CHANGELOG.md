@@ -1,5 +1,17 @@
 # Changelog
 
+## v3.0.22 (2026-05-28)
+
+### Auto-stop a manually-started charge actually works again
+
+A charge started via the Start button is supposed to auto-stop when the car finishes charging. The old implementation polled `/api/vehicle/status` every 10 minutes, which both burned API quota and lagged the user by up to 10 min plus the cloud cache lag — long enough that the feature looked broken in practice.
+
+The auto-poll now hits a new lightweight DB-only endpoint `/api/vehicle/last_sync` (no cloud call, no quota cost) on a **60-second cadence**. The background sync loop already updates the DB on a 10-min cached read, so the same `is_charging` 1→0 flip is now picked up by the form within ~60 s of the bg loop seeing it. An immediate first tick on session start also catches charges that ended *before* the user opened the page.
+
+### Hard cap on a single charge's kWh
+
+A charge entry can no longer exceed `battery_kwh × 1.3` — i.e. capacity plus the worst-case AC charge losses plus a small margin. The form's `max=` attribute reflects this so the browser blocks an over-typed value, and a server-side check rejects on save with a clear flash message. Catches typos (e.g. 333 kWh on a 64 kWh car) that would otherwise wreck stats and the self-calibrating efficiency baseline.
+
 ## v3.0.21 (2026-05-28)
 
 ### New-charge form: location, operator + price pre-filled from GPS
