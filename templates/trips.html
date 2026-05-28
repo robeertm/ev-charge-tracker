@@ -513,9 +513,16 @@
         _modal = new bootstrap.Modal(modalEl);
         modalEl.addEventListener('shown.bs.modal', () => {
             // Leaflet measures container on init — if the modal was
-            // hidden when the map was created, tiles render at 0x0.
-            // invalidateSize() after the modal is actually shown fixes it.
-            if (map) setTimeout(() => map.invalidateSize(), 50);
+            // hidden when the map was created, tiles render at 0x0 and
+            // any fitBounds called before the slide-in finished targets
+            // the wrong viewport. invalidateSize fixes the dimensions,
+            // and re-applying the last fit re-centers the markers in
+            // the proper viewport so both are always visible.
+            if (!map) return;
+            setTimeout(() => {
+                map.invalidateSize();
+                if (lastFitPts) fitToPts(lastFitPts);
+            }, 50);
         });
         return _modal;
     }
@@ -561,7 +568,20 @@
 
     // ── Leaflet map ──────────────────────────────────────────────
     let map = null;
+    let lastFitPts = null;
     const markers = { from: null, to: null };
+
+    function fitToPts(pts) {
+        if (!map || !pts || !pts.length) return;
+        if (pts.length === 1) {
+            map.setView(pts[0], 14);
+        } else {
+            // Generous padding + a moderate maxZoom so both markers are
+            // always comfortably visible — never snapped to street-level
+            // when the endpoints happen to be close together.
+            map.fitBounds(pts, { padding: [60, 60], maxZoom: 13 });
+        }
+    }
     const MARKER_COLOR = { from: '#0d6efd', to: '#dc3545' };
 
     function ensureMap() {
@@ -688,17 +708,18 @@
             for (const side of ['from', 'to']) {
                 if (results[side]) fillSide(side, results[side]);
             }
-            // Fit map to both markers if present
+            // Fit map to both markers if present. Stash the pts so the
+            // shown.bs.modal handler can re-apply the fit once Leaflet has
+            // the real (post-animation) container dimensions — otherwise
+            // the initial fit uses stale 0×0 / mid-animation sizes and
+            // one of the markers ends up off-screen.
             const pts = [];
             for (const side of ['from', 'to']) {
                 const m = markers[side];
                 if (m) pts.push(m.getLatLng());
             }
-            // maxZoom keeps fitBounds from snapping to street-level when the
-            // two endpoints are close — the user needs to see a useful chunk
-            // of the surrounding area, not just trees between the markers.
-            if (pts.length === 1) map.setView(pts[0], 14);
-            else if (pts.length === 2) map.fitBounds(pts, { padding: [40, 40], maxZoom: 14 });
+            lastFitPts = pts;
+            fitToPts(pts);
 
             // Oldest of the two wins — that's the threshold for the warning.
             for (const side of ['from', 'to']) {

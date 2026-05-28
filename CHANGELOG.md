@@ -1,5 +1,11 @@
 # Changelog
 
+## v3.0.23 (2026-05-28)
+
+### Trip-edit map: both endpoints are always visible
+
+The trip-edit map's initial `fitBounds` ran before the Bootstrap modal had finished its slide-in animation, so Leaflet measured a 0×0 / mid-animation viewport and the resulting zoom was off — one of the two markers often landed outside the visible area. The map's `shown.bs.modal` handler already calls `invalidateSize` to correct the dimensions, but it did not re-apply the fit. It does now: the last fit is replayed after the dimensions are correct, with generous padding (60 px) and a moderate `maxZoom: 13` so both blue and red markers always fit comfortably with surrounding context.
+
 ## v3.0.22 (2026-05-28)
 
 ### Auto-stop a manually-started charge actually works again
