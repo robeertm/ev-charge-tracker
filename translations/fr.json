@@ -264,6 +264,7 @@
   "input.loss_label": "perte",
   "input.low_12v_confirm": "Batterie 12 V basse (%pct%%). Un force-refresh réveille la voiture et décharge davantage la 12 V. Récupérer quand même les données en direct ?",
   "input.low_12v_skipped": "Batterie 12 V trop basse — pas de requête en direct. Dernier SoC connu utilisé, vérifiez/ajustez avant d'enregistrer.",
+  "input.new_charge": "Nouvelle charge",
   "input.no_data": "Aucune donnée disponible.",
   "input.notes": "Notes",
   "input.notes_placeholder": "ex. emplacement de la borne...",

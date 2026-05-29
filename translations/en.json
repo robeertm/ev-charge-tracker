@@ -320,6 +320,7 @@
   "input.loss_label": "loss",
   "input.low_12v_confirm": "12 V battery low (%pct%%). A force-refresh wakes the car and drains the 12 V further. Fetch live data from the car anyway?",
   "input.low_12v_skipped": "12 V battery too low — no live fetch. Last known SoC used, please check/adjust before saving.",
+  "input.new_charge": "New charge",
   "input.no_data": "No data available.",
   "input.notes": "Notes",
   "input.notes_placeholder": "e.g. charging station, location...",

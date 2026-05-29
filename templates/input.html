@@ -2,18 +2,37 @@
 {% block title %}{{ t('input.title') }} — EV Charge Tracker{% endblock %}
 
 {% block content %}
-<div class="row justify-content-center">
-    <div class="col-lg-6 col-md-8">
-        <div class="card shadow-sm">
-            <div class="card-header bg-success text-white d-flex justify-content-between align-items-center">
-                <h5 class="mb-0"><i class="bi bi-plus-circle"></i> {{ t('input.title') }}</h5>
-                {% if active_session %}
-                <span class="badge bg-warning text-dark" id="activeSessionBadge">
-                    <i class="bi bi-hourglass-split"></i> {{ t('input.active_session') }}
-                </span>
-                {% endif %}
-            </div>
-            <div class="card-body">
+{# v3.0.25 Phase 1b: the page itself is now just heading + list. The big
+   new-charge form (Start/Stop/Live-Timer/Save) lives inside the modal
+   below, opened via the "+ Neue Ladung" button. The form's elements
+   keep their original IDs so the existing 700 lines of session/timer/
+   polling JS attach unchanged — they just operate on DOM that lives
+   inside a modal rather than directly on the page. #}
+<div class="d-flex justify-content-between align-items-center mb-3">
+    <h4 class="mb-0"><i class="bi bi-lightning-charge"></i> {{ t('input.title') }}</h4>
+    <button type="button" class="btn btn-success" id="btnOpenNewCharge"
+            data-bs-toggle="modal" data-bs-target="#newChargeModal">
+        <i class="bi bi-plus-circle"></i> {{ t('input.new_charge') }}
+    </button>
+</div>
+
+{% if charges %}
+{% include "_history_section.html" %}
+{% endif %}
+
+<div class="modal fade" id="newChargeModal" tabindex="-1" aria-hidden="true">
+  <div class="modal-dialog modal-fullscreen-sm-down modal-lg modal-dialog-scrollable">
+    <div class="modal-content">
+      <div class="modal-header bg-success text-white">
+        <h5 class="modal-title mb-0">
+          <i class="bi bi-plus-circle"></i> {{ t('input.new_charge') }}
+          <span class="badge bg-warning text-dark ms-2" id="activeSessionBadge" {% if not active_session %}style="display:none"{% endif %}>
+            <i class="bi bi-hourglass-split"></i> {{ t('input.active_session') }}
+          </span>
+        </h5>
+        <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="Close"></button>
+      </div>
+      <div class="modal-body">
 
                 {# v2.29: Fahrzeug-Auswahl pro Ladung. Default = pre_charge's
                    vehicle (when editing) → picker (when one is selected) →
@@ -325,18 +344,10 @@
                     </div>
                 </form>
 
-            </div>
-        </div>
-    </div>
-</div>
-
-{% if charges %}
-<div class="row justify-content-center mt-4">
-    <div class="col-12">
-        {% include "_history_section.html" %}
-    </div>
-</div>
-{% endif %}
+      </div> {# modal-body #}
+    </div> {# modal-content #}
+  </div> {# modal-dialog #}
+</div> {# modal #}
 {% endblock %}
 
 {% block scripts %}
@@ -647,6 +658,26 @@ function persistFormCache() {
             }
         }
     } catch(e) {}
+})();
+
+// v3.0.25: auto-open the new-charge modal when there's an in-progress
+// charge (either server-rendered active_session=True from the
+// intermediate-save round-trip, or localStorage carries a startTime).
+// Without this, after Phase 1b the user would land on /input with the
+// list visible but no obvious sign that a charge session is still
+// running in the background.
+(function autoOpenChargeModal() {
+    const el = document.getElementById('newChargeModal');
+    if (!el || typeof bootstrap === 'undefined' || !bootstrap.Modal) return;
+    let open = {{ 'true' if active_session else 'false' }};
+    try {
+        const s = JSON.parse(localStorage.getItem(CHARGE_KEY));
+        if (s && s.startTime) open = true;
+    } catch(e) {}
+    if (open) {
+        const m = bootstrap.Modal.getOrCreateInstance(el);
+        m.show();
+    }
 })();
 
 function startTimer() {

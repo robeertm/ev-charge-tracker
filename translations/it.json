@@ -264,6 +264,7 @@
   "input.loss_label": "perdita",
   "input.low_12v_confirm": "Batteria 12 V scarica (%pct%%). Un force-refresh sveglia l'auto e scarica ulteriormente la 12 V. Recuperare comunque i dati in tempo reale?",
   "input.low_12v_skipped": "Batteria 12 V troppo scarica — nessuna richiesta live. Usato l'ultimo SoC noto, controlla/correggi prima di salvare.",
+  "input.new_charge": "Nuova ricarica",
   "input.no_data": "Nessun dato disponibile.",
   "input.notes": "Note",
   "input.notes_placeholder": "es. posizione della colonnina...",

@@ -320,6 +320,7 @@
   "input.loss_label": "Verlust",
   "input.low_12v_confirm": "12 V-Batterie niedrig (%pct%%). Ein Force-Refresh weckt das Auto und entlädt die 12 V weiter. Trotzdem aktuelle Daten vom Auto holen?",
   "input.low_12v_skipped": "12 V-Batterie zu niedrig — keine Live-Abfrage. Letzter bekannter SoC übernommen, bitte vor dem Speichern prüfen/anpassen.",
+  "input.new_charge": "Neue Ladung",
   "input.no_data": "Keine Daten verfügbar.",
   "input.notes": "Notizen",
   "input.notes_placeholder": "z.B. Ladestation, Ort...",

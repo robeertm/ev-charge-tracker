@@ -264,6 +264,7 @@
   "input.loss_label": "verlies",
   "input.low_12v_confirm": "12 V-accu laag (%pct%%). Een force-refresh wekt de auto en ontlaadt de 12 V verder. Toch live gegevens van de auto ophalen?",
   "input.low_12v_skipped": "12 V-accu te laag — geen live-opvraging. Laatst bekende SoC gebruikt, controleer/pas aan vóór opslaan.",
+  "input.new_charge": "Nieuwe laadbeurt",
   "input.no_data": "Geen gegevens beschikbaar.",
   "input.notes": "Notities",
   "input.notes_placeholder": "bijv. locatie laadpaal...",

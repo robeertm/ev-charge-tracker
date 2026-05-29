@@ -264,6 +264,7 @@
   "input.loss_label": "pérdida",
   "input.low_12v_confirm": "Batería 12 V baja (%pct%%). Un force-refresh despierta el coche y descarga más la 12 V. ¿Obtener datos en vivo igualmente?",
   "input.low_12v_skipped": "Batería 12 V demasiado baja — sin consulta en vivo. Se usó el último SoC conocido, revísalo/ajústalo antes de guardar.",
+  "input.new_charge": "Nueva carga",
   "input.no_data": "No hay datos disponibles.",
   "input.notes": "Notas",
   "input.notes_placeholder": "ej. ubicación del cargador...",

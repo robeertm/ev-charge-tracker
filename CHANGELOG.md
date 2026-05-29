@@ -1,5 +1,17 @@
 # Changelog
 
+## v3.0.25 (2026-05-29)
+
+### New-charge form moves into a "+" modal (phase 1b)
+
+The `/input` page is now just the charge list with a "+ Neue Ladung" button above it. Clicking the button opens the full new-charge dialog — vehicle picker, AC/DC/PV, Start/Stop/Live-Timer, all fields, Save — in a Bootstrap modal. The page itself stays calm and list-focused; the charging UI only appears when you're actually entering one.
+
+To keep this low-risk, the modal wraps the existing form contents *in place*: every input keeps its original `id` so the ~700 lines of session/timer/polling/restoreSession/auto-stop/auto-persist/CO₂-fetch/operator-autofill JS that has accumulated over v3.0.15–v3.0.22 attaches to the same DOM nodes without changes. Only the outer card wrapper changed.
+
+An auto-open hook makes sure the modal pops up whenever there's an in-progress charge — server-rendered `active_session=True` from the intermediate-save round-trip, or a `startTime` in `localStorage`. The "Ladung läuft" badge sits in the modal header so you see it as soon as the modal opens.
+
+Same interaction pattern as the trips log and the v3.0.24 row-click editor — that's the consistency goal.
+
 ## v3.0.24 (2026-05-29)
 
 ### Charges: row-click → in-place edit modal (phase 1a)
