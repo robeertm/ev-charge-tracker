@@ -4396,6 +4396,53 @@ def register_routes(app):
                                today=date.today().isoformat(),
                                default_intervals=DEFAULT_INTERVALS)
 
+    @app.route('/maintenance/edit/<int:entry_id>', methods=['POST'])
+    def maintenance_edit(entry_id):
+        """v3.0.26: in-place edit endpoint for the maintenance modal.
+        Same field shape as the /maintenance create POST; only updates
+        the targeted entry instead of inserting a new one."""
+        from services.maintenance_service import update_entry
+        try:
+            date_str = request.form.get('date')
+            next_date_str = request.form.get('next_due_date')
+            updated = update_entry(
+                entry_id,
+                date=datetime.strptime(date_str, '%Y-%m-%d').date() if date_str else None,
+                item_type=request.form.get('item_type', 'other'),
+                title=request.form.get('title', '').strip() or None,
+                odometer_km=_int(request.form.get('odometer_km')),
+                cost_eur=_float(request.form.get('cost_eur')),
+                notes=request.form.get('notes', '').strip() or None,
+                next_due_km=_int(request.form.get('next_due_km')),
+                next_due_date=(datetime.strptime(next_date_str, '%Y-%m-%d').date()
+                               if next_date_str else None),
+            )
+            if updated is not None:
+                flash(t('flash.entry_updated'), 'success')
+        except Exception as e:
+            flash(t('flash.error', error=e), 'danger')
+        return redirect(url_for('maintenance_page'))
+
+    @app.route('/api/maintenance/<int:entry_id>', methods=['GET'])
+    def api_get_maintenance(entry_id):
+        """Return a single MaintenanceEntry as JSON for the edit modal
+        to populate from. The MaintenanceEntry model has no to_dict()
+        helper, so the field shape is built here once."""
+        from models.database import MaintenanceEntry
+        e = MaintenanceEntry.query.get_or_404(entry_id)
+        return jsonify({
+            'id': e.id,
+            'date': e.date.isoformat() if e.date else None,
+            'item_type': e.item_type,
+            'title': e.title,
+            'odometer_km': e.odometer_km,
+            'cost_eur': e.cost_eur,
+            'notes': e.notes,
+            'next_due_km': e.next_due_km,
+            'next_due_date': e.next_due_date.isoformat() if e.next_due_date else None,
+            'vehicle_id': e.vehicle_id,
+        })
+
     @app.route('/maintenance/delete/<int:entry_id>', methods=['POST'])
     def maintenance_delete(entry_id):
         from services.maintenance_service import delete_entry

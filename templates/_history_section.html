@@ -182,7 +182,7 @@
    `chargeRow` JS at the bottom of this file fetches /api/charges/<id>,
    fills the fields, and shows the modal. #}
 <div class="modal fade" id="chargeEditModal" tabindex="-1" aria-hidden="true">
-  <div class="modal-dialog modal-dialog-scrollable modal-fullscreen-sm-down">
+  <div class="modal-dialog modal-dialog-scrollable modal-fullscreen-md-down">
     <div class="modal-content">
       <div class="modal-header">
         <h5 class="modal-title">
@@ -440,7 +440,13 @@
         });
     }
 
-    // ── v3.0.24: row click → edit modal ──────────────────────────
+    // ── v3.0.24/26: row click → edit modal ───────────────────────
+    // The bug from v3.0.24/25: this <script> is inside {% block content %}
+    // which runs BEFORE base.html loads bootstrap.bundle.js, so the
+    // `typeof bootstrap === 'undefined'` guard always tripped and no
+    // click handler was attached. Defer setup until DOM (and the inline
+    // bootstrap script after it) has finished so bootstrap.Modal exists.
+    function _setupChargeEditModal() {
     const editModalEl = document.getElementById('chargeEditModal');
     if (editModalEl && typeof bootstrap !== 'undefined' && bootstrap.Modal) {
         const editModal = new bootstrap.Modal(editModalEl);
@@ -569,6 +575,12 @@
             document.body.appendChild(f);
             f.submit();
         });
+    }
+    } // _setupChargeEditModal
+    if (document.readyState === 'loading') {
+        document.addEventListener('DOMContentLoaded', _setupChargeEditModal);
+    } else {
+        _setupChargeEditModal();
     }
 })();
 </script>

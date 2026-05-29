@@ -1,5 +1,13 @@
 # Changelog
 
+## v3.0.26 (2026-05-29)
+
+### Hotfix: charge row click + smaller charge modal
+
+**Row click did nothing.** The history-list `<script>` lives inside `{% block content %}`, which is rendered *before* `base.html` loads `bootstrap.bundle.js`. The `typeof bootstrap === 'undefined'` guard at the top of the row-click setup therefore always tripped on first execution, no listener got attached, and clicking a charge row was a no-op (regression introduced in v3.0.24). Setup is now wrapped in a `DOMContentLoaded` hook so it runs after Bootstrap is in scope.
+
+**Charge modal too big on small screens.** The new-charge modal carried `modal-lg modal-fullscreen-sm-down`, which left tablets and split-screen phones between 576 px and 768 px viewing an 800 px modal that overflowed. Both the new-charge and the edit modals now use `modal-fullscreen-md-down` (full-screen up to 768 px, default 500 px above) — fixes the cramped tablet view without affecting desktop.
+
 ## v3.0.25 (2026-05-29)
 
 ### New-charge form moves into a "+" modal (phase 1b)
