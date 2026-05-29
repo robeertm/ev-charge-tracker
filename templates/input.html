@@ -12,7 +12,7 @@
     <h4 class="mb-0"><i class="bi bi-lightning-charge"></i> {{ t('input.title') }}</h4>
     <button type="button" class="btn btn-success" id="btnOpenNewCharge"
             data-bs-toggle="modal" data-bs-target="#newChargeModal">
-        <i class="bi bi-plus-circle"></i> {{ t('input.new_charge') }}
+        <i class="bi bi-plus-circle"></i> {{ t('input.title') }}
     </button>
 </div>
 
@@ -25,7 +25,7 @@
     <div class="modal-content">
       <div class="modal-header bg-success text-white">
         <h5 class="modal-title mb-0">
-          <i class="bi bi-plus-circle"></i> {{ t('input.new_charge') }}
+          <i class="bi bi-plus-circle"></i> {{ t('input.title') }}
           <span class="badge bg-warning text-dark ms-2" id="activeSessionBadge" {% if not active_session %}style="display:none"{% endif %}>
             <i class="bi bi-hourglass-split"></i> {{ t('input.active_session') }}
           </span>

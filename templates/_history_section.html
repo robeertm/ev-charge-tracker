@@ -441,11 +441,12 @@
     }
 
     // ── v3.0.24/26: row click → edit modal ───────────────────────
-    // The bug from v3.0.24/25: this <script> is inside {% block content %}
-    // which runs BEFORE base.html loads bootstrap.bundle.js, so the
-    // `typeof bootstrap === 'undefined'` guard always tripped and no
-    // click handler was attached. Defer setup until DOM (and the inline
-    // bootstrap script after it) has finished so bootstrap.Modal exists.
+    // The v3.0.24/25 bug: this script renders inside the page's content
+    // block, which appears in base.html BEFORE bootstrap.bundle.js is
+    // pulled in. So at first execution `typeof bootstrap` was
+    // 'undefined', the guard tripped, and no click handler was attached.
+    // Defer the setup until DOMContentLoaded so the inline bootstrap
+    // <script> after us has run and `bootstrap.Modal` is in scope.
     function _setupChargeEditModal() {
     const editModalEl = document.getElementById('chargeEditModal');
     if (editModalEl && typeof bootstrap !== 'undefined' && bootstrap.Modal) {

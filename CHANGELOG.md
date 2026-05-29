@@ -1,5 +1,13 @@
 # Changelog
 
+## v3.0.27 (2026-05-29)
+
+### Hotfix: /input was 500-ing after v3.0.26, button label corrected
+
+The v3.0.26 comment in `_history_section.html` quoted `{% block content %}` literally inside a JS comment. Jinja2 happily parsed that as a real block-open tag, then ran out of template before finding the matching `{% endblock %}` and threw a `TemplateSyntaxError` — every GET on `/input` returned HTTP 500. The comment now describes the same situation without the literal tags.
+
+The "+ Neue Ladung" button (and modal title) is renamed to just **"Ladung"** to match the page heading — that was the original v3.0.24 rename intent, accidentally re-introduced as "Neue Ladung" via a new key in v3.0.25.
+
 ## v3.0.26 (2026-05-29)
 
 ### Hotfix: charge row click + smaller charge modal
