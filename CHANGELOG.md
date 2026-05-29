@@ -1,5 +1,11 @@
 # Changelog
 
+## v3.0.31 (2026-05-29)
+
+### Nav-menu label: "Charge" instead of "New Charge"
+
+The top-nav `nav.input` entry kept the old "Neue Ladung" / "New Charge" label in all six languages — out of sync with the page heading + "+" button which were already renamed to just "Ladung" in v3.0.24/27. Renamed across DE, EN, ES, FR, IT, NL so the menu matches the page.
+
 ## v3.0.30 (2026-05-29)
 
 ### Maintenance: same row-click modal pattern as trips and charges (phase 2)
