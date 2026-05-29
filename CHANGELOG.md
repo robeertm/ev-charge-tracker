@@ -1,5 +1,13 @@
 # Changelog
 
+## v3.0.28 (2026-05-29)
+
+### Edit modal: Save reachable + no horizontal slide on mobile
+
+**Save / Cancel slid off the bottom on small screens.** The edit modal wrapped `modal-body` + `modal-footer` in a `<form>`. The form was a plain block element between `modal-content`'s flex children, so the body wasn't constrained to the available height — its content grew past the viewport and pushed the footer (with Save and Delete) below the visible area. The form is now `d-flex flex-column flex-grow-1 overflow-hidden` so it takes over the flex column role: body grows + scrolls inside it, footer stays pinned at the bottom.
+
+**Modal could slide horizontally on small screens.** `overflow-x: hidden` on the modal-body of both the charge-edit and the new-charge dialogs prevents a stray-wide element (Lat/Lon input group, Bootstrap row gutter) from creating a horizontal scroll axis.
+
 ## v3.0.27 (2026-05-29)
 
 ### Hotfix: /input was 500-ing after v3.0.26, button label corrected

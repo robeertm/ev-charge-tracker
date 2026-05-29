@@ -190,8 +190,14 @@
         </h5>
         <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
       </div>
-      <form method="POST" id="chargeEditForm" action="">
-        <div class="modal-body">
+      {# d-flex flex-column flex-grow-1 + overflow-hidden makes the form
+         act as the flex container between modal-header and modal-content's
+         bottom edge. Without this, body+footer wrapped in <form> stack as
+         plain block, the body grows past the viewport, and the footer
+         (Save / Delete) slides off the bottom on small screens. #}
+      <form method="POST" id="chargeEditForm" action=""
+            class="d-flex flex-column flex-grow-1 overflow-hidden">
+        <div class="modal-body" style="overflow-x: hidden;">
           <div id="chargeEditReviewBanner" class="alert alert-danger small py-2" style="display:none">
             <i class="bi bi-exclamation-triangle-fill"></i>
             <span>{{ t('hist.needs_review_hint') }}</span>
