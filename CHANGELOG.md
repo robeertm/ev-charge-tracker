@@ -1,5 +1,20 @@
 # Changelog
 
+## v3.0.30 (2026-05-29)
+
+### Maintenance: same row-click modal pattern as trips and charges (phase 2)
+
+The maintenance page is rewritten to match what trips and charges already look like:
+
+- Heading **Wartung** on the left, **"+ Neue Wartung"** green button on the right.
+- Below: the existing due-items alert (unchanged), then the entry list — full width, no separate left-column form, no trailing trash column.
+- **Clicking a row** opens an in-place modal pre-filled with that entry. The same modal also handles the **"+"** path; the only difference is whether the red Delete button at the bottom-left is visible.
+- The form posts to `/maintenance` (create) or `/maintenance/edit/<id>` (update). Delete uses the existing `/maintenance/delete/<id>` route via a confirm + synthesized form, same as on the charge list.
+
+The auto-fill heuristic that picked next-due km / date from the chosen type still works — its `#itemTypeSel` listener moved into the modal but the id is preserved. Modal sizing follows the v3.0.26/28 conventions: `modal-fullscreen-md-down` so it's full-screen up to 768 px, form is `d-flex flex-column flex-grow-1 overflow-hidden` so Save / Delete stay pinned to the bottom on mobile.
+
+The backend endpoints (`GET /api/maintenance/<id>` and `POST /maintenance/edit/<id>`) shipped inert with v3.0.26; v3.0.30 wires the UI to them.
+
 ## v3.0.29 (2026-05-29)
 
 ### Charge list shows full data on mobile too

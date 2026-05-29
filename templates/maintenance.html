@@ -2,7 +2,19 @@
 {% block title %}{{ t('maint.title') }} — EV Charge Tracker{% endblock %}
 
 {% block content %}
-<h4 class="mb-3"><i class="bi bi-tools"></i> {{ t('maint.title') }}</h4>
+{# v3.0.30 (Phase 2): same UX as charges/trips. Heading + "+ Neue Wartung"
+   on the page, list below. Clicking a row opens the same modal pre-filled
+   with that entry plus a red Delete button. The "+" button opens the same
+   modal in create mode (Delete hidden, form posts to /maintenance). The
+   INTERVALS auto-fill logic that picks next_due_km / next_due_date from
+   the chosen type still hooks into #itemTypeSel — that id is preserved. #}
+
+<div class="d-flex justify-content-between align-items-center mb-3">
+    <h4 class="mb-0"><i class="bi bi-tools"></i> {{ t('maint.title') }}</h4>
+    <button type="button" class="btn btn-success" id="btnNewMaint">
+        <i class="bi bi-plus-circle"></i> {{ t('maint.new_entry') }}
+    </button>
+</div>
 
 {% if due_items %}
 <div class="card mb-3 border-warning">
@@ -26,145 +38,234 @@
 </div>
 {% endif %}
 
-<div class="row g-3">
-    <div class="col-lg-5">
-        <!-- Add form -->
-        <div class="card mb-3">
-            <div class="card-header bg-white fw-bold"><i class="bi bi-plus-circle"></i> {{ t('maint.add_title') }}</div>
-            <div class="card-body">
-                <form method="POST">
-                    <div class="row g-2">
-                        <div class="col-12">
-                            <label class="form-label small mb-1">{{ t('maint.field_type') }}</label>
-                            <select name="item_type" class="form-select form-select-sm" id="itemTypeSel">
-                                <option value="inspection">{{ t('maint.type_inspection') }}</option>
-                                <option value="tires_winter">{{ t('maint.type_tires_winter') }}</option>
-                                <option value="tires_summer">{{ t('maint.type_tires_summer') }}</option>
-                                <option value="brakes">{{ t('maint.type_brakes') }}</option>
-                                <option value="wiper">{{ t('maint.type_wiper') }}</option>
-                                <option value="battery_12v">{{ t('maint.type_battery_12v') }}</option>
-                                <option value="cabin_filter">{{ t('maint.type_cabin_filter') }}</option>
-                                <option value="tuv">{{ t('maint.type_tuv') }}</option>
-                                <option value="other">{{ t('maint.type_other') }}</option>
-                            </select>
-                        </div>
-                        <div class="col-12">
-                            <label class="form-label small mb-1">{{ t('maint.field_title') }}</label>
-                            <input type="text" name="title" class="form-control form-control-sm" placeholder="{{ t('maint.field_title_ph') }}">
-                        </div>
-                        <div class="col-6">
-                            <label class="form-label small mb-1">{{ t('maint.field_date') }}</label>
-                            <input type="date" name="date" class="form-control form-control-sm" value="{{ today }}" required>
-                        </div>
-                        <div class="col-6">
-                            <label class="form-label small mb-1">{{ t('maint.field_odo') }}</label>
-                            <input type="number" name="odometer_km" class="form-control form-control-sm" value="{{ current_odo or '' }}">
-                        </div>
-                        <div class="col-6">
-                            <label class="form-label small mb-1">{{ t('maint.field_cost') }}</label>
-                            <input type="number" step="0.01" name="cost_eur" class="form-control form-control-sm" placeholder="0.00">
-                        </div>
-                        <div class="col-12">
-                            <label class="form-label small mb-1">{{ t('maint.field_notes') }}</label>
-                            <textarea name="notes" rows="2" class="form-control form-control-sm"></textarea>
-                        </div>
-                        <div class="col-6">
-                            <label class="form-label small mb-1">{{ t('maint.field_next_km') }}</label>
-                            <input type="number" name="next_due_km" id="nextKmInput" class="form-control form-control-sm">
-                        </div>
-                        <div class="col-6">
-                            <label class="form-label small mb-1">{{ t('maint.field_next_date') }}</label>
-                            <input type="date" name="next_due_date" id="nextDateInput" class="form-control form-control-sm">
-                        </div>
-                    </div>
-                    <button type="submit" class="btn btn-primary btn-sm mt-3">
-                        <i class="bi bi-save"></i> {{ t('maint.save_btn') }}
-                    </button>
-                </form>
-            </div>
-        </div>
+<div class="card">
+    <div class="card-header bg-white fw-bold d-flex justify-content-between">
+        <span><i class="bi bi-list-ul"></i> {{ t('maint.list_title') }}</span>
+        {% if summary.count %}
+        <span class="text-muted small">
+            {{ summary.count }} {{ t('maint.entries') }} · {{ "%.2f"|format(summary.total_cost) }} €
+        </span>
+        {% endif %}
     </div>
-
-    <div class="col-lg-7">
-        <div class="card">
-            <div class="card-header bg-white fw-bold d-flex justify-content-between">
-                <span><i class="bi bi-list-ul"></i> {{ t('maint.list_title') }}</span>
-                {% if summary.count %}
-                <span class="text-muted small">
-                    {{ summary.count }} {{ t('maint.entries') }} · {{ "%.2f"|format(summary.total_cost) }} €
-                </span>
-                {% endif %}
-            </div>
-            <div class="card-body p-0">
-                <div class="table-responsive">
-                    <table class="table table-sm table-hover mb-0">
-                        <thead>
-                            <tr>
-                                <th>{{ t('maint.field_date') }}</th>
-                                {% if active_vehicle_filter == 'all' %}<th>{{ t('maint.col_vehicle') }}</th>{% endif %}
-                                <th>{{ t('maint.field_type') }}</th>
-                                <th>{{ t('maint.field_title') }}</th>
-                                <th class="text-end">km</th>
-                                <th class="text-end">€</th>
-                                <th></th>
-                            </tr>
-                        </thead>
-                        <tbody>
-                        {# v2.29: render a small color-dotted vehicle badge per
-                           row only when the picker is on "Alle Flotte" — when
-                           a single vehicle is selected the badge would be
-                           redundant. Lookup map keyed by id. #}
-                        {% set _veh_by_id = {} %}
-                        {% for v in fleet_vehicles %}{% set _ = _veh_by_id.update({v.id: v}) %}{% endfor %}
-                        {% for e in entries %}
-                            <tr>
-                                <td class="small">{{ e.date.strftime('%d.%m.%Y') }}</td>
-                                {% if active_vehicle_filter == 'all' %}
-                                <td class="small">
-                                    {% set _v = _veh_by_id.get(e.vehicle_id) %}
-                                    {% if _v %}
-                                    <span class="d-inline-block rounded-circle me-1" style="width:.6rem; height:.6rem; background:{{ _v.color or '#0d6efd' }};"></span>
-                                    {{ _v.name }}
-                                    {% else %}<span class="text-muted">—</span>{% endif %}
-                                </td>
-                                {% endif %}
-                                <td><span class="badge bg-secondary">{{ e.item_type }}</span></td>
-                                <td>{{ e.title or '—' }}</td>
-                                <td class="text-end">{% if e.odometer_km %}{{ '{:,.0f}'.format(e.odometer_km).replace(',', '.') }}{% endif %}</td>
-                                <td class="text-end">{% if e.cost_eur %}{{ "%.2f"|format(e.cost_eur) }}{% endif %}</td>
-                                <td>
-                                    <form method="POST" action="/maintenance/delete/{{ e.id }}" onsubmit="return confirm('{{ t('maint.delete_confirm') }}')">
-                                        <button class="btn btn-sm btn-link text-danger p-0"><i class="bi bi-trash"></i></button>
-                                    </form>
-                                </td>
-                            </tr>
-                        {% else %}
-                            <tr><td colspan="{{ 7 if active_vehicle_filter == 'all' else 6 }}" class="text-center text-muted py-4">{{ t('maint.empty') }}</td></tr>
-                        {% endfor %}
-                        </tbody>
-                    </table>
-                </div>
-            </div>
+    <div class="card-body p-0">
+        <div class="table-responsive">
+            <table class="table table-sm table-hover mb-0">
+                <thead>
+                    <tr>
+                        <th>{{ t('maint.field_date') }}</th>
+                        {% if active_vehicle_filter == 'all' %}<th>{{ t('maint.col_vehicle') }}</th>{% endif %}
+                        <th>{{ t('maint.field_type') }}</th>
+                        <th>{{ t('maint.field_title') }}</th>
+                        <th class="text-end">km</th>
+                        <th class="text-end">€</th>
+                    </tr>
+                </thead>
+                <tbody>
+                {% set _veh_by_id = {} %}
+                {% for v in fleet_vehicles %}{% set _ = _veh_by_id.update({v.id: v}) %}{% endfor %}
+                {% for e in entries %}
+                    <tr class="maintRow" data-entry-id="{{ e.id }}" role="button" style="cursor:pointer">
+                        <td class="small">{{ e.date.strftime('%d.%m.%Y') }}</td>
+                        {% if active_vehicle_filter == 'all' %}
+                        <td class="small">
+                            {% set _v = _veh_by_id.get(e.vehicle_id) %}
+                            {% if _v %}
+                            <span class="d-inline-block rounded-circle me-1" style="width:.6rem; height:.6rem; background:{{ _v.color or '#0d6efd' }};"></span>
+                            {{ _v.name }}
+                            {% else %}<span class="text-muted">—</span>{% endif %}
+                        </td>
+                        {% endif %}
+                        <td><span class="badge bg-secondary">{{ e.item_type }}</span></td>
+                        <td>{{ e.title or '—' }}</td>
+                        <td class="text-end">{% if e.odometer_km %}{{ '{:,.0f}'.format(e.odometer_km).replace(',', '.') }}{% endif %}</td>
+                        <td class="text-end">{% if e.cost_eur %}{{ "%.2f"|format(e.cost_eur) }}{% endif %}</td>
+                    </tr>
+                {% else %}
+                    <tr><td colspan="{{ 6 if active_vehicle_filter == 'all' else 5 }}" class="text-center text-muted py-4">{{ t('maint.empty') }}</td></tr>
+                {% endfor %}
+                </tbody>
+            </table>
         </div>
     </div>
 </div>
 
+<div class="modal fade" id="maintModal" tabindex="-1" aria-hidden="true">
+  <div class="modal-dialog modal-dialog-scrollable modal-fullscreen-md-down">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title mb-0" id="maintModalTitle">
+          <i class="bi bi-plus-circle"></i> {{ t('maint.new_entry') }}
+        </h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+      </div>
+      <form method="POST" id="maintForm" action="/maintenance"
+            class="d-flex flex-column flex-grow-1 overflow-hidden">
+        <div class="modal-body" style="overflow-x: hidden;">
+          <div class="row g-2">
+            <div class="col-12">
+              <label class="form-label small mb-1 fw-semibold">{{ t('maint.field_type') }}</label>
+              <select name="item_type" class="form-select form-select-sm" id="itemTypeSel">
+                <option value="inspection">{{ t('maint.type_inspection') }}</option>
+                <option value="tires_winter">{{ t('maint.type_tires_winter') }}</option>
+                <option value="tires_summer">{{ t('maint.type_tires_summer') }}</option>
+                <option value="brakes">{{ t('maint.type_brakes') }}</option>
+                <option value="wiper">{{ t('maint.type_wiper') }}</option>
+                <option value="battery_12v">{{ t('maint.type_battery_12v') }}</option>
+                <option value="cabin_filter">{{ t('maint.type_cabin_filter') }}</option>
+                <option value="tuv">{{ t('maint.type_tuv') }}</option>
+                <option value="other">{{ t('maint.type_other') }}</option>
+              </select>
+            </div>
+            <div class="col-12">
+              <label class="form-label small mb-1 fw-semibold">{{ t('maint.field_title') }}</label>
+              <input type="text" name="title" id="maintTitle" class="form-control form-control-sm" placeholder="{{ t('maint.field_title_ph') }}">
+            </div>
+            <div class="col-6">
+              <label class="form-label small mb-1 fw-semibold">{{ t('maint.field_date') }}</label>
+              <input type="date" name="date" id="maintDate" class="form-control form-control-sm" value="{{ today }}" required>
+            </div>
+            <div class="col-6">
+              <label class="form-label small mb-1 fw-semibold">{{ t('maint.field_odo') }}</label>
+              <input type="number" name="odometer_km" id="maintOdo" class="form-control form-control-sm" value="{{ current_odo or '' }}">
+            </div>
+            <div class="col-6">
+              <label class="form-label small mb-1 fw-semibold">{{ t('maint.field_cost') }}</label>
+              <input type="number" step="0.01" name="cost_eur" id="maintCost" class="form-control form-control-sm" placeholder="0.00">
+            </div>
+            <div class="col-12">
+              <label class="form-label small mb-1 fw-semibold">{{ t('maint.field_notes') }}</label>
+              <textarea name="notes" id="maintNotes" rows="2" class="form-control form-control-sm"></textarea>
+            </div>
+            <div class="col-6">
+              <label class="form-label small mb-1 fw-semibold">{{ t('maint.field_next_km') }}</label>
+              <input type="number" name="next_due_km" id="nextKmInput" class="form-control form-control-sm">
+            </div>
+            <div class="col-6">
+              <label class="form-label small mb-1 fw-semibold">{{ t('maint.field_next_date') }}</label>
+              <input type="date" name="next_due_date" id="nextDateInput" class="form-control form-control-sm">
+            </div>
+          </div>
+        </div>
+        <div class="modal-footer d-flex justify-content-between">
+          <button type="button" class="btn btn-outline-danger" id="maintDeleteBtn" style="display:none">
+            <i class="bi bi-trash"></i> {{ t('hist.delete') }}
+          </button>
+          <div class="d-flex gap-2 ms-auto">
+            <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">
+              {{ t('common.cancel') }}
+            </button>
+            <button type="submit" class="btn btn-primary">
+              <i class="bi bi-save"></i> {{ t('maint.save_btn') }}
+            </button>
+          </div>
+        </div>
+      </form>
+    </div>
+  </div>
+</div>
+
 <script>
-// Pre-fill next_due fields based on type defaults
 const INTERVALS = {{ default_intervals | tojson }};
 const currentOdo = {{ current_odo or 'null' }};
-document.getElementById('itemTypeSel').addEventListener('change', function() {
-    const intv = INTERVALS[this.value] || {};
-    const kmIn = document.getElementById('nextKmInput');
-    const dateIn = document.getElementById('nextDateInput');
-    if (intv.km && currentOdo) {
-        kmIn.value = currentOdo + intv.km;
-    } else { kmIn.value = ''; }
-    if (intv.months) {
-        const d = new Date();
-        d.setMonth(d.getMonth() + intv.months);
-        dateIn.value = d.toISOString().slice(0, 10);
-    } else { dateIn.value = ''; }
-});
+const TODAY_ISO = {{ today | tojson }};
+const T_MAINT = {
+    new_entry:      {{ t('maint.new_entry') | tojson }},
+    edit_title:     {{ t('maint.edit_title') | tojson }},
+    delete_confirm: {{ t('maint.delete_confirm') | tojson }},
+};
+
+function _maintSetup() {
+    const typeSel = document.getElementById('itemTypeSel');
+    if (typeSel) {
+        // Same auto-fill behavior as the old inline form — pick a sensible
+        // next-due km / date based on the type's default interval. Skipped
+        // when the modal is opened in edit mode (the existing values from
+        // the server win; this listener only fires on user-change).
+        typeSel.addEventListener('change', function() {
+            const intv = INTERVALS[this.value] || {};
+            const kmIn = document.getElementById('nextKmInput');
+            const dateIn = document.getElementById('nextDateInput');
+            if (intv.km && currentOdo) {
+                kmIn.value = currentOdo + intv.km;
+            } else { kmIn.value = ''; }
+            if (intv.months) {
+                const d = new Date();
+                d.setMonth(d.getMonth() + intv.months);
+                dateIn.value = d.toISOString().slice(0, 10);
+            } else { dateIn.value = ''; }
+        });
+    }
+
+    const modalEl = document.getElementById('maintModal');
+    if (!modalEl || typeof bootstrap === 'undefined' || !bootstrap.Modal) return;
+    const modal = bootstrap.Modal.getOrCreateInstance(modalEl);
+    const form = document.getElementById('maintForm');
+    const titleEl = document.getElementById('maintModalTitle');
+    const deleteBtn = document.getElementById('maintDeleteBtn');
+
+    function resetForm() {
+        form.reset();
+        document.getElementById('maintDate').value = TODAY_ISO;
+        document.getElementById('maintOdo').value = currentOdo != null ? currentOdo : '';
+    }
+
+    function openForNew() {
+        resetForm();
+        form.action = '/maintenance';
+        titleEl.innerHTML = '<i class="bi bi-plus-circle"></i> ' + T_MAINT.new_entry;
+        deleteBtn.style.display = 'none';
+        delete deleteBtn.dataset.entryId;
+        modal.show();
+    }
+
+    async function openForEdit(entryId) {
+        titleEl.innerHTML = '<i class="bi bi-pencil-square"></i> ' + T_MAINT.edit_title;
+        deleteBtn.style.display = '';
+        deleteBtn.dataset.entryId = entryId;
+        form.action = '/maintenance/edit/' + entryId;
+        modal.show();
+        try {
+            const r = await fetch('/api/maintenance/' + entryId);
+            if (!r.ok) throw new Error('HTTP ' + r.status);
+            const d = await r.json();
+            document.getElementById('itemTypeSel').value = d.item_type || 'other';
+            document.getElementById('maintTitle').value = d.title || '';
+            document.getElementById('maintDate').value = d.date || '';
+            document.getElementById('maintOdo').value = d.odometer_km != null ? d.odometer_km : '';
+            document.getElementById('maintCost').value = d.cost_eur != null ? d.cost_eur : '';
+            document.getElementById('maintNotes').value = d.notes || '';
+            document.getElementById('nextKmInput').value = d.next_due_km != null ? d.next_due_km : '';
+            document.getElementById('nextDateInput').value = d.next_due_date || '';
+        } catch (e) {
+            console.error('maintenance fetch failed:', e);
+        }
+    }
+
+    document.getElementById('btnNewMaint').addEventListener('click', openForNew);
+
+    document.querySelectorAll('tr.maintRow').forEach(row => {
+        row.addEventListener('click', () => {
+            const id = row.dataset.entryId;
+            if (id) openForEdit(parseInt(id, 10));
+        });
+    });
+
+    deleteBtn.addEventListener('click', () => {
+        const id = deleteBtn.dataset.entryId;
+        if (!id) return;
+        if (!confirm(T_MAINT.delete_confirm)) return;
+        const f = document.createElement('form');
+        f.method = 'POST';
+        f.action = '/maintenance/delete/' + id;
+        document.body.appendChild(f);
+        f.submit();
+    });
+}
+
+if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', _maintSetup);
+} else {
+    _maintSetup();
+}
 </script>
 {% endblock %}
