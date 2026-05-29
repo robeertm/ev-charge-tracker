@@ -92,8 +92,8 @@
                 <th class="text-end">{{ t('hist.cost') }}</th>
                 <th class="text-end d-none d-md-table-cell">{{ t('hist.km') }}</th>
                 <th class="text-end d-none d-md-table-cell">{{ t('hist.soc') }}</th>
-                <th class="text-end d-none d-lg-table-cell">{{ t('hist.loss') }}</th>
-                <th class="text-end d-none d-lg-table-cell">CO₂</th>
+                <th class="text-end d-none d-md-table-cell">{{ t('hist.loss') }}</th>
+                <th class="text-end d-none d-md-table-cell">CO₂</th>
             </tr>
         </thead>
         <tbody>
@@ -121,6 +121,18 @@
                         {% if c.location_name %}{% if c.operator %} · {% endif %}{{ c.location_name }}{% endif %}
                     </div>
                     {% endif %}
+                    {# v3.0.29: compact summary under the date on screens
+                       below md where the dedicated km/SoC/loss/CO2 columns
+                       are hidden. Joining with " · " gives a single readable
+                       muted line without claiming any extra horizontal width. #}
+                    {% set _mobile_bits = [] %}
+                    {% if c.odometer %}{% set _ = _mobile_bits.append('{:,.0f} km'.format(c.odometer).replace(',', '.')) %}{% endif %}
+                    {% if c.soc_from is not none %}{% set _ = _mobile_bits.append(c.soc_from|string + '→' + c.soc_to|string + '%') %}{% endif %}
+                    {% if c.loss_pct is not none %}{% set _ = _mobile_bits.append('%.1f%% %s'|format(c.loss_pct, t('hist.loss'))) %}{% endif %}
+                    {% if c.co2_kg is not none %}{% set _ = _mobile_bits.append('%.1f kg CO₂'|format(c.co2_kg)) %}{% endif %}
+                    {% if _mobile_bits %}
+                    <div class="small text-muted d-md-none">{{ _mobile_bits|join(' · ') }}</div>
+                    {% endif %}
                 </td>
                 <td><span class="badge bg-{{ 'success' if c.charge_type == 'AC' else ('info' if c.charge_type == 'PV' else 'warning') }}">{{ c.charge_type }}</span></td>
                 <td class="text-end">{{ "%.1f"|format(c.kwh_loaded or 0) }}</td>
@@ -135,10 +147,10 @@
                 <td class="text-end d-none d-md-table-cell">
                     {% if c.soc_from is not none %}{{ c.soc_from }}→{{ c.soc_to }}%{% else %}—{% endif %}
                 </td>
-                <td class="text-end d-none d-lg-table-cell">
+                <td class="text-end d-none d-md-table-cell">
                     {% if c.loss_pct is not none %}{{ "%.1f"|format(c.loss_pct) }}%{% else %}—{% endif %}
                 </td>
-                <td class="text-end d-none d-lg-table-cell">
+                <td class="text-end d-none d-md-table-cell">
                     {% if c.co2_kg is not none %}{{ "%.1f"|format(c.co2_kg) }} kg{% else %}—{% endif %}
                 </td>
             </tr>

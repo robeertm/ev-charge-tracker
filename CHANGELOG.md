@@ -1,5 +1,11 @@
 # Changelog
 
+## v3.0.29 (2026-05-29)
+
+### Charge list shows full data on mobile too
+
+Loss and CO₂ used to be `d-none d-lg-table-cell` — hidden below ~992 px — so phones and small tablets saw a charge row stripped of half its useful figures. Both columns are now `d-md-table-cell` (visible from 768 px up). Below 768 px, where dedicated columns still don't fit, a compact muted summary line appears under the date / operator: e.g. `84.499 km · 50→90% · 12.0% Verluste · 13.3 kg CO₂`. Same data, one readable line, no horizontal scroll required.
+
 ## v3.0.28 (2026-05-29)
 
 ### Edit modal: Save reachable + no horizontal slide on mobile
