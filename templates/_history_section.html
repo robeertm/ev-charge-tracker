@@ -94,20 +94,25 @@
                 <th class="text-end d-none d-md-table-cell">{{ t('hist.soc') }}</th>
                 <th class="text-end d-none d-lg-table-cell">{{ t('hist.loss') }}</th>
                 <th class="text-end d-none d-lg-table-cell">CO₂</th>
-                <th></th>
             </tr>
         </thead>
         <tbody>
+            {# v3.0.24: row is the clickable target for the edit modal —
+               only the checkbox + odometer-inline-edit stop propagation
+               so existing in-row interactions stay intact. The dedicated
+               pencil/trash column is gone in favour of the modal that
+               carries Save + Delete together. #}
             {% for c in charges.items %}
-            <tr class="{{ 'table-danger' if c.needs_review else ('table-success' if c.charge_type == 'AC' else ('table-info' if c.charge_type == 'PV' else 'table-warning')) }}"
-                style="--bs-table-bg-factor: 0.15;">
-                <td><input type="checkbox" class="form-check-input row-select" data-id="{{ c.id }}"></td>
+            <tr class="chargeRow {{ 'table-danger' if c.needs_review else ('table-success' if c.charge_type == 'AC' else ('table-info' if c.charge_type == 'PV' else 'table-warning')) }}"
+                data-charge-id="{{ c.id }}" role="button"
+                style="--bs-table-bg-factor: 0.15; cursor: pointer;">
+                <td class="rowStop"><input type="checkbox" class="form-check-input row-select" data-id="{{ c.id }}"></td>
                 <td>
                     {{ c.date.strftime('%d.%m.%Y') }}
                     {% if c.needs_review %}
-                    <a href="{{ url_for('edit_charge', charge_id=c.id) }}" class="badge bg-danger text-decoration-none d-inline-flex align-items-center gap-1" title="{{ t('hist.needs_review_hint') }}">
+                    <span class="badge bg-danger d-inline-flex align-items-center gap-1" title="{{ t('hist.needs_review_hint') }}">
                         <i class="bi bi-exclamation-triangle-fill"></i> {{ t('hist.needs_review') }}
-                    </a>
+                    </span>
                     {% endif %}
                     {% if c.operator or c.location_name %}
                     <div class="small text-muted text-truncate" style="max-width: 180px;"
@@ -121,7 +126,7 @@
                 <td class="text-end">{{ "%.1f"|format(c.kwh_loaded or 0) }}</td>
                 <td class="text-end">{{ "%.2f"|format(c.eur_per_kwh or 0) }}</td>
                 <td class="text-end fw-bold">€{{ "%.2f"|format(c.total_cost or 0) }}</td>
-                <td class="text-end d-none d-md-table-cell">
+                <td class="text-end d-none d-md-table-cell rowStop">
                     <span class="editable-km" data-id="{{ c.id }}" role="button" title="{{ t('hist.click_edit_km') }}"
                           style="cursor:pointer; border-bottom:1px dashed #aaa;">
                         {% if c.odometer %}{{ "{:,}".format(c.odometer).replace(",", ".") }}{% else %}—{% endif %}
@@ -135,19 +140,6 @@
                 </td>
                 <td class="text-end d-none d-lg-table-cell">
                     {% if c.co2_kg is not none %}{{ "%.1f"|format(c.co2_kg) }} kg{% else %}—{% endif %}
-                </td>
-                <td>
-                    <div class="btn-group btn-group-sm">
-                        <a href="/edit/{{ c.id }}" class="btn btn-outline-primary" title="{{ t('hist.edit') }}">
-                            <i class="bi bi-pencil"></i>
-                        </a>
-                        <form method="POST" action="/delete/{{ c.id }}" class="d-inline"
-                              onsubmit="return confirm(window.HIST_T.confirm_delete)">
-                            <button type="submit" class="btn btn-outline-danger" title="{{ t('hist.delete') }}">
-                                <i class="bi bi-trash"></i>
-                            </button>
-                        </form>
-                    </div>
                 </td>
             </tr>
             {% endfor %}
@@ -183,6 +175,160 @@
 
 <div class="text-muted text-center small">
     {{ charges.total }} {{ t('hist.total_entries') }}
+</div>
+
+{# v3.0.24: edit modal — opened by clicking any row in the table above.
+   POSTs to /edit/<id> (existing route); Delete uses /delete/<id>. The
+   `chargeRow` JS at the bottom of this file fetches /api/charges/<id>,
+   fills the fields, and shows the modal. #}
+<div class="modal fade" id="chargeEditModal" tabindex="-1" aria-hidden="true">
+  <div class="modal-dialog modal-dialog-scrollable modal-fullscreen-sm-down">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title">
+          <i class="bi bi-pencil-square"></i> {{ t('hist.edit') }}
+        </h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+      </div>
+      <form method="POST" id="chargeEditForm" action="">
+        <div class="modal-body">
+          <div id="chargeEditReviewBanner" class="alert alert-danger small py-2" style="display:none">
+            <i class="bi bi-exclamation-triangle-fill"></i>
+            <span>{{ t('hist.needs_review_hint') }}</span>
+          </div>
+
+          <div class="row g-2 mb-2">
+            <div class="col-7">
+              <label class="form-label small mb-0 fw-semibold">{{ t('input.date') }}</label>
+              <input type="date" class="form-control form-control-sm" name="date" id="chgEditDate" required>
+            </div>
+            <div class="col-5">
+              <label class="form-label small mb-0 fw-semibold">{{ t('input.start_time') }}</label>
+              <select class="form-select form-select-sm" name="charge_hour" id="chgEditHour">
+                <option value="">–</option>
+                {% for h in range(24) %}<option value="{{ h }}">{{ "%02d"|format(h) }}:00</option>{% endfor %}
+              </select>
+            </div>
+          </div>
+
+          <div class="mb-2">
+            <label class="form-label small mb-0 fw-semibold">{{ t('input.charge_type') }}</label>
+            <select class="form-select form-select-sm" name="charge_type" id="chgEditType">
+              <option value="AC">AC</option>
+              <option value="DC">DC</option>
+              <option value="PV">PV</option>
+            </select>
+          </div>
+
+          <div class="row g-2 mb-2">
+            <div class="col-6">
+              <label class="form-label small mb-0 fw-semibold">{{ t('input.soc_from') }}</label>
+              <input type="number" class="form-control form-control-sm" name="soc_from" id="chgEditSocFrom" min="0" max="100" step="1">
+            </div>
+            <div class="col-6">
+              <label class="form-label small mb-0 fw-semibold">{{ t('input.soc_to') }}</label>
+              <input type="number" class="form-control form-control-sm" name="soc_to" id="chgEditSocTo" min="0" max="100" step="1">
+            </div>
+          </div>
+
+          <div class="row g-2 mb-2">
+            <div class="col-6">
+              <label class="form-label small mb-0 fw-semibold">{{ t('input.kwh_loaded') }}</label>
+              <input type="number" class="form-control form-control-sm" name="kwh_loaded" id="chgEditKwh"
+                     step="0.001" min="0"
+                     max="{{ ((battery_kwh|float) * 1.3) | round(1) if battery_kwh else 200 }}"
+                     inputmode="decimal" required>
+            </div>
+            <div class="col-6">
+              <label class="form-label small mb-0 fw-semibold">{{ t('input.eur_kwh') }}</label>
+              <input type="number" class="form-control form-control-sm" name="eur_per_kwh" id="chgEditEur"
+                     step="0.01" min="0" max="2" inputmode="decimal">
+            </div>
+          </div>
+
+          <div class="mb-2">
+            <label class="form-label small mb-0 fw-semibold">
+              <i class="bi bi-building"></i> {{ t('input.operator') }}
+            </label>
+            <select class="form-select form-select-sm" id="chgEditOperatorSelect">
+              <option value="">{{ t('input.operator_none') }}</option>
+              {% for op in operators or [] %}
+                <option value="{{ op }}">{{ op }}</option>
+              {% endfor %}
+              <option value="__custom">{{ t('input.operator_custom_option') }}</option>
+            </select>
+            <input type="text" class="form-control form-control-sm mt-1" id="chgEditOperatorCustom"
+                   placeholder="{{ t('input.operator_ph') }}" autocomplete="off" style="display:none">
+            <input type="hidden" name="operator" id="chgEditOperator">
+          </div>
+
+          <div class="mb-2">
+            <label class="form-label small mb-0 fw-semibold">
+              <i class="bi bi-geo-alt"></i> {{ t('input.location') }}
+            </label>
+            <input type="text" class="form-control form-control-sm mb-1" name="location_name" id="chgEditLocName"
+                   placeholder="{{ t('input.location_name_ph') }}">
+            <div class="input-group input-group-sm">
+              <span class="input-group-text">Lat</span>
+              <input type="number" step="0.000001" name="location_lat" id="chgEditLat" class="form-control">
+              <span class="input-group-text">Lon</span>
+              <input type="number" step="0.000001" name="location_lon" id="chgEditLon" class="form-control">
+            </div>
+          </div>
+
+          <div class="row g-2 mb-2">
+            <div class="col-6">
+              <label class="form-label small mb-0 fw-semibold">{{ t('hist.km') }}</label>
+              <input type="number" class="form-control form-control-sm" name="odometer" id="chgEditOdo" step="1" min="0">
+            </div>
+            <div class="col-6">
+              <label class="form-label small mb-0 fw-semibold">CO₂ g/kWh</label>
+              <input type="number" class="form-control form-control-sm" name="co2_g_per_kwh" id="chgEditCo2" step="1" min="0">
+            </div>
+          </div>
+
+          <div class="mb-2">
+            <label class="form-label small mb-0 fw-semibold">{{ t('input.loss_label') }} (kWh)</label>
+            <input type="number" class="form-control form-control-sm" name="loss_kwh" id="chgEditLoss" step="0.001" min="0">
+          </div>
+
+          <div class="mb-2">
+            <label class="form-label small mb-0 fw-semibold">{{ t('input.notes') }}</label>
+            <textarea class="form-control form-control-sm" name="notes" id="chgEditNotes" rows="2"></textarea>
+          </div>
+
+          <details class="mb-2">
+            <summary class="small text-muted">{{ t('input.extra_costs') }}</summary>
+            <div class="row g-2 mt-1">
+              <div class="col-6">
+                <label class="form-label small mb-0">{{ t('input.start_fee') }} (€)</label>
+                <input type="number" class="form-control form-control-sm" name="start_fee_eur" id="chgEditStartFee" step="0.01" min="0">
+              </div>
+              <div class="col-6">
+                <label class="form-label small mb-0">{{ t('input.blocking_fee') }} (€)</label>
+                <input type="number" class="form-control form-control-sm" name="blocking_fee_eur" id="chgEditBlockFee" step="0.01" min="0">
+              </div>
+            </div>
+          </details>
+
+          <div id="chargeEditStatus" class="small text-muted mt-2"></div>
+        </div>
+        <div class="modal-footer d-flex justify-content-between">
+          <button type="button" class="btn btn-outline-danger" id="chargeEditDelete">
+            <i class="bi bi-trash"></i> {{ t('hist.delete') }}
+          </button>
+          <div class="d-flex gap-2">
+            <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">
+              {{ t('common.cancel') }}
+            </button>
+            <button type="submit" class="btn btn-primary">
+              <i class="bi bi-save"></i> {{ t('input.save') }}
+            </button>
+          </div>
+        </div>
+      </form>
+    </div>
+  </div>
 </div>
 
 <script>
@@ -291,6 +437,137 @@
                 alert(window.HIST_T.error_prefix + ' ' + e.message);
                 bulkApply.disabled = false;
             }
+        });
+    }
+
+    // ── v3.0.24: row click → edit modal ──────────────────────────
+    const editModalEl = document.getElementById('chargeEditModal');
+    if (editModalEl && typeof bootstrap !== 'undefined' && bootstrap.Modal) {
+        const editModal = new bootstrap.Modal(editModalEl);
+        const editForm = document.getElementById('chargeEditForm');
+        const editStatus = document.getElementById('chargeEditStatus');
+        const reviewBanner = document.getElementById('chargeEditReviewBanner');
+        const deleteBtn = document.getElementById('chargeEditDelete');
+        const opSel = document.getElementById('chgEditOperatorSelect');
+        const opCustom = document.getElementById('chgEditOperatorCustom');
+        const opHidden = document.getElementById('chgEditOperator');
+        const F = {
+            date:    document.getElementById('chgEditDate'),
+            hour:    document.getElementById('chgEditHour'),
+            type:    document.getElementById('chgEditType'),
+            socFrom: document.getElementById('chgEditSocFrom'),
+            socTo:   document.getElementById('chgEditSocTo'),
+            kwh:     document.getElementById('chgEditKwh'),
+            eur:     document.getElementById('chgEditEur'),
+            locName: document.getElementById('chgEditLocName'),
+            lat:     document.getElementById('chgEditLat'),
+            lon:     document.getElementById('chgEditLon'),
+            odo:     document.getElementById('chgEditOdo'),
+            co2:     document.getElementById('chgEditCo2'),
+            loss:    document.getElementById('chgEditLoss'),
+            notes:   document.getElementById('chgEditNotes'),
+            startFee:document.getElementById('chgEditStartFee'),
+            blockFee:document.getElementById('chgEditBlockFee'),
+        };
+
+        // Operator dropdown ↔ hidden field sync (same logic as input.html).
+        function commitOperator(value) {
+            opHidden.value = (value || '').trim();
+        }
+        opSel.addEventListener('change', () => {
+            if (opSel.value === '__custom') {
+                opCustom.style.display = '';
+                opCustom.value = '';
+                opCustom.focus();
+                commitOperator('');
+            } else {
+                opCustom.style.display = 'none';
+                commitOperator(opSel.value);
+            }
+        });
+        opCustom.addEventListener('input', () => { opHidden.value = opCustom.value.trim(); });
+
+        function setOperatorFromValue(opName) {
+            const value = opName || '';
+            opHidden.value = value;
+            // Try to select the option; fall back to __custom for free-text.
+            const opt = Array.from(opSel.options).find(o => o.value === value);
+            if (value === '') {
+                opSel.value = '';
+                opCustom.style.display = 'none';
+                opCustom.value = '';
+            } else if (opt) {
+                opSel.value = value;
+                opCustom.style.display = 'none';
+                opCustom.value = '';
+            } else {
+                opSel.value = '__custom';
+                opCustom.style.display = '';
+                opCustom.value = value;
+            }
+        }
+
+        function setStatus(msg, level) {
+            if (!editStatus) return;
+            editStatus.textContent = msg || '';
+            editStatus.className = 'small mt-2 text-' + (level || 'muted');
+        }
+
+        async function openEditor(chargeId) {
+            setStatus('…');
+            editForm.action = '/edit/' + chargeId;
+            deleteBtn.dataset.chargeId = chargeId;
+            editModal.show();
+            try {
+                const r = await fetch('/api/charges/' + chargeId);
+                if (!r.ok) throw new Error('HTTP ' + r.status);
+                const d = await r.json();
+                F.date.value    = d.date || '';
+                F.hour.value    = d.charge_hour != null ? d.charge_hour : '';
+                F.type.value    = d.charge_type || 'AC';
+                F.socFrom.value = d.soc_from != null ? d.soc_from : '';
+                F.socTo.value   = d.soc_to   != null ? d.soc_to   : '';
+                F.kwh.value     = d.kwh_loaded != null ? d.kwh_loaded : '';
+                F.eur.value     = d.eur_per_kwh != null ? d.eur_per_kwh : '';
+                F.locName.value = d.location_name || '';
+                F.lat.value     = d.location_lat != null ? Number(d.location_lat).toFixed(6) : '';
+                F.lon.value     = d.location_lon != null ? Number(d.location_lon).toFixed(6) : '';
+                F.odo.value     = d.odometer != null ? d.odometer : '';
+                F.co2.value     = d.co2_g_per_kwh != null ? d.co2_g_per_kwh : '';
+                F.loss.value    = d.loss_kwh != null ? d.loss_kwh : '';
+                F.notes.value   = d.notes || '';
+                F.startFee.value = d.start_fee_eur != null ? d.start_fee_eur : '';
+                F.blockFee.value = d.blocking_fee_eur != null ? d.blocking_fee_eur : '';
+                setOperatorFromValue(d.operator || '');
+                reviewBanner.style.display = d.needs_review ? '' : 'none';
+                setStatus('');
+            } catch (e) {
+                setStatus('Fehler: ' + e.message, 'danger');
+            }
+        }
+
+        // Row click — ignore clicks on .rowStop containers (checkbox,
+        // inline-edit km) so they keep working.
+        document.querySelectorAll('tr.chargeRow').forEach(row => {
+            row.addEventListener('click', (e) => {
+                if (e.target.closest('.rowStop')) return;
+                const id = row.dataset.chargeId;
+                if (id) openEditor(parseInt(id, 10));
+            });
+        });
+
+        // Delete: confirm → POST /delete/<id> via a synthesized form so
+        // the existing route handles it identically to the old per-row
+        // trash button.
+        deleteBtn.addEventListener('click', () => {
+            const id = deleteBtn.dataset.chargeId;
+            if (!id) return;
+            if (!confirm(window.HIST_T.confirm_delete)) return;
+            const f = document.createElement('form');
+            f.method = 'POST';
+            f.action = '/delete/' + id;
+            document.body.appendChild(f);
+            f.submit();
         });
     }
 })();

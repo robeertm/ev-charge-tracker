@@ -2410,9 +2410,16 @@ def register_routes(app):
     def history():
         charges, charge_type, year, years, per_page_raw = \
             _build_charges_query(request.args)
+        # v3.0.24: the embedded edit-modal in _history_section.html needs
+        # the operator dropdown + price map + battery capacity (for the
+        # kWh hard cap). /input already passes these; mirror them here so
+        # the partial works in both contexts.
         return render_template('history.html', charges=charges,
                                charge_type=charge_type, year=year, years=years,
-                               per_page=per_page_raw)
+                               per_page=per_page_raw,
+                               operators=_get_operator_list(),
+                               operator_prices=_get_operator_prices(),
+                               battery_kwh=_get_battery_kwh())
 
     # ── EDIT / DELETE ──────────────────────────────────────────
     @app.route('/edit/<int:charge_id>', methods=['GET', 'POST'])
@@ -2450,6 +2457,12 @@ def register_routes(app):
                 )
                 db.session.commit()
                 flash(t('flash.entry_updated'), 'success')
+                # v3.0.24: when the edit was submitted from the in-page
+                # modal (on /input or /history), bounce back to where the
+                # user was instead of always landing on /history.
+                _ref = request.referrer or ''
+                if _ref and request.host in _ref:
+                    return redirect(_ref)
                 return redirect(url_for('history'))
             except Exception as e:
                 flash(t('flash.error', error=e), 'danger')
@@ -2471,6 +2484,9 @@ def register_routes(app):
         db.session.delete(charge)
         db.session.commit()
         flash(t('flash.entry_deleted'), 'warning')
+        _ref = request.referrer or ''
+        if _ref and request.host in _ref:
+            return redirect(_ref)
         return redirect(url_for('history'))
 
     # ── SETTINGS ───────────────────────────────────────────────
@@ -3036,6 +3052,17 @@ def register_routes(app):
         charge.odometer = int(data['odometer']) if data.get('odometer') else None
         db.session.commit()
         return jsonify({'ok': True, 'odometer': charge.odometer})
+
+    @app.route('/api/charges/<int:charge_id>', methods=['GET'])
+    def api_get_charge(charge_id):
+        """Return a single Charge's fields as JSON for the in-place edit
+        modal in the history list (v3.0.24). Mirrors Charge.to_dict() and
+        adds the needs_review flag the modal uses to mark the form."""
+        charge = Charge.query.get_or_404(charge_id)
+        d = charge.to_dict()
+        d['needs_review'] = bool(charge.needs_review)
+        d['vehicle_id'] = charge.vehicle_id
+        return jsonify(d)
 
     @app.route('/api/charges/bulk_type', methods=['POST'])
     def api_charges_bulk_type():

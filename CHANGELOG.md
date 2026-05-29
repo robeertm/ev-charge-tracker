@@ -1,5 +1,18 @@
 # Changelog
 
+## v3.0.24 (2026-05-29)
+
+### Charges: row-click → in-place edit modal (phase 1a)
+
+The charge history list now follows the same interaction pattern as the trips log: clicking a row opens an in-place modal with all the fields editable + a red Delete button at the bottom-left. The dedicated pencil/trash column on each row is gone. After save or delete the user lands back on the page they came from (Referer-aware redirect) instead of being bounced to /history.
+
+- New endpoint `/api/charges/<id>` returns a Charge as JSON for the modal to populate from.
+- The modal is included in `_history_section.html` so both `/input` and `/history` get it.
+- The `/input` page heading is renamed from "Neue Ladung erfassen" → "Ladung" (matches the trips/Fahrtenbuch tone). All six languages.
+- Filled in the previously-missing `input.operator*` keys in es / fr / it / nl (they were quietly falling back to German).
+
+The new-charge form (Start/Stop/Live-Timer) above the list stays in place for this phase. Phase 1b will move that into a "+" modal in v3.0.25.
+
 ## v3.0.23 (2026-05-28)
 
 ### Trip-edit map: both endpoints are always visible
