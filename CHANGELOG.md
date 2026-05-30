@@ -1,5 +1,15 @@
 # Changelog
 
+## v3.0.32 (2026-05-30)
+
+### Auto-detect: defend against the cloud's SoC-echo at charge end
+
+Real report: a 50→82 % home charge finished, but the auto-detection produced no entry. The BlueLink/UVO cloud occasionally echoes the charge-*start* SoC on the very first `is_charging=0` response after a charge ends — so the 1→0 transition arrived with `soc=50` instead of `82`. The detector computed `soc_to − soc_from = −3`, the gain was below the 3 % threshold, and it silently bailed. Eight minutes later the cloud sent the real `soc=82` reading, but `is_charging` was already 0 at that point so no new transition fired and the whole charge was missed.
+
+`soc_to` is now floored at the highest SoC observed during the charging run. A glitchy echo can no longer sink the end-SoC below what the car physically reached, so the detection captures the full window even when the cloud lies on the very last sample.
+
+The missed 2026-05-30 ev-robert charge (50→82 %, ~24.3 kWh, home) was reconstructed manually as `needs_review` so the user can confirm and edit if needed.
+
 ## v3.0.31 (2026-05-29)
 
 ### Nav-menu label: "Charge" instead of "New Charge"

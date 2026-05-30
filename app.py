@@ -968,7 +968,20 @@ def _detect_auto_charge(end_sync):
     soc_from = (pre_charge_row.soc_percent if pre_charge_row
                 and pre_charge_row.soc_percent is not None
                 else start_row.soc_percent)
+    # v3.0.32: guard against the BlueLink/UVO cloud occasionally echoing
+    # the charge-START SoC on the very first is_charging=0 response. Real
+    # report from 2026-05-30: a 50→82 % home charge produced
+    # end_sync.soc=50 instead of 82, the next stable sync arrived 8 min
+    # later with soc=82 but no longer carried a 1→0 transition, so the
+    # detector silently missed the whole charge. Floor soc_to at the
+    # highest SoC seen during the charging run so an echo can't sink it
+    # below the value the car already physically reached.
+    charge_top_soc = max((r.soc_percent for r in charging_rows
+                          if r.soc_percent is not None),
+                         default=None)
     soc_to = end_sync.soc_percent
+    if charge_top_soc is not None and (soc_to is None or charge_top_soc > soc_to):
+        soc_to = charge_top_soc
     if soc_from is None or soc_to is None:
         return
     if (soc_to - soc_from) < _AUTO_CHARGE_MIN_SOC_GAIN:
