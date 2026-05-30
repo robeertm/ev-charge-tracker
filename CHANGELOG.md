@@ -1,5 +1,13 @@
 # Changelog
 
+## v3.0.34 (2026-05-30)
+
+### Edit modals: stop iOS Safari from zooming on input focus
+
+Tapping into any field inside the charge / trip / maintenance edit modals on iPhone made Safari zoom hard into the input, leaving the cursor offset and the modal partly off-screen. The cause is a long-standing iOS behaviour: whenever a focused `<input>` has a computed font-size below 16 px, Safari treats it as "too small to type into" and auto-zooms. Bootstrap's `form-control-sm` (which all three modals use to keep the form compact on mobile) renders at 0.875 rem ≈ 14 px — exactly in the zoom-trigger range.
+
+Added a mobile CSS rule (`@media (max-width: 768px)`) that lifts every text/number/select input back to 16 px. Pinch-zoom still works for the rest of the page; only the auto-zoom on focus is gone.
+
 ## v3.0.33 (2026-05-30)
 
 ### Edit/new charge: allow 4-decimal price per kWh

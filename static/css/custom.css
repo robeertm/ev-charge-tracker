@@ -85,6 +85,29 @@ body {
     .btn-lg {
         padding: 0.7rem 1rem;
     }
+    /* iOS Safari auto-zooms whenever a focused input has font-size < 16px.
+       Bootstrap's form-control-sm (0.875rem ≈ 14px) triggers this on every
+       tap inside the charge / trip / maintenance edit modals. Force 16px
+       on phones for every text-style input so the page never zooms in
+       on focus, while leaving pinch-zoom available to the user. */
+    .form-control,
+    .form-control-sm,
+    .form-select,
+    .form-select-sm,
+    textarea.form-control,
+    input[type="text"],
+    input[type="number"],
+    input[type="email"],
+    input[type="password"],
+    input[type="date"],
+    input[type="time"],
+    input[type="datetime-local"],
+    input[type="search"],
+    input[type="tel"],
+    input[type="url"],
+    select {
+        font-size: 16px;
+    }
 }
 
 .navbar-brand i {
