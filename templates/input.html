@@ -172,7 +172,7 @@
                         <div class="col-6">
                             <label for="eur_per_kwh" class="form-label fw-bold">{{ t('input.eur_kwh') }}</label>
                             <input type="number" class="form-control form-control-lg" id="eur_per_kwh"
-                                   name="eur_per_kwh" step="0.01" min="0" max="2"
+                                   name="eur_per_kwh" step="0.0001" min="0" max="2"
                                    placeholder="0.30" inputmode="decimal"
                                    value="{{ pre_charge.eur_per_kwh if pre_charge and pre_charge.eur_per_kwh is not none else (auto_loc.eur_per_kwh if auto_loc and auto_loc.eur_per_kwh is not none else '') }}">
                         </div>

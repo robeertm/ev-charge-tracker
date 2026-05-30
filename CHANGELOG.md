@@ -1,5 +1,13 @@
 # Changelog
 
+## v3.0.33 (2026-05-30)
+
+### Edit/new charge: allow 4-decimal price per kWh
+
+The price-per-kWh input on all three forms (new charge, in-page edit modal on /input and /history, full-page /edit) had `step="0.01"`, which forced the browser to reject any value that didn't round to two decimals. Auto-detected and reconstructed entries store the operator price as-configured (e.g. `0.3287 €/kWh`), so the user couldn't save them without manually rounding first — for the reconstructed v3.0.32 entry the form simply refused with *"ungültiger Wert"*. Relaxed `step` to `0.0001` so any tariff with up to four decimal places submits cleanly while the spinner still works.
+
+A retrospective sweep of the last 14 days of vehicle-sync data turned up one further missed charge: ev-dirk on 2026-05-22 at work (50→90 %, ~31.4 kWh AC). The sync log was clean, so this predates the v3.0.32 cloud-echo fix and was likely missed by an earlier detector version. Reconstructed as `needs_review`.
+
 ## v3.0.32 (2026-05-30)
 
 ### Auto-detect: defend against the cloud's SoC-echo at charge end
