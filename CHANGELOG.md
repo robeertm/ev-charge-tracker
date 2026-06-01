@@ -1,5 +1,21 @@
 # Changelog
 
+## v3.0.43 (2026-06-01)
+
+### /input resume banner: removed
+
+After v3.0.35 / 38 / 39 / 40 / 41 / 42 the banner kept resurfacing in stuck states. Removed the feature entirely:
+
+- The `<div id="resumeChargeBanner">` element is gone from the template.
+- The `syncResumeBanner` IIFE is replaced with a minimal `purgeStaleChargeKey` IIFE that just nukes the localStorage entry when the server reports no recent charging activity (or when its `startTime` is older than 6 h).
+- Discard endpoint and `dismissed_charge_session_ids` AppConfig stay in the codebase for now (no harm) but are no longer driven.
+
+The intermediate-save flow still works — Zwischenspeichern still redirects with `saved_id`, the form still pre-fills from `pre_charge`, localStorage still restores in-progress field values. The user just doesn't get a top-of-page reminder anymore. To finalise a half-saved charge, click its row in the history table; the existing edit modal opens with everything pre-filled. This trades one UI affordance for not having a phantom banner the user couldn't get rid of.
+
+### Trip split: trip-too-short screen no longer shows misleading hint
+
+The "tap a candidate or anywhere on the map" empty-stops hint kept rendering below the trip-too-short alert even though there was nothing tappable. Suppressed when the trip is rejected as too short.
+
 ## v3.0.42 (2026-06-01)
 
 ### /input banner: localStorage path also auto-cleaned

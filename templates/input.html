@@ -16,27 +16,15 @@
     </button>
 </div>
 
-{# v3.0.35: an in-progress session no longer auto-opens the modal.
-   Instead a clickable banner appears here so the user can resume it,
-   plus an explicit Verwerfen (discard) button next to it for zombie
-   sessions the user never actually started. Hidden by default; the
-   server flips it on when active_session is set, and the JS
-   staleness check below toggles it on/off from localStorage. #}
-<div id="resumeChargeBanner"
-     class="alert alert-warning d-flex align-items-center justify-content-between mb-3"
-     data-saved-id="{{ active_saved_id or '' }}"
-     style="{% if not active_session %}display:none;{% endif %}">
-    <span role="button" id="resumeChargeOpen"
-          data-bs-toggle="modal" data-bs-target="#newChargeModal"
-          style="cursor:pointer; flex:1 1 auto;">
-        <i class="bi bi-hourglass-split"></i>
-        {{ t('input.resume_session') }}
-    </span>
-    <button type="button" class="btn btn-sm btn-outline-secondary ms-2"
-            id="resumeChargeDiscard" title="{{ t('input.discard_session') }}">
-        <i class="bi bi-x-lg"></i> <span class="d-none d-sm-inline">{{ t('input.discard_session') }}</span>
-    </button>
-</div>
+{# v3.0.43: resume banner removed entirely. After five attempts at
+   fixing edge cases (v3.0.35 / 38 / 39 / 40 / 41 / 42), the feature
+   kept resurfacing in stuck states the user couldn't escape. The
+   underlying intermediate-save flow still works — Zwischenspeichern
+   still redirects with the saved_id so the form pre-fills, and
+   localStorage still restores the in-progress form values across
+   reloads. The user just doesn't get a top-of-page banner anymore.
+   To finalise a half-saved charge, click its row in the history
+   table below; the edit modal opens with everything pre-filled. #}
 
 {% if charges %}
 {% include "_history_section.html" %}
@@ -683,112 +671,35 @@ function persistFormCache() {
     } catch(e) {}
 })();
 
-// v3.0.35: no auto-open. The page always lands on the history list;
-// the modal is opened only by the user (the "+" button) or by tapping
-// the resume banner. A stale CHARGE_KEY (startTime > 6 h old) is
-// purged here so it can't keep showing the banner forever.
-// v3.0.38: Verwerfen is now permanent per saved_id — it adds the id
-// to a "dismissed" set in localStorage, hides the banner without
-// reload, and strips the URL params. Even if the user's browser keeps
-// re-loading with the same saved_id (bookmark, browser-history), the
-// banner stays gone.
+// v3.0.43: resume banner removed (see template comment). The
+// localStorage CHARGE_KEY still drives the intermediate-save form
+// restoration, but no longer the banner. Stale CHARGE_KEY entries
+// (startTime > 6 h) are still purged here on every page load so
+// downstream code doesn't act on dead state. Also: when the server
+// reports no_recent_activity, purge immediately regardless of age.
 const CHARGE_SESSION_TTL_HOURS = 6;
-const DISMISSED_KEY = 'ev_charge_dismissed_ids';
-(function syncResumeBanner() {
-    const banner = document.getElementById('resumeChargeBanner');
-    if (!banner) return;
-
-    const url = new URL(window.location.href);
-    // v3.0.39: read saved_id from the server-rendered data attribute
-    // first; the URL's saved_id is stripped earlier by ingestSavedId,
-    // so by the time this IIFE runs the URL no longer carries it.
-    // localStorage.chargeId is a third fallback for the case where
-    // the URL was already stripped by an earlier render.
-    let activeSavedId = banner.dataset.savedId || '';
-    if (!activeSavedId) activeSavedId = url.searchParams.get('saved_id') || '';
-    if (!activeSavedId) {
-        try {
-            const cs = JSON.parse(localStorage.getItem(CHARGE_KEY) || '{}');
-            if (cs && cs.chargeId) activeSavedId = String(cs.chargeId);
-        } catch(_) {}
-    }
-
-    // Build the dismissed-set with safe defaults.
-    let dismissed = [];
-    try { dismissed = JSON.parse(localStorage.getItem(DISMISSED_KEY) || '[]'); } catch(_) {}
-    if (!Array.isArray(dismissed)) dismissed = [];
-
-    // v3.0.42: server tells us when there's no real charging activity
-    // in the last 2 h. In that case we unconditionally purge
-    // CHARGE_KEY before even checking it — kills the stuck-banner case
-    // where localStorage outlived its DB-side reality.
+(function purgeStaleChargeKey() {
+    // Server tells us when there's been no charging activity in the
+    // last 2 h. In that case the localStorage state is by definition
+    // stale and gets nuked.
     const noRecentActivity = {{ 'true' if no_recent_activity else 'false' }};
     if (noRecentActivity) {
         try { localStorage.removeItem(CHARGE_KEY); } catch(_){}
+        return;
     }
-
-    let hasFreshLocal = false;
+    // Otherwise honour the 6 h TTL.
     try {
         const raw = localStorage.getItem(CHARGE_KEY);
         if (raw) {
             const s = JSON.parse(raw);
             if (s && s.startTime) {
                 const ageH = (Date.now() - Date.parse(s.startTime)) / 3.6e6;
-                if (ageH >= 0 && ageH < CHARGE_SESSION_TTL_HOURS) hasFreshLocal = true;
-                else localStorage.removeItem(CHARGE_KEY);
+                if (ageH < 0 || ageH >= CHARGE_SESSION_TTL_HOURS) {
+                    localStorage.removeItem(CHARGE_KEY);
+                }
             }
         }
     } catch(e) { try { localStorage.removeItem(CHARGE_KEY); } catch(_){} }
-
-    const serverActive = {{ 'true' if active_session else 'false' }};
-    // Suppress the banner if the user already explicitly discarded
-    // this saved_id (stored in DISMISSED_KEY on previous Verwerfen).
-    const isDismissed = activeSavedId && dismissed.indexOf(activeSavedId) !== -1;
-    const shouldShow = (serverActive && !isDismissed) || hasFreshLocal;
-    banner.style.display = shouldShow ? '' : 'none';
-
-    const discardBtn = document.getElementById('resumeChargeDiscard');
-    if (discardBtn) {
-        discardBtn.addEventListener('click', async (ev) => {
-            ev.preventDefault();
-            ev.stopPropagation();
-            if (!confirm(T.discard_session_confirm || 'Tote Sitzung verwerfen?')) return;
-            // 1. Tell the server. v3.0.40: the server persists the
-            // dismissal in AppConfig and refuses to render
-            // active_session=True for this id on future requests.
-            // This is the only step that survives iOS Safari caching
-            // a stale HTML page — once recorded server-side, no
-            // amount of client weirdness can bring the banner back.
-            if (activeSavedId) {
-                try {
-                    await fetch('/api/charges/dismiss_session', {
-                        method: 'POST',
-                        credentials: 'same-origin',
-                        headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({ saved_id: activeSavedId }),
-                    });
-                } catch(_) {}
-            }
-            // 2. Local cleanup.
-            try { localStorage.removeItem(CHARGE_KEY); } catch(_){}
-            if (activeSavedId) {
-                try {
-                    if (dismissed.indexOf(activeSavedId) === -1) {
-                        dismissed.push(activeSavedId);
-                        if (dismissed.length > 50) dismissed = dismissed.slice(-50);
-                        localStorage.setItem(DISMISSED_KEY, JSON.stringify(dismissed));
-                    }
-                } catch(_){}
-            }
-            // 3. Strip URL params + hide.
-            try {
-                url.searchParams.delete('saved_id');
-                url.searchParams.delete('active');
-                window.history.replaceState({}, '', url.pathname + (url.search ? '?' + url.searchParams.toString() : ''));
-            } catch(_){}
-            banner.style.display = 'none';
-        });
-    }
 })();
 
 function startTimer() {
