@@ -1024,6 +1024,7 @@
   "trips.split_loading": "Lade Fahrt-Daten…",
   "trips.split_manual_hint": "Tippe einen grauen Sync-Punkt auf der Karte an, um die Teilung manuell zu setzen.",
   "trips.split_no_candidates": "Keine erkannten Zwischenstopps in dieser Fahrt.",
+  "trips.split_outside_window": "Stopp muss innerhalb des Fahrt-Zeitfensters liegen.",
   "trips.split_save": "Hier teilen",
   "trips.split_save_failed": "Fehler:",
   "trips.split_saving": "Teile Fahrt…",

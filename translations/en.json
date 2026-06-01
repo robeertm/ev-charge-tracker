@@ -1024,6 +1024,7 @@
   "trips.split_loading": "Loading trip data…",
   "trips.split_manual_hint": "Tap a grey sync point on the map to set the split position manually.",
   "trips.split_no_candidates": "No intermediate stops detected on this trip.",
+  "trips.split_outside_window": "Stop must fall inside the trip time window.",
   "trips.split_save": "Split here",
   "trips.split_save_failed": "Error:",
   "trips.split_saving": "Splitting trip…",

@@ -740,6 +740,7 @@
   "trips.split_loading": "Caricamento dei dati del viaggio…",
   "trips.split_manual_hint": "Tocca un punto di sync grigio sulla mappa per impostare la divisione manualmente.",
   "trips.split_no_candidates": "Nessuna sosta intermedia rilevata in questo viaggio.",
+  "trips.split_outside_window": "La sosta deve essere all'interno della finestra temporale del viaggio.",
   "trips.split_save": "Dividi qui",
   "trips.split_save_failed": "Errore:",
   "trips.split_saving": "Divisione del viaggio…",

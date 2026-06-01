@@ -404,6 +404,7 @@
         stops_heading:   {{ t('trips.split_stops_heading')|tojson }},
         stops_empty:     {{ t('trips.split_stops_empty')|tojson }},
         stop_remove:     {{ t('trips.split_stop_remove')|tojson }},
+        outside_window:  {{ t('trips.split_outside_window')|tojson }},
         saving:          {{ t('trips.split_saving')|tojson }},
         save_failed:     {{ t('trips.split_save_failed')|tojson }},
         labels: {
@@ -469,6 +470,22 @@
         });
     }
     function round6(n) { return Math.round(n * 1e6) / 1e6; }
+    function formatNaiveIso(d) {
+        // The server stores naive datetimes (local time) and serializes
+        // them as ISO strings without a timezone designator. `Date.toISOString()`
+        // would convert to UTC and append "Z" — the server then strips the
+        // Z and treats the UTC value as naive local, shifting it by the
+        // user's tz offset. Format manually so the roundtrip stays in
+        // local time end-to-end.
+        const pad = n => String(n).padStart(2, '0');
+        return d.getFullYear() + '-' + pad(d.getMonth()+1) + '-' + pad(d.getDate())
+             + 'T' + pad(d.getHours()) + ':' + pad(d.getMinutes()) + ':' + pad(d.getSeconds());
+    }
+    function isInsideWindow(ts) {
+        if (!currentData) return false;
+        // ISO strings in the same format sort lexicographically.
+        return ts > currentData.from.departed_at && ts < currentData.to.arrived_at;
+    }
     function haversineKm(la1, lo1, la2, lo2) {
         const R = 6371;
         const toRad = d => d * Math.PI / 180;
@@ -484,8 +501,12 @@
             if (!currentData) return null;
             const a = new Date(currentData.from.departed_at).getTime();
             const b = new Date(currentData.to.arrived_at).getTime();
-            if (b <= a) return null;
-            return new Date(Math.floor((a + b) / 2)).toISOString();
+            if (b - a < 2000) return null;  // <2 s: no room
+            // Clamp midpoint at least 1 s away from each boundary so the
+            // strict server-side check `from.departed_at < at_arr < to.arrived_at`
+            // doesn't trip on rounding.
+            const mid = Math.min(b - 1000, Math.max(a + 1000, Math.floor((a + b) / 2)));
+            return formatNaiveIso(new Date(mid));
         }
         let best = currentData.syncs[0];
         let bestD = haversineKm(lat, lon, best.lat, best.lon);
@@ -501,6 +522,13 @@
     }
 
     function addStop(info) {
+        // Reject anything that would fail the server-side window check —
+        // happens on tiny / zero-duration legacy trips, or when a click
+        // resolves to a timestamp at the very boundary.
+        if (!isInsideWindow(info.at_arrived) || !isInsideWindow(info.at_departed || info.at_arrived)) {
+            setStatus(T_S.outside_window, 'warning');
+            return;
+        }
         // No duplicates at the same lat/lon AND timestamp.
         if (stops.find(s => s.at_arrived === info.at_arrived
                             && Math.abs(s.lat - info.lat) < 1e-5

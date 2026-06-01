@@ -740,6 +740,7 @@
   "trips.split_loading": "Chargement des données du trajet…",
   "trips.split_manual_hint": "Touche un point de synchronisation gris sur la carte pour définir la division manuellement.",
   "trips.split_no_candidates": "Aucun arrêt intermédiaire détecté sur ce trajet.",
+  "trips.split_outside_window": "L'arrêt doit se situer dans la fenêtre temporelle du trajet.",
   "trips.split_save": "Diviser ici",
   "trips.split_save_failed": "Erreur :",
   "trips.split_saving": "Division du trajet…",

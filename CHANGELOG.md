@@ -1,5 +1,24 @@
 # Changelog
 
+## v3.0.38 (2026-06-01)
+
+### Trip split: fix UTC-shift bug on manual map taps
+
+A user tap on empty map (no candidate, no sync circle) generated a midpoint timestamp via `new Date(...).toISOString()`, which converts to UTC and appends "Z". The server then stripped the "Z" and treated the UTC value as naive local time, shifting the timestamp by the user's timezone offset (2 h in CET summer) — pushing it outside the trip's window and triggering `split_outside_window`. Replaced the conversion with a naive-ISO formatter that uses local components directly, so the server reads back the same wall-clock value it originally serialised.
+
+Added a client-side `isInsideWindow` guard too: any stop whose timestamp would fail the server check is rejected up front with a clean message instead of a generic "Fehler".
+
+### /input resume banner: dismiss is now permanent per saved_id
+
+Robert reported the resume banner reappearing on ev-robert even after clicking Verwerfen. Root cause: server-side `active_session` is driven purely by URL params (`?saved_id=X&active=1`), and a stuck bookmark / browser-history entry kept reloading those params. The old `window.location.replace` reload also occasionally came back from iOS Safari's cache with the params re-attached.
+
+Reworked Verwerfen:
+
+- Stores the dismissed `saved_id` in `localStorage.ev_charge_dismissed_ids` (capped at 50).
+- Hides the banner immediately, no reload — fixes the iOS cache issue.
+- Strips URL params via `history.replaceState`.
+- Future page loads where the URL carries the same `saved_id` suppress the banner client-side, even when the server still wants to show it.
+
 ## v3.0.37 (2026-06-01)
 
 ### Trip split: multi-pin + click-anywhere on map

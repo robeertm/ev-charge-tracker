@@ -740,6 +740,7 @@
   "trips.split_loading": "Ritgegevens laden…",
   "trips.split_manual_hint": "Tik op een grijs sync-punt op de kaart om de splitsing handmatig in te stellen.",
   "trips.split_no_candidates": "Geen tussenstops gedetecteerd op deze rit.",
+  "trips.split_outside_window": "Stop moet binnen het tijdvenster van de rit liggen.",
   "trips.split_save": "Hier splitsen",
   "trips.split_save_failed": "Fout:",
   "trips.split_saving": "Rit splitsen…",

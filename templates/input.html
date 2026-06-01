@@ -685,15 +685,27 @@ function persistFormCache() {
 // v3.0.35: no auto-open. The page always lands on the history list;
 // the modal is opened only by the user (the "+" button) or by tapping
 // the resume banner. A stale CHARGE_KEY (startTime > 6 h old) is
-// purged here so it can't keep showing the banner forever — Dirk
-// reported repeatedly seeing "tote Ladungen" he never started,
-// caused by a long-abandoned client session that kept re-opening the
-// modal. 6 h is short enough to catch this; a real overnight slow
-// charge tops out around 6 h on AC anyway.
+// purged here so it can't keep showing the banner forever.
+// v3.0.38: Verwerfen is now permanent per saved_id — it adds the id
+// to a "dismissed" set in localStorage, hides the banner without
+// reload, and strips the URL params. Even if the user's browser keeps
+// re-loading with the same saved_id (bookmark, browser-history), the
+// banner stays gone.
 const CHARGE_SESSION_TTL_HOURS = 6;
+const DISMISSED_KEY = 'ev_charge_dismissed_ids';
 (function syncResumeBanner() {
     const banner = document.getElementById('resumeChargeBanner');
     if (!banner) return;
+
+    const url = new URL(window.location.href);
+    const urlSavedId = url.searchParams.get('saved_id');
+    const urlActive = url.searchParams.get('active') === '1';
+
+    // Build the dismissed-set with safe defaults.
+    let dismissed = [];
+    try { dismissed = JSON.parse(localStorage.getItem(DISMISSED_KEY) || '[]'); } catch(_) {}
+    if (!Array.isArray(dismissed)) dismissed = [];
+
     let hasFreshLocal = false;
     try {
         const raw = localStorage.getItem(CHARGE_KEY);
@@ -706,8 +718,13 @@ const CHARGE_SESSION_TTL_HOURS = 6;
             }
         }
     } catch(e) { try { localStorage.removeItem(CHARGE_KEY); } catch(_){} }
+
     const serverActive = {{ 'true' if active_session else 'false' }};
-    banner.style.display = (serverActive || hasFreshLocal) ? '' : 'none';
+    // Suppress the banner if the user already explicitly discarded the
+    // saved_id currently in the URL.
+    const urlDismissed = urlSavedId && dismissed.indexOf(urlSavedId) !== -1;
+    const shouldShow = (serverActive && !urlDismissed) || hasFreshLocal;
+    banner.style.display = shouldShow ? '' : 'none';
 
     const discardBtn = document.getElementById('resumeChargeDiscard');
     if (discardBtn) {
@@ -716,11 +733,27 @@ const CHARGE_SESSION_TTL_HOURS = 6;
             ev.stopPropagation();
             if (!confirm(T.discard_session_confirm || 'Tote Sitzung verwerfen?')) return;
             try { localStorage.removeItem(CHARGE_KEY); } catch(_){}
-            // Drop server-side active flag too if it's in the URL.
-            const url = new URL(window.location.href);
-            url.searchParams.delete('saved_id');
-            url.searchParams.delete('active');
-            window.location.replace(url.toString());
+            // Remember this saved_id as dismissed so future visits with
+            // the same URL don't bring the banner back.
+            if (urlSavedId) {
+                try {
+                    if (dismissed.indexOf(urlSavedId) === -1) {
+                        dismissed.push(urlSavedId);
+                        // cap to last 50 so the list can't grow unbounded
+                        if (dismissed.length > 50) dismissed = dismissed.slice(-50);
+                        localStorage.setItem(DISMISSED_KEY, JSON.stringify(dismissed));
+                    }
+                } catch(_){}
+            }
+            // Strip URL params via replaceState (no full reload — that
+            // helped on iOS Safari where the reload sometimes came back
+            // from cache with the params re-attached).
+            try {
+                url.searchParams.delete('saved_id');
+                url.searchParams.delete('active');
+                window.history.replaceState({}, '', url.pathname + (url.search ? '?' + url.searchParams.toString() : ''));
+            } catch(_){}
+            banner.style.display = 'none';
         });
     }
 })();
