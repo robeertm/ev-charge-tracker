@@ -1,5 +1,16 @@
 # Changelog
 
+## v3.0.44 (2026-06-01)
+
+### Trip split: manual mode for zero-duration legacy trips
+
+The v3.0.40 trip-too-short rejection was a dead-end — the user still wanted to log stops on those legacy trips, just with custom times. Added a manual mode:
+
+- When `GET /api/trips/.../split_data` returns `422 trip_too_short`, the modal no longer locks. The map stays visible, a yellow alert explains the situation, and a small panel appears with two `datetime-local` inputs (arrival + departure at the stop). A tap on the map sets the stop's location; the inputs default to the broken endpoint time and the user edits them to whatever the real arrival was.
+- Save POSTs the stop with `{force: true}`. The server skips the strict in-window check and **auto-extends the parent PEs' timestamps** (sliding `from.departed_at` backward and/or `to.arrived_at` forward with a 60 s cushion) so the new PE has somewhere to live without breaking the `prev.departed_at < curr.arrived_at` invariant the trip renderer relies on. Adjacent trips are untouched.
+
+End-to-end tested with a synthetic zero-duration trip: server returned 422 on `split_data`, then accepted a force-mode POST and correctly extended the to-PE while leaving the from-PE alone (since the new stop sat strictly after it).
+
 ## v3.0.43 (2026-06-01)
 
 ### /input resume banner: removed

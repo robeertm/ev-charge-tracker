@@ -4212,6 +4212,10 @@ def register_routes(app):
                 'trip_seconds': trip_seconds,
                 'from_departed_at': ev_from.departed_at.isoformat(),
                 'to_arrived_at': ev_to.arrived_at.isoformat(),
+                'from_lat': ev_from.lat,
+                'from_lon': ev_from.lon,
+                'to_lat': ev_to.lat,
+                'to_lon': ev_to.lon,
             }), 422
 
         syncs_q = (VehicleSync.query
@@ -4306,11 +4310,12 @@ def register_routes(app):
         ``{at_arrived, at_departed?, lat, lon}`` OR the multi form
         ``{stops: [{at_arrived, at_departed?, lat, lon}, …]}`` — the UI
         sends ``stops`` so the user can drop several pins in one go.
-        Each stop's odometer + SoC are sourced from the VehicleSync
-        row nearest its arrival/departure timestamps. Label is
-        auto-classified against home / work / favorites for every stop.
-        Stops are inserted in arrival-order; the response returns the
-        list of new event ids."""
+
+        v3.0.44: ``{force: true}`` (in either form) skips the strict
+        trip-window check and auto-extends the parent PEs' timestamps
+        backward / forward as needed to accommodate stops the user
+        explicitly placed outside the current window. This is how
+        zero-duration legacy trips get manually reconstructed."""
         from models.database import ParkingEvent, VehicleSync
         from services.trips_service import _classify_location
 
@@ -4322,23 +4327,10 @@ def register_routes(app):
             return jsonify({'error': 'incomplete_trip'}), 400
 
         data = request.get_json() or {}
+        force = bool(data.get('force'))
         raw_stops = data.get('stops')
         if not isinstance(raw_stops, list):
             raw_stops = [data]  # legacy single-stop form
-
-        # Pull every sync inside the trip window once — the multi-stop
-        # case would otherwise re-query for every pin.
-        in_range_syncs = (VehicleSync.query
-                          .filter(VehicleSync.vehicle_id == ev_from.vehicle_id)
-                          .filter(VehicleSync.timestamp >= ev_from.departed_at)
-                          .filter(VehicleSync.timestamp <= ev_to.arrived_at)
-                          .all())
-
-        def _nearest_sync(ts):
-            if not in_range_syncs:
-                return None
-            return min(in_range_syncs,
-                       key=lambda r: abs((r.timestamp - ts).total_seconds()))
 
         parsed = []
         for raw in raw_stops:
@@ -4352,9 +4344,16 @@ def register_routes(app):
                 lon = float(raw['lon'])
             except (KeyError, ValueError, TypeError, AttributeError):
                 return jsonify({'error': 'invalid_payload'}), 400
-            if not (ev_from.departed_at < at_arr <= at_dep < ev_to.arrived_at):
-                return jsonify({'error': 'split_outside_window',
-                                'at_arrived': at_arr.isoformat()}), 400
+            if not force:
+                if not (ev_from.departed_at < at_arr <= at_dep < ev_to.arrived_at):
+                    return jsonify({'error': 'split_outside_window',
+                                    'at_arrived': at_arr.isoformat()}), 400
+            else:
+                # Force-mode still requires arr<=dep on each stop — that's
+                # a hard invariant. Window extension is handled below.
+                if at_arr > at_dep:
+                    return jsonify({'error': 'invalid_payload',
+                                    'detail': 'at_arrived > at_departed'}), 400
             parsed.append({'at_arrived': at_arr, 'at_departed': at_dep,
                            'lat': lat, 'lon': lon})
 
@@ -4364,6 +4363,34 @@ def register_routes(app):
         for a, b in zip(parsed, parsed[1:]):
             if a['at_departed'] >= b['at_arrived']:
                 return jsonify({'error': 'stops_overlap'}), 400
+
+        # Force-mode: auto-extend the parent PEs' timestamps so the
+        # new stops have somewhere to live. Each side extends only as
+        # far as needed plus a 60-second cushion so the strict
+        # `<`/`>` ordering still holds for trip-rendering. Adjacent
+        # trips are unaffected — we only touch the FROM PE's
+        # ``departed_at`` and the TO PE's ``arrived_at``.
+        if force and parsed:
+            from datetime import timedelta as _td
+            first_arr = parsed[0]['at_arrived']
+            last_dep = parsed[-1]['at_departed']
+            if first_arr <= ev_from.departed_at:
+                ev_from.departed_at = first_arr - _td(seconds=60)
+            if last_dep >= ev_to.arrived_at:
+                ev_to.arrived_at = last_dep + _td(seconds=60)
+
+        # Pull syncs from the (now possibly extended) window.
+        in_range_syncs = (VehicleSync.query
+                          .filter(VehicleSync.vehicle_id == ev_from.vehicle_id)
+                          .filter(VehicleSync.timestamp >= ev_from.departed_at)
+                          .filter(VehicleSync.timestamp <= ev_to.arrived_at)
+                          .all())
+
+        def _nearest_sync(ts):
+            if not in_range_syncs:
+                return None
+            return min(in_range_syncs,
+                       key=lambda r: abs((r.timestamp - ts).total_seconds()))
 
         new_ids = []
         try:

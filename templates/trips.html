@@ -370,6 +370,33 @@
         <p class="small text-muted mb-2">{{ t('trips.split_hint') }}</p>
         <div id="tripSplitMap" style="height:260px; border-radius:4px;"></div>
         <div id="tripSplitCandidates" class="mt-3"></div>
+        {# v3.0.44: manual-time picker used when the trip is too short
+           to compute a sensible auto-midpoint (zero-duration legacy
+           trips). The user enters arrival + optional departure
+           times; map click sets the location. POSTed with force=true
+           so the server skips the strict in-window check and extends
+           the parent PEs if needed. #}
+        <div id="tripSplitManual" class="mt-3" style="display:none">
+          <div class="border rounded p-2">
+            <div class="fw-semibold small mb-2">
+                <i class="bi bi-clock"></i> {{ t('trips.split_manual_title') }}
+            </div>
+            <div class="row g-2">
+              <div class="col-12 col-sm-6">
+                <label class="form-label small mb-0">{{ t('trips.split_manual_arrived') }}</label>
+                <input type="datetime-local" class="form-control form-control-sm"
+                       id="tripSplitManualArrived" step="60">
+              </div>
+              <div class="col-12 col-sm-6">
+                <label class="form-label small mb-0">{{ t('trips.split_manual_departed') }}</label>
+                <input type="datetime-local" class="form-control form-control-sm"
+                       id="tripSplitManualDeparted" step="60">
+              </div>
+            </div>
+            <div class="small text-muted mt-2">{{ t('trips.split_manual_hint_loc') }}</div>
+            <div id="tripSplitManualLocLabel" class="small mt-1"></div>
+          </div>
+        </div>
         <div id="tripSplitStops" class="mt-3"></div>
         <div id="tripSplitStatus" class="small text-muted mt-2"></div>
       </div>
@@ -406,6 +433,9 @@
         stop_remove:     {{ t('trips.split_stop_remove')|tojson }},
         outside_window:  {{ t('trips.split_outside_window')|tojson }},
         too_short:       {{ t('trips.split_too_short')|tojson }},
+        too_short_force: {{ t('trips.split_too_short_force_hint')|tojson }},
+        manual_loc_set:  {{ t('trips.split_manual_loc_set')|tojson }},
+        manual_loc_none: {{ t('trips.split_manual_loc_none')|tojson }},
         saving:          {{ t('trips.split_saving')|tojson }},
         save_failed:     {{ t('trips.split_save_failed')|tojson }},
         labels: {
@@ -422,6 +452,8 @@
     let stops = [];         // [{ at_arrived, at_departed, lat, lon, label_hint, fav, source }]
     let ids = { from: null, to: null };
     let currentData = null; // cached split_data response
+    let manualMode = false; // v3.0.44: zero-duration trip path
+    let manualLoc = null;   // { lat, lon } picked via map tap in manual mode
 
     const candidatesEl = document.getElementById('tripSplitCandidates');
     const stopsEl = document.getElementById('tripSplitStops');
@@ -445,6 +477,52 @@
         stopMarkers.forEach(l => { try { map.removeLayer(l); } catch(e){} });
         stopMarkers = [];
     }
+    function renderManualLoc() {
+        const el = document.getElementById('tripSplitManualLocLabel');
+        if (!el) return;
+        if (manualLoc) {
+            el.innerHTML = '<span class="text-success"><i class="bi bi-geo-alt-fill"></i> '
+                + T_S.manual_loc_set + ' ' + manualLoc.lat.toFixed(5) + ', ' + manualLoc.lon.toFixed(5) + '</span>';
+        } else {
+            el.innerHTML = '<span class="text-muted">' + T_S.manual_loc_none + '</span>';
+        }
+    }
+    function enterManualMode(toArrivedIso, fromDepartedIso) {
+        manualMode = true;
+        manualLoc = null;
+        // Show map (don't hide as in normal too-short path), show the
+        // manual time/location panel.
+        const mapEl = document.getElementById('tripSplitMap');
+        if (mapEl) mapEl.style.display = '';
+        const manualEl = document.getElementById('tripSplitManual');
+        if (manualEl) manualEl.style.display = '';
+        // Default the time inputs to "midpoint" of the broken trip
+        // (which for zero-duration trips equals both endpoints — the
+        // user will edit this).
+        const arrEl = document.getElementById('tripSplitManualArrived');
+        const depEl = document.getElementById('tripSplitManualDeparted');
+        const defaultIso = toLocalDtString(toArrivedIso || fromDepartedIso || new Date().toISOString());
+        if (arrEl && !arrEl.value) arrEl.value = defaultIso;
+        if (depEl && !depEl.value) depEl.value = defaultIso;
+        renderManualLoc();
+        saveBtn.disabled = true;
+        saveBtn.classList.remove('btn-warning');
+        saveBtn.classList.add('btn-secondary');
+    }
+    function leaveManualMode() {
+        manualMode = false;
+        manualLoc = null;
+        const manualEl = document.getElementById('tripSplitManual');
+        if (manualEl) manualEl.style.display = 'none';
+    }
+    function toLocalDtString(iso) {
+        if (!iso) return '';
+        const d = new Date(iso);
+        if (isNaN(d.getTime())) return '';
+        const pad = n => String(n).padStart(2, '0');
+        return d.getFullYear() + '-' + pad(d.getMonth()+1) + '-' + pad(d.getDate())
+             + 'T' + pad(d.getHours()) + ':' + pad(d.getMinutes());
+    }
     function ensureMap() {
         if (map) return;
         map = L.map('tripSplitMap').setView([51.1, 13.7], 13);
@@ -456,8 +534,24 @@
         // from the geographically nearest sync — that gives a sensible
         // when even when the user reaches outside the actual route.
         map.on('click', (ev) => {
+            const lat = round6(ev.latlng.lat), lon = round6(ev.latlng.lng);
+            if (manualMode) {
+                // Just remember the picked location — time is entered
+                // separately via the datetime-local pickers, Save reads
+                // both and posts with force=true.
+                manualLoc = { lat, lon };
+                renderManualLoc();
+                clearStopMarkers();
+                const icon = L.divIcon({ className:'', iconSize:[24,24],
+                    html:'<div style="background:#22c55e;color:white;width:24px;height:24px;border-radius:50%;border:3px solid white;box-shadow:0 0 4px rgba(0,0,0,.4);font-size:11px;font-weight:700;line-height:18px;text-align:center;">✓</div>' });
+                stopMarkers.push(L.marker([lat, lon], { icon }).addTo(map));
+                saveBtn.disabled = false;
+                saveBtn.classList.remove('btn-secondary');
+                if (!saveBtn.classList.contains('btn-warning'))
+                    saveBtn.classList.add('btn-warning');
+                return;
+            }
             if (!currentData) return;
-            const lat = ev.latlng.lat, lon = ev.latlng.lng;
             const ts = nearestSyncTs(lat, lon);
             if (!ts) {
                 setStatus(T_S.manual_hint, 'warning');
@@ -465,7 +559,7 @@
             }
             addStop({
                 at_arrived: ts, at_departed: ts,
-                lat: round6(lat), lon: round6(lon),
+                lat: lat, lon: lon,
                 source: 'manual',
             });
         });
@@ -681,8 +775,8 @@
         stops = [];
         currentData = null;
         candidatesEl.innerHTML = '';
-        // Reset state from any previous trip-too-short open: show map
-        // again and restore Save button to its normal warning style.
+        leaveManualMode();
+        // Reset state from any previous open.
         const mapEl = document.getElementById('tripSplitMap');
         if (mapEl) mapEl.style.display = '';
         saveBtn.classList.remove('btn-secondary');
@@ -704,15 +798,23 @@
                 // the explanation once in the candidate-list panel,
                 // clear the bottom status line, and lock Save.
                 if (r.status === 422 && data.error === 'trip_too_short') {
-                    if (mapEl) mapEl.style.display = 'none';
-                    candidatesEl.innerHTML = '<div class="alert alert-warning mb-0">' + T_S.too_short + '</div>';
-                    // Hide the empty-stops-list hint too — its "tap a
-                    // candidate" prompt is misleading when there's
-                    // nothing tappable.
+                    // v3.0.44: instead of dead-ending, surface a manual
+                    // entry mode the user can use to log stops with
+                    // their own custom timestamps + location.
+                    ensureMap();
+                    candidatesEl.innerHTML =
+                        '<div class="alert alert-warning mb-2">' + T_S.too_short + '</div>' +
+                        '<div class="small text-muted">' + T_S.too_short_force + '</div>';
                     stopsEl.innerHTML = '';
-                    saveBtn.disabled = true;
-                    saveBtn.classList.remove('btn-warning');
-                    saveBtn.classList.add('btn-secondary');
+                    enterManualMode(data.to_arrived_at, data.from_departed_at);
+                    // Drop a faint outline of from/to so the user has
+                    // SOME bearing on the map.
+                    if (data.from_lat != null && data.from_lon != null) {
+                        const m1 = L.circleMarker([data.from_lat, data.from_lon],
+                            { radius: 8, color:'#0d6efd', weight: 2 }).addTo(map);
+                        mapLayers.push(m1);
+                        map.setView([data.from_lat, data.from_lon], 13);
+                    }
                     setStatus('');
                 } else {
                     setStatus(data.error || 'error', 'danger');
@@ -729,18 +831,39 @@
     }
 
     saveBtn.addEventListener('click', async () => {
-        if (!stops.length) return;
+        // Build the payload depending on mode.
+        let payload;
+        if (manualMode) {
+            const arrEl = document.getElementById('tripSplitManualArrived');
+            const depEl = document.getElementById('tripSplitManualDeparted');
+            if (!manualLoc) { setStatus(T_S.manual_loc_none, 'warning'); return; }
+            const arr = arrEl ? arrEl.value : '';
+            const dep = (depEl && depEl.value) ? depEl.value : arr;
+            if (!arr) { setStatus(T_S.manual_loc_none, 'warning'); return; }
+            // datetime-local already yields naive ISO local time —
+            // matches what the server expects.
+            payload = {
+                force: true,
+                stops: [{
+                    at_arrived: arr, at_departed: dep,
+                    lat: manualLoc.lat, lon: manualLoc.lon,
+                }],
+            };
+        } else {
+            if (!stops.length) return;
+            payload = { stops: stops.map(s => ({
+                at_arrived: s.at_arrived,
+                at_departed: s.at_departed,
+                lat: s.lat, lon: s.lon,
+            })) };
+        }
         saveBtn.disabled = true;
         setStatus(T_S.saving);
         try {
             const r = await fetch('/api/trips/' + ids.from + '/' + ids.to + '/split', {
                 method: 'POST', credentials: 'same-origin',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ stops: stops.map(s => ({
-                    at_arrived: s.at_arrived,
-                    at_departed: s.at_departed,
-                    lat: s.lat, lon: s.lon,
-                })) }),
+                body: JSON.stringify(payload),
             });
             const data = await r.json();
             if (!r.ok || !data.ok) {
