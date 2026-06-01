@@ -4066,6 +4066,193 @@ def register_routes(app):
             'departed_at': _iso(evt.departed_at),
         })
 
+    @app.route('/api/trips/<int:from_id>/<int:to_id>/split_data', methods=['GET'])
+    def api_trip_split_data(from_id, to_id):
+        """Return everything the trip-split modal needs.
+
+        Validates that ``from_id`` and ``to_id`` are real ParkingEvents
+        belonging to the same vehicle with a valid trip window
+        (``from.departed_at < to.arrived_at``), then returns the syncs
+        inside that window plus a list of detected stationary
+        "candidate stops" (the same heuristic the user-facing UX is
+        about to ask them to pick from)."""
+        from models.database import ParkingEvent, VehicleSync
+        from services.trips_service import (
+            _classify_location, _haversine_m, _load_locations,
+        )
+
+        ev_from = ParkingEvent.query.get_or_404(from_id)
+        ev_to = ParkingEvent.query.get_or_404(to_id)
+        if ev_from.vehicle_id != ev_to.vehicle_id:
+            return jsonify({'error': 'vehicle_mismatch'}), 400
+        if not ev_from.departed_at or not ev_to.arrived_at:
+            return jsonify({'error': 'incomplete_trip'}), 400
+        if ev_from.departed_at >= ev_to.arrived_at:
+            return jsonify({'error': 'invalid_trip_window'}), 400
+
+        syncs_q = (VehicleSync.query
+                   .filter(VehicleSync.vehicle_id == ev_from.vehicle_id)
+                   .filter(VehicleSync.timestamp > ev_from.departed_at)
+                   .filter(VehicleSync.timestamp < ev_to.arrived_at)
+                   .filter(VehicleSync.location_lat.isnot(None))
+                   .filter(VehicleSync.location_lon.isnot(None))
+                   .order_by(VehicleSync.timestamp.asc()))
+        syncs = syncs_q.all()
+
+        # Stationary candidate detection: walk the syncs, group runs of
+        # consecutive rows whose location stays within ~150 m of the
+        # cluster's anchor. Any cluster spanning ≥ 5 min becomes a
+        # candidate stop. 150 m is generous on purpose — GPS drift on
+        # parked Korean cars is wider than the 100 m used elsewhere in
+        # the codebase, and a stop is only interesting if it's already
+        # the user's intent (intentional 5 min+ wait, not a red light).
+        STATIONARY_RADIUS_M = 150.0
+        STATIONARY_MIN_MIN = 5
+        candidates = []
+        cluster = []  # list of (idx, sync)
+        for i, s in enumerate(syncs):
+            if not cluster:
+                cluster.append((i, s))
+                continue
+            anchor = cluster[0][1]
+            if _haversine_m(anchor.location_lat, anchor.location_lon,
+                            s.location_lat, s.location_lon) <= STATIONARY_RADIUS_M:
+                cluster.append((i, s))
+            else:
+                if len(cluster) >= 2:
+                    dur = (cluster[-1][1].timestamp
+                           - cluster[0][1].timestamp).total_seconds() / 60
+                    if dur >= STATIONARY_MIN_MIN:
+                        candidates.append(cluster)
+                cluster = [(i, s)]
+        if len(cluster) >= 2:
+            dur = (cluster[-1][1].timestamp
+                   - cluster[0][1].timestamp).total_seconds() / 60
+            if dur >= STATIONARY_MIN_MIN:
+                candidates.append(cluster)
+
+        cand_out = []
+        locs = _load_locations()
+        for grp in candidates:
+            first = grp[0][1]
+            last = grp[-1][1]
+            # Cluster centroid (mean lat/lon) for a stable label point.
+            mean_lat = sum(s.location_lat for _, s in grp) / len(grp)
+            mean_lon = sum(s.location_lon for _, s in grp) / len(grp)
+            lbl, fav = _classify_location(mean_lat, mean_lon, locs)
+            cand_out.append({
+                'arrived_at': first.timestamp.isoformat(),
+                'departed_at': last.timestamp.isoformat(),
+                'lat': round(mean_lat, 6),
+                'lon': round(mean_lon, 6),
+                'duration_min': int((last.timestamp - first.timestamp).total_seconds() / 60),
+                'label_hint': lbl,
+                'favorite_name': fav,
+                'odometer_arrived': first.odometer_km,
+                'odometer_departed': last.odometer_km,
+                'soc_arrived': first.soc_percent,
+                'soc_departed': last.soc_percent,
+            })
+
+        return jsonify({
+            'from': {
+                'id': ev_from.id, 'lat': ev_from.lat, 'lon': ev_from.lon,
+                'departed_at': ev_from.departed_at.isoformat(),
+                'label': ev_from.label, 'name': ev_from.favorite_name,
+            },
+            'to': {
+                'id': ev_to.id, 'lat': ev_to.lat, 'lon': ev_to.lon,
+                'arrived_at': ev_to.arrived_at.isoformat(),
+                'label': ev_to.label, 'name': ev_to.favorite_name,
+            },
+            'syncs': [{
+                'timestamp': s.timestamp.isoformat(),
+                'lat': s.location_lat, 'lon': s.location_lon,
+                'odometer': s.odometer_km, 'soc': s.soc_percent,
+            } for s in syncs],
+            'candidates': cand_out,
+        })
+
+    @app.route('/api/trips/<int:from_id>/<int:to_id>/split', methods=['POST'])
+    def api_trip_split(from_id, to_id):
+        """Insert a new ParkingEvent between two PEs, splitting the
+        trip into two.
+
+        Body: ``{at_arrived: ISO, at_departed: ISO|null, lat, lon}``.
+        ``at_departed`` defaults to ``at_arrived`` (instantaneous stop).
+        Odometer + SoC are sourced from the VehicleSync rows nearest
+        to those timestamps. Label is auto-classified against the
+        user's home/work/favorite locations."""
+        from models.database import ParkingEvent, VehicleSync
+        from services.trips_service import _classify_location
+
+        ev_from = ParkingEvent.query.get_or_404(from_id)
+        ev_to = ParkingEvent.query.get_or_404(to_id)
+        if ev_from.vehicle_id != ev_to.vehicle_id:
+            return jsonify({'error': 'vehicle_mismatch'}), 400
+        if not ev_from.departed_at or not ev_to.arrived_at:
+            return jsonify({'error': 'incomplete_trip'}), 400
+
+        data = request.get_json() or {}
+        try:
+            at_arr = datetime.fromisoformat(
+                data['at_arrived'].replace('Z', '+00:00').split('+')[0])
+            at_dep_raw = data.get('at_departed') or data['at_arrived']
+            at_dep = datetime.fromisoformat(
+                at_dep_raw.replace('Z', '+00:00').split('+')[0])
+            lat = float(data['lat'])
+            lon = float(data['lon'])
+        except (KeyError, ValueError, TypeError, AttributeError):
+            return jsonify({'error': 'invalid_payload'}), 400
+
+        if not (ev_from.departed_at < at_arr <= at_dep < ev_to.arrived_at):
+            return jsonify({'error': 'split_outside_window'}), 400
+
+        # Source odometer + SoC from the nearest sync to each endpoint.
+        def _nearest_sync(ts):
+            # SQLite-compatible ordering: pull all in-range syncs and
+            # pick the one closest by Python-side timedelta. Trip
+            # windows are at most a few hours so the row count is small.
+            rows = (VehicleSync.query
+                    .filter(VehicleSync.vehicle_id == ev_from.vehicle_id)
+                    .filter(VehicleSync.timestamp >= ev_from.departed_at)
+                    .filter(VehicleSync.timestamp <= ev_to.arrived_at)
+                    .all())
+            if not rows:
+                return None
+            return min(rows, key=lambda r: abs((r.timestamp - ts).total_seconds()))
+        s_arr = _nearest_sync(at_arr)
+        s_dep = _nearest_sync(at_dep) if at_dep != at_arr else s_arr
+
+        lbl, fav = _classify_location(lat, lon)
+
+        new_evt = ParkingEvent(
+            vehicle_id=ev_from.vehicle_id,
+            arrived_at=at_arr,
+            departed_at=at_dep,
+            last_seen_at=s_dep.timestamp if s_dep else at_dep,
+            lat=lat,
+            lon=lon,
+            label=lbl or 'other',
+            favorite_name=fav,
+            odometer_arrived=(s_arr.odometer_km if s_arr else None),
+            odometer_departed=(s_dep.odometer_km if s_dep else None),
+            soc_arrived=(s_arr.soc_percent if s_arr else None),
+            soc_departed=(s_dep.soc_percent if s_dep else None),
+        )
+        try:
+            db.session.add(new_evt)
+            db.session.commit()
+        except Exception as e:
+            db.session.rollback()
+            return jsonify({'error': str(e)}), 500
+        return jsonify({
+            'ok': True,
+            'new_event_id': new_evt.id,
+            'label': new_evt.label,
+            'favorite_name': new_evt.favorite_name,
+        })
+
     @app.route('/api/trips/geocode_missing', methods=['POST'])
     def api_trips_geocode_missing():
         """Resolve addresses for parking events without one (manual trigger)."""

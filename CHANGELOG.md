@@ -1,5 +1,24 @@
 # Changelog
 
+## v3.0.36 (2026-06-01)
+
+### Trip log: split clustered trips into two
+
+When two short drives happen back-to-back with only a brief stop in between, the parking-event state machine sometimes never opens a new event for the middle stop — the GPS hadn't moved enough or the stationary window was below the 100 m threshold. The result is a single "trip" in the Fahrtenbuch that's really two: e.g. *Home → Hardware store → Home* shows up as one *Home → Home* loop.
+
+New **Split** action (scissors icon at the right edge of every trip row, only visible for ParkingEvent-pair trips) opens a mobile-friendly modal with:
+
+- A map showing the full trip route (blue line) plus every intermediate VehicleSync point (small grey circles you can tap).
+- **Auto-detected candidate stops** as numbered orange pins + a list below — any cluster of consecutive syncs that stayed within ~150 m of each other for ≥ 5 min becomes a candidate, with the cluster's classified label (Home / Work / Favorit / Sonstiges) and duration already shown.
+- Manual fallback: tap any sync point on the route to set the split exactly there.
+
+Saving inserts a fresh ParkingEvent at the chosen point with arrival + departure timestamps, odometer and SoC pulled from the nearest sync, and the label auto-classified against the user's configured home / work / favorites. The trip list re-derives from PE pairs on reload, so one entry becomes two without any other state to migrate.
+
+Backed by two new endpoints:
+
+- `GET /api/trips/<from>/<to>/split_data` — returns the route's syncs + detected candidates.
+- `POST /api/trips/<from>/<to>/split` — performs the insertion, validates the timestamp falls strictly inside the trip window.
+
 ## v3.0.35 (2026-06-01)
 
 ### /input: no more auto-opening on landing + zombie session escape hatch

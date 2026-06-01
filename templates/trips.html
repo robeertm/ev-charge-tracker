@@ -133,6 +133,7 @@
                         <th class="text-end">km</th>
                         <th class="text-end">SoC</th>
                         <th class="text-end">{{ t('trips.col_regen') }}</th>
+                        <th></th>
                     </tr>
                 </thead>
                 <tbody>
@@ -181,9 +182,18 @@
                                 {% if tr.regen_estimated %}<i class="bi bi-asterisk small" title="{{ t('trips.regen_estimated') }}"></i> {% endif %}+{{ "%.1f"|format(tr.regen_kwh) }}
                             {% endif %}
                         </td>
+                        <td class="text-end">
+                            {% if tr.source == 'polled' and tr.from.id and tr.to.id %}
+                            <button type="button" class="btn btn-sm btn-outline-secondary trip-split-btn"
+                                    data-from-id="{{ tr.from.id }}" data-to-id="{{ tr.to.id }}"
+                                    title="{{ t('trips.split_title') }}">
+                                <i class="bi bi-scissors"></i>
+                            </button>
+                            {% endif %}
+                        </td>
                     </tr>
                 {% else %}
-                    <tr><td colspan="{{ 7 if active_vehicle_filter == 'all' else 6 }}" class="text-center text-muted py-4">{{ t('trips.empty') }}</td></tr>
+                    <tr><td colspan="{{ 8 if active_vehicle_filter == 'all' else 7 }}" class="text-center text-muted py-4">{{ t('trips.empty') }}</td></tr>
                 {% endfor %}
                 </tbody>
             </table>
@@ -345,6 +355,276 @@
     </div>
   </div>
 </div>
+
+<!-- Split Modal ─────────────────────────────────────────────────── -->
+<div class="modal fade" id="tripSplitModal" tabindex="-1" aria-hidden="true">
+  <div class="modal-dialog modal-lg modal-fullscreen-md-down modal-dialog-scrollable">
+    <div class="modal-content">
+      <div class="modal-header bg-warning-subtle">
+        <h5 class="modal-title">
+            <i class="bi bi-scissors"></i> {{ t('trips.split_title') }}
+        </h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+      </div>
+      <div class="modal-body" style="overflow-x: hidden;">
+        <p class="small text-muted mb-2">{{ t('trips.split_hint') }}</p>
+        <div id="tripSplitMap" style="height:260px; border-radius:4px;"></div>
+        <div id="tripSplitCandidates" class="mt-3"></div>
+        <div id="tripSplitSelected" class="alert alert-info small mt-3" style="display:none">
+            <i class="bi bi-geo-alt"></i>
+            <span id="tripSplitSelectedText"></span>
+        </div>
+        <div id="tripSplitStatus" class="small text-muted mt-2"></div>
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">
+            {{ t('trips.edit_cancel') }}
+        </button>
+        <button type="button" class="btn btn-warning flex-fill" id="tripSplitSave" disabled>
+            <i class="bi bi-scissors"></i> {{ t('trips.split_save') }}
+        </button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+// Split-modal logic — kept separate from the edit modal so the two
+// don't share state. v3.0.36.
+(function tripSplitController() {
+    const modalEl = document.getElementById('tripSplitModal');
+    if (!modalEl) return;
+    const T_S = {
+        loading:         {{ t('trips.split_loading')|tojson }},
+        no_candidates:   {{ t('trips.split_no_candidates')|tojson }},
+        candidate_at:    {{ t('trips.split_candidate_at')|tojson }},
+        duration:        {{ t('trips.split_duration')|tojson }},
+        manual_hint:     {{ t('trips.split_manual_hint')|tojson }},
+        selected_sync:   {{ t('trips.split_selected_sync')|tojson }},
+        selected_cand:   {{ t('trips.split_selected_cand')|tojson }},
+        saving:          {{ t('trips.split_saving')|tojson }},
+        save_failed:     {{ t('trips.split_save_failed')|tojson }},
+        labels: {
+            home: {{ t('trips.edit_label_home')|tojson }},
+            work: {{ t('trips.edit_label_work')|tojson }},
+            favorite: {{ t('trips.edit_label_favorite')|tojson }},
+            other: {{ t('trips.edit_label_other')|tojson }},
+        },
+    };
+
+    let map = null;
+    let mapLayers = [];   // tile + path + markers, cleared on re-open
+    let chosen = null;    // { at_arrived, at_departed, lat, lon, label_kind: 'cand'|'sync' }
+    let ids = { from: null, to: null };
+
+    const candidatesEl = document.getElementById('tripSplitCandidates');
+    const selectedEl = document.getElementById('tripSplitSelected');
+    const selectedText = document.getElementById('tripSplitSelectedText');
+    const statusEl = document.getElementById('tripSplitStatus');
+    const saveBtn = document.getElementById('tripSplitSave');
+
+    function setStatus(msg, cls) {
+        statusEl.className = 'small mt-2 text-' + (cls || 'muted');
+        statusEl.textContent = msg || '';
+    }
+    function fmtDt(iso) {
+        if (!iso) return '—';
+        const d = new Date(iso);
+        return d.toLocaleString();
+    }
+    function clearMapLayers() {
+        mapLayers.forEach(l => { try { map.removeLayer(l); } catch(e){} });
+        mapLayers = [];
+    }
+    function ensureMap() {
+        if (map) return;
+        map = L.map('tripSplitMap').setView([51.1, 13.7], 13);
+        L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+            attribution: '&copy; OpenStreetMap', maxZoom: 19,
+        }).addTo(map);
+    }
+    function clearSelection() {
+        chosen = null;
+        selectedEl.style.display = 'none';
+        saveBtn.disabled = true;
+        candidatesEl.querySelectorAll('.split-cand').forEach(el => {
+            el.classList.remove('border-primary', 'bg-primary-subtle');
+        });
+    }
+    function showSelection(kind, info) {
+        chosen = info;
+        selectedText.textContent = kind === 'cand'
+            ? (T_S.selected_cand + ' ' + fmtDt(info.at_arrived))
+            : (T_S.selected_sync + ' ' + fmtDt(info.at_arrived));
+        selectedEl.style.display = '';
+        saveBtn.disabled = false;
+    }
+    function labelText(lbl, fav) {
+        if (lbl === 'favorite') return fav || T_S.labels.favorite;
+        return T_S.labels[lbl] || T_S.labels.other;
+    }
+
+    function paintMap(data) {
+        ensureMap();
+        clearMapLayers();
+        const fromPt = [data.from.lat, data.from.lon];
+        const toPt = [data.to.lat, data.to.lon];
+        const path = data.syncs.map(s => [s.lat, s.lon]);
+        const allPts = [fromPt, ...path, toPt];
+        const polyline = L.polyline(allPts, { color: '#0d6efd', weight: 3, opacity: 0.7 });
+        polyline.addTo(map); mapLayers.push(polyline);
+        const startIcon = L.divIcon({ className:'', iconSize:[18,18],
+            html:'<div style="background:#0d6efd;width:14px;height:14px;border-radius:50%;border:3px solid white;box-shadow:0 0 4px rgba(0,0,0,.4)"></div>' });
+        const endIcon = L.divIcon({ className:'', iconSize:[18,18],
+            html:'<div style="background:#dc3545;width:14px;height:14px;border-radius:50%;border:3px solid white;box-shadow:0 0 4px rgba(0,0,0,.4)"></div>' });
+        const mFrom = L.marker(fromPt, { icon: startIcon }).addTo(map); mapLayers.push(mFrom);
+        const mTo = L.marker(toPt, { icon: endIcon }).addTo(map); mapLayers.push(mTo);
+
+        // Every intermediate sync becomes a small tappable circle.
+        data.syncs.forEach(s => {
+            const c = L.circleMarker([s.lat, s.lon], {
+                radius: 6, color: '#6c757d', fillColor: '#adb5bd',
+                fillOpacity: 0.9, weight: 1,
+            }).addTo(map);
+            c.on('click', () => {
+                clearSelection();
+                showSelection('sync', {
+                    at_arrived: s.timestamp, at_departed: s.timestamp,
+                    lat: s.lat, lon: s.lon,
+                });
+                // visually mark the picked sync
+                mapLayers.forEach(l => {
+                    if (l.options && l.options.fillColor === '#22c55e') {
+                        l.setStyle({ fillColor: '#adb5bd', color: '#6c757d' });
+                    }
+                });
+                c.setStyle({ fillColor: '#22c55e', color: '#16a34a' });
+            });
+            mapLayers.push(c);
+        });
+
+        // Candidate stops get bigger orange pins.
+        (data.candidates || []).forEach((cand, idx) => {
+            const candIcon = L.divIcon({ className:'', iconSize:[22,22],
+                html:'<div style="background:#fd7e14;color:white;width:22px;height:22px;border-radius:50%;border:2px solid white;box-shadow:0 0 4px rgba(0,0,0,.4);font-size:11px;font-weight:700;line-height:18px;text-align:center;">'+ (idx+1) +'</div>' });
+            const m = L.marker([cand.lat, cand.lon], { icon: candIcon }).addTo(map);
+            m.on('click', () => selectCandidate(cand, idx));
+            mapLayers.push(m);
+        });
+
+        const bounds = L.latLngBounds(allPts);
+        map.fitBounds(bounds, { padding: [40, 40], maxZoom: 14 });
+        // Re-fit once the modal is visible — Leaflet doesn't know
+        // its size before the modal animation finishes.
+        setTimeout(() => { map.invalidateSize(); map.fitBounds(bounds, { padding: [40, 40], maxZoom: 14 }); }, 250);
+    }
+
+    function selectCandidate(cand, idx) {
+        clearSelection();
+        showSelection('cand', {
+            at_arrived: cand.arrived_at,
+            at_departed: cand.departed_at,
+            lat: cand.lat, lon: cand.lon,
+        });
+        const card = candidatesEl.querySelector('[data-cand-idx="' + idx + '"]');
+        if (card) {
+            card.classList.add('border-primary', 'bg-primary-subtle');
+            card.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+        }
+    }
+
+    function paintCandidates(cands) {
+        candidatesEl.innerHTML = '';
+        if (!cands || !cands.length) {
+            candidatesEl.innerHTML = '<div class="alert alert-secondary small mb-0">'
+                + T_S.no_candidates + '<br><span class="text-muted">' + T_S.manual_hint + '</span></div>';
+            return;
+        }
+        cands.forEach((c, idx) => {
+            const div = document.createElement('div');
+            div.className = 'split-cand border rounded p-2 mb-2';
+            div.style.cursor = 'pointer';
+            div.dataset.candIdx = String(idx);
+            const lbl = labelText(c.label_hint, c.favorite_name);
+            div.innerHTML =
+                '<div class="d-flex justify-content-between align-items-start">' +
+                  '<div>' +
+                    '<div class="fw-semibold"><span class="badge bg-warning text-dark me-1">' + (idx+1) + '</span> ' + lbl + '</div>' +
+                    '<div class="small text-muted">' + T_S.candidate_at + ' ' + fmtDt(c.arrived_at) + '</div>' +
+                    '<div class="small text-muted">' + T_S.duration + ' ~' + c.duration_min + ' min</div>' +
+                  '</div>' +
+                  '<i class="bi bi-chevron-right text-muted"></i>' +
+                '</div>';
+            div.addEventListener('click', () => selectCandidate(c, idx));
+            candidatesEl.appendChild(div);
+        });
+    }
+
+    async function openSplitter(fromId, toId) {
+        ids = { from: fromId, to: toId };
+        clearSelection();
+        candidatesEl.innerHTML = '';
+        setStatus(T_S.loading);
+        const m = bootstrap.Modal.getOrCreateInstance(modalEl);
+        m.show();
+        try {
+            const r = await fetch('/api/trips/' + fromId + '/' + toId + '/split_data',
+                                  { credentials: 'same-origin' });
+            const data = await r.json();
+            if (!r.ok) { setStatus(data.error || 'error', 'danger'); return; }
+            setStatus('');
+            paintMap(data);
+            paintCandidates(data.candidates);
+        } catch(e) {
+            setStatus(e.message, 'danger');
+        }
+    }
+
+    saveBtn.addEventListener('click', async () => {
+        if (!chosen) return;
+        saveBtn.disabled = true;
+        setStatus(T_S.saving);
+        try {
+            const r = await fetch('/api/trips/' + ids.from + '/' + ids.to + '/split', {
+                method: 'POST', credentials: 'same-origin',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(chosen),
+            });
+            const data = await r.json();
+            if (!r.ok || !data.ok) {
+                setStatus(T_S.save_failed + ' ' + (data.error || ''), 'danger');
+                saveBtn.disabled = false;
+                return;
+            }
+            // Trip list re-derives from PE pairs on reload.
+            location.reload();
+        } catch(e) {
+            setStatus(T_S.save_failed + ' ' + e.message, 'danger');
+            saveBtn.disabled = false;
+        }
+    });
+
+    function bindRowButtons() {
+        document.querySelectorAll('.trip-split-btn').forEach(btn => {
+            if (btn.dataset.splitBound) return;
+            btn.dataset.splitBound = '1';
+            btn.addEventListener('click', (ev) => {
+                ev.preventDefault();
+                ev.stopPropagation();
+                const fid = parseInt(btn.dataset.fromId, 10);
+                const tid = parseInt(btn.dataset.toId, 10);
+                if (isNaN(fid) || isNaN(tid)) return;
+                openSplitter(fid, tid);
+            });
+        });
+    }
+    if (document.readyState === 'loading') {
+        document.addEventListener('DOMContentLoaded', bindRowButtons);
+    } else {
+        bindRowButtons();
+    }
+})();
+</script>
 
 <script>
 (function() {
