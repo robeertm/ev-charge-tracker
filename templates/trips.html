@@ -681,10 +681,14 @@
         stops = [];
         currentData = null;
         candidatesEl.innerHTML = '';
-        // Reset map visibility — a previous trip-too-short open might
-        // have hidden it.
+        // Reset state from any previous trip-too-short open: show map
+        // again and restore Save button to its normal warning style.
         const mapEl = document.getElementById('tripSplitMap');
         if (mapEl) mapEl.style.display = '';
+        saveBtn.classList.remove('btn-secondary');
+        if (!saveBtn.classList.contains('btn-warning')) {
+            saveBtn.classList.add('btn-warning');
+        }
         renderStops();
         renderStopMarkers();
         setStatus(T_S.loading);
@@ -702,7 +706,11 @@
                 if (r.status === 422 && data.error === 'trip_too_short') {
                     if (mapEl) mapEl.style.display = 'none';
                     candidatesEl.innerHTML = '<div class="alert alert-warning mb-0">' + T_S.too_short + '</div>';
+                    // Visually grey the Save button — Bootstrap's
+                    // opacity-only disabled state is too subtle on iOS.
                     saveBtn.disabled = true;
+                    saveBtn.classList.remove('btn-warning');
+                    saveBtn.classList.add('btn-secondary');
                     setStatus('');
                 } else {
                     setStatus(data.error || 'error', 'danger');

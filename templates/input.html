@@ -718,6 +718,15 @@ const DISMISSED_KEY = 'ev_charge_dismissed_ids';
     try { dismissed = JSON.parse(localStorage.getItem(DISMISSED_KEY) || '[]'); } catch(_) {}
     if (!Array.isArray(dismissed)) dismissed = [];
 
+    // v3.0.42: server tells us when there's no real charging activity
+    // in the last 2 h. In that case we unconditionally purge
+    // CHARGE_KEY before even checking it — kills the stuck-banner case
+    // where localStorage outlived its DB-side reality.
+    const noRecentActivity = {{ 'true' if no_recent_activity else 'false' }};
+    if (noRecentActivity) {
+        try { localStorage.removeItem(CHARGE_KEY); } catch(_){}
+    }
+
     let hasFreshLocal = false;
     try {
         const raw = localStorage.getItem(CHARGE_KEY);

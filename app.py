@@ -2308,12 +2308,29 @@ def register_routes(app):
             if active_session:
                 active_saved_id = saved_id
 
+        # v3.0.42: server tells the client whether there's any real
+        # activity worth keeping localStorage state for. If no vehicle
+        # is currently charging AND no Charge row has been created in
+        # the last 2 h, the client auto-purges CHARGE_KEY on render
+        # — kills the localStorage path to the banner without needing
+        # the user to tap anything.
+        no_recent_activity = True
+        try:
+            from datetime import timedelta as _td
+            _two_h_ago = datetime.now() - _td(hours=2)
+            _has_recent_charge = bool(
+                Charge.query.filter(Charge.created_at >= _two_h_ago).first())
+            _has_active_charging = bool(
+                VehicleSync.query
+                .filter(VehicleSync.is_charging.is_(True))
+                .filter(VehicleSync.timestamp >= _two_h_ago)
+                .first())
+            no_recent_activity = not (_has_recent_charge or _has_active_charging)
+        except Exception:
+            no_recent_activity = False
+
         # v3.0.41: idiot-proof auto-dismiss. Banner only ever shows
         # when the user reasonably might want to resume the session.
-        # All four conditions below force it off without any client
-        # involvement — fixes the "I can't get rid of the banner"
-        # stuck-state where iOS Safari hands back a cached page faster
-        # than the user can hit Verwerfen.
         if active_session and active_saved_id is not None:
             try:
                 _dlist = json.loads(
@@ -2414,6 +2431,7 @@ def register_routes(app):
                                auto_loc=auto_loc,
                                active_session=active_session,
                                active_saved_id=active_saved_id,
+                               no_recent_activity=no_recent_activity,
                                pv_co2=_get_pv_co2(),
                                pv_price=AppConfig.get('pv_price_eur_per_kwh', '0.00'),
                                max_ac_kw=AppConfig.get('max_ac_kw', '11'),

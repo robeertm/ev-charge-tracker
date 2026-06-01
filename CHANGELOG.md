@@ -1,5 +1,21 @@
 # Changelog
 
+## v3.0.42 (2026-06-01)
+
+### /input banner: localStorage path also auto-cleaned
+
+v3.0.41 fixed the URL-driven path (server-side auto-dismiss for orphan/stale `saved_id`), but a third path was still live: `localStorage.ev_charge_session` carrying a fresh `startTime` from an old Start tap that was never finished. The 6 h TTL would have purged it eventually, but the user was rightly losing patience.
+
+The route now also reports `no_recent_activity` (no `Charge` row created in the last 2 h and no `VehicleSync` with `is_charging=True` in the last 2 h). When that flag is true, the client purges `CHARGE_KEY` on render — no tap, no confirm, just gone. Combined with v3.0.41's server-side decision, every path to a stuck banner is now closed at the source:
+
+- URL has params → server auto-dismisses orphans / >6 h-stale ids
+- URL clean + localStorage fresh + no real charging → client auto-purges localStorage
+- Explicit Verwerfen → still does its thing
+
+### Trip split: visually disabled Save button
+
+Bootstrap's `disabled` attribute on `btn-warning` only drops opacity to 0.65, which barely reads as "off" on a phone screen — users were tapping a button that looked active. When the trip is too short to split, the Save button now also gets `btn-secondary` (grey) until the modal is reopened with a usable trip.
+
 ## v3.0.41 (2026-06-01)
 
 ### /input banner: idiot-proof server-side auto-dismiss
