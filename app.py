@@ -4087,7 +4087,11 @@ def register_routes(app):
             return jsonify({'error': 'vehicle_mismatch'}), 400
         if not ev_from.departed_at or not ev_to.arrived_at:
             return jsonify({'error': 'incomplete_trip'}), 400
-        if ev_from.departed_at >= ev_to.arrived_at:
+        # Zero-duration trips (ev-robert has a handful where the state
+        # machine flushed departure + arrival on the same sync) are
+        # still renderable in the UI — only reject strictly inverted
+        # data.
+        if ev_from.departed_at > ev_to.arrived_at:
             return jsonify({'error': 'invalid_trip_window'}), 400
 
         syncs_q = (VehicleSync.query
@@ -4175,14 +4179,18 @@ def register_routes(app):
 
     @app.route('/api/trips/<int:from_id>/<int:to_id>/split', methods=['POST'])
     def api_trip_split(from_id, to_id):
-        """Insert a new ParkingEvent between two PEs, splitting the
-        trip into two.
+        """Insert one or more new ParkingEvents between two PEs,
+        splitting the trip into N+1 segments.
 
-        Body: ``{at_arrived: ISO, at_departed: ISO|null, lat, lon}``.
-        ``at_departed`` defaults to ``at_arrived`` (instantaneous stop).
-        Odometer + SoC are sourced from the VehicleSync rows nearest
-        to those timestamps. Label is auto-classified against the
-        user's home/work/favorite locations."""
+        Body accepts EITHER the legacy single form
+        ``{at_arrived, at_departed?, lat, lon}`` OR the multi form
+        ``{stops: [{at_arrived, at_departed?, lat, lon}, …]}`` — the UI
+        sends ``stops`` so the user can drop several pins in one go.
+        Each stop's odometer + SoC are sourced from the VehicleSync
+        row nearest its arrival/departure timestamps. Label is
+        auto-classified against home / work / favorites for every stop.
+        Stops are inserted in arrival-order; the response returns the
+        list of new event ids."""
         from models.database import ParkingEvent, VehicleSync
         from services.trips_service import _classify_location
 
@@ -4194,64 +4202,78 @@ def register_routes(app):
             return jsonify({'error': 'incomplete_trip'}), 400
 
         data = request.get_json() or {}
-        try:
-            at_arr = datetime.fromisoformat(
-                data['at_arrived'].replace('Z', '+00:00').split('+')[0])
-            at_dep_raw = data.get('at_departed') or data['at_arrived']
-            at_dep = datetime.fromisoformat(
-                at_dep_raw.replace('Z', '+00:00').split('+')[0])
-            lat = float(data['lat'])
-            lon = float(data['lon'])
-        except (KeyError, ValueError, TypeError, AttributeError):
-            return jsonify({'error': 'invalid_payload'}), 400
+        raw_stops = data.get('stops')
+        if not isinstance(raw_stops, list):
+            raw_stops = [data]  # legacy single-stop form
 
-        if not (ev_from.departed_at < at_arr <= at_dep < ev_to.arrived_at):
-            return jsonify({'error': 'split_outside_window'}), 400
+        # Pull every sync inside the trip window once — the multi-stop
+        # case would otherwise re-query for every pin.
+        in_range_syncs = (VehicleSync.query
+                          .filter(VehicleSync.vehicle_id == ev_from.vehicle_id)
+                          .filter(VehicleSync.timestamp >= ev_from.departed_at)
+                          .filter(VehicleSync.timestamp <= ev_to.arrived_at)
+                          .all())
 
-        # Source odometer + SoC from the nearest sync to each endpoint.
         def _nearest_sync(ts):
-            # SQLite-compatible ordering: pull all in-range syncs and
-            # pick the one closest by Python-side timedelta. Trip
-            # windows are at most a few hours so the row count is small.
-            rows = (VehicleSync.query
-                    .filter(VehicleSync.vehicle_id == ev_from.vehicle_id)
-                    .filter(VehicleSync.timestamp >= ev_from.departed_at)
-                    .filter(VehicleSync.timestamp <= ev_to.arrived_at)
-                    .all())
-            if not rows:
+            if not in_range_syncs:
                 return None
-            return min(rows, key=lambda r: abs((r.timestamp - ts).total_seconds()))
-        s_arr = _nearest_sync(at_arr)
-        s_dep = _nearest_sync(at_dep) if at_dep != at_arr else s_arr
+            return min(in_range_syncs,
+                       key=lambda r: abs((r.timestamp - ts).total_seconds()))
 
-        lbl, fav = _classify_location(lat, lon)
+        parsed = []
+        for raw in raw_stops:
+            try:
+                at_arr = datetime.fromisoformat(
+                    raw['at_arrived'].replace('Z', '+00:00').split('+')[0])
+                at_dep_raw = raw.get('at_departed') or raw['at_arrived']
+                at_dep = datetime.fromisoformat(
+                    at_dep_raw.replace('Z', '+00:00').split('+')[0])
+                lat = float(raw['lat'])
+                lon = float(raw['lon'])
+            except (KeyError, ValueError, TypeError, AttributeError):
+                return jsonify({'error': 'invalid_payload'}), 400
+            if not (ev_from.departed_at < at_arr <= at_dep < ev_to.arrived_at):
+                return jsonify({'error': 'split_outside_window',
+                                'at_arrived': at_arr.isoformat()}), 400
+            parsed.append({'at_arrived': at_arr, 'at_departed': at_dep,
+                           'lat': lat, 'lon': lon})
 
-        new_evt = ParkingEvent(
-            vehicle_id=ev_from.vehicle_id,
-            arrived_at=at_arr,
-            departed_at=at_dep,
-            last_seen_at=s_dep.timestamp if s_dep else at_dep,
-            lat=lat,
-            lon=lon,
-            label=lbl or 'other',
-            favorite_name=fav,
-            odometer_arrived=(s_arr.odometer_km if s_arr else None),
-            odometer_departed=(s_dep.odometer_km if s_dep else None),
-            soc_arrived=(s_arr.soc_percent if s_arr else None),
-            soc_departed=(s_dep.soc_percent if s_dep else None),
-        )
+        parsed.sort(key=lambda s: s['at_arrived'])
+        # Reject overlapping stops — keeps the trip-rendering invariant
+        # (each PE pair must be chronologically clean).
+        for a, b in zip(parsed, parsed[1:]):
+            if a['at_departed'] >= b['at_arrived']:
+                return jsonify({'error': 'stops_overlap'}), 400
+
+        new_ids = []
         try:
-            db.session.add(new_evt)
+            for stop in parsed:
+                s_arr = _nearest_sync(stop['at_arrived'])
+                s_dep = (_nearest_sync(stop['at_departed'])
+                         if stop['at_departed'] != stop['at_arrived']
+                         else s_arr)
+                lbl, fav = _classify_location(stop['lat'], stop['lon'])
+                new_evt = ParkingEvent(
+                    vehicle_id=ev_from.vehicle_id,
+                    arrived_at=stop['at_arrived'],
+                    departed_at=stop['at_departed'],
+                    last_seen_at=s_dep.timestamp if s_dep else stop['at_departed'],
+                    lat=stop['lat'], lon=stop['lon'],
+                    label=lbl or 'other',
+                    favorite_name=fav,
+                    odometer_arrived=(s_arr.odometer_km if s_arr else None),
+                    odometer_departed=(s_dep.odometer_km if s_dep else None),
+                    soc_arrived=(s_arr.soc_percent if s_arr else None),
+                    soc_departed=(s_dep.soc_percent if s_dep else None),
+                )
+                db.session.add(new_evt)
+                db.session.flush()
+                new_ids.append(new_evt.id)
             db.session.commit()
         except Exception as e:
             db.session.rollback()
             return jsonify({'error': str(e)}), 500
-        return jsonify({
-            'ok': True,
-            'new_event_id': new_evt.id,
-            'label': new_evt.label,
-            'favorite_name': new_evt.favorite_name,
-        })
+        return jsonify({'ok': True, 'new_event_ids': new_ids})
 
     @app.route('/api/trips/geocode_missing', methods=['POST'])
     def api_trips_geocode_missing():

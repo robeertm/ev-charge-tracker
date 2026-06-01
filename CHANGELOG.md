@@ -1,5 +1,23 @@
 # Changelog
 
+## v3.0.37 (2026-06-01)
+
+### Trip split: multi-pin + click-anywhere on map
+
+Two real-world reports against the v3.0.36 splitter:
+
+1. **`invalid_trip_window` rejection**: a handful of legacy ParkingEvent pairs have `prev.departed_at == next.arrived_at` (zero-duration "pass-through" trips the state machine flushed onto a single sync). The v3.0.36 validation used `>=` and rejected them; relaxed to `>` so equal timestamps go through.
+2. **Trips without auto-detected stops were unsplittable**: the only clickable affordances were sync circles and candidate pins. Trips with sparse syncs or no qualifying stationary clusters had nothing to tap.
+
+Reworked the modal into a multi-pin picker:
+
+- **Tap anywhere on the map** to drop a new stop. The timestamp is inferred from the geographically nearest sync; lat/lon come from the click.
+- Tap a sync circle or candidate pin → also adds a stop (same data shape).
+- **All chosen stops appear in a list** below the map with their times and a remove button. The map shows them as green pins; tap a pin again to remove.
+- One Save click POSTs all stops in chronological order — server inserts N new ParkingEvents in a single transaction, so the user can log a whole Home → Bakery → Doctor → Home loop in one go.
+
+The single-stop POST shape (`{at_arrived, …}`) is still accepted for backwards-compat; the UI now always sends `{stops: […]}`.
+
 ## v3.0.36 (2026-06-01)
 
 ### Trip log: split clustered trips into two

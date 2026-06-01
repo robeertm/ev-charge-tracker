@@ -370,10 +370,7 @@
         <p class="small text-muted mb-2">{{ t('trips.split_hint') }}</p>
         <div id="tripSplitMap" style="height:260px; border-radius:4px;"></div>
         <div id="tripSplitCandidates" class="mt-3"></div>
-        <div id="tripSplitSelected" class="alert alert-info small mt-3" style="display:none">
-            <i class="bi bi-geo-alt"></i>
-            <span id="tripSplitSelectedText"></span>
-        </div>
+        <div id="tripSplitStops" class="mt-3"></div>
         <div id="tripSplitStatus" class="small text-muted mt-2"></div>
       </div>
       <div class="modal-footer">
@@ -390,7 +387,11 @@
 
 <script>
 // Split-modal logic — kept separate from the edit modal so the two
-// don't share state. v3.0.36.
+// don't share state. v3.0.37: multi-pin support — the user drops as
+// many pins as they want and saves them all in one POST. Empty space
+// on the map is tappable too (timestamp inferred from the nearest
+// sync), so trips with no auto-detected stops or even no intermediate
+// syncs at all are still splittable.
 (function tripSplitController() {
     const modalEl = document.getElementById('tripSplitModal');
     if (!modalEl) return;
@@ -400,8 +401,9 @@
         candidate_at:    {{ t('trips.split_candidate_at')|tojson }},
         duration:        {{ t('trips.split_duration')|tojson }},
         manual_hint:     {{ t('trips.split_manual_hint')|tojson }},
-        selected_sync:   {{ t('trips.split_selected_sync')|tojson }},
-        selected_cand:   {{ t('trips.split_selected_cand')|tojson }},
+        stops_heading:   {{ t('trips.split_stops_heading')|tojson }},
+        stops_empty:     {{ t('trips.split_stops_empty')|tojson }},
+        stop_remove:     {{ t('trips.split_stop_remove')|tojson }},
         saving:          {{ t('trips.split_saving')|tojson }},
         save_failed:     {{ t('trips.split_save_failed')|tojson }},
         labels: {
@@ -413,13 +415,14 @@
     };
 
     let map = null;
-    let mapLayers = [];   // tile + path + markers, cleared on re-open
-    let chosen = null;    // { at_arrived, at_departed, lat, lon, label_kind: 'cand'|'sync' }
+    let mapLayers = [];
+    let stopMarkers = [];   // L.marker per chosen stop, indexed like stops
+    let stops = [];         // [{ at_arrived, at_departed, lat, lon, label_hint, fav, source }]
     let ids = { from: null, to: null };
+    let currentData = null; // cached split_data response
 
     const candidatesEl = document.getElementById('tripSplitCandidates');
-    const selectedEl = document.getElementById('tripSplitSelected');
-    const selectedText = document.getElementById('tripSplitSelectedText');
+    const stopsEl = document.getElementById('tripSplitStops');
     const statusEl = document.getElementById('tripSplitStatus');
     const saveBtn = document.getElementById('tripSplitSave');
 
@@ -436,32 +439,129 @@
         mapLayers.forEach(l => { try { map.removeLayer(l); } catch(e){} });
         mapLayers = [];
     }
+    function clearStopMarkers() {
+        stopMarkers.forEach(l => { try { map.removeLayer(l); } catch(e){} });
+        stopMarkers = [];
+    }
     function ensureMap() {
         if (map) return;
         map = L.map('tripSplitMap').setView([51.1, 13.7], 13);
         L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
             attribution: '&copy; OpenStreetMap', maxZoom: 19,
         }).addTo(map);
-    }
-    function clearSelection() {
-        chosen = null;
-        selectedEl.style.display = 'none';
-        saveBtn.disabled = true;
-        candidatesEl.querySelectorAll('.split-cand').forEach(el => {
-            el.classList.remove('border-primary', 'bg-primary-subtle');
+        // v3.0.37: tap anywhere on the map (not just on a sync circle
+        // or candidate pin) to drop a new stop. The timestamp comes
+        // from the geographically nearest sync — that gives a sensible
+        // when even when the user reaches outside the actual route.
+        map.on('click', (ev) => {
+            if (!currentData) return;
+            const lat = ev.latlng.lat, lon = ev.latlng.lng;
+            const ts = nearestSyncTs(lat, lon);
+            if (!ts) {
+                setStatus(T_S.manual_hint, 'warning');
+                return;
+            }
+            addStop({
+                at_arrived: ts, at_departed: ts,
+                lat: round6(lat), lon: round6(lon),
+                source: 'manual',
+            });
         });
     }
-    function showSelection(kind, info) {
-        chosen = info;
-        selectedText.textContent = kind === 'cand'
-            ? (T_S.selected_cand + ' ' + fmtDt(info.at_arrived))
-            : (T_S.selected_sync + ' ' + fmtDt(info.at_arrived));
-        selectedEl.style.display = '';
-        saveBtn.disabled = false;
+    function round6(n) { return Math.round(n * 1e6) / 1e6; }
+    function haversineKm(la1, lo1, la2, lo2) {
+        const R = 6371;
+        const toRad = d => d * Math.PI / 180;
+        const dLat = toRad(la2 - la1);
+        const dLon = toRad(lo2 - lo1);
+        const a = Math.sin(dLat/2)**2 + Math.cos(toRad(la1)) * Math.cos(toRad(la2)) * Math.sin(dLon/2)**2;
+        return 2 * R * Math.asin(Math.sqrt(a));
+    }
+    function nearestSyncTs(lat, lon) {
+        if (!currentData || !currentData.syncs || !currentData.syncs.length) {
+            // No intermediate syncs — fall back to the midpoint of the
+            // trip window so the user can at least drop a single stop.
+            if (!currentData) return null;
+            const a = new Date(currentData.from.departed_at).getTime();
+            const b = new Date(currentData.to.arrived_at).getTime();
+            if (b <= a) return null;
+            return new Date(Math.floor((a + b) / 2)).toISOString();
+        }
+        let best = currentData.syncs[0];
+        let bestD = haversineKm(lat, lon, best.lat, best.lon);
+        currentData.syncs.forEach(s => {
+            const d = haversineKm(lat, lon, s.lat, s.lon);
+            if (d < bestD) { best = s; bestD = d; }
+        });
+        return best.timestamp;
     }
     function labelText(lbl, fav) {
         if (lbl === 'favorite') return fav || T_S.labels.favorite;
         return T_S.labels[lbl] || T_S.labels.other;
+    }
+
+    function addStop(info) {
+        // No duplicates at the same lat/lon AND timestamp.
+        if (stops.find(s => s.at_arrived === info.at_arrived
+                            && Math.abs(s.lat - info.lat) < 1e-5
+                            && Math.abs(s.lon - info.lon) < 1e-5)) {
+            return;
+        }
+        stops.push(info);
+        stops.sort((a, b) => new Date(a.at_arrived) - new Date(b.at_arrived));
+        renderStops();
+        renderStopMarkers();
+        setStatus('');
+    }
+    function removeStop(idx) {
+        stops.splice(idx, 1);
+        renderStops();
+        renderStopMarkers();
+    }
+    function renderStopMarkers() {
+        if (!map) return;
+        clearStopMarkers();
+        stops.forEach((s, i) => {
+            const icon = L.divIcon({ className:'', iconSize:[24,24],
+                html:'<div style="background:#22c55e;color:white;width:24px;height:24px;border-radius:50%;border:3px solid white;box-shadow:0 0 4px rgba(0,0,0,.4);font-size:11px;font-weight:700;line-height:18px;text-align:center;">'+(i+1)+'</div>' });
+            const m = L.marker([s.lat, s.lon], { icon }).addTo(map);
+            m.on('click', () => removeStop(i));
+            stopMarkers.push(m);
+        });
+    }
+    function renderStops() {
+        saveBtn.disabled = stops.length === 0;
+        if (!stops.length) {
+            stopsEl.innerHTML =
+                '<div class="text-muted small fst-italic">' + T_S.stops_empty + '</div>';
+            return;
+        }
+        const parts = ['<div class="fw-semibold small mb-1">' + T_S.stops_heading + '</div>'];
+        stops.forEach((s, i) => {
+            const lbl = labelText(s.label_hint, s.fav);
+            parts.push(
+                '<div class="d-flex justify-content-between align-items-center border rounded p-2 mb-1">' +
+                  '<div>' +
+                    '<span class="badge bg-success me-2">' + (i+1) + '</span>' +
+                    '<span class="fw-semibold">' + lbl + '</span>' +
+                    '<div class="small text-muted">' + fmtDt(s.at_arrived) +
+                      (s.at_departed && s.at_departed !== s.at_arrived
+                        ? ' → ' + fmtDt(s.at_departed) : '') + '</div>' +
+                  '</div>' +
+                  '<button type="button" class="btn btn-sm btn-outline-danger" data-stop-idx="' + i + '" title="' + T_S.stop_remove + '">' +
+                    '<i class="bi bi-x-lg"></i>' +
+                  '</button>' +
+                '</div>'
+            );
+        });
+        stopsEl.innerHTML = parts.join('');
+        stopsEl.querySelectorAll('[data-stop-idx]').forEach(b => {
+            b.addEventListener('click', (e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                removeStop(parseInt(b.dataset.stopIdx, 10));
+            });
+        });
     }
 
     function paintMap(data) {
@@ -480,57 +580,44 @@
         const mFrom = L.marker(fromPt, { icon: startIcon }).addTo(map); mapLayers.push(mFrom);
         const mTo = L.marker(toPt, { icon: endIcon }).addTo(map); mapLayers.push(mTo);
 
-        // Every intermediate sync becomes a small tappable circle.
         data.syncs.forEach(s => {
             const c = L.circleMarker([s.lat, s.lon], {
                 radius: 6, color: '#6c757d', fillColor: '#adb5bd',
                 fillOpacity: 0.9, weight: 1,
             }).addTo(map);
-            c.on('click', () => {
-                clearSelection();
-                showSelection('sync', {
+            c.on('click', (ev) => {
+                L.DomEvent.stopPropagation(ev);
+                addStop({
                     at_arrived: s.timestamp, at_departed: s.timestamp,
-                    lat: s.lat, lon: s.lon,
+                    lat: s.lat, lon: s.lon, source: 'sync',
                 });
-                // visually mark the picked sync
-                mapLayers.forEach(l => {
-                    if (l.options && l.options.fillColor === '#22c55e') {
-                        l.setStyle({ fillColor: '#adb5bd', color: '#6c757d' });
-                    }
-                });
-                c.setStyle({ fillColor: '#22c55e', color: '#16a34a' });
             });
             mapLayers.push(c);
         });
 
-        // Candidate stops get bigger orange pins.
         (data.candidates || []).forEach((cand, idx) => {
             const candIcon = L.divIcon({ className:'', iconSize:[22,22],
                 html:'<div style="background:#fd7e14;color:white;width:22px;height:22px;border-radius:50%;border:2px solid white;box-shadow:0 0 4px rgba(0,0,0,.4);font-size:11px;font-weight:700;line-height:18px;text-align:center;">'+ (idx+1) +'</div>' });
             const m = L.marker([cand.lat, cand.lon], { icon: candIcon }).addTo(map);
-            m.on('click', () => selectCandidate(cand, idx));
+            m.on('click', (ev) => {
+                L.DomEvent.stopPropagation(ev);
+                addStopFromCandidate(cand);
+            });
             mapLayers.push(m);
         });
 
         const bounds = L.latLngBounds(allPts);
         map.fitBounds(bounds, { padding: [40, 40], maxZoom: 14 });
-        // Re-fit once the modal is visible — Leaflet doesn't know
-        // its size before the modal animation finishes.
         setTimeout(() => { map.invalidateSize(); map.fitBounds(bounds, { padding: [40, 40], maxZoom: 14 }); }, 250);
     }
 
-    function selectCandidate(cand, idx) {
-        clearSelection();
-        showSelection('cand', {
-            at_arrived: cand.arrived_at,
-            at_departed: cand.departed_at,
+    function addStopFromCandidate(cand) {
+        addStop({
+            at_arrived: cand.arrived_at, at_departed: cand.departed_at,
             lat: cand.lat, lon: cand.lon,
+            label_hint: cand.label_hint, fav: cand.favorite_name,
+            source: 'cand',
         });
-        const card = candidatesEl.querySelector('[data-cand-idx="' + idx + '"]');
-        if (card) {
-            card.classList.add('border-primary', 'bg-primary-subtle');
-            card.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
-        }
     }
 
     function paintCandidates(cands) {
@@ -553,17 +640,20 @@
                     '<div class="small text-muted">' + T_S.candidate_at + ' ' + fmtDt(c.arrived_at) + '</div>' +
                     '<div class="small text-muted">' + T_S.duration + ' ~' + c.duration_min + ' min</div>' +
                   '</div>' +
-                  '<i class="bi bi-chevron-right text-muted"></i>' +
+                  '<i class="bi bi-plus-circle text-success"></i>' +
                 '</div>';
-            div.addEventListener('click', () => selectCandidate(c, idx));
+            div.addEventListener('click', () => addStopFromCandidate(c));
             candidatesEl.appendChild(div);
         });
     }
 
     async function openSplitter(fromId, toId) {
         ids = { from: fromId, to: toId };
-        clearSelection();
+        stops = [];
+        currentData = null;
         candidatesEl.innerHTML = '';
+        renderStops();
+        renderStopMarkers();
         setStatus(T_S.loading);
         const m = bootstrap.Modal.getOrCreateInstance(modalEl);
         m.show();
@@ -572,6 +662,7 @@
                                   { credentials: 'same-origin' });
             const data = await r.json();
             if (!r.ok) { setStatus(data.error || 'error', 'danger'); return; }
+            currentData = data;
             setStatus('');
             paintMap(data);
             paintCandidates(data.candidates);
@@ -581,14 +672,18 @@
     }
 
     saveBtn.addEventListener('click', async () => {
-        if (!chosen) return;
+        if (!stops.length) return;
         saveBtn.disabled = true;
         setStatus(T_S.saving);
         try {
             const r = await fetch('/api/trips/' + ids.from + '/' + ids.to + '/split', {
                 method: 'POST', credentials: 'same-origin',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify(chosen),
+                body: JSON.stringify({ stops: stops.map(s => ({
+                    at_arrived: s.at_arrived,
+                    at_departed: s.at_departed,
+                    lat: s.lat, lon: s.lon,
+                })) }),
             });
             const data = await r.json();
             if (!r.ok || !data.ok) {
@@ -596,7 +691,6 @@
                 saveBtn.disabled = false;
                 return;
             }
-            // Trip list re-derives from PE pairs on reload.
             location.reload();
         } catch(e) {
             setStatus(T_S.save_failed + ' ' + e.message, 'danger');
