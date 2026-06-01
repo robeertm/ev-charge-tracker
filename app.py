@@ -2305,25 +2305,50 @@ def register_routes(app):
         if saved_id:
             pre_charge = Charge.query.get(saved_id)
             active_session = request.args.get('active') == '1'
-            # v3.0.39: snapshot the saved_id at render time so the
-            # banner's Discard handler can read it via a data attribute
-            # even after the client-side ingestSavedId IIFE has
-            # stripped it from the URL.
             if active_session:
                 active_saved_id = saved_id
-        # v3.0.40: server-side dismissal — once the user clicks Verwerfen
-        # the saved_id lands in AppConfig.dismissed_charge_session_ids
-        # and the banner stays suppressed even when the URL still
-        # carries the params (iOS Safari likes to keep them in history).
+
+        # v3.0.41: idiot-proof auto-dismiss. Banner only ever shows
+        # when the user reasonably might want to resume the session.
+        # All four conditions below force it off without any client
+        # involvement — fixes the "I can't get rid of the banner"
+        # stuck-state where iOS Safari hands back a cached page faster
+        # than the user can hit Verwerfen.
         if active_session and active_saved_id is not None:
             try:
                 _dlist = json.loads(
                     AppConfig.get('dismissed_charge_session_ids', '[]') or '[]')
-                if isinstance(_dlist, list) and str(active_saved_id) in [str(x) for x in _dlist]:
-                    active_session = False
-                    active_saved_id = None
+                if not isinstance(_dlist, list):
+                    _dlist = []
             except (ValueError, TypeError):
-                pass
+                _dlist = []
+            _force_off_reason = None
+            # 1. Explicitly dismissed via Verwerfen.
+            if str(active_saved_id) in [str(x) for x in _dlist]:
+                _force_off_reason = 'dismissed'
+            # 2. Orphan: saved_id doesn't reference an existing charge.
+            elif pre_charge is None:
+                _force_off_reason = 'orphan'
+            # 3. Stale: charge exists but it's older than 6 h. A real
+            # active session would have been finalised long before
+            # then; anything older is leftover from an abandoned
+            # Zwischenspeichern.
+            elif pre_charge.created_at is not None and (
+                    datetime.now() - pre_charge.created_at
+                ).total_seconds() > 6 * 3600:
+                _force_off_reason = 'stale'
+            if _force_off_reason:
+                active_session = False
+                active_saved_id = None
+                # Self-heal: persist the dismissal so even older
+                # browsers without v3.0.40+ JS get clean state from now
+                # on. No-op when already dismissed.
+                if saved_id and str(saved_id) not in [str(x) for x in _dlist]:
+                    _dlist.append(str(saved_id))
+                    if len(_dlist) > 200:
+                        _dlist = _dlist[-200:]
+                    AppConfig.set('dismissed_charge_session_ids',
+                                  json.dumps(_dlist))
         # v3.0.21: prefill location/operator from the latest sync GPS for
         # a fresh form (no pre_charge round-trip). Mirrors the resolution
         # that _detect_auto_charge does on charge-end so a manually-started

@@ -1,5 +1,24 @@
 # Changelog
 
+## v3.0.41 (2026-06-01)
+
+### /input banner: idiot-proof server-side auto-dismiss
+
+The user's iPhone Safari was still serving cached HTML from an earlier version on every visit, so the v3.0.40 Discard button (which calls the server endpoint) was never running — and the `dismissed_charge_session_ids` list stayed empty no matter how often the user tapped Verwerfen. The banner was driven purely by stuck URL params that the server kept honouring.
+
+The route now actively decides whether the banner should be allowed *at all*, not just whether to honour a dismissal:
+
+- **Orphan** (`saved_id` points to a charge that doesn't exist) → suppress + auto-add to dismissed list.
+- **Stale** (charge exists but `created_at` is more than 6 h ago) → same. A genuine in-progress session would have been finalised long before then; anything older is leftover from an abandoned Zwischenspeichern.
+- **Explicitly dismissed** → suppress as before.
+- **Otherwise** → render the banner.
+
+Self-heals: the dismissal is persisted on the server during the render itself, so subsequent visits stay clean even from older clients that don't even know about the dismiss endpoint.
+
+### Trip split: cleaner zero-duration error UI
+
+The 422 *trip_too_short* path used to render the same explanation twice — once as a yellow alert in the candidate-list panel and again as orange status text below — while still showing an empty grey map area. Tightened to one alert in the candidate panel, the map div is hidden, Save stays disabled, status line is cleared.
+
 ## v3.0.40 (2026-06-01)
 
 ### /input resume banner: dismiss is now genuinely permanent

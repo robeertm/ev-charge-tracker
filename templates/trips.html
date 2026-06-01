@@ -681,6 +681,10 @@
         stops = [];
         currentData = null;
         candidatesEl.innerHTML = '';
+        // Reset map visibility — a previous trip-too-short open might
+        // have hidden it.
+        const mapEl = document.getElementById('tripSplitMap');
+        if (mapEl) mapEl.style.display = '';
         renderStops();
         renderStopMarkers();
         setStatus(T_S.loading);
@@ -691,14 +695,15 @@
                                   { credentials: 'same-origin' });
             const data = await r.json();
             if (!r.ok) {
-                // v3.0.40: zero/sub-5s legacy trips return 422
-                // {error: 'trip_too_short', ...}. Show a clear message
-                // and lock the Save button instead of letting the user
-                // tap a broken map.
+                // Zero/sub-5s legacy trips return 422 trip_too_short.
+                // Hide the map (no useful interaction possible), show
+                // the explanation once in the candidate-list panel,
+                // clear the bottom status line, and lock Save.
                 if (r.status === 422 && data.error === 'trip_too_short') {
-                    setStatus(T_S.too_short, 'warning');
-                    candidatesEl.innerHTML = '<div class="alert alert-warning small mb-0">' + T_S.too_short + '</div>';
+                    if (mapEl) mapEl.style.display = 'none';
+                    candidatesEl.innerHTML = '<div class="alert alert-warning mb-0">' + T_S.too_short + '</div>';
                     saveBtn.disabled = true;
+                    setStatus('');
                 } else {
                     setStatus(data.error || 'error', 'danger');
                 }
