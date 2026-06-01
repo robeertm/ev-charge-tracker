@@ -1,5 +1,22 @@
 # Changelog
 
+## v3.0.45 (2026-06-01)
+
+### Trip split: km / SoC for manual stops — user input + time interpolation fallback
+
+The v3.0.44 manual-split worked structurally (the new PE was inserted and trip endpoints extended), but the km and SoC came out wrong: the server only used the *nearest* VehicleSync regardless of how distant it was in time. For a stop placed at 06:50 on a day where polling didn't run until 15:35, "nearest" was hours away and the odometer reading belonged to a completely different driving phase. Result: one trip showed `NULL → 84986 km` (rendering as blank) and the other showed `84986 → 84986 = 0 km`, even though ~39 km were actually driven.
+
+Two changes:
+
+1. **User overrides** (optional). The manual panel now also has two extra inputs: *km am Stopp* and *SoC am Stopp*. When filled, the server uses those values directly (applied to both arrival and departure).
+2. **Time-fraction interpolation** when neither a user value nor a sync within 10 min of the chosen timestamp is available. The new PE's odometer and SoC are linearly interpolated between the parent PEs based on where the stop's timestamp sits in the (possibly extended) trip window — so total trip km / SoC drop are preserved, just split proportionally.
+
+The two resulting trips now always render with a non-blank km column.
+
+E2E-tested:
+- explicit `odometer_arrived: 85025` + `soc_arrived: 70` → values used as-is
+- no user values + no nearby syncs, stop at 50 % time fraction → interpolated to 85020 km / 70 % (= exactly 50 % between 85000/85040 and 80/60)
+
 ## v3.0.44 (2026-06-01)
 
 ### Trip split: manual mode for zero-duration legacy trips

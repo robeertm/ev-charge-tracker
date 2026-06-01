@@ -4332,6 +4332,15 @@ def register_routes(app):
         if not isinstance(raw_stops, list):
             raw_stops = [data]  # legacy single-stop form
 
+        def _opt_num(raw, key, kind=int):
+            v = raw.get(key)
+            if v is None or v == '':
+                return None
+            try:
+                return kind(v)
+            except (TypeError, ValueError):
+                return None
+
         parsed = []
         for raw in raw_stops:
             try:
@@ -4354,8 +4363,19 @@ def register_routes(app):
                 if at_arr > at_dep:
                     return jsonify({'error': 'invalid_payload',
                                     'detail': 'at_arrived > at_departed'}), 400
-            parsed.append({'at_arrived': at_arr, 'at_departed': at_dep,
-                           'lat': lat, 'lon': lon})
+            parsed.append({
+                'at_arrived': at_arr, 'at_departed': at_dep,
+                'lat': lat, 'lon': lon,
+                # v3.0.45: optional user-provided overrides — when
+                # given, they take precedence over sync-derived or
+                # interpolated values. Lets the user enter the actual
+                # km / SoC that the car had at the manually-placed
+                # stop instead of trusting a heuristic.
+                'odometer_arrived':   _opt_num(raw, 'odometer_arrived', int),
+                'odometer_departed':  _opt_num(raw, 'odometer_departed', int),
+                'soc_arrived':        _opt_num(raw, 'soc_arrived', int),
+                'soc_departed':       _opt_num(raw, 'soc_departed', int),
+            })
 
         parsed.sort(key=lambda s: s['at_arrived'])
         # Reject overlapping stops — keeps the trip-rendering invariant
@@ -4386,11 +4406,38 @@ def register_routes(app):
                           .filter(VehicleSync.timestamp <= ev_to.arrived_at)
                           .all())
 
+        # 10 min: anything further out, the sync's km / SoC reading no
+        # longer represents the wall-clock time the user picked — fall
+        # back to time-fraction interpolation between the two parent
+        # PEs instead. Without this, manual-mode splits ended up with
+        # NULL odometer (no nearby sync) so the trips rendered with
+        # blank km.
+        _NEAREST_SYNC_MAX_SEC = 10 * 60
+
         def _nearest_sync(ts):
             if not in_range_syncs:
                 return None
-            return min(in_range_syncs,
+            best = min(in_range_syncs,
                        key=lambda r: abs((r.timestamp - ts).total_seconds()))
+            if abs((best.timestamp - ts).total_seconds()) > _NEAREST_SYNC_MAX_SEC:
+                return None
+            return best
+
+        # v3.0.45: time-fraction fallback. Linearly interpolates a
+        # value between the two parent PEs based on where ``ts`` falls
+        # in the trip window. Returns None if either endpoint value
+        # is itself None or the window has no duration.
+        _win_start = ev_from.departed_at
+        _win_end = ev_to.arrived_at
+        _win_sec = max(1.0, (_win_end - _win_start).total_seconds())
+
+        def _interp(ts, from_val, to_val):
+            if from_val is None or to_val is None:
+                return None
+            frac = (ts - _win_start).total_seconds() / _win_sec
+            frac = max(0.0, min(1.0, frac))
+            v = from_val + (to_val - from_val) * frac
+            return round(v) if isinstance(from_val, int) and isinstance(to_val, int) else round(v, 2)
 
         new_ids = []
         try:
@@ -4400,6 +4447,33 @@ def register_routes(app):
                          if stop['at_departed'] != stop['at_arrived']
                          else s_arr)
                 lbl, fav = _classify_location(stop['lat'], stop['lon'])
+
+                # Priority for each numeric field:
+                #   1. explicit user-provided value
+                #   2. sync row within 10 min of the chosen timestamp
+                #   3. linear time-interpolation between the two
+                #      parent PEs (preserves the total trip km even
+                #      when polling was sparse around the picked time)
+                def _resolve(user_val, sync, sync_attr, from_val, to_val, ts):
+                    if user_val is not None:
+                        return user_val
+                    if sync is not None and getattr(sync, sync_attr) is not None:
+                        return getattr(sync, sync_attr)
+                    return _interp(ts, from_val, to_val)
+
+                odo_arr = _resolve(stop['odometer_arrived'], s_arr, 'odometer_km',
+                                   ev_from.odometer_departed, ev_to.odometer_arrived,
+                                   stop['at_arrived'])
+                odo_dep = _resolve(stop['odometer_departed'], s_dep, 'odometer_km',
+                                   ev_from.odometer_departed, ev_to.odometer_arrived,
+                                   stop['at_departed'])
+                soc_arr = _resolve(stop['soc_arrived'], s_arr, 'soc_percent',
+                                   ev_from.soc_departed, ev_to.soc_arrived,
+                                   stop['at_arrived'])
+                soc_dep = _resolve(stop['soc_departed'], s_dep, 'soc_percent',
+                                   ev_from.soc_departed, ev_to.soc_arrived,
+                                   stop['at_departed'])
+
                 new_evt = ParkingEvent(
                     vehicle_id=ev_from.vehicle_id,
                     arrived_at=stop['at_arrived'],
@@ -4408,10 +4482,10 @@ def register_routes(app):
                     lat=stop['lat'], lon=stop['lon'],
                     label=lbl or 'other',
                     favorite_name=fav,
-                    odometer_arrived=(s_arr.odometer_km if s_arr else None),
-                    odometer_departed=(s_dep.odometer_km if s_dep else None),
-                    soc_arrived=(s_arr.soc_percent if s_arr else None),
-                    soc_departed=(s_dep.soc_percent if s_dep else None),
+                    odometer_arrived=odo_arr,
+                    odometer_departed=odo_dep,
+                    soc_arrived=soc_arr,
+                    soc_departed=soc_dep,
                 )
                 db.session.add(new_evt)
                 db.session.flush()

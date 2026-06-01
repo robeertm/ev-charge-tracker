@@ -395,6 +395,21 @@
             </div>
             <div class="small text-muted mt-2">{{ t('trips.split_manual_hint_loc') }}</div>
             <div id="tripSplitManualLocLabel" class="small mt-1"></div>
+            <div class="row g-2 mt-2">
+              <div class="col-6">
+                <label class="form-label small mb-0">{{ t('trips.split_manual_odo') }}</label>
+                <input type="number" class="form-control form-control-sm"
+                       id="tripSplitManualOdo" min="0" step="1"
+                       placeholder="{{ t('trips.split_manual_optional') }}">
+              </div>
+              <div class="col-6">
+                <label class="form-label small mb-0">{{ t('trips.split_manual_soc') }}</label>
+                <input type="number" class="form-control form-control-sm"
+                       id="tripSplitManualSoc" min="0" max="100" step="1"
+                       placeholder="{{ t('trips.split_manual_optional') }}">
+              </div>
+            </div>
+            <div class="small text-muted mt-1">{{ t('trips.split_manual_auto_hint') }}</div>
           </div>
         </div>
         <div id="tripSplitStops" class="mt-3"></div>
@@ -836,19 +851,31 @@
         if (manualMode) {
             const arrEl = document.getElementById('tripSplitManualArrived');
             const depEl = document.getElementById('tripSplitManualDeparted');
+            const odoEl = document.getElementById('tripSplitManualOdo');
+            const socEl = document.getElementById('tripSplitManualSoc');
             if (!manualLoc) { setStatus(T_S.manual_loc_none, 'warning'); return; }
             const arr = arrEl ? arrEl.value : '';
             const dep = (depEl && depEl.value) ? depEl.value : arr;
             if (!arr) { setStatus(T_S.manual_loc_none, 'warning'); return; }
-            // datetime-local already yields naive ISO local time —
-            // matches what the server expects.
-            payload = {
-                force: true,
-                stops: [{
-                    at_arrived: arr, at_departed: dep,
-                    lat: manualLoc.lat, lon: manualLoc.lon,
-                }],
+            const stop = {
+                at_arrived: arr, at_departed: dep,
+                lat: manualLoc.lat, lon: manualLoc.lon,
             };
+            // Optional user-provided km / SoC. Applied to both arrival
+            // and departure (instantaneous-stop semantics — same odo
+            // / SoC). Server falls back to time-interpolation between
+            // the parent PEs when omitted.
+            const odoVal = odoEl && odoEl.value !== '' ? parseInt(odoEl.value, 10) : null;
+            if (odoVal !== null && !isNaN(odoVal)) {
+                stop.odometer_arrived = odoVal;
+                stop.odometer_departed = odoVal;
+            }
+            const socVal = socEl && socEl.value !== '' ? parseInt(socEl.value, 10) : null;
+            if (socVal !== null && !isNaN(socVal)) {
+                stop.soc_arrived = socVal;
+                stop.soc_departed = socVal;
+            }
+            payload = { force: true, stops: [stop] };
         } else {
             if (!stops.length) return;
             payload = { stops: stops.map(s => ({
