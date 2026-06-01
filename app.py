@@ -2281,10 +2281,17 @@ def register_routes(app):
         vehicle_configured = bool(AppConfig.get('vehicle_api_brand', ''))
         pre_charge = None
         active_session = False
+        active_saved_id = None
         saved_id = _int(request.args.get('saved_id'))
         if saved_id:
             pre_charge = Charge.query.get(saved_id)
             active_session = request.args.get('active') == '1'
+            # v3.0.39: snapshot the saved_id at render time so the
+            # banner's Discard handler can read it via a data attribute
+            # even after the client-side ingestSavedId IIFE has
+            # stripped it from the URL.
+            if active_session:
+                active_saved_id = saved_id
         # v3.0.21: prefill location/operator from the latest sync GPS for
         # a fresh form (no pre_charge round-trip). Mirrors the resolution
         # that _detect_auto_charge does on charge-end so a manually-started
@@ -2349,6 +2356,7 @@ def register_routes(app):
                                pre_charge=pre_charge,
                                auto_loc=auto_loc,
                                active_session=active_session,
+                               active_saved_id=active_saved_id,
                                pv_co2=_get_pv_co2(),
                                pv_price=AppConfig.get('pv_price_eur_per_kwh', '0.00'),
                                max_ac_kw=AppConfig.get('max_ac_kw', '11'),

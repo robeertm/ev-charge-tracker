@@ -738,7 +738,7 @@
   "trips.split_duration": "Duración:",
   "trips.split_hint": "Elige una parada detectada automáticamente o toca cualquier punto de la ruta para dividir el viaje allí.",
   "trips.split_loading": "Cargando datos del viaje…",
-  "trips.split_manual_hint": "Toca un punto gris de sincronización en el mapa para establecer la división manualmente.",
+  "trips.split_manual_hint": "Toca cualquier punto del mapa para añadir una parada manualmente.",
   "trips.split_no_candidates": "No se detectaron paradas intermedias en este viaje.",
   "trips.split_outside_window": "La parada debe estar dentro del intervalo de tiempo del viaje.",
   "trips.split_save": "Dividir aquí",

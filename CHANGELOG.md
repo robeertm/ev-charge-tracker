@@ -1,5 +1,17 @@
 # Changelog
 
+## v3.0.39 (2026-06-01)
+
+### /input resume banner: Discard now actually sticks
+
+The v3.0.38 attempt at persistent Discard via `dismissed_ids` had a fatal ordering bug: the `ingestSavedId` IIFE strips `saved_id` and `active` from the URL via `history.replaceState` *before* the `syncResumeBanner` IIFE reads them. By the time the Discard handler ran, `url.searchParams.get('saved_id')` was always `null`, so the dismissed list never actually received the id — and the next render with the same URL (browser-history / cached navigation) brought the banner right back.
+
+Fix: the server now also renders the active `saved_id` into a `data-saved-id` attribute on the banner element. The Discard handler reads from that attribute first, with URL and `localStorage.chargeId` as fallbacks. The dismissed list gets populated reliably, and subsequent renders for the same id are suppressed client-side.
+
+### Trip split: clearer manual hint
+
+The empty-candidates message told the user to "tap a grey sync point" — but on short trips with no intermediate polling there are no sync points to tap. Reworded to "tap any point on the map" in all six languages, matching what the click handler actually accepts (any lat/lon, timestamp inferred from the geographically nearest sync or trip midpoint).
+
 ## v3.0.38 (2026-06-01)
 
 ### Trip split: fix UTC-shift bug on manual map taps

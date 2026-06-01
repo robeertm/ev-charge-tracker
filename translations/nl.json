@@ -738,7 +738,7 @@
   "trips.split_duration": "Duur:",
   "trips.split_hint": "Kies een automatisch gedetecteerde stop of tik op een punt van de route om de rit daar te splitsen.",
   "trips.split_loading": "Ritgegevens laden…",
-  "trips.split_manual_hint": "Tik op een grijs sync-punt op de kaart om de splitsing handmatig in te stellen.",
+  "trips.split_manual_hint": "Tik op een willekeurig punt op de kaart om handmatig een stop toe te voegen.",
   "trips.split_no_candidates": "Geen tussenstops gedetecteerd op deze rit.",
   "trips.split_outside_window": "Stop moet binnen het tijdvenster van de rit liggen.",
   "trips.split_save": "Hier splitsen",

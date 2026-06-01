@@ -1022,7 +1022,7 @@
   "trips.split_duration": "Dauer:",
   "trips.split_hint": "Wähle einen automatisch erkannten Stopp aus der Liste oder tippe auf einen Punkt der Route, um die Fahrt dort zu teilen.",
   "trips.split_loading": "Lade Fahrt-Daten…",
-  "trips.split_manual_hint": "Tippe einen grauen Sync-Punkt auf der Karte an, um die Teilung manuell zu setzen.",
+  "trips.split_manual_hint": "Tippe auf eine beliebige Stelle der Karte, um einen Stopp manuell zu setzen.",
   "trips.split_no_candidates": "Keine erkannten Zwischenstopps in dieser Fahrt.",
   "trips.split_outside_window": "Stopp muss innerhalb des Fahrt-Zeitfensters liegen.",
   "trips.split_save": "Hier teilen",

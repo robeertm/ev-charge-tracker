@@ -738,7 +738,7 @@
   "trips.split_duration": "Durée :",
   "trips.split_hint": "Choisis un arrêt détecté automatiquement ou touche un point du trajet pour le diviser à cet endroit.",
   "trips.split_loading": "Chargement des données du trajet…",
-  "trips.split_manual_hint": "Touche un point de synchronisation gris sur la carte pour définir la division manuellement.",
+  "trips.split_manual_hint": "Touche n'importe quel endroit de la carte pour ajouter un arrêt manuellement.",
   "trips.split_no_candidates": "Aucun arrêt intermédiaire détecté sur ce trajet.",
   "trips.split_outside_window": "L'arrêt doit se situer dans la fenêtre temporelle du trajet.",
   "trips.split_save": "Diviser ici",

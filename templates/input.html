@@ -24,6 +24,7 @@
    staleness check below toggles it on/off from localStorage. #}
 <div id="resumeChargeBanner"
      class="alert alert-warning d-flex align-items-center justify-content-between mb-3"
+     data-saved-id="{{ active_saved_id or '' }}"
      style="{% if not active_session %}display:none;{% endif %}">
     <span role="button" id="resumeChargeOpen"
           data-bs-toggle="modal" data-bs-target="#newChargeModal"
@@ -698,8 +699,19 @@ const DISMISSED_KEY = 'ev_charge_dismissed_ids';
     if (!banner) return;
 
     const url = new URL(window.location.href);
-    const urlSavedId = url.searchParams.get('saved_id');
-    const urlActive = url.searchParams.get('active') === '1';
+    // v3.0.39: read saved_id from the server-rendered data attribute
+    // first; the URL's saved_id is stripped earlier by ingestSavedId,
+    // so by the time this IIFE runs the URL no longer carries it.
+    // localStorage.chargeId is a third fallback for the case where
+    // the URL was already stripped by an earlier render.
+    let activeSavedId = banner.dataset.savedId || '';
+    if (!activeSavedId) activeSavedId = url.searchParams.get('saved_id') || '';
+    if (!activeSavedId) {
+        try {
+            const cs = JSON.parse(localStorage.getItem(CHARGE_KEY) || '{}');
+            if (cs && cs.chargeId) activeSavedId = String(cs.chargeId);
+        } catch(_) {}
+    }
 
     // Build the dismissed-set with safe defaults.
     let dismissed = [];
@@ -720,10 +732,10 @@ const DISMISSED_KEY = 'ev_charge_dismissed_ids';
     } catch(e) { try { localStorage.removeItem(CHARGE_KEY); } catch(_){} }
 
     const serverActive = {{ 'true' if active_session else 'false' }};
-    // Suppress the banner if the user already explicitly discarded the
-    // saved_id currently in the URL.
-    const urlDismissed = urlSavedId && dismissed.indexOf(urlSavedId) !== -1;
-    const shouldShow = (serverActive && !urlDismissed) || hasFreshLocal;
+    // Suppress the banner if the user already explicitly discarded
+    // this saved_id (stored in DISMISSED_KEY on previous Verwerfen).
+    const isDismissed = activeSavedId && dismissed.indexOf(activeSavedId) !== -1;
+    const shouldShow = (serverActive && !isDismissed) || hasFreshLocal;
     banner.style.display = shouldShow ? '' : 'none';
 
     const discardBtn = document.getElementById('resumeChargeDiscard');
@@ -733,13 +745,13 @@ const DISMISSED_KEY = 'ev_charge_dismissed_ids';
             ev.stopPropagation();
             if (!confirm(T.discard_session_confirm || 'Tote Sitzung verwerfen?')) return;
             try { localStorage.removeItem(CHARGE_KEY); } catch(_){}
-            // Remember this saved_id as dismissed so future visits with
-            // the same URL don't bring the banner back.
-            if (urlSavedId) {
+            // Remember this saved_id as dismissed so future renders
+            // where the server still emits active_session=True for the
+            // same id stay suppressed client-side.
+            if (activeSavedId) {
                 try {
-                    if (dismissed.indexOf(urlSavedId) === -1) {
-                        dismissed.push(urlSavedId);
-                        // cap to last 50 so the list can't grow unbounded
+                    if (dismissed.indexOf(activeSavedId) === -1) {
+                        dismissed.push(activeSavedId);
                         if (dismissed.length > 50) dismissed = dismissed.slice(-50);
                         localStorage.setItem(DISMISSED_KEY, JSON.stringify(dismissed));
                     }

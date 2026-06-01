@@ -1022,7 +1022,7 @@
   "trips.split_duration": "Duration:",
   "trips.split_hint": "Pick an auto-detected stop from the list or tap any point along the route to split the trip there.",
   "trips.split_loading": "Loading trip data…",
-  "trips.split_manual_hint": "Tap a grey sync point on the map to set the split position manually.",
+  "trips.split_manual_hint": "Tap any point on the map to add a stop manually.",
   "trips.split_no_candidates": "No intermediate stops detected on this trip.",
   "trips.split_outside_window": "Stop must fall inside the trip time window.",
   "trips.split_save": "Split here",
