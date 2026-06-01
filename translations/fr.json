@@ -741,6 +741,7 @@
   "trips.split_manual_hint": "Touche n'importe quel endroit de la carte pour ajouter un arrêt manuellement.",
   "trips.split_no_candidates": "Aucun arrêt intermédiaire détecté sur ce trajet.",
   "trips.split_outside_window": "L'arrêt doit se situer dans la fenêtre temporelle du trajet.",
+  "trips.split_too_short": "Ce trajet n'a pas de durée mesurable — ses heures de début et de fin coïncident. Modifie d'abord les horodatages des extrémités, puis réessaie de le diviser.",
   "trips.split_save": "Diviser ici",
   "trips.split_save_failed": "Erreur :",
   "trips.split_saving": "Division du trajet…",

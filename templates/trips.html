@@ -405,6 +405,7 @@
         stops_empty:     {{ t('trips.split_stops_empty')|tojson }},
         stop_remove:     {{ t('trips.split_stop_remove')|tojson }},
         outside_window:  {{ t('trips.split_outside_window')|tojson }},
+        too_short:       {{ t('trips.split_too_short')|tojson }},
         saving:          {{ t('trips.split_saving')|tojson }},
         save_failed:     {{ t('trips.split_save_failed')|tojson }},
         labels: {
@@ -689,7 +690,20 @@
             const r = await fetch('/api/trips/' + fromId + '/' + toId + '/split_data',
                                   { credentials: 'same-origin' });
             const data = await r.json();
-            if (!r.ok) { setStatus(data.error || 'error', 'danger'); return; }
+            if (!r.ok) {
+                // v3.0.40: zero/sub-5s legacy trips return 422
+                // {error: 'trip_too_short', ...}. Show a clear message
+                // and lock the Save button instead of letting the user
+                // tap a broken map.
+                if (r.status === 422 && data.error === 'trip_too_short') {
+                    setStatus(T_S.too_short, 'warning');
+                    candidatesEl.innerHTML = '<div class="alert alert-warning small mb-0">' + T_S.too_short + '</div>';
+                    saveBtn.disabled = true;
+                } else {
+                    setStatus(data.error || 'error', 'danger');
+                }
+                return;
+            }
             currentData = data;
             setStatus('');
             paintMap(data);

@@ -740,14 +740,28 @@ const DISMISSED_KEY = 'ev_charge_dismissed_ids';
 
     const discardBtn = document.getElementById('resumeChargeDiscard');
     if (discardBtn) {
-        discardBtn.addEventListener('click', (ev) => {
+        discardBtn.addEventListener('click', async (ev) => {
             ev.preventDefault();
             ev.stopPropagation();
             if (!confirm(T.discard_session_confirm || 'Tote Sitzung verwerfen?')) return;
+            // 1. Tell the server. v3.0.40: the server persists the
+            // dismissal in AppConfig and refuses to render
+            // active_session=True for this id on future requests.
+            // This is the only step that survives iOS Safari caching
+            // a stale HTML page — once recorded server-side, no
+            // amount of client weirdness can bring the banner back.
+            if (activeSavedId) {
+                try {
+                    await fetch('/api/charges/dismiss_session', {
+                        method: 'POST',
+                        credentials: 'same-origin',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ saved_id: activeSavedId }),
+                    });
+                } catch(_) {}
+            }
+            // 2. Local cleanup.
             try { localStorage.removeItem(CHARGE_KEY); } catch(_){}
-            // Remember this saved_id as dismissed so future renders
-            // where the server still emits active_session=True for the
-            // same id stay suppressed client-side.
             if (activeSavedId) {
                 try {
                     if (dismissed.indexOf(activeSavedId) === -1) {
@@ -757,9 +771,7 @@ const DISMISSED_KEY = 'ev_charge_dismissed_ids';
                     }
                 } catch(_){}
             }
-            // Strip URL params via replaceState (no full reload — that
-            // helped on iOS Safari where the reload sometimes came back
-            // from cache with the params re-attached).
+            // 3. Strip URL params + hide.
             try {
                 url.searchParams.delete('saved_id');
                 url.searchParams.delete('active');

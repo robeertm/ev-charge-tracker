@@ -1,5 +1,6 @@
 """EV Charge Tracker - Main Flask Application."""
 import io
+import json
 import os
 import shutil
 import subprocess
@@ -349,6 +350,24 @@ def create_app(config_class=Config):
                    name='tailscale-kick').start()
     except Exception:
         pass
+
+    # v3.0.40: dynamic HTML pages must never be cached by the browser.
+    # iOS Safari was holding onto a stale /input render for hours,
+    # making the "tote Ladung" banner reappear after Verwerfen because
+    # the user was looking at a cached page where the fix wasn't loaded
+    # yet. no-store on text/html keeps dynamic state fresh — static
+    # CSS/JS/images are unaffected.
+    @app.after_request
+    def _no_cache_dynamic_html(response):
+        try:
+            ct = (response.content_type or '').lower()
+            if ct.startswith('text/html'):
+                response.headers['Cache-Control'] = 'no-store, must-revalidate'
+                response.headers['Pragma'] = 'no-cache'
+                response.headers['Expires'] = '0'
+        except Exception:
+            pass
+        return response
 
     return app
 
@@ -2292,6 +2311,19 @@ def register_routes(app):
             # stripped it from the URL.
             if active_session:
                 active_saved_id = saved_id
+        # v3.0.40: server-side dismissal — once the user clicks Verwerfen
+        # the saved_id lands in AppConfig.dismissed_charge_session_ids
+        # and the banner stays suppressed even when the URL still
+        # carries the params (iOS Safari likes to keep them in history).
+        if active_session and active_saved_id is not None:
+            try:
+                _dlist = json.loads(
+                    AppConfig.get('dismissed_charge_session_ids', '[]') or '[]')
+                if isinstance(_dlist, list) and str(active_saved_id) in [str(x) for x in _dlist]:
+                    active_session = False
+                    active_saved_id = None
+            except (ValueError, TypeError):
+                pass
         # v3.0.21: prefill location/operator from the latest sync GPS for
         # a fresh form (no pre_charge round-trip). Mirrors the resolution
         # that _detect_auto_charge does on charge-end so a manually-started
@@ -2498,6 +2530,33 @@ def register_routes(app):
                                work_lat=AppConfig.get('work_lat', ''),
                                work_lon=AppConfig.get('work_lon', ''),
                                work_label=AppConfig.get('work_label', ''))
+
+    @app.route('/api/charges/dismiss_session', methods=['POST'])
+    def api_dismiss_charge_session():
+        """v3.0.40: server-side persistent dismissal of an active charge
+        session. The /input route checks this list before rendering
+        ``active_session=True``, so once the user has clicked Verwerfen
+        the banner stays suppressed regardless of what URL params their
+        browser keeps reloading."""
+        data = request.get_json(silent=True) or {}
+        sid = data.get('saved_id')
+        if sid is None or str(sid) == '':
+            return jsonify({'error': 'missing_saved_id'}), 400
+        try:
+            current = json.loads(
+                AppConfig.get('dismissed_charge_session_ids', '[]') or '[]')
+            if not isinstance(current, list):
+                current = []
+        except (ValueError, TypeError):
+            current = []
+        sid_s = str(sid)
+        if sid_s not in [str(x) for x in current]:
+            current.append(sid_s)
+            # Cap at 200 ids so the list can't grow unbounded.
+            if len(current) > 200:
+                current = current[-200:]
+            AppConfig.set('dismissed_charge_session_ids', json.dumps(current))
+        return jsonify({'ok': True, 'dismissed_count': len(current)})
 
     @app.route('/delete/<int:charge_id>', methods=['POST'])
     def delete_charge(charge_id):
@@ -4095,12 +4154,22 @@ def register_routes(app):
             return jsonify({'error': 'vehicle_mismatch'}), 400
         if not ev_from.departed_at or not ev_to.arrived_at:
             return jsonify({'error': 'incomplete_trip'}), 400
-        # Zero-duration trips (ev-robert has a handful where the state
-        # machine flushed departure + arrival on the same sync) are
-        # still renderable in the UI — only reject strictly inverted
-        # data.
         if ev_from.departed_at > ev_to.arrived_at:
             return jsonify({'error': 'invalid_trip_window'}), 400
+        # v3.0.40: a non-trivially-splittable trip needs at least ~5 s
+        # of window so the inserted stop has somewhere strictly inside
+        # both endpoints to live. Zero-duration legacy trips (departed
+        # and arrived on the exact same sync) get a clean 422 with the
+        # actual endpoint timestamps so the UI can explain what's
+        # wrong instead of dropping the user into a broken modal.
+        trip_seconds = (ev_to.arrived_at - ev_from.departed_at).total_seconds()
+        if trip_seconds < 5:
+            return jsonify({
+                'error': 'trip_too_short',
+                'trip_seconds': trip_seconds,
+                'from_departed_at': ev_from.departed_at.isoformat(),
+                'to_arrived_at': ev_to.arrived_at.isoformat(),
+            }), 422
 
         syncs_q = (VehicleSync.query
                    .filter(VehicleSync.vehicle_id == ev_from.vehicle_id)

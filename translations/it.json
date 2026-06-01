@@ -741,6 +741,7 @@
   "trips.split_manual_hint": "Tocca un punto qualsiasi della mappa per aggiungere manualmente una sosta.",
   "trips.split_no_candidates": "Nessuna sosta intermedia rilevata in questo viaggio.",
   "trips.split_outside_window": "La sosta deve essere all'interno della finestra temporale del viaggio.",
+  "trips.split_too_short": "Questo viaggio non ha durata misurabile — i suoi orari di inizio e fine coincidono. Modifica prima i timestamp degli estremi e riprova a dividerlo.",
   "trips.split_save": "Dividi qui",
   "trips.split_save_failed": "Errore:",
   "trips.split_saving": "Divisione del viaggio…",

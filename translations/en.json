@@ -1025,6 +1025,7 @@
   "trips.split_manual_hint": "Tap any point on the map to add a stop manually.",
   "trips.split_no_candidates": "No intermediate stops detected on this trip.",
   "trips.split_outside_window": "Stop must fall inside the trip time window.",
+  "trips.split_too_short": "This trip has no measurable duration — its start and end times are identical. Edit the endpoint timestamps first (pencil icon on the start/end), then try splitting again.",
   "trips.split_save": "Split here",
   "trips.split_save_failed": "Error:",
   "trips.split_saving": "Splitting trip…",

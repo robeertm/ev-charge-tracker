@@ -741,6 +741,7 @@
   "trips.split_manual_hint": "Toca cualquier punto del mapa para añadir una parada manualmente.",
   "trips.split_no_candidates": "No se detectaron paradas intermedias en este viaje.",
   "trips.split_outside_window": "La parada debe estar dentro del intervalo de tiempo del viaje.",
+  "trips.split_too_short": "Este viaje no tiene duración medible — sus horas de inicio y fin coinciden. Edita primero las marcas de tiempo de los extremos y luego intenta dividirlo de nuevo.",
   "trips.split_save": "Dividir aquí",
   "trips.split_save_failed": "Error:",
   "trips.split_saving": "Dividiendo viaje…",

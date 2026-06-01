@@ -741,6 +741,7 @@
   "trips.split_manual_hint": "Tik op een willekeurig punt op de kaart om handmatig een stop toe te voegen.",
   "trips.split_no_candidates": "Geen tussenstops gedetecteerd op deze rit.",
   "trips.split_outside_window": "Stop moet binnen het tijdvenster van de rit liggen.",
+  "trips.split_too_short": "Deze rit heeft geen meetbare duur — start- en eindtijd vallen samen. Pas eerst de tijdstempels van de eindpunten aan en probeer dan opnieuw te splitsen.",
   "trips.split_save": "Hier splitsen",
   "trips.split_save_failed": "Fout:",
   "trips.split_saving": "Rit splitsen…",

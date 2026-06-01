@@ -1,5 +1,22 @@
 # Changelog
 
+## v3.0.40 (2026-06-01)
+
+### /input resume banner: dismiss is now genuinely permanent
+
+Three prior attempts (v3.0.35 / v3.0.38 / v3.0.39) all relied on client-side state to suppress the banner — and all three failed in the field because iOS Safari kept serving a stale HTML page where the fix wasn't loaded yet. Discard would clear localStorage, but on the next visit Safari served the cached HTML, the URL still carried `?saved_id=X&active=1`, and the banner came right back.
+
+Two changes finally pin this down:
+
+1. **Server-side persistent dismissal**: a new `POST /api/charges/dismiss_session` endpoint appends the dismissed `saved_id` to `AppConfig.dismissed_charge_session_ids` (capped at 200). The `/input` route consults this list and forces `active_session = False` for any id present — so even when the URL params survive in browser history, the server refuses to ever render the banner for that id again.
+2. **No HTTP caching of dynamic HTML**: an `@app.after_request` hook now sets `Cache-Control: no-store, must-revalidate` on every `text/html` response. Static CSS / JS / images are untouched; only the dynamic pages stop being cached. This is what finally lets the fix actually reach the user's browser.
+
+The Discard button now: calls the server endpoint, then mirrors the dismissal into `localStorage` for the offline-fast-path, then strips the URL params, then hides the banner — in that order, so a hand-off between any two layers still leaves the dismissal recorded.
+
+### Trip split: zero-duration legacy trips refuse to open
+
+ev-robert has five ParkingEvent pairs with `departed_at == arrived_at` (a quirk of how the state machine flushed flush-on-stop on a single sync long before v3.0.32). The splitter modal used to open on these, show an empty map, and silently fail with a confusing warning on every map tap because there's literally no time interval to insert a stop into. The endpoint now returns `422 trip_too_short` upfront with the actual endpoint timestamps; the modal renders a clear "fix the endpoint timestamps first" message and locks the Save button so the user knows what's required.
+
 ## v3.0.39 (2026-06-01)
 
 ### /input resume banner: Discard now actually sticks
