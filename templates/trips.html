@@ -236,9 +236,19 @@
                 </div>
                 <div class="mb-2 tripEditFavWrap" data-side="{{ side }}" style="display:none">
                   <label class="form-label small mb-0">{{ t('trips.edit_favorite_name') }}</label>
-                  <input type="text" class="form-control form-control-sm tripEditFavName"
+                  {# v3.0.35: was a free-text input only — users had no way to know
+                     which favorites they already had. Dropdown of known favorites
+                     + an explicit "Neuer Favorit" option that re-reveals the
+                     text input for first-time names. #}
+                  <select class="form-select form-select-sm tripEditFavSelect" data-side="{{ side }}">
+                    {% for f in (locations.favorites or []) if f.name %}
+                      <option value="{{ f.name }}">{{ f.name }}</option>
+                    {% endfor %}
+                    <option value="__new">{{ t('trips.edit_favorite_new') }}</option>
+                  </select>
+                  <input type="text" class="form-control form-control-sm mt-1 tripEditFavName"
                          data-side="{{ side }}" maxlength="120"
-                         placeholder="{{ t('trips.edit_favorite_name_ph') }}">
+                         placeholder="{{ t('trips.edit_favorite_name_ph') }}" style="display:none">
                 </div>
                 <div class="mb-2">
                   <label class="form-label small mb-0">{{ t('trips.edit_address') }}</label>
@@ -557,13 +567,22 @@
     }
     function setPickStatus(msg) { pickStatus.textContent = msg; }
 
+    function updateFavInputVisibility(side) {
+        const sel = q('tripEditFavSelect', side);
+        const txt = q('tripEditFavName', side);
+        if (!sel || !txt) return;
+        txt.style.display = sel.value === '__new' ? '' : 'none';
+    }
     function updateFavVisibility(side) {
         const labelEl = q('tripEditLabel', side);
         const wrap = modalEl.querySelector('.tripEditFavWrap[data-side="' + side + '"]');
         wrap.style.display = labelEl.value === 'favorite' ? '' : 'none';
+        if (labelEl.value === 'favorite') updateFavInputVisibility(side);
     }
     ['from', 'to'].forEach(side => {
         q('tripEditLabel', side).addEventListener('change', () => updateFavVisibility(side));
+        const sel = q('tripEditFavSelect', side);
+        if (sel) sel.addEventListener('change', () => updateFavInputVisibility(side));
     });
 
     // ── Leaflet map ──────────────────────────────────────────────
@@ -669,7 +688,20 @@
 
     function fillSide(side, d) {
         q('tripEditLabel', side).value = d.label || 'other';
-        q('tripEditFavName', side).value = d.favorite_name || '';
+        const favSel = q('tripEditFavSelect', side);
+        const favTxt = q('tripEditFavName', side);
+        favTxt.value = d.favorite_name || '';
+        if (favSel) {
+            const wanted = d.favorite_name || '';
+            const opts = Array.from(favSel.options).map(o => o.value);
+            if (wanted && opts.includes(wanted)) {
+                favSel.value = wanted;
+            } else if (wanted) {
+                favSel.value = '__new';   // unknown name → show text input
+            } else {
+                favSel.value = opts[0] || '__new';
+            }
+        }
         q('tripEditAddress', side).value = d.address || '';
         q('tripEditArrivedAt', side).value = toLocalDtString(d.arrived_at);
         q('tripEditDepartedAt', side).value = toLocalDtString(d.departed_at);
@@ -780,9 +812,18 @@
 
     function collectSide(side) {
         const label = q('tripEditLabel', side).value;
+        let favName = null;
+        if (label === 'favorite') {
+            const sel = q('tripEditFavSelect', side);
+            if (sel && sel.value && sel.value !== '__new') {
+                favName = sel.value;
+            } else {
+                favName = q('tripEditFavName', side).value.trim() || null;
+            }
+        }
         const out = {
             label,
-            favorite_name: label === 'favorite' ? q('tripEditFavName', side).value.trim() : null,
+            favorite_name: favName,
             address: q('tripEditAddress', side).value.trim(),
         };
         const lat = q('tripEditLat', side).value;

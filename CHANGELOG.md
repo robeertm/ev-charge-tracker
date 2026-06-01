@@ -1,5 +1,22 @@
 # Changelog
 
+## v3.0.35 (2026-06-01)
+
+### /input: no more auto-opening on landing + zombie session escape hatch
+
+Some users reported "tote Ladungen" — opening the Charge tab on the phone and being dropped straight into the new-charge modal even though they had never started one. Root cause: the v3.0.25 auto-open used a stale `localStorage` flag from an abandoned earlier session (`startTime` set, never Stopped or Saved). Every subsequent visit then re-opened the modal indefinitely.
+
+Reworked the landing behaviour:
+
+- **No auto-open.** Tapping the Charge nav entry always lands on the history list. The modal opens only when the user taps the "+" button, a history row, or the resume banner.
+- **Resume banner.** When the server reports an active session (saved via *Zwischenspeichern*) or `localStorage` holds a fresh session, a yellow alert appears above the history with one tap to resume.
+- **Verwerfen / Discard.** The banner ships with an explicit "X / Verwerfen" button that nukes the stored session after a confirmation. No more workaround-by-restarting.
+- **Stale TTL = 6 h.** Anything older than 6 h in `localStorage` is treated as a leftover and purged on page load — long enough for any realistic overnight AC charge, short enough that an abandoned tab on the phone doesn't haunt the user the next day.
+
+### Trip edit: pick from known favorites instead of free-text
+
+The Startpunkt / Zielpunkt → *Art* → *Favorit* picker previously showed only an empty text input — the user had no way to see which favorites they already had configured, so the field invited typos that broke the location classifier. Replaced with a dropdown of all configured favorites (`AppConfig.favorite_locations`) plus a "+ Neuer Favorit" entry that re-reveals the text input for first-time names. Adding the same favourite to a second event now keeps it linked via the canonical name.
+
 ## v3.0.34 (2026-05-30)
 
 ### Edit modals: stop iOS Safari from zooming on input focus

@@ -16,6 +16,27 @@
     </button>
 </div>
 
+{# v3.0.35: an in-progress session no longer auto-opens the modal.
+   Instead a clickable banner appears here so the user can resume it,
+   plus an explicit Verwerfen (discard) button next to it for zombie
+   sessions the user never actually started. Hidden by default; the
+   server flips it on when active_session is set, and the JS
+   staleness check below toggles it on/off from localStorage. #}
+<div id="resumeChargeBanner"
+     class="alert alert-warning d-flex align-items-center justify-content-between mb-3"
+     style="{% if not active_session %}display:none;{% endif %}">
+    <span role="button" id="resumeChargeOpen"
+          data-bs-toggle="modal" data-bs-target="#newChargeModal"
+          style="cursor:pointer; flex:1 1 auto;">
+        <i class="bi bi-hourglass-split"></i>
+        {{ t('input.resume_session') }}
+    </span>
+    <button type="button" class="btn btn-sm btn-outline-secondary ms-2"
+            id="resumeChargeDiscard" title="{{ t('input.discard_session') }}">
+        <i class="bi bi-x-lg"></i> <span class="d-none d-sm-inline">{{ t('input.discard_session') }}</span>
+    </button>
+</div>
+
 {% if charges %}
 {% include "_history_section.html" %}
 {% endif %}
@@ -392,6 +413,7 @@ const T = {
     started_retroactively: {{ t('input.started_retroactively')|tojson }},
     retry_failed: {{ t('input.retry_failed')|tojson }},
     discard_stopped_confirm: {{ t('input.discard_stopped_confirm')|tojson }},
+    discard_session_confirm: {{ t('input.discard_session_confirm')|tojson }},
     stop: {{ t('input.stop')|tojson }},
 };
 
@@ -660,23 +682,46 @@ function persistFormCache() {
     } catch(e) {}
 })();
 
-// v3.0.25: auto-open the new-charge modal when there's an in-progress
-// charge (either server-rendered active_session=True from the
-// intermediate-save round-trip, or localStorage carries a startTime).
-// Without this, after Phase 1b the user would land on /input with the
-// list visible but no obvious sign that a charge session is still
-// running in the background.
-(function autoOpenChargeModal() {
-    const el = document.getElementById('newChargeModal');
-    if (!el || typeof bootstrap === 'undefined' || !bootstrap.Modal) return;
-    let open = {{ 'true' if active_session else 'false' }};
+// v3.0.35: no auto-open. The page always lands on the history list;
+// the modal is opened only by the user (the "+" button) or by tapping
+// the resume banner. A stale CHARGE_KEY (startTime > 6 h old) is
+// purged here so it can't keep showing the banner forever — Dirk
+// reported repeatedly seeing "tote Ladungen" he never started,
+// caused by a long-abandoned client session that kept re-opening the
+// modal. 6 h is short enough to catch this; a real overnight slow
+// charge tops out around 6 h on AC anyway.
+const CHARGE_SESSION_TTL_HOURS = 6;
+(function syncResumeBanner() {
+    const banner = document.getElementById('resumeChargeBanner');
+    if (!banner) return;
+    let hasFreshLocal = false;
     try {
-        const s = JSON.parse(localStorage.getItem(CHARGE_KEY));
-        if (s && s.startTime) open = true;
-    } catch(e) {}
-    if (open) {
-        const m = bootstrap.Modal.getOrCreateInstance(el);
-        m.show();
+        const raw = localStorage.getItem(CHARGE_KEY);
+        if (raw) {
+            const s = JSON.parse(raw);
+            if (s && s.startTime) {
+                const ageH = (Date.now() - Date.parse(s.startTime)) / 3.6e6;
+                if (ageH >= 0 && ageH < CHARGE_SESSION_TTL_HOURS) hasFreshLocal = true;
+                else localStorage.removeItem(CHARGE_KEY);
+            }
+        }
+    } catch(e) { try { localStorage.removeItem(CHARGE_KEY); } catch(_){} }
+    const serverActive = {{ 'true' if active_session else 'false' }};
+    banner.style.display = (serverActive || hasFreshLocal) ? '' : 'none';
+
+    const discardBtn = document.getElementById('resumeChargeDiscard');
+    if (discardBtn) {
+        discardBtn.addEventListener('click', (ev) => {
+            ev.preventDefault();
+            ev.stopPropagation();
+            if (!confirm(T.discard_session_confirm || 'Tote Sitzung verwerfen?')) return;
+            try { localStorage.removeItem(CHARGE_KEY); } catch(_){}
+            // Drop server-side active flag too if it's in the URL.
+            const url = new URL(window.location.href);
+            url.searchParams.delete('saved_id');
+            url.searchParams.delete('active');
+            window.location.replace(url.toString());
+        });
     }
 })();
 
