@@ -932,6 +932,18 @@ def _save_vehicle_sync(status, battery_kwh, raw_json='', vehicle_id=None):
     except Exception as e:
         logger.warning(f"Auto-charge detection failed: {e}")
 
+    # v3.0.47: SoC-rise fallback. Brands whose cached polling rarely
+    # coincides with the actual charge window (Skoda/VAG via MySkoda —
+    # cars only push state to the cloud on key events, not continuously)
+    # miss the is_charging=True transition entirely, so the detector
+    # above never fires. Infer the charge from a SoC jump between two
+    # consecutive parked syncs (odometer unchanged) instead.
+    try:
+        if result is not None and result is new_sync:
+            _detect_auto_charge_from_soc_rise(result)
+    except Exception as e:
+        logger.warning(f"SoC-rise auto-charge detection failed: {e}")
+
     return result
 
 
@@ -1133,6 +1145,142 @@ def _detect_auto_charge(end_sync):
     logger.info(
         f"Auto-detected charge id={c.id}: {charge_type} {soc_from}->{soc_to}% "
         f"{gross}kWh @ {loc_name or 'unknown'} (needs_review)"
+    )
+
+
+# Higher than _AUTO_CHARGE_MIN_SOC_GAIN because the SoC-rise path has no
+# is_charging signal to corroborate — only a SoC delta + parked invariant.
+# Set high enough to ignore BMS recalibration noise (typically ±2-3 % on a
+# parked car) but low enough to catch every meaningful home top-up.
+_AUTO_CHARGE_SOCRISE_MIN_GAIN = 8     # %
+# Beyond this gap two syncs can't be assumed to bracket "one" charge —
+# the BMS may have recalibrated multiple times or the user could've
+# driven and parked and charged at a different location.
+_AUTO_CHARGE_SOCRISE_MAX_GAP_HOURS = 36
+# Driving consumption estimate (kWh/100 km) used to subtract drive
+# losses from the apparent SoC delta when ``odo`` increased between the
+# two samples. Fits the average for Kia Niro EV / Skoda Enyaq within
+# ±2 % — the detector is conservative anyway and only fires once the
+# inferred net charge clears the gain threshold above.
+_AUTO_CHARGE_SOCRISE_KWH_PER_100KM = 18.0
+
+
+def _detect_auto_charge_from_soc_rise(end_sync):
+    """Infer a missed charge between two consecutive syncs whose SoC rose
+    by more than the noise floor. For brands whose cached polling rarely
+    coincides with the actual charging window (Skoda/VAG via MySkoda),
+    the is_charging=True transition is never observed so the primary
+    detector never fires. This is the fallback path.
+
+    When ``odo`` increased between the samples we assume the car drove
+    AND charged in that window; the apparent SoC delta gets the drive
+    consumption added back before checking the threshold so a top-up
+    that exactly offset the drive still counts.
+
+    Inserts a needs_review Charge if no overlapping charge already
+    covers the inferred SoC range on the same day.
+    """
+    vid = end_sync.vehicle_id
+    q = VehicleSync.query
+    if vid is not None:
+        q = q.filter(VehicleSync.vehicle_id == vid)
+    prev = (q.filter(VehicleSync.timestamp < end_sync.timestamp)
+            .order_by(VehicleSync.timestamp.desc())
+            .first())
+    if prev is None:
+        return
+    if (prev.soc_percent is None or end_sync.soc_percent is None
+            or prev.odometer_km is None or end_sync.odometer_km is None):
+        return
+    odo_delta = end_sync.odometer_km - prev.odometer_km
+    if odo_delta < 0:
+        return  # corrupt odo data (driver swapped clusters etc.)
+    bk = _get_battery_kwh(vehicle_id=vid)
+    drive_consumed_pct = (
+        odo_delta * _AUTO_CHARGE_SOCRISE_KWH_PER_100KM / 100.0 / bk * 100.0
+    ) if bk > 0 else 0.0
+    soc_delta = end_sync.soc_percent - prev.soc_percent
+    inferred_charge_pct = soc_delta + drive_consumed_pct
+    if inferred_charge_pct < _AUTO_CHARGE_SOCRISE_MIN_GAIN:
+        return
+    gap_hours = (end_sync.timestamp - prev.timestamp).total_seconds() / 3600
+    if gap_hours > _AUTO_CHARGE_SOCRISE_MAX_GAP_HOURS:
+        return
+
+    # Reconstruct SoC bounds: assume all driving happened first (worst
+    # case for "where did the user charge?"), so the charge window
+    # starts at the post-drive SoC and ends at the current SoC. Clamp
+    # to [0, 100] in case the consumption estimate over-shoots.
+    soc_from = max(0, int(round(prev.soc_percent - drive_consumed_pct)))
+    soc_to = end_sync.soc_percent
+    if soc_to <= soc_from:
+        return
+    charge_date = end_sync.timestamp.date()
+
+    # Bail if any same-day charge already covers this SoC range
+    existing = Charge.query.filter(
+        Charge.vehicle_id == vid,
+        Charge.date == charge_date,
+    ).all()
+    for c in existing:
+        if c.soc_from is None or c.soc_to is None:
+            return  # opaque same-day charge — leave alone
+        overlaps = not (c.soc_to <= soc_from or c.soc_from >= soc_to)
+        if overlaps:
+            return
+
+    eff = _get_charge_efficiency(vehicle_id=vid)
+
+    # Location/operator/price from end-sync GPS where available
+    lat = end_sync.location_lat or prev.location_lat
+    lon = end_sync.location_lon or prev.location_lon
+    op = None
+    eur = None
+    loc_name = None
+    if lat is not None and lon is not None:
+        from services.trips_service import _classify_location
+        label, fav_name = _classify_location(lat, lon)
+        prices = _get_operator_prices()
+        from services.i18n import t as _t
+        if label == 'home':
+            op = _t('set.op_home_private')
+            loc_name = AppConfig.get('home_label', 'Home') or 'Home'
+        elif label == 'work':
+            op = _t('set.op_work')
+            loc_name = AppConfig.get('work_label', 'Work') or 'Work'
+        elif label == 'favorite' and fav_name:
+            loc_name = fav_name
+        if op and op in prices:
+            eur = prices[op]
+
+    fb = (Charge.query.filter(Charge.co2_g_per_kwh.isnot(None),
+                              Charge.charge_type != 'PV',
+                              Charge.vehicle_id == vid)
+          .order_by(Charge.date.desc()).first())
+    co2 = fb.co2_g_per_kwh if fb else None
+
+    # No charge_power signal in this path — assume AC (home charging is
+    # AC on every supported brand). User can switch to DC on review.
+    charge_type = 'AC'
+    net = (soc_to - soc_from) / 100.0 * bk
+    gross = round(net / eff if (eff and eff > 0) else net, 2)
+
+    c = Charge(
+        vehicle_id=vid, date=charge_date, charge_hour=prev.timestamp.hour,
+        charge_type=charge_type, soc_from=soc_from, soc_to=soc_to,
+        kwh_loaded=gross, eur_per_kwh=eur, operator=op,
+        odometer=end_sync.odometer_km,
+        location_lat=lat, location_lon=lon, location_name=loc_name,
+        co2_g_per_kwh=co2, needs_review=True, created_at=end_sync.timestamp,
+        notes='Automatisch erkannt aus SoC-Sprung (kein is_charging-Signal) — bitte prüfen',
+    )
+    c.calculate_fields(bk, eff)
+    db.session.add(c)
+    db.session.commit()
+    logger.info(
+        f"Auto-detected charge (SoC-rise) id={c.id}: {charge_type} "
+        f"{soc_from}->{soc_to}% {gross}kWh @ {loc_name or 'unknown'} "
+        f"(gap={gap_hours:.1f}h, needs_review)"
     )
 
 

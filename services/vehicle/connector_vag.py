@@ -6,9 +6,11 @@ submodule. Old releases had it on the top level. Try both so upgrades and
 downgrades don't break.
 """
 import json
+import logging
 import os
-import tempfile
 from datetime import datetime, date as _date
+
+logger = logging.getLogger(__name__)
 
 try:
     try:
@@ -83,8 +85,19 @@ class VAGConnector(VehicleConnector):
     def __init__(self, credentials: dict):
         super().__init__(credentials)
         self._cc = None
+        # Persist OAuth tokens under data/ instead of /tmp. systemd
+        # services run with PrivateTmp=yes which wipes /tmp on every
+        # restart, so the tokenstore could never accumulate state and
+        # CarConnectivity re-ran the full OAuth dance on every poll
+        # ("Could not use tokenstore from file ..." in the logs). The
+        # actual save also requires an explicit ``cc.persist()`` call
+        # (see ``_find_vehicle``) — without that the file is never
+        # written even if the path survives.
+        from config import DATA_DIR
+        token_dir = os.path.join(DATA_DIR, 'cc_tokens')
+        os.makedirs(token_dir, exist_ok=True)
         self._tokenstore = os.path.join(
-            tempfile.gettempdir(), f'ev_tracker_cc_{self.CONNECTOR_TYPE}_tokens.json'
+            token_dir, f'{self.CONNECTOR_TYPE}_tokens.json'
         )
 
     def _build_config(self) -> dict:
@@ -116,6 +129,15 @@ class VAGConnector(VehicleConnector):
     def _find_vehicle(self):
         cc = self._get_cc()
         cc.fetch_all()
+        # Persist OAuth tokens so the next poll can resume the existing
+        # session instead of re-running the full identity-server dance.
+        # CarConnectivity loads the tokenstore on startup() but only
+        # writes it via persist() — and the connector instance lives
+        # for one sync only, so we have to call it explicitly here.
+        try:
+            cc.persist()
+        except Exception as e:
+            logger.debug(f'tokenstore persist failed: {e}')
         garage = cc.get_garage()
         vin = self.credentials.get('vin', '').strip()
         if vin:

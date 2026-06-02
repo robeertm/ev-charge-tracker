@@ -1,5 +1,28 @@
 # Changelog
 
+## v3.0.47 (2026-06-02)
+
+### Auto-charge detection: SoC-rise fallback for non-charging-aware brands
+
+Skoda / VW Group cars (and any other brand whose cloud only updates state on key events, not continuously) usually have their actual charge window entirely outside the polling cadence — by the time the next cached sync arrives, MySkoda already reports `is_charging=false` again. The v3.0.18 detector relies on observing a `is_charging=1→0` transition, so on these brands an everyday home top-up was silently missed.
+
+Added a fallback path that watches consecutive syncs for a SoC jump:
+
+- Min gain: 8 % (configurable, kept well above the BMS recalibration noise floor of ±2-3 % on a parked car).
+- Max gap: 36 h between samples — beyond that two syncs can't reliably bracket a single charge.
+- Tolerates driving between samples: subtracts an estimated drive consumption (18 kWh/100 km, fits Niro EV / Enyaq within ±2 %) from the apparent SoC delta before applying the threshold, so a 9 % net rise across a 46 km drive (~13 % consumed = 22 % charged) still counts.
+- De-duplicates against any same-day Charge whose SoC range overlaps — so the existing `is_charging`-transition detector and a manually logged Charge both pre-empt this fallback.
+- Reconstructs the SoC bounds by assuming all driving happened before the charge (worst case for "where was the user when they charged?"); user can correct on review.
+
+Inserts `needs_review=true` rows with the notes field calling out the inference path so the user knows what to verify.
+
+### VAG (Skoda / VW / Seat / Cupra) tokenstore — out of `/tmp`, properly persisted
+
+Two related fixes to stop the connector running a full OAuth dance on every poll:
+
+1. Moved the tokenstore from `/tmp/ev_tracker_cc_{brand}_tokens.json` to `data/cc_tokens/{brand}_tokens.json`. systemd's `PrivateTmp=yes` wipes `/tmp` on every service restart so the file never survived a deploy, and CarConnectivity then re-ran the identity-server consent flow on every fetch.
+2. Added an explicit `cc.persist()` call after `fetch_all()`. CarConnectivity loads the tokenstore on `startup()` but only writes it via `persist()` — and our connector instance lives for exactly one sync, so without the explicit call the file was never actually written even when the path was stable. The "Could not use tokenstore from file …" warning that was logged on every poll is now expected only on first run (and on tokenstore rotation).
+
 ## v3.0.46 (2026-06-02)
 
 ### Charge input: operator price now auto-fills on initial render
