@@ -1215,12 +1215,18 @@ def _detect_auto_charge_from_soc_rise(end_sync):
     soc_to = end_sync.soc_percent
     if soc_to <= soc_from:
         return
-    charge_date = end_sync.timestamp.date()
+    # Anchor the date on prev (the "before charge" sample). The charge
+    # likely started shortly after the previous sync; using end_sync's
+    # date would land an overnight charge on the morning-after day,
+    # which doesn't match how users manually log them.
+    charge_date = prev.timestamp.date()
 
-    # Bail if any same-day charge already covers this SoC range
+    # Bail if any charge already covers this SoC range on either the
+    # prev-anchored date OR the end-anchored date (overnight charges
+    # straddle midnight; the user could've manually logged it on either).
     existing = Charge.query.filter(
         Charge.vehicle_id == vid,
-        Charge.date == charge_date,
+        Charge.date.in_({prev.timestamp.date(), end_sync.timestamp.date()}),
     ).all()
     for c in existing:
         if c.soc_from is None or c.soc_to is None:

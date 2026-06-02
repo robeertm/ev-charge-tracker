@@ -1,5 +1,14 @@
 # Changelog
 
+## v3.0.48 (2026-06-02)
+
+### SoC-rise auto-charge — date anchor + cross-day dedup fix
+
+Follow-up to v3.0.47. The detector dated its inferred Charge on `end_sync.timestamp.date()`, which for the common overnight-charge case is the morning-after day. Users usually log the charge under the day it started, so the dedup query against an already-logged same-day charge missed and the detector would have created a duplicate.
+
+- Anchor `Charge.date` on `prev.timestamp.date()` (the "before-charge" sample).
+- Dedup query now spans both `prev` and `end` dates so a charge logged on either side of midnight pre-empts the inference.
+
 ## v3.0.47 (2026-06-02)
 
 ### Auto-charge detection: SoC-rise fallback for non-charging-aware brands
