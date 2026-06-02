@@ -1,5 +1,13 @@
 # Changelog
 
+## v3.0.46 (2026-06-02)
+
+### Charge input: operator price now auto-fills on initial render
+
+If the charge form opens with an operator already pre-selected — because the user has an in-progress saved charge or because the auto-location service matched a known operator — the price field stayed empty even when a `€/kWh` was configured for that operator in settings. Reason: the auto-fill JS only listened to the `change` event on the operator `<select>`, and no `change` fires on initial page render.
+
+The IIFE that owns the operator dropdown now runs one auto-fill pass on load if the dropdown already has a selected value (or the free-text input is non-empty). The existing "don't clobber a user-typed value" guard still applies, so a manually-entered price won't be overwritten.
+
 ## v3.0.45 (2026-06-01)
 
 ### Trip split: km / SoC for manual stops — user input + time interpolation fallback

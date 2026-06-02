@@ -1325,6 +1325,18 @@ document.getElementById('chargeForm').addEventListener('submit', (ev) => {
         if (typeof persistFormCache === 'function') persistFormCache();
     });
     custom.addEventListener('blur', () => { commit(custom.value); });
+
+    // Initial fill: when the form renders with an operator already
+    // selected (pre_charge.operator / auto_loc.operator) the `change`
+    // event never fires, so the price field stays empty even though
+    // a price is configured for that operator. Trigger one auto-fill
+    // pass on load. Empty-by-default price field means we don't
+    // clobber a user-typed value.
+    if (sel.value && sel.value !== '__custom') {
+        tryAutoFillPrice(sel.value);
+    } else if (custom.value) {
+        tryAutoFillPrice(custom.value.trim());
+    }
 })();
 
 // ── Cancel: discard any in-progress charge timer + form state ────
