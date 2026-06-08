@@ -1282,7 +1282,14 @@ document.getElementById('chargeForm').addEventListener('submit', (ev) => {
 
     let lastAutoFilled = '';
 
-    function tryAutoFillPrice(name) {
+    // ``force`` distinguishes a user-driven operator pick (dropdown
+    // change, custom-field blur) from passive paths (initial render,
+    // restored form cache). User pick → always overwrite the price
+    // field, even if it already shows something — that's what the user
+    // expects when consciously switching operators. Passive paths keep
+    // the "don't clobber what the user typed" guard.
+    function tryAutoFillPrice(name, opts) {
+        const force = !!(opts && opts.force);
         if (!priceIn || !prices) return;
         if (!name) return;
         let p = prices[name];
@@ -1293,16 +1300,18 @@ document.getElementById('chargeForm').addEventListener('submit', (ev) => {
             }
         }
         if (p === undefined) return;
-        const current = (priceIn.value || '').trim();
-        if (current && current !== lastAutoFilled) return;  // user typed, keep
+        if (!force) {
+            const current = (priceIn.value || '').trim();
+            if (current && current !== lastAutoFilled) return;
+        }
         priceIn.value = p.toFixed(4).replace(/\.?0+$/, '');
         lastAutoFilled = priceIn.value;
         if (typeof updateCalcPrice === 'function') updateCalcPrice();
     }
 
-    function commit(value) {
+    function commit(value, opts) {
         hidden.value = value || '';
-        tryAutoFillPrice(hidden.value);
+        tryAutoFillPrice(hidden.value, opts);
         if (typeof persistFormCache === 'function') persistFormCache();
     }
 
@@ -1311,10 +1320,10 @@ document.getElementById('chargeForm').addEventListener('submit', (ev) => {
             custom.style.display = '';
             custom.value = '';
             custom.focus();
-            commit('');
+            commit('', {force: true});
         } else {
             custom.style.display = 'none';
-            commit(sel.value);
+            commit(sel.value, {force: true});
         }
     });
     // Free text — commit on input so the hidden field is always current
@@ -1324,14 +1333,14 @@ document.getElementById('chargeForm').addEventListener('submit', (ev) => {
         hidden.value = custom.value.trim();
         if (typeof persistFormCache === 'function') persistFormCache();
     });
-    custom.addEventListener('blur', () => { commit(custom.value); });
+    custom.addEventListener('blur', () => { commit(custom.value, {force: true}); });
 
     // Initial fill: when the form renders with an operator already
     // selected (pre_charge.operator / auto_loc.operator) the `change`
     // event never fires, so the price field stays empty even though
     // a price is configured for that operator. Trigger one auto-fill
-    // pass on load. Empty-by-default price field means we don't
-    // clobber a user-typed value.
+    // pass on load — no force, so we never overwrite a value the user
+    // already typed in a prior session.
     if (sel.value && sel.value !== '__custom') {
         tryAutoFillPrice(sel.value);
     } else if (custom.value) {

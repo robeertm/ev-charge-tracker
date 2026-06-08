@@ -1,5 +1,13 @@
 # Changelog
 
+## v3.0.50 (2026-06-08)
+
+### Charge input: operator pick now always overwrites the price field
+
+v3.0.46 added a "don't clobber a user-typed price" guard so the auto-fill wouldn't wipe a value the user had already entered. The guard was too broad: it also blocked the auto-fill when the user *consciously* switched the operator dropdown — if the price field already had any value (from `pre_charge.eur_per_kwh`, the auto-location service, or a restored form-cache entry), the new operator's configured price never landed.
+
+User-driven operator changes (dropdown `change`, custom-field `blur`) now force-overwrite the price field. Passive paths (initial render, no explicit user action) still respect the guard so a value the user actively typed in a prior session is preserved.
+
 ## v3.0.49 (2026-06-08)
 
 ### Auto-charge detection: SoC-rise detector ran amok during multi-step rises
