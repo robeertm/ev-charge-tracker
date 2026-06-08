@@ -496,21 +496,45 @@
         };
 
         // Operator dropdown ↔ hidden field sync (same logic as input.html).
-        function commitOperator(value) {
+        // Also force-fills the €/kWh field whenever the user actively picks
+        // an operator that has a configured price — the row we're editing
+        // already shows the old price, so without ``force`` the auto-fill
+        // would always bail on the "value already present" guard.
+        const OPERATOR_PRICES = {{ operator_prices|tojson }};
+        function tryAutoFillEditPrice(name, opts) {
+            const force = !!(opts && opts.force);
+            if (!F.eur || !OPERATOR_PRICES || !name) return;
+            let p = OPERATOR_PRICES[name];
+            if (p === undefined) {
+                const lower = name.toLowerCase();
+                for (const k in OPERATOR_PRICES) {
+                    if (k.toLowerCase() === lower) { p = OPERATOR_PRICES[k]; break; }
+                }
+            }
+            if (p === undefined) return;
+            if (!force) {
+                const current = (F.eur.value || '').trim();
+                if (current) return;
+            }
+            F.eur.value = p.toFixed(4).replace(/\.?0+$/, '');
+        }
+        function commitOperator(value, opts) {
             opHidden.value = (value || '').trim();
+            tryAutoFillEditPrice(opHidden.value, opts);
         }
         opSel.addEventListener('change', () => {
             if (opSel.value === '__custom') {
                 opCustom.style.display = '';
                 opCustom.value = '';
                 opCustom.focus();
-                commitOperator('');
+                commitOperator('', {force: true});
             } else {
                 opCustom.style.display = 'none';
-                commitOperator(opSel.value);
+                commitOperator(opSel.value, {force: true});
             }
         });
         opCustom.addEventListener('input', () => { opHidden.value = opCustom.value.trim(); });
+        opCustom.addEventListener('blur', () => { commitOperator(opCustom.value, {force: true}); });
 
         function setOperatorFromValue(opName) {
             const value = opName || '';

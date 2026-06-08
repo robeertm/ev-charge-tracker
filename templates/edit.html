@@ -305,7 +305,13 @@
 
     let lastAutoFilled = '';
 
-    function tryAutoFillPrice(name) {
+    // ``force`` lets a user-driven dropdown change overwrite the price
+    // field unconditionally. On the edit page the field is always
+    // pre-filled with the existing charge's price, so without ``force``
+    // the guard below would always bail — switching operator would
+    // silently leave the old price in place.
+    function tryAutoFillPrice(name, opts) {
+        const force = !!(opts && opts.force);
         if (!priceIn || !prices || !name) return;
         let p = prices[name];
         if (p === undefined) {
@@ -315,29 +321,31 @@
             }
         }
         if (p === undefined) return;
-        const current = (priceIn.value || '').trim();
-        if (current && current !== lastAutoFilled) return;
+        if (!force) {
+            const current = (priceIn.value || '').trim();
+            if (current && current !== lastAutoFilled) return;
+        }
         priceIn.value = p.toFixed(4).replace(/\.?0+$/, '');
         lastAutoFilled = priceIn.value;
     }
 
-    function commit(value) {
+    function commit(value, opts) {
         hidden.value = value || '';
-        tryAutoFillPrice(hidden.value);
+        tryAutoFillPrice(hidden.value, opts);
     }
 
     sel.addEventListener('change', () => {
         if (sel.value === '__custom') {
             custom.style.display = '';
             custom.focus();
-            commit(custom.value);
+            commit(custom.value, {force: true});
         } else {
             custom.style.display = 'none';
-            commit(sel.value);
+            commit(sel.value, {force: true});
         }
     });
     custom.addEventListener('input', () => { hidden.value = custom.value.trim(); });
-    custom.addEventListener('blur', () => { commit(custom.value); });
+    custom.addEventListener('blur', () => { commit(custom.value, {force: true}); });
 })();
 </script>
 {% endblock %}

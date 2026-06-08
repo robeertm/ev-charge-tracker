@@ -1,5 +1,16 @@
 # Changelog
 
+## v3.0.51 (2026-06-08)
+
+### Charge edit views: operator pick now auto-fills the price
+
+Follow-up to v3.0.50. That release fixed the operator → price auto-fill on the new-charge form, but the same logic was duplicated in two other places:
+
+- `edit.html` (full-page edit of a saved charge) — same `lastAutoFilled` guard as input.html, but the field is always pre-filled with the existing charge's price, so the guard always bailed and the price never updated when the operator was changed.
+- `_history_section.html` inline-edit modal (opened by clicking a row in the history list) — had **no** price auto-fill at all on operator change.
+
+Both edit paths now mirror the input form: user-driven operator changes force-overwrite the price; passive paths still keep what's there.
+
 ## v3.0.50 (2026-06-08)
 
 ### Charge input: operator pick now always overwrites the price field
