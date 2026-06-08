@@ -1,5 +1,23 @@
 # Changelog
 
+## v3.0.49 (2026-06-08)
+
+### Auto-charge detection: SoC-rise detector ran amok during multi-step rises
+
+A 24→68 % home charge on one car and an 11→100 % charge on another both produced the canonical full-session Charge row PLUS a chain of 10 %-step "shard" rows (40→50, 50→60, 60→70 …). Two compounding bugs:
+
+1. `_detect_auto_charge_from_soc_rise` (v3.0.47) compared each new sync to the *immediately preceding* one. A continuous charge session that sampled every 40 min produced one candidate per sync, each abutting the previous (`30→40`, `40→50` …). The dedup check `c.soc_to <= soc_from` lets abutting candidates slip through — there's no overlap, so a new row gets created on every step.
+2. The same detector also fired *during* an active charge (with `is_charging=1` on the syncs), competing with the primary `_detect_auto_charge` handler that owns the `1→0` session-end transition. The primary handler's merge logic then absorbed one shard but `break`-ed out of the loop, leaving the rest as orphans.
+
+Fixes:
+
+- SoC-rise detector now anchors on the **SoC valley** — walks back through recent syncs to find where the current rise actually started, instead of using just the last sync. A continuous session therefore produces ONE candidate (`valley → current peak`) that grows in place on every poll.
+- SoC-rise detector now **skips entirely** when `end_sync.is_charging` or the immediately previous sync's `is_charging` is true. Primary detector owns those windows.
+- SoC-rise detector now **extends** an existing un-reviewed auto Charge on overlap instead of bailing — symmetric with the primary detector's merge behavior, so the row grows with each poll rather than ping-ponging.
+- Primary detector now **absorbs every overlapping un-reviewed shard** at session end (oldest row wins, others get deleted), so residue from the buggy code path gets cleaned up automatically on the next real charge.
+
+Garbage rows from the bug remain in already-shipped databases; remove them manually (`needs_review=1` rows from 2026-06-08 with the SoC-rise notes string).
+
 ## v3.0.48 (2026-06-02)
 
 ### SoC-rise auto-charge — date anchor + cross-day dedup fix

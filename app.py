@@ -1041,7 +1041,12 @@ def _detect_auto_charge(end_sync):
         Charge.vehicle_id == vid,
         Charge.date == charge_date,
     ).all()
+    # Collect every un-reviewed auto charge that touches this session
+    # (the buggy v3.0.47 SoC-rise detector could leave several shards
+    # behind from one physical charge). Keep the oldest as the merge
+    # anchor and delete the rest so the session ends up as ONE row.
     merge_target = None
+    absorb_others = []
     for c in existing:
         if c.soc_from is None or c.soc_to is None:
             # Same-day charge without SoC bounds — be conservative, skip.
@@ -1058,8 +1063,12 @@ def _detect_auto_charge(end_sync):
         gap_min = (abs((start_ts - c.created_at).total_seconds()) / 60.0
                    if c.created_at else 1e9)
         if soc_touch and gap_min <= _AUTO_CHARGE_MERGE_WINDOW_MIN:
-            merge_target = c
-            break
+            if merge_target is None or (c.id is not None and c.id < merge_target.id):
+                if merge_target is not None:
+                    absorb_others.append(merge_target)
+                merge_target = c
+            else:
+                absorb_others.append(c)
 
     # Location + operator/price from the start sync's GPS.
     lat = start_row.location_lat or end_sync.location_lat
@@ -1100,12 +1109,22 @@ def _detect_auto_charge(end_sync):
         return round(n, 2) if ctype == 'DC' else round(n / eff, 2)
 
     if merge_target is not None:
-        # Extend the session to the union of both SoC windows and recompute
-        # everything from the full span. Reset loss_kwh so calculate_fields
-        # re-derives it from the measured efficiency rather than freezing a
-        # stale per-fragment value (the cause of the bogus 6 % loss).
+        # Extend the session to the union of all overlapping windows
+        # (target + absorbed shards) and recompute everything from the
+        # full span. Reset loss_kwh so calculate_fields re-derives it
+        # from the measured efficiency rather than freezing a stale
+        # per-fragment value (the cause of the bogus 6 % loss).
         new_from = min(merge_target.soc_from, soc_from)
         new_to = max(merge_target.soc_to, soc_to)
+        for _shard in absorb_others:
+            new_from = min(new_from, _shard.soc_from)
+            new_to = max(new_to, _shard.soc_to)
+            db.session.delete(_shard)
+        if absorb_others:
+            logger.info(
+                f"Auto-charge absorbed {len(absorb_others)} shard(s) "
+                f"into id={merge_target.id} (ids: {[s.id for s in absorb_others]})"
+            )
         if charge_type == 'DC':
             merge_target.charge_type = 'DC'
         merge_target.soc_from = new_from
@@ -1166,80 +1185,116 @@ _AUTO_CHARGE_SOCRISE_KWH_PER_100KM = 18.0
 
 
 def _detect_auto_charge_from_soc_rise(end_sync):
-    """Infer a missed charge between two consecutive syncs whose SoC rose
-    by more than the noise floor. For brands whose cached polling rarely
-    coincides with the actual charging window (Skoda/VAG via MySkoda),
-    the is_charging=True transition is never observed so the primary
-    detector never fires. This is the fallback path.
+    """Fallback detector for brands whose cached polling rarely catches
+    an ``is_charging=True`` frame (Skoda/VAG via MySkoda — the cloud only
+    pushes state on key events, not continuously). Infers a missed
+    charge from a SoC rise between *parked* samples.
 
-    When ``odo`` increased between the samples we assume the car drove
-    AND charged in that window; the apparent SoC delta gets the drive
-    consumption added back before checking the threshold so a top-up
-    that exactly offset the drive still counts.
+    Two structural guarantees that have to hold or this thing runs amok:
 
-    Inserts a needs_review Charge if no overlapping charge already
-    covers the inferred SoC range on the same day.
+    1. ``prev`` is the SoC **valley** that started this rise — not just
+       the immediately preceding sync. Otherwise every 10 % step in a
+       continuous charge session produces its own Charge row (the
+       v3.0.47 → v3.0.49 bug: 11→100 % becomes one big charge AND
+       seven 10 % shards because each candidate's ``soc_from`` ==
+       previous candidate's ``soc_to`` slips past the overlap check).
+
+    2. Skipped entirely when ``end_sync`` or the immediately previous
+       sync show ``is_charging``. The primary ``_detect_auto_charge``
+       handler owns those windows; running both detectors on the same
+       session produces duplicate rows that the merge logic can't fully
+       reconcile.
+
+    On overlap with an un-reviewed auto charge: **extend** the existing
+    row to the union of both SoC windows rather than creating a new
+    one. On overlap with a reviewed/manual charge: bail (the user owns
+    that slot).
     """
+    if end_sync.is_charging:
+        return
+    if end_sync.soc_percent is None or end_sync.odometer_km is None:
+        return
+
     vid = end_sync.vehicle_id
     q = VehicleSync.query
     if vid is not None:
         q = q.filter(VehicleSync.vehicle_id == vid)
-    prev = (q.filter(VehicleSync.timestamp < end_sync.timestamp)
-            .order_by(VehicleSync.timestamp.desc())
-            .first())
-    if prev is None:
+    from datetime import timedelta as _td
+    horizon = end_sync.timestamp - _td(hours=_AUTO_CHARGE_SOCRISE_MAX_GAP_HOURS)
+    recent = (q.filter(VehicleSync.timestamp <= end_sync.timestamp)
+              .filter(VehicleSync.timestamp >= horizon)
+              .order_by(VehicleSync.timestamp.desc()).all())
+    if len(recent) < 2 or recent[0].id != end_sync.id:
         return
-    if (prev.soc_percent is None or end_sync.soc_percent is None
-            or prev.odometer_km is None or end_sync.odometer_km is None):
-        return
-    odo_delta = end_sync.odometer_km - prev.odometer_km
-    if odo_delta < 0:
-        return  # corrupt odo data (driver swapped clusters etc.)
+    if recent[1].is_charging:
+        return  # 1→0 transition — primary detector owns this
+
+    # Walk back to the SoC valley where this rise began. The valley is
+    # the most recent sync where SoC reached its running minimum going
+    # backwards; we stop at the first sync whose SoC is *higher* than
+    # that minimum (that's the previous session's peak, beyond the
+    # valley we want).
+    valley = end_sync
+    min_soc = end_sync.soc_percent
+    for s in recent[1:]:
+        if s.soc_percent is None:
+            continue
+        if s.soc_percent <= min_soc:
+            min_soc = s.soc_percent
+            valley = s
+        else:
+            break
+    if valley.id == end_sync.id:
+        return  # nothing below us in the window — no rise to attribute
+
+    # Odometer on the valley is optional: Skoda often reports odo only
+    # sporadically. Missing odo → zero drive consumption (conservative).
+    if valley.odometer_km is not None:
+        odo_delta = end_sync.odometer_km - valley.odometer_km
+        if odo_delta < 0:
+            return  # corrupt odo (cluster swap etc.)
+    else:
+        odo_delta = 0
     bk = _get_battery_kwh(vehicle_id=vid)
     drive_consumed_pct = (
         odo_delta * _AUTO_CHARGE_SOCRISE_KWH_PER_100KM / 100.0 / bk * 100.0
     ) if bk > 0 else 0.0
-    soc_delta = end_sync.soc_percent - prev.soc_percent
+    soc_delta = end_sync.soc_percent - valley.soc_percent
     inferred_charge_pct = soc_delta + drive_consumed_pct
     if inferred_charge_pct < _AUTO_CHARGE_SOCRISE_MIN_GAIN:
         return
-    gap_hours = (end_sync.timestamp - prev.timestamp).total_seconds() / 3600
+    gap_hours = (end_sync.timestamp - valley.timestamp).total_seconds() / 3600
     if gap_hours > _AUTO_CHARGE_SOCRISE_MAX_GAP_HOURS:
         return
 
-    # Reconstruct SoC bounds: assume all driving happened first (worst
-    # case for "where did the user charge?"), so the charge window
-    # starts at the post-drive SoC and ends at the current SoC. Clamp
-    # to [0, 100] in case the consumption estimate over-shoots.
-    soc_from = max(0, int(round(prev.soc_percent - drive_consumed_pct)))
+    soc_from = max(0, int(round(valley.soc_percent - drive_consumed_pct)))
     soc_to = end_sync.soc_percent
     if soc_to <= soc_from:
         return
-    # Anchor the date on prev (the "before charge" sample). The charge
-    # likely started shortly after the previous sync; using end_sync's
-    # date would land an overnight charge on the morning-after day,
-    # which doesn't match how users manually log them.
-    charge_date = prev.timestamp.date()
+    # Anchor the date on the valley (the "before charge" sample).
+    charge_date = valley.timestamp.date()
 
-    # Bail if any charge already covers this SoC range on either the
-    # prev-anchored date OR the end-anchored date (overnight charges
-    # straddle midnight; the user could've manually logged it on either).
     existing = Charge.query.filter(
         Charge.vehicle_id == vid,
-        Charge.date.in_({prev.timestamp.date(), end_sync.timestamp.date()}),
+        Charge.date.in_({valley.timestamp.date(), end_sync.timestamp.date()}),
     ).all()
+    merge_target = None
     for c in existing:
         if c.soc_from is None or c.soc_to is None:
             return  # opaque same-day charge — leave alone
         overlaps = not (c.soc_to <= soc_from or c.soc_from >= soc_to)
+        if not c.needs_review:
+            if overlaps:
+                return  # reviewed/manual charge wins
+            continue
         if overlaps:
-            return
+            merge_target = c
+            break
 
     eff = _get_charge_efficiency(vehicle_id=vid)
 
-    # Location/operator/price from end-sync GPS where available
-    lat = end_sync.location_lat or prev.location_lat
-    lon = end_sync.location_lon or prev.location_lon
+    lat = end_sync.location_lat or valley.location_lat
+    lon = end_sync.location_lon or valley.location_lon
     op = None
     eur = None
     loc_name = None
@@ -1265,14 +1320,39 @@ def _detect_auto_charge_from_soc_rise(end_sync):
           .order_by(Charge.date.desc()).first())
     co2 = fb.co2_g_per_kwh if fb else None
 
-    # No charge_power signal in this path — assume AC (home charging is
-    # AC on every supported brand). User can switch to DC on review.
     charge_type = 'AC'
+
+    if merge_target is not None:
+        new_from = min(merge_target.soc_from, soc_from)
+        new_to = max(merge_target.soc_to, soc_to)
+        net = (new_to - new_from) / 100.0 * bk
+        merge_target.soc_from = new_from
+        merge_target.soc_to = new_to
+        merge_target.kwh_loaded = round(net / eff if (eff and eff > 0) else net, 2)
+        merge_target.loss_kwh = None
+        merge_target.odometer = end_sync.odometer_km
+        merge_target.created_at = end_sync.timestamp
+        if loc_name and not merge_target.location_name:
+            merge_target.location_name = loc_name
+        if op and not merge_target.operator:
+            merge_target.operator = op
+        if eur and not merge_target.eur_per_kwh:
+            merge_target.eur_per_kwh = eur
+        if co2 is not None and merge_target.co2_g_per_kwh is None:
+            merge_target.co2_g_per_kwh = co2
+        merge_target.calculate_fields(bk, eff)
+        db.session.commit()
+        logger.info(
+            f"Auto-detected charge (SoC-rise) merged into id={merge_target.id}: "
+            f"now {new_from}->{new_to}% {merge_target.kwh_loaded}kWh"
+        )
+        return
+
     net = (soc_to - soc_from) / 100.0 * bk
     gross = round(net / eff if (eff and eff > 0) else net, 2)
 
     c = Charge(
-        vehicle_id=vid, date=charge_date, charge_hour=prev.timestamp.hour,
+        vehicle_id=vid, date=charge_date, charge_hour=valley.timestamp.hour,
         charge_type=charge_type, soc_from=soc_from, soc_to=soc_to,
         kwh_loaded=gross, eur_per_kwh=eur, operator=op,
         odometer=end_sync.odometer_km,
