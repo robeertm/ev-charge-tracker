@@ -19,19 +19,35 @@ from models.database import db, VehicleTrip
 logger = logging.getLogger(__name__)
 
 
-def _parse_dt(s):
-    """Best-effort ISO-8601 → naive datetime parser.
+def _combine_day_and_time(day, end_time_str):
+    """myskoda's Trip.end_time is just ``HH:MM`` (not a full timestamp);
+    the date sits on the enclosing DailyTrip. Combine them into a naive
+    datetime, returning None on any parse failure.
 
-    myskoda returns end_time as an ISO string like ``2026-06-09T17:43:00Z``
-    or with a ``+00:00`` offset. We store naive datetimes elsewhere in
-    the schema so strip the tz info after parsing.
+    Note: the trip may have STARTED on the previous day if the drive
+    crossed midnight. travel_time_in_min lets us detect that case
+    downstream, but ``end_time`` belongs unambiguously to ``day``.
     """
-    if s is None:
+    if day is None or end_time_str is None:
         return None
-    if isinstance(s, datetime):
-        return s.replace(tzinfo=None) if s.tzinfo else s
+    if isinstance(day, str):
+        try:
+            day = date.fromisoformat(day)
+        except (TypeError, ValueError):
+            return None
+    if isinstance(end_time_str, datetime):
+        return end_time_str.replace(tzinfo=None) if end_time_str.tzinfo else end_time_str
+    s = str(end_time_str).strip()
+    # Accept "HH:MM" or "HH:MM:SS"
+    for fmt in ('%H:%M', '%H:%M:%S'):
+        try:
+            tt = datetime.strptime(s, fmt).time()
+            return datetime.combine(day, tt)
+        except ValueError:
+            continue
+    # Fall back to full ISO parse for forward-compat if the API ever
+    # starts returning a full timestamp.
     try:
-        # Python 3.11+ tolerates the trailing Z; older versions don't.
         dt = datetime.fromisoformat(s.replace('Z', '+00:00'))
         return dt.replace(tzinfo=None) if dt.tzinfo else dt
     except (TypeError, ValueError):
@@ -78,9 +94,27 @@ def fetch_skoda_trips(days: int = 30,
             password = password or AppConfig.get('vehicle_api_password', '')
             vin = vin or AppConfig.get('vehicle_api_vin', '')
 
-    if not (email and password and vin):
+    if not (email and password):
         out['error'] = 'missing_credentials'
         return out
+
+    # Auto-discover VIN if the Vehicle row doesn't have one set yet,
+    # and persist it back so we don't pay the discovery round-trip
+    # on every subsequent fetch.
+    if not vin:
+        bootstrap = MySkodaSync(email=email, password=password, vin=None)
+        vins = bootstrap.list_vins()
+        if not vins:
+            out['error'] = 'no_vins_in_account'
+            return out
+        vin = vins[0]
+        out['vin_discovered'] = vin
+        if vehicle_id is not None:
+            v = Vehicle.query.get(vehicle_id)
+            if v is not None and not (v.api_vin or '').strip():
+                v.api_vin = vin
+                db.session.commit()
+                out['vin_persisted'] = True
 
     client = MySkodaSync(email=email, password=password, vin=vin)
     end_dt = datetime.combine(date.today(), time(23, 59, 59))
@@ -103,7 +137,7 @@ def fetch_skoda_trips(days: int = 30,
         trips = getattr(daily, 'trips', None) or []
         for trip in trips:
             out['trips_seen'] += 1
-            end_time = _parse_dt(getattr(trip, 'end_time', None))
+            end_time = _combine_day_and_time(day, getattr(trip, 'end_time', None))
             travel_min = getattr(trip, 'travel_time_in_min', None)
             if end_time is None or travel_min is None:
                 logger.debug(

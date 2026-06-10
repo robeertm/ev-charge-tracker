@@ -149,6 +149,22 @@ class MySkodaSync:
             return False
         return True
 
+    def list_vins(self) -> Optional[list]:
+        """Discover all VINs in the authenticated account. Used to
+        bootstrap a Vehicle row whose ``api_vin`` is empty."""
+        if not HAS_MYSKODA:
+            return None
+        if not self.email or not self.password:
+            return None
+
+        async def fn(ms):
+            return await ms.list_vehicle_vins()
+        try:
+            return _run_sync(_run_call(self.email, self.password, fn))
+        except Exception as e:
+            logger.warning(f"myskoda list_vehicle_vins failed: {type(e).__name__}: {e}")
+            return None
+
     # ── Position ──────────────────────────────────────────────────
     def get_parking_position(self) -> Optional[Any]:
         """``ParkingPositionV3`` with ``parking_position.gps_coordinates``

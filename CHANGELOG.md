@@ -1,5 +1,14 @@
 # Changelog
 
+## v3.0.54 (2026-06-10)
+
+### Skoda trip backfill: fix end_time parsing + auto-discover VIN
+
+Two follow-ups to v3.0.53 found during the first live run on the Enyaq install:
+
+- **end_time is `HH:MM`, not a full ISO timestamp.** The previous version tried to `datetime.fromisoformat(end_time)` and silently dropped every trip (81 trips returned, 0 written). The day comes from the enclosing `DailyTrip.date`; the new helper combines them. First live backfill landed all 81 trips across 39 days (1931 km, 73 h driving) into VehicleTrip.
+- **VIN auto-discovery + persistence.** `Vehicle.api_vin` was empty on the Skoda row (the user never entered it; `carconnectivity` discovers it implicitly via `garage.list_vehicles`). The backfill now calls `MySkoda.list_vehicle_vins()` when no VIN is configured, takes the first hit, persists it back onto the Vehicle row, and uses it for the rest of the run. Saves a round-trip on every subsequent fetch.
+
 ## v3.0.53 (2026-06-10)
 
 ### Skoda: surface position + trip statistics via the dedicated MySkoda v3 API
