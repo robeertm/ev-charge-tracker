@@ -1,5 +1,20 @@
 # Changelog
 
+## v3.0.53 (2026-06-10)
+
+### Skoda: surface position + trip statistics via the dedicated MySkoda v3 API
+
+`carconnectivity-connector-skoda` exposes SoC / odo / charging state but doesn't map the v3 endpoints for position, parking, or trip statistics. v3.0.53 adds a thin sync wrapper around the standalone `myskoda` Python lib (the one the Home Assistant integration uses) and grafts it onto the existing SkodaConnector for two concrete surfaces:
+
+- **Parking position** (`get_parking_position`) — `SkodaConnector.get_status()` now fills `location_lat` / `location_lon` from the last known parking spot. The existing VehicleSync → ParkingEvent → Trips-pair pipeline picks it up automatically and starts producing a Fahrtenbuch with actual addresses (Nominatim geocode plus the formatted address MySkoda itself provides). No car wake-up — parking position is served from the cloud cache.
+- **Trip statistics** (`get_single_trip_statistics`) — new endpoint `POST /api/trips/skoda_backfill {days: N}` pulls the per-trip detail (mileage, drive time, avg speed) for the last N days into `VehicleTrip` with `source='myskoda'`. The trips_service overlay already consumes VehicleTrip rows, so they show up in the Fahrtenbuch with the cloud-check icon and surface the SDK-style stats even on days where no ParkingEvent pair was captured. Default 90 days, capped at 365.
+
+Feature matrix update: `skoda.location` → `partial` (the parking spot is cached and reliable; live driving GPS needs the car awake).
+
+The refresh token from `MySkoda.connect()` is cached in `data/myskoda/<email>.refresh_token` (mode 0600) so subsequent calls skip the full OAuth dance. Import is lazy and the import failure is logged but tolerated — non-Skoda hosts don't need the lib installed. The Skoda host (Enyaq install) does: `pip install myskoda aiohttp`.
+
+Charging-history (`get_charging_history`) is wired up in the client wrapper but not yet routed to a UI endpoint — next step.
+
 ## v3.0.52 (2026-06-10)
 
 ### Charge input: Start/Stop removed — auto-detection owns live sessions

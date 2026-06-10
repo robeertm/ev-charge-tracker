@@ -4721,6 +4721,53 @@ def register_routes(app):
         except Exception as e:
             return jsonify({'error': str(e)}), 500
 
+    @app.route('/api/trips/skoda_backfill', methods=['POST'])
+    def api_trips_skoda_backfill():
+        """Pull trip statistics from the MySkoda v3 API for the last N
+        days and upsert them into VehicleTrip rows (source='myskoda').
+        Server-side call only — no car wake-up."""
+        data = request.get_json(silent=True) or {}
+        try:
+            days = int(data.get('days', 90))
+        except (TypeError, ValueError):
+            days = 90
+        days = max(1, min(days, 365))
+
+        # Pick a Skoda vehicle: the active picker takes precedence, then
+        # the first non-archived Skoda in the fleet. Manual ?vehicle_id=
+        # in the POST body wins above everything.
+        from models.database import Vehicle
+        from services.vehicle.skoda_trip_fetch import fetch_skoda_trips
+        try:
+            vid_override = data.get('vehicle_id')
+            target_vid = int(vid_override) if vid_override is not None else None
+        except (TypeError, ValueError):
+            target_vid = None
+        if target_vid is None:
+            picker = _active_vehicle_id()
+            if isinstance(picker, int):
+                v = Vehicle.query.get(picker)
+                if v is not None and (v.api_brand or '').lower() == 'skoda':
+                    target_vid = picker
+        if target_vid is None:
+            v = (Vehicle.query
+                 .filter(Vehicle.api_brand == 'skoda',
+                         Vehicle.is_archived.is_(False))
+                 .order_by(Vehicle.id.asc())
+                 .first())
+            if v is not None:
+                target_vid = v.id
+        if target_vid is None:
+            return jsonify({'error': 'no_skoda_vehicle_configured'}), 400
+        try:
+            summary = fetch_skoda_trips(days=days, vehicle_id=target_vid)
+            if summary.get('error'):
+                return jsonify({'ok': False, **summary}), 502
+            return jsonify({'ok': True, **summary})
+        except Exception as e:
+            logger.exception("skoda_backfill failed")
+            return jsonify({'error': str(e)}), 500
+
     @app.route('/api/trips/sdk_backfill', methods=['POST'])
     def api_trips_sdk_backfill():
         """Pull per-trip data from the Kia/Hyundai server for the last N

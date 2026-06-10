@@ -270,6 +270,45 @@ class SkodaConnector(VAGConnector):
     def brand_name() -> str:
         return "Skoda (MySkoda)"
 
+    def get_status(self, force=False) -> VehicleStatus:
+        status = super().get_status(force=force)
+        # Enrich with the v3 MySkoda parking position. carconnectivity-
+        # connector-skoda doesn't surface this; the dedicated ``myskoda``
+        # lib does. We never wake the car here — parking_position is the
+        # last cached spot, served instantly from Skoda's server.
+        try:
+            from services.vehicle.myskoda_client import MySkodaSync, HAS_MYSKODA
+            if HAS_MYSKODA:
+                ms = MySkodaSync(
+                    email=self.credentials.get('username', ''),
+                    password=self.credentials.get('password', ''),
+                    vin=self.credentials.get('vin', '').strip() or None,
+                )
+                if ms.vin:
+                    parking = ms.get_parking_position()
+                    if parking is not None:
+                        pp = getattr(parking, 'parking_position', None)
+                        gps = getattr(pp, 'gps_coordinates', None) if pp else None
+                        lat = getattr(gps, 'latitude', None) if gps else None
+                        lon = getattr(gps, 'longitude', None) if gps else None
+                        if lat is not None and lon is not None:
+                            status.location_lat = float(lat)
+                            status.location_lon = float(lon)
+                            # The raw payload is useful for the
+                            # /vehicle/raw inspector.
+                            try:
+                                status.raw_data['myskoda_parking'] = {
+                                    'lat': float(lat),
+                                    'lon': float(lon),
+                                    'formatted_address':
+                                        getattr(pp, 'formatted_address', None),
+                                }
+                            except Exception:
+                                pass
+        except Exception as e:
+            logger.debug(f"skoda parking-position enrichment failed: {e}")
+        return status
+
 
 class SeatConnector(VAGConnector):
     CONNECTOR_TYPE = "seatcupra"

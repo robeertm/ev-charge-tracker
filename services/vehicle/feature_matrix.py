@@ -109,7 +109,11 @@ MATRIX = {
     'vw':    {'soc_range_odo': 'yes', 'live_status': 'yes', 'location': 'no',
               'battery_12v': 'no', 'soh': 'no', 'regenerated': 'no',
               'consumption_30d': 'no', 'doors_locks': 'partial', 'climate': 'partial', 'tires': 'no'},
-    'skoda': {'soc_range_odo': 'yes', 'live_status': 'yes', 'location': 'no',
+    # Skoda: position comes via the v3 MySkoda parking endpoint (lib:
+    # ``myskoda``), grafted on by SkodaConnector.get_status. Live
+    # driving GPS would need the live ``get_positions`` endpoint and
+    # an awake car; the parking spot is the only reliably-cached one.
+    'skoda': {'soc_range_odo': 'yes', 'live_status': 'yes', 'location': 'partial',
               'battery_12v': 'no', 'soh': 'no', 'regenerated': 'no',
               'consumption_30d': 'no', 'doors_locks': 'partial', 'climate': 'partial', 'tires': 'no'},
     'seat':  {'soc_range_odo': 'yes', 'live_status': 'yes', 'location': 'no',
