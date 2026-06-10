@@ -147,6 +147,19 @@ def create_app(config_class=Config):
         except Exception:
             pass  # table might not exist yet on a fresh install
 
+        # Migrate: add regen_kwh_per_100km + consumption_kwh_per_100km
+        # to vehicle_trips (v3.0.55, fed by the MySkoda daily aggregate).
+        try:
+            vt_columns = [c['name'] for c in inspector.get_columns('vehicle_trips')]
+            if 'regen_kwh_per_100km' not in vt_columns:
+                db.session.execute(text(
+                    'ALTER TABLE vehicle_trips ADD COLUMN regen_kwh_per_100km REAL'))
+            if 'consumption_kwh_per_100km' not in vt_columns:
+                db.session.execute(text(
+                    'ALTER TABLE vehicle_trips ADD COLUMN consumption_kwh_per_100km REAL'))
+        except Exception:
+            pass  # fresh install — create_all() handles it
+
         db.session.commit()
 
         # Scale fix v1 (shipped in v2.5.4): the pre-v2.5.4 code stored
@@ -4719,6 +4732,52 @@ def register_routes(app):
         try:
             return jsonify({'ok': True, **repair_all_pe_soc()})
         except Exception as e:
+            return jsonify({'error': str(e)}), 500
+
+    @app.route('/api/charges/skoda_backfill', methods=['POST'])
+    def api_charges_skoda_backfill():
+        """Pull charging-session history from MySkoda v3 and insert any
+        sessions we don't already have as Charge rows with
+        ``needs_review=True``. Dedup window: ±2 h on charge_hour for the
+        same vehicle on the same date. No price info comes from MySkoda
+        — the user fills it in afterwards."""
+        data = request.get_json(silent=True) or {}
+        try:
+            days = int(data.get('days', 180))
+        except (TypeError, ValueError):
+            days = 180
+        days = max(1, min(days, 365))
+
+        from models.database import Vehicle
+        from services.vehicle.skoda_charging_fetch import fetch_skoda_charging
+        try:
+            vid_override = data.get('vehicle_id')
+            target_vid = int(vid_override) if vid_override is not None else None
+        except (TypeError, ValueError):
+            target_vid = None
+        if target_vid is None:
+            picker = _active_vehicle_id()
+            if isinstance(picker, int):
+                v = Vehicle.query.get(picker)
+                if v is not None and (v.api_brand or '').lower() == 'skoda':
+                    target_vid = picker
+        if target_vid is None:
+            v = (Vehicle.query
+                 .filter(Vehicle.api_brand == 'skoda',
+                         Vehicle.is_archived.is_(False))
+                 .order_by(Vehicle.id.asc())
+                 .first())
+            if v is not None:
+                target_vid = v.id
+        if target_vid is None:
+            return jsonify({'error': 'no_skoda_vehicle_configured'}), 400
+        try:
+            summary = fetch_skoda_charging(days=days, vehicle_id=target_vid)
+            if summary.get('error'):
+                return jsonify({'ok': False, **summary}), 502
+            return jsonify({'ok': True, **summary})
+        except Exception as e:
+            logger.exception("skoda_charging_backfill failed")
             return jsonify({'error': str(e)}), 500
 
     @app.route('/api/trips/skoda_backfill', methods=['POST'])

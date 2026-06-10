@@ -330,6 +330,15 @@ class VehicleTrip(db.Model):
     distance_km = db.Column(db.Float)
     avg_speed_kmh = db.Column(db.Float)
     max_speed_kmh = db.Column(db.Integer)
+    # v3.0.55: MySkoda trip statistics expose recuperation and electric
+    # consumption only as a daily aggregate (StatisticsEntry), not per
+    # Trip. We carry the day's averages on every Trip row of that day —
+    # callers attribute the trip's regen as ``distance_km × regen / 100``
+    # and the trip's consumption likewise. Kia/Hyundai populate the
+    # consumption side via the consumption_30d rolling average in
+    # VehicleSync, so these two columns stay None there.
+    regen_kwh_per_100km = db.Column(db.Float)
+    consumption_kwh_per_100km = db.Column(db.Float)
     source = db.Column(db.String(32), default='sdk_day_trip_info')
     fetched_at = db.Column(db.DateTime, default=datetime.now)
 

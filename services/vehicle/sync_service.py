@@ -409,16 +409,72 @@ def _do_sync(app):
 
 
 def _trip_info_vehicles():
-    """Return all non-archived Kia/Hyundai fleet vehicles with creds —
-    those are the only ones day_trip_info runs against. Used by both
-    the post-move + nightly reconcile paths."""
+    """Return all non-archived fleet vehicles with creds whose brand
+    supports a server-side trip-log backfill. Used by both the
+    post-move + nightly reconcile paths.
+
+    Supported brands:
+    - kia / hyundai → ``trip_log_fetch.backfill`` via the BlueLink SDK
+      (``update_day_trip_info``). Passive read, no car wake.
+    - skoda → ``skoda_trip_fetch.fetch_skoda_trips`` via the MySkoda v3
+      API (``get_single_trip_statistics``). Passive read, no car wake.
+    """
     from models.database import Vehicle
     return (Vehicle.query
             .filter_by(is_archived=False, auto_sync=True)
-            .filter(Vehicle.api_brand.in_(['kia', 'hyundai']))
+            .filter(Vehicle.api_brand.in_(['kia', 'hyundai', 'skoda']))
             .filter(Vehicle.api_username.isnot(None))
             .order_by(Vehicle.id.asc())
             .all())
+
+
+def _skoda_should_run_daily(vehicle_id: int) -> bool:
+    """20h-cooldown gate for the Skoda daily backfill, persisted in
+    AppConfig. Mirrors trip_reconcile.should_run_daily but without the
+    Kia/Hyundai brand check (which is the whole point of bypassing it).
+    """
+    from models.database import AppConfig as _AC
+    key = f'skoda_last_daily_reconcile_{vehicle_id}'
+    last = _AC.get(key, '') or ''
+    if not last:
+        return True
+    try:
+        last_dt = datetime.fromisoformat(last)
+    except ValueError:
+        return True
+    return (datetime.now() - last_dt) >= timedelta(hours=20)
+
+
+def _skoda_mark_daily_run(vehicle_id: int) -> None:
+    from models.database import AppConfig as _AC
+    _AC.set(f'skoda_last_daily_reconcile_{vehicle_id}',
+            datetime.now().isoformat(timespec='seconds'))
+
+
+def _run_trip_backfill_for_vehicle(v, days: int) -> dict:
+    """Dispatch to the correct brand-specific trip backfill. Returns a
+    dict shaped like the trip_log_fetch.backfill result (with ``results``
+    list of per-day summaries), so callers can read ``added`` /
+    ``updated`` totals uniformly.
+    """
+    brand = (v.api_brand or '').lower()
+    if brand in ('kia', 'hyundai'):
+        from services.vehicle.trip_log_fetch import backfill
+        return backfill(days=days, vehicle_id=v.id)
+    if brand == 'skoda':
+        from services.vehicle.skoda_trip_fetch import fetch_skoda_trips
+        s = fetch_skoda_trips(days=days, vehicle_id=v.id)
+        # Normalise to the trip_log_fetch shape: one synthetic per-day
+        # entry collapsing the whole pull.
+        return {
+            'results': [{
+                'added': s.get('added', 0),
+                'updated': s.get('updated', 0),
+                'source': 'myskoda',
+            }],
+            'skoda_summary': s,
+        }
+    return {'results': []}
 
 
 def _maybe_post_move_reconcile(app) -> None:
@@ -432,26 +488,28 @@ def _maybe_post_move_reconcile(app) -> None:
     _post_move_reconcile_pending = False
     try:
         with app.app_context():
-            from services.vehicle.trip_log_fetch import backfill
+            from services.vehicle.trip_log_fetch import backfill as _kia_backfill
             from services.trip_reconcile import _brand_supports_trip_info
             targets = _trip_info_vehicles()
             if not targets:
                 # Fall back to the legacy single-vehicle path when no
-                # Vehicle row carries Kia/Hyundai creds — covers
-                # installs that haven't been migrated to per-vehicle
-                # creds yet.
+                # Vehicle row carries supported creds — covers installs
+                # that haven't been migrated to per-vehicle creds yet.
+                # Skoda only ever uses the per-vehicle path (it's
+                # post-v2.29), so this fallback stays Kia/Hyundai-only.
                 if not _brand_supports_trip_info():
                     return
-                r = backfill(days=1)
+                r = _kia_backfill(days=1)
                 total = sum(d.get('added', 0) + d.get('updated', 0) for d in r.get('results', []))
                 logger.info(f"Post-move trip reconcile (legacy): {total} SDK trip(s) touched")
                 return
             for v in targets:
                 try:
-                    r = backfill(days=1, vehicle_id=v.id)
+                    r = _run_trip_backfill_for_vehicle(v, days=1)
                     total = sum(d.get('added', 0) + d.get('updated', 0) for d in r.get('results', []))
+                    brand_tag = (v.api_brand or '').lower()
                     logger.info(
-                        f"Post-move trip reconcile [{v.name}]: {total} SDK trip(s) touched"
+                        f"Post-move trip reconcile [{v.name}/{brand_tag}]: {total} trip(s) touched"
                     )
                 except Exception as e:
                     logger.warning(f"Post-move reconcile [{v.name}] failed: {e}")
@@ -474,10 +532,10 @@ def _maybe_daily_trip_reconcile(app) -> None:
             from services.trip_reconcile import (
                 should_run_daily, reconcile_range, gap_days_since_last_reconcile,
             )
-            from services.vehicle.trip_log_fetch import backfill
+            from services.vehicle.trip_log_fetch import backfill as _kia_backfill
             targets = _trip_info_vehicles()
             if not targets:
-                # Legacy single-vehicle path
+                # Legacy single-vehicle Kia/Hyundai fallback
                 if not should_run_daily():
                     return
                 # v3.0.2: gap-aware walk. After a long LUKS-lock the
@@ -486,7 +544,7 @@ def _maybe_daily_trip_reconcile(app) -> None:
                 # the SDK's ~30-day server-side retention.
                 walk_days = gap_days_since_last_reconcile()
                 logger.info(f"Daily trip reconcile (legacy): {walk_days}-day walk")
-                backfill(days=walk_days)
+                _kia_backfill(days=walk_days)
                 r = reconcile_range(days=walk_days)
                 logger.info(
                     f"Daily trip reconcile (legacy) done: "
@@ -497,18 +555,39 @@ def _maybe_daily_trip_reconcile(app) -> None:
                 return
             for v in targets:
                 try:
-                    if not should_run_daily(vehicle_id=v.id):
+                    brand = (v.api_brand or '').lower()
+                    if brand in ('kia', 'hyundai'):
+                        if not should_run_daily(vehicle_id=v.id):
+                            continue
+                        walk_days = gap_days_since_last_reconcile(vehicle_id=v.id)
+                    elif brand == 'skoda':
+                        if not _skoda_should_run_daily(v.id):
+                            continue
+                        # MySkoda v3 typically retains a few weeks of
+                        # trip stats; 14 days covers the common "user
+                        # had the host off for a week" case without
+                        # being wasteful.
+                        walk_days = 14
+                    else:
                         continue
-                    walk_days = gap_days_since_last_reconcile(vehicle_id=v.id)
-                    logger.info(f"Daily trip reconcile [{v.name}]: {walk_days}-day walk")
-                    backfill(days=walk_days, vehicle_id=v.id)
-                    r = reconcile_range(days=walk_days, vehicle_id=v.id)
-                    logger.info(
-                        f"Daily trip reconcile [{v.name}] done: "
-                        f"dep={r.get('total_applied', 0)} "
-                        f"arr={r.get('total_arr_applied', 0)} "
-                        f"conflicts={r.get('total_conflicts', 0)}"
-                    )
+                    logger.info(f"Daily trip reconcile [{v.name}/{brand}]: {walk_days}-day walk")
+                    _run_trip_backfill_for_vehicle(v, days=walk_days)
+                    # reconcile_range only meaningfully realigns
+                    # ParkingEvent departed_at when SDK timestamps are
+                    # millisecond-precise (Kia/Hyundai). MySkoda's
+                    # end_time is HH:MM only, so the realign step is a
+                    # no-op for Skoda — skip it to avoid noise.
+                    if brand in ('kia', 'hyundai'):
+                        r = reconcile_range(days=walk_days, vehicle_id=v.id)
+                        logger.info(
+                            f"Daily trip reconcile [{v.name}/{brand}] done: "
+                            f"dep={r.get('total_applied', 0)} "
+                            f"arr={r.get('total_arr_applied', 0)} "
+                            f"conflicts={r.get('total_conflicts', 0)}"
+                        )
+                    else:
+                        _skoda_mark_daily_run(v.id)
+                        logger.info(f"Daily trip reconcile [{v.name}/{brand}] done")
                 except Exception as e:
                     logger.warning(f"Daily trip reconcile [{v.name}] failed: {e}")
     except Exception as e:

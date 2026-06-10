@@ -128,6 +128,30 @@ def fetch_skoda_trips(days: int = 30,
     daily_trips = getattr(result, 'daily_trips', None) or []
     out['daily_trips'] = len(daily_trips)
 
+    # The TripStatistics aggregate (a separate myskoda endpoint, but
+    # included in the same SingleTrips payload as ``statistics``)
+    # carries day-level averages for recuperation and electric
+    # consumption. Build a {date → (regen, consumption)} lookup so
+    # we can stamp each Trip row with the day's averages — per-trip
+    # values aren't exposed.
+    daily_stats = {}
+    stats = getattr(result, 'statistics', None)
+    if stats is not None:
+        entries = getattr(stats, 'statistics_entries', None) or []
+        for e in entries:
+            d = getattr(e, 'date', None)
+            if isinstance(d, str):
+                try:
+                    d = date.fromisoformat(d)
+                except (TypeError, ValueError):
+                    d = None
+            if d is None:
+                continue
+            daily_stats[d] = (
+                getattr(e, 'average_recuperation', None),
+                getattr(e, 'average_electric_consumption', None),
+            )
+
     for daily in daily_trips:
         # daily.date is a string like "2026-06-09"
         try:
@@ -147,6 +171,7 @@ def fetch_skoda_trips(days: int = 30,
             start_time = end_time - timedelta(minutes=int(travel_min))
             distance = getattr(trip, 'mileage_in_km', None)
             avg_speed = getattr(trip, 'average_speed_in_kmph', None)
+            day_regen, day_consumption = daily_stats.get(day, (None, None))
 
             existing_q = VehicleTrip.query.filter_by(start_time=start_time)
             if vehicle_id is not None:
@@ -162,6 +187,8 @@ def fetch_skoda_trips(days: int = 30,
                     distance_km=float(distance) if distance is not None else None,
                     avg_speed_kmh=float(avg_speed) if avg_speed is not None else None,
                     max_speed_kmh=None,
+                    regen_kwh_per_100km=float(day_regen) if day_regen is not None else None,
+                    consumption_kwh_per_100km=float(day_consumption) if day_consumption is not None else None,
                     source='myskoda',
                     fetched_at=datetime.now(),
                 )
@@ -173,6 +200,8 @@ def fetch_skoda_trips(days: int = 30,
                     ('drive_minutes', int(travel_min) if travel_min is not None else None),
                     ('distance_km', float(distance) if distance is not None else None),
                     ('avg_speed_kmh', float(avg_speed) if avg_speed is not None else None),
+                    ('regen_kwh_per_100km', float(day_regen) if day_regen is not None else None),
+                    ('consumption_kwh_per_100km', float(day_consumption) if day_consumption is not None else None),
                 ]:
                     if val is not None and getattr(existing, attr) != val:
                         setattr(existing, attr, val)

@@ -1161,6 +1161,15 @@ def get_trips(limit: Optional[int] = None,
             trip['avg_speed_kmh'] = sdk.avg_speed_kmh
             trip['max_speed_kmh'] = sdk.max_speed_kmh
             used_sdk_ids.add(sdk.id)
+            # MySkoda surfaces regen + consumption as a daily aggregate;
+            # the trip_fetch attaches it to every VehicleTrip of that
+            # day. When present, override the km × static_recup_rate
+            # estimate with km × (daily regen / 100) — closer to the
+            # car's own measurement.
+            sdk_regen_rate = getattr(sdk, 'regen_kwh_per_100km', None)
+            if sdk_regen_rate is not None and km:
+                trip['regen_kwh'] = round(km * float(sdk_regen_rate) / 100.0, 2)
+                trip['regen_estimated'] = True
 
         # Phantom filter: drop 0-km "trips" that no SDK trip confirms.
         # These are GPS-jitter artefacts (the car briefly appearing at a
@@ -1218,7 +1227,16 @@ def get_trips(limit: Optional[int] = None,
                    else _unknown_endpoint_dict(include_departed=False, time_override=to_time))
 
         sdk_km = round(row.distance_km, 1) if row.distance_km is not None else None
-        sdk_regen = round(sdk_km * static_recup_rate, 2) if sdk_km else None
+        # Prefer the day-aggregate regen rate from MySkoda when present
+        # (myskoda rows carry ``regen_kwh_per_100km``); fall back to the
+        # vehicle's configured static rate otherwise.
+        sdk_regen_rate = getattr(row, 'regen_kwh_per_100km', None)
+        if sdk_km and sdk_regen_rate is not None:
+            sdk_regen = round(sdk_km * float(sdk_regen_rate) / 100.0, 2)
+        elif sdk_km:
+            sdk_regen = round(sdk_km * static_recup_rate, 2)
+        else:
+            sdk_regen = None
         trips.append({
             'from': from_dict,
             'to':   to_dict,

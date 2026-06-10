@@ -1,5 +1,20 @@
 # Changelog
 
+## v3.0.55 (2026-06-10)
+
+### Skoda: auto-backfill after every drive + daily reconcile + regen/consumption + charging history
+
+Following v3.0.53/54, the Skoda integration now matches the Kia/Hyundai pattern as closely as the MySkoda API allows. **All API calls go through MySkoda's cloud cache — the car is never woken up.**
+
+- **Auto-backfill after every drive.** `_trip_info_vehicles()` now also picks up `api_brand='skoda'` rows. The existing `request_post_move_reconcile()` hook (fired by the parking pipeline when a PE transition is detected) dispatches to either `trip_log_fetch.backfill` (Kia/Hyundai) or `skoda_trip_fetch.fetch_skoda_trips` (Skoda). One day of trips is pulled within a couple of minutes of every drive, no extra polling needed.
+- **Daily reconcile.** The 03:00-ish nightly tick that walks Kia/Hyundai through `gap_days_since_last_reconcile` now also walks Skoda through a 14-day window, gated by a separate 20 h cooldown (`AppConfig skoda_last_daily_reconcile_<vid>`) so it can't loop. PE-pair `departed_at` realign is skipped for Skoda — MySkoda's `end_time` is only HH:MM, not ms-precise.
+- **Recuperation + consumption from the daily aggregate.** MySkoda doesn't expose per-trip regen or kWh consumed, but the day-level `StatisticsEntry` carries `average_recuperation` and `average_electric_consumption`. New `VehicleTrip.regen_kwh_per_100km` / `consumption_kwh_per_100km` columns (with a SQLite ALTER migration) carry the day's averages on every trip row; `trips_service.get_trips()` prefers them over the static km × recuperation_kwh_per_km fallback when present. The Fahrtenbuch regen column for Skoda now reflects the car's own measurement.
+- **Charging-history backfill.** New `POST /api/charges/skoda_backfill {days: N}` calls `get_charging_history` and inserts any session we don't already have as a `Charge` row (date + charge_hour from `start_at`, kwh_loaded from `charged_in_kwh`, charge_type from `current_type`, `needs_review=True`, `notes='[MySkoda-Historie]'`). Dedup window ±2 h on charge_hour against existing rows for the same vehicle on the same date — the auto-detection's canonical Charge always wins. Default 180 days, capped at 365. **No price comes from MySkoda — backfilled rows stay flagged for review.**
+
+12 V hygiene: nothing here pings `get_positions` (the live-driving endpoint that would wake the car). Position data still comes only from `get_parking_position` (passive cloud cache, refreshed by the car on its own schedule).
+
+The `data/myskoda/<email>.refresh_token` cache means each backfill is a single HTTP round-trip after the first OAuth handshake — measured at ~600 ms wall-clock for the 1-day post-move pull.
+
 ## v3.0.54 (2026-06-10)
 
 ### Skoda trip backfill: fix end_time parsing + auto-discover VIN
