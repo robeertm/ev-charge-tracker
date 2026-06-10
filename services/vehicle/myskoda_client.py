@@ -211,6 +211,31 @@ class MySkodaSync:
                 f"myskoda get_single_trip_statistics failed: {type(e).__name__}: {e}")
             return None
 
+    # ── Trip aggregates (period-offset endpoint) ────────────────
+    def get_trip_statistics_month(self, offset_months: int = 0) -> Optional[Any]:
+        """``TripStatistics`` for a whole month (``offset=0`` is the
+        current month, ``offset=1`` last month, etc.). Contains
+        ``statistics_entries: list[StatisticsEntry]`` — one row per day
+        with ``average_recuperation`` and ``average_electric_consumption``.
+
+        Distinct from ``get_single_trip_statistics`` (which returns
+        individual trips, no aggregates).
+        """
+        if not self._require():
+            return None
+
+        async def fn(ms):
+            from myskoda.rest_api import OffsetType
+            return await ms.get_trip_statistics(
+                self.vin, offset=offset_months, offset_type=OffsetType.MONTH)
+        try:
+            return _run_sync(_run_call(self.email, self.password, fn))
+        except Exception as e:
+            logger.warning(
+                f"myskoda get_trip_statistics(MONTH, offset={offset_months}) failed: "
+                f"{type(e).__name__}: {e}")
+            return None
+
     # ── Charging history ─────────────────────────────────────────
     def get_charging_history(self, start=None, end=None, limit: int = 50) -> Optional[Any]:
         """``ChargingHistory`` with ``periods: list[ChargingPeriod]``."""

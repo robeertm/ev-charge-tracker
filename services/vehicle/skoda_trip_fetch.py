@@ -128,29 +128,60 @@ def fetch_skoda_trips(days: int = 30,
     daily_trips = getattr(result, 'daily_trips', None) or []
     out['daily_trips'] = len(daily_trips)
 
-    # The TripStatistics aggregate (a separate myskoda endpoint, but
-    # included in the same SingleTrips payload as ``statistics``)
-    # carries day-level averages for recuperation and electric
-    # consumption. Build a {date → (regen, consumption)} lookup so
-    # we can stamp each Trip row with the day's averages — per-trip
-    # values aren't exposed.
+    # Day-level averages for recuperation + electric consumption come
+    # from the separate ``get_trip_statistics`` endpoint (period-offset
+    # by month). NOT exposed on SingleTrips. Many Skoda accounts /
+    # vehicle subscription tiers return 403 here (the Enyaq 60 in
+    # production does); we cache that fact in AppConfig so we don't
+    # spam the API on every post-move backfill — once a week is plenty
+    # to re-probe in case the user upgrades their subscription.
+    from models.database import AppConfig as _AC
     daily_stats = {}
-    stats = getattr(result, 'statistics', None)
-    if stats is not None:
-        entries = getattr(stats, 'statistics_entries', None) or []
-        for e in entries:
-            d = getattr(e, 'date', None)
-            if isinstance(d, str):
-                try:
-                    d = date.fromisoformat(d)
-                except (TypeError, ValueError):
-                    d = None
-            if d is None:
+    today = date.today()
+    earliest_day = today - timedelta(days=max(days, 1) - 1)
+    months_back = (today.year * 12 + today.month
+                   - earliest_day.year * 12 - earliest_day.month) + 1
+    supported_key = f'skoda_aggregate_supported_{vehicle_id}'
+    last_probe_key = f'skoda_aggregate_last_probe_{vehicle_id}'
+    last_probe_raw = _AC.get(last_probe_key, '') or ''
+    last_probe = None
+    if last_probe_raw:
+        try:
+            last_probe = date.fromisoformat(last_probe_raw)
+        except ValueError:
+            last_probe = None
+    supported_raw = (_AC.get(supported_key, '') or '').lower()
+    aggregate_supported = supported_raw != 'false'  # default-true
+    # Re-probe a "false" cache once a week.
+    if (not aggregate_supported and last_probe is not None
+            and (today - last_probe) >= timedelta(days=7)):
+        aggregate_supported = True
+    if aggregate_supported:
+        any_success = False
+        for off in range(months_back + 1):
+            stats = client.get_trip_statistics_month(offset_months=off)
+            if stats is None:
                 continue
-            daily_stats[d] = (
-                getattr(e, 'average_recuperation', None),
-                getattr(e, 'average_electric_consumption', None),
-            )
+            any_success = True
+            entries = (getattr(stats, 'detailed_statistics', None)
+                       or getattr(stats, 'statistics_entries', None)
+                       or [])
+            for e in entries:
+                d = getattr(e, 'date', None)
+                if isinstance(d, str):
+                    try:
+                        d = date.fromisoformat(d)
+                    except (TypeError, ValueError):
+                        d = None
+                if d is None:
+                    continue
+                daily_stats[d] = (
+                    getattr(e, 'average_recuperation', None),
+                    getattr(e, 'average_electric_consumption', None),
+                )
+        _AC.set(supported_key, 'true' if any_success else 'false')
+        _AC.set(last_probe_key, today.isoformat())
+    out['days_with_stats'] = len(daily_stats)
 
     for daily in daily_trips:
         # daily.date is a string like "2026-06-09"

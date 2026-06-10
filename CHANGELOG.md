@@ -1,5 +1,16 @@
 # Changelog
 
+## v3.0.56 (2026-06-10)
+
+### Skoda: subscription-tier endpoint probing + import path fix
+
+Live shake-out of v3.0.55 on the reference Enyaq 60 install surfaced two issues:
+
+- **`OffsetType` import path was wrong** — the enum lives in `myskoda.rest_api`, not `myskoda.models.trip_statistics`. Caused every aggregate-stats fetch attempt to ImportError; the wrapper swallowed it as a generic warning, so the regen/consumption columns silently stayed None even on cars where the endpoint would actually work.
+- **Probe-and-cache for endpoints that aren't on the user's subscription tier.** The reference Enyaq 60 returns 403 on `get_trip_statistics` (the day-aggregate endpoint that feeds regen + consumption) and 500 on `get_charging_history` / `get_all_charging_sessions`. Working endpoints: `get_single_trip_statistics` (per-trip detail), `get_parking_position`, `get_positions` (live — deliberately unused), `get_driving_score`. Two new AppConfig pairs — `skoda_aggregate_supported_<vid>` / `skoda_charging_history_supported_<vid>` plus a `_last_probe_<vid>` date — gate the unsupported endpoints to one weekly re-probe instead of one failed HTTP request per post-move backfill. If the user upgrades their subscription, the weekly probe picks it up automatically.
+
+Net effect for the Enyaq 60: trip detail (km, drive time, avg speed) and parking position keep flowing into the Fahrtenbuch on every drive; regen falls back to the configured km × `recuperation_kwh_per_km` until the aggregate endpoint becomes available; charging-history backfill returns `{error: 'unsupported_cached'}` until a weekly re-probe confirms a status change.
+
 ## v3.0.55 (2026-06-10)
 
 ### Skoda: auto-backfill after every drive + daily reconcile + regen/consumption + charging history

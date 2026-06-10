@@ -96,13 +96,38 @@ def fetch_skoda_charging(days: int = 90,
         out['error'] = 'missing_credentials'
         return out
 
+    # Same probe/cache pattern as the aggregate stats endpoint —
+    # the Enyaq 60 reference install returns 500 here, presumably
+    # because the subscription tier doesn't include it. Skip the
+    # API call entirely on a cached 'unsupported' until the next
+    # weekly re-probe.
+    from models.database import AppConfig as _AC
+    supported_key = f'skoda_charging_history_supported_{vehicle_id}'
+    last_probe_key = f'skoda_charging_history_last_probe_{vehicle_id}'
+    last_probe_raw = _AC.get(last_probe_key, '') or ''
+    last_probe = None
+    if last_probe_raw:
+        try:
+            last_probe = date.fromisoformat(last_probe_raw)
+        except ValueError:
+            last_probe = None
+    supported_raw = (_AC.get(supported_key, '') or '').lower()
+    if (supported_raw == 'false' and last_probe is not None
+            and (date.today() - last_probe) < timedelta(days=7)):
+        out['error'] = 'unsupported_cached'
+        return out
+
     client = MySkodaSync(email=email, password=password, vin=vin)
-    end_dt = datetime.now()
+    end_dt = datetime.now().replace(microsecond=0)
     start_dt = end_dt - timedelta(days=max(days, 1))
     result = client.get_charging_history(start=start_dt, end=end_dt, limit=limit)
     if result is None:
+        _AC.set(supported_key, 'false')
+        _AC.set(last_probe_key, date.today().isoformat())
         out['error'] = 'fetch_failed'
         return out
+    _AC.set(supported_key, 'true')
+    _AC.set(last_probe_key, date.today().isoformat())
 
     periods = getattr(result, 'periods', None) or []
     out['periods_seen'] = len(periods)
