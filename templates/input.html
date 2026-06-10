@@ -2,12 +2,11 @@
 {% block title %}{{ t('input.title') }} — EV Charge Tracker{% endblock %}
 
 {% block content %}
-{# v3.0.25 Phase 1b: the page itself is now just heading + list. The big
-   new-charge form (Start/Stop/Live-Timer/Save) lives inside the modal
-   below, opened via the "+ Neue Ladung" button. The form's elements
-   keep their original IDs so the existing 700 lines of session/timer/
-   polling JS attach unchanged — they just operate on DOM that lives
-   inside a modal rather than directly on the page. #}
+{# Page = heading + history list. The "+ Neue Ladung" button opens the
+   modal below for retroactive manual entry: date, hour, SoC range, kWh,
+   price, operator, location etc. Auto-detection (services.app
+   _detect_auto_charge) handles live sessions, so this UI no longer
+   exposes any Start/Stop/timer affordances. #}
 <div class="d-flex justify-content-between align-items-center mb-3">
     <h4 class="mb-0"><i class="bi bi-lightning-charge"></i> {{ t('input.title') }}</h4>
     <button type="button" class="btn btn-success" id="btnOpenNewCharge"
@@ -36,9 +35,6 @@
       <div class="modal-header bg-success text-white">
         <h5 class="modal-title mb-0">
           <i class="bi bi-plus-circle"></i> {{ t('input.title') }}
-          <span class="badge bg-warning text-dark ms-2" id="activeSessionBadge" {% if not active_session %}style="display:none"{% endif %}>
-            <i class="bi bi-hourglass-split"></i> {{ t('input.active_session') }}
-          </span>
         </h5>
         <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="Close"></button>
       </div>
@@ -101,26 +97,9 @@
                     </div>
                 </div>
 
-                {% if vehicle_configured %}
-                <!-- Start/Stop Buttons -->
-                <div class="d-flex gap-2 mb-3">
-                    <button type="button" class="btn btn-success btn-lg flex-fill" id="btnStart">
-                        <i class="bi bi-play-circle"></i> {{ t('input.start') }}
-                    </button>
-                    <button type="button" class="btn btn-danger btn-lg flex-fill" id="btnStop" disabled>
-                        <i class="bi bi-stop-circle"></i> {{ t('input.stop') }}
-                    </button>
-                </div>
-                <div class="small text-center mb-3" id="chargeTimer" style="display:none">
-                    <i class="bi bi-clock"></i> {{ t('input.timer') }} <span id="timerDisplay" class="fw-bold">00:00</span>
-                </div>
-                {% endif %}
-
                 <!-- Formular (alle Felder änderbar) -->
                 <form method="POST" id="chargeForm" autocomplete="off">
                     <input type="hidden" name="charge_type" id="chargeTypeHidden" value="{{ pre_charge.charge_type if pre_charge else 'AC' }}">
-                    <input type="hidden" name="charge_id" id="chargeIdHidden" value="{{ pre_charge.id if pre_charge else '' }}">
-                    <input type="hidden" name="session_active" id="sessionActiveHidden" value="">
                     {# v2.29: vehicle_id mirror — JS keeps this in sync with
                        the visible #charge_vehicle_id select up top so the
                        form submission carries the user's chosen vehicle. #}
@@ -376,34 +355,13 @@ let CHARGE_EFF = {{ charge_efficiency if charge_efficiency else 0.88 }};
 if (!(CHARGE_EFF > 0.4 && CHARGE_EFF < 1)) CHARGE_EFF = 0.88;
 const pvCo2 = {{ pv_co2 }};
 const pvPrice = {{ pv_price }};
-let chargeStartTime = null;
-let timerInterval = null;
-
 const T = {
     enter_date_first: {{ t('input.enter_date_first')|tojson }},
     error_prefix: {{ t('input.error_prefix')|tojson }},
-    low_12v_confirm: {{ t('input.low_12v_confirm')|tojson }},
-    low_12v_skipped: {{ t('input.low_12v_skipped')|tojson }},
     save_label: {{ t('input.save')|tojson }},
     loss_label: {{ t('input.loss_label')|tojson }},
     no_data: {{ t('input.no_data')|tojson }},
-    started: {{ t('input.started')|tojson }},
-    stopped: {{ t('input.stopped')|tojson }},
-    ready_to_save: {{ t('input.ready_to_save')|tojson }},
     from_soc: {{ t('input.from_soc')|tojson }},
-    current: {{ t('input.current')|tojson }},
-    from_time: {{ t('input.from_time')|tojson }},
-    hours_covered: {{ t('input.hours_covered')|tojson }},
-    confirm_delete: {{ t('input.confirm_delete')|tojson }},
-    save: {{ t('input.save')|tojson }},
-    save_intermediate: {{ t('input.save_intermediate')|tojson }},
-    waiting_for_car: {{ t('input.waiting_for_car')|tojson }},
-    start: {{ t('input.start')|tojson }},
-    started_retroactively: {{ t('input.started_retroactively')|tojson }},
-    retry_failed: {{ t('input.retry_failed')|tojson }},
-    discard_stopped_confirm: {{ t('input.discard_stopped_confirm')|tojson }},
-    discard_session_confirm: {{ t('input.discard_session_confirm')|tojson }},
-    stop: {{ t('input.stop')|tojson }},
 };
 
 // v2.29 vehicle-selector wiring. The visible select sits outside the
@@ -460,7 +418,6 @@ document.querySelectorAll('input[name="charge_type_select"]').forEach(radio => {
             document.getElementById('eur_per_kwh').value = pvPrice;
             updateCalcPrice();
         }
-        if (typeof persistFormCache === 'function') persistFormCache();
     });
 });
 
@@ -553,595 +510,27 @@ document.getElementById('btnFetchCo2').addEventListener('click', async () => {
     }
 });
 
-{% if vehicle_configured %}
-// === Start/Stop charge tracking ===
-const btnStart = document.getElementById('btnStart');
-const btnStop = document.getElementById('btnStop');
-const timerEl = document.getElementById('chargeTimer');
-const timerDisplay = document.getElementById('timerDisplay');
-const CHARGE_KEY = 'ev_charge_session';
-
-// Post-intermediate-save pickup: when /input?saved_id=X&active=1 renders,
-// capture the freshly-assigned charge id into the running session so the
-// next submit updates the same row instead of creating a duplicate.
-(function ingestSavedId() {
-    try {
-        const url = new URL(window.location.href);
-        const savedId = url.searchParams.get('saved_id');
-        const activeFlag = url.searchParams.get('active');
-        if (!savedId) return;
-        if (activeFlag === '1') {
-            const s = JSON.parse(localStorage.getItem(CHARGE_KEY) || '{}');
-            s.chargeId = savedId;
-            localStorage.setItem(CHARGE_KEY, JSON.stringify(s));
+// ── Lightweight double-submit guard on the Save button ──────────
+// (Replaces the old Start/Stop/session-aware submit handler. The
+// 90 s server-side fold in app.input_charge is still the backstop.)
+(function() {
+    const form = document.getElementById('chargeForm');
+    if (!form) return;
+    let submitted = false;
+    form.addEventListener('submit', (ev) => {
+        if (submitted) { ev.preventDefault(); return; }
+        submitted = true;
+        const sb = document.getElementById('btnSave');
+        if (sb) {
+            sb.disabled = true;
+            const lbl = document.getElementById('btnSaveLabel');
+            if (lbl) lbl.innerHTML = '<span class="spinner-border spinner-border-sm"></span>';
+            // Safety re-enable if a validation error keeps us on the page.
+            setTimeout(() => { submitted = false; sb.disabled = false;
+                if (lbl) lbl.textContent = T.save_label; }, 8000);
         }
-        // Strip the params from the URL so a reload doesn't re-trigger.
-        url.searchParams.delete('saved_id');
-        url.searchParams.delete('active');
-        window.history.replaceState({}, '', url.pathname + (url.search ? '?' + url.searchParams.toString() : ''));
-    } catch(e) {}
+    });
 })();
-
-// Field IDs we cache to localStorage during an active session — covers
-// every user-editable form field. Belt-and-suspenders against the
-// intermediate-save round-trip occasionally losing a value (browser
-// autofill, validation reject, server miss): if the rendered form
-// comes back empty but the cache has the value the user typed, we
-// restore it.
-const FORM_FIELD_IDS = ['date', 'charge_hour', 'odometer',
-    'soc_from', 'soc_to', 'eur_per_kwh', 'kwh_loaded', 'loss_kwh',
-    'co2_g_per_kwh', 'notes', 'location_name', 'location_lat',
-    'location_lon', 'operator', 'start_fee_eur', 'blocking_fee_eur'];
-
-function persistFormCache() {
-    try {
-        const s = JSON.parse(localStorage.getItem(CHARGE_KEY) || 'null');
-        if (!s || !s.startTime) return;  // only during active session
-        s.formCache = s.formCache || {};
-        FORM_FIELD_IDS.forEach(id => {
-            const el = document.getElementById(id);
-            if (el) s.formCache[id] = el.value || '';
-        });
-        localStorage.setItem(CHARGE_KEY, JSON.stringify(s));
-    } catch(e) {}
-}
-
-// Restore session if active
-(function restoreSession() {
-    try {
-        const saved = JSON.parse(localStorage.getItem(CHARGE_KEY));
-        if (saved && saved.startTime) {
-            chargeStartTime = new Date(saved.startTime);
-            // Only overwrite fields that the server didn't already pre-fill
-            // from pre_charge. Empty DOM values mean no server-side pre-fill.
-            const dateEl = document.getElementById('date');
-            if (!dateEl.value) dateEl.value = saved.date || '';
-            const hourEl = document.getElementById('charge_hour');
-            if (!hourEl.value) hourEl.value = saved.hour || '';
-            const socFromEl = document.getElementById('soc_from');
-            if (!socFromEl.value) socFromEl.value = saved.socFrom || '';
-            const odoEl = document.getElementById('odometer');
-            if (!odoEl.value) odoEl.value = saved.odometer || '';
-            if (saved.chargeType) {
-                document.getElementById('type' + saved.chargeType).checked = true;
-                document.getElementById('chargeTypeHidden').value = saved.chargeType;
-            }
-            if (saved.chargeId) {
-                document.getElementById('chargeIdHidden').value = saved.chargeId;
-            }
-            // Replay formCache for any field the server didn't pre-fill.
-            // This catches the intermediate-save edge case where eur_per_kwh
-            // / soc_to / etc. came back empty in pre_charge — the user's
-            // typed value is still in the cache and we restore it here.
-            if (saved.formCache && !saved.stopped) {
-                FORM_FIELD_IDS.forEach(id => {
-                    const el = document.getElementById(id);
-                    if (el && !el.value && saved.formCache[id]) {
-                        el.value = saved.formCache[id];
-                    }
-                });
-                if (typeof updateCalcPrice === 'function') updateCalcPrice();
-            }
-            if (saved.stopped) {
-                // Stopped, unsaved session: keep Stop greyed but re-enable
-                // Start as a "discard & restart" recovery path so the user
-                // isn't trapped with both buttons disabled if they didn't
-                // notice the small Cancel button. Click handler will prompt
-                // before wiping the in-progress data.
-                btnStop.disabled = true;
-                btnStop.innerHTML = '<i class="bi bi-check-circle"></i> ' + T.stopped;
-                btnStop.classList.replace('btn-danger', 'btn-secondary');
-                btnStart.disabled = false;
-                btnStart.dataset.discardAndRestart = '1';
-            } else {
-                btnStart.disabled = true;
-                btnStart.innerHTML = '<i class="bi bi-check-circle"></i> ' + T.started;
-                btnStart.classList.replace('btn-success', 'btn-secondary');
-                btnStop.disabled = false;
-                timerEl.style.display = '';
-                startTimer();
-                startAutoPolling();
-                // Running session → repurpose the submit button as an
-                // intermediate-save so it's clear that saving doesn't
-                // end the charge.
-                const lblEl = document.getElementById('btnSaveLabel');
-                if (lblEl) lblEl.textContent = T.save_intermediate;
-            }
-        }
-    } catch(e) {}
-})();
-
-// v3.0.43: resume banner removed (see template comment). The
-// localStorage CHARGE_KEY still drives the intermediate-save form
-// restoration, but no longer the banner. Stale CHARGE_KEY entries
-// (startTime > 6 h) are still purged here on every page load so
-// downstream code doesn't act on dead state. Also: when the server
-// reports no_recent_activity, purge immediately regardless of age.
-const CHARGE_SESSION_TTL_HOURS = 6;
-(function purgeStaleChargeKey() {
-    // Server tells us when there's been no charging activity in the
-    // last 2 h. In that case the localStorage state is by definition
-    // stale and gets nuked.
-    const noRecentActivity = {{ 'true' if no_recent_activity else 'false' }};
-    if (noRecentActivity) {
-        try { localStorage.removeItem(CHARGE_KEY); } catch(_){}
-        return;
-    }
-    // Otherwise honour the 6 h TTL.
-    try {
-        const raw = localStorage.getItem(CHARGE_KEY);
-        if (raw) {
-            const s = JSON.parse(raw);
-            if (s && s.startTime) {
-                const ageH = (Date.now() - Date.parse(s.startTime)) / 3.6e6;
-                if (ageH < 0 || ageH >= CHARGE_SESSION_TTL_HOURS) {
-                    localStorage.removeItem(CHARGE_KEY);
-                }
-            }
-        }
-    } catch(e) { try { localStorage.removeItem(CHARGE_KEY); } catch(_){} }
-})();
-
-function startTimer() {
-    timerInterval = setInterval(() => {
-        if (!chargeStartTime) return;
-        const elapsed = Math.floor((Date.now() - chargeStartTime.getTime()) / 1000);
-        const h = Math.floor(elapsed / 3600);
-        const m = Math.floor((elapsed % 3600) / 60);
-        timerDisplay.textContent = (h > 0 ? h + 'h ' : '') + String(m).padStart(2, '0') + 'min';
-
-        // Live kWh estimate from time + AC power. estKwhNum is GROSS
-        // wall energy (time × charger power) — that's exactly what the
-        // meter shows and what kwh_loaded should hold. v3.0.16: the SoC
-        // projection now applies the charge efficiency, because only
-        // CHARGE_EFF of that wall energy actually reaches the pack —
-        // before this the running SoC over-stated by the loss amount.
-        const type = document.getElementById('chargeTypeHidden').value;
-        if (type === 'AC') {
-            const hours = elapsed / 3600;
-            const estKwhNum = hours * MAX_AC_KW;          // gross (wall)
-            const estKwh = estKwhNum.toFixed(3);
-            const netKwh = estKwhNum * CHARGE_EFF;         // into the pack
-            const kwhField = document.getElementById('kwh_loaded');
-            // Only auto-fill if not manually changed
-            if (!kwhField.dataset.manual) {
-                kwhField.value = estKwh;
-                const lossPctTxt = Math.round((1 - CHARGE_EFF) * 100);
-                document.getElementById('kwhHint').textContent =
-                    '(~' + estKwh + ' kWh @ ' + MAX_AC_KW + ' kW · −' + lossPctTxt + '% ' + (T.loss_label || 'Verlust') + ')';
-                updateCalcPrice();
-            }
-            // Evolving SoC target from the NET energy (gross × eff).
-            const socToField = document.getElementById('soc_to');
-            const socFromVal = parseInt(document.getElementById('soc_from').value);
-            if (!socToField.dataset.manual && !isNaN(socFromVal) && BATTERY_KWH > 0) {
-                const estSoc = Math.min(100, Math.round(socFromVal + (netKwh / BATTERY_KWH) * 100));
-                socToField.value = estSoc;
-            }
-        }
-        // Mirror the just-updated values into formCache so the
-        // intermediate-save round-trip can restore them if the
-        // server-rendered form comes back without them.
-        if (typeof persistFormCache === 'function') persistFormCache();
-    }, 1000);
-}
-
-// Mark kWh field as manually edited
-document.getElementById('kwh_loaded').addEventListener('input', function() {
-    this.dataset.manual = '1';
-});
-// Same for soc_to so the timer's projection doesn't clobber a manual entry.
-document.getElementById('soc_to').addEventListener('input', function() {
-    this.dataset.manual = '1';
-});
-
-// Persist every editable field to localStorage.formCache during an
-// active session, so fields the server might lose on the
-// intermediate-save round-trip can be replayed on the next render.
-FORM_FIELD_IDS.forEach(id => {
-    const el = document.getElementById(id);
-    if (el) {
-        el.addEventListener('input', persistFormCache);
-        el.addEventListener('change', persistFormCache);
-    }
-});
-
-// Shared status fetch with 12 V-lockout (HTTP 423) handling. On 423 the
-// server refuses an automatic AVN wake; we ask the user once, and on
-// confirm retry with the override flag. Returns the status object, or
-// throws a typed error the callers turn into a graceful fallback (use
-// the last cached SoC instead of leaving the Stop button "dead" — the
-// user reported having to tap Stop 3× because the raw 423 error just
-// bounced back with no explanation).
-async function _statusFetch(allowConfirm) {
-    let r = await fetch('/api/vehicle/status?force=1');
-    if (r.status === 423) {
-        let lj = {};
-        try { lj = await r.json(); } catch(e) {}
-        if (lj && lj.error === 'low_12v') {
-            if (allowConfirm && window.confirm(
-                    T.low_12v_confirm.replace('%pct%', lj.battery_12v ?? '?'))) {
-                r = await fetch('/api/vehicle/status?force=1&confirm_low_12v=1');
-            } else {
-                const err = new Error(T.low_12v_skipped);
-                err.code = 'low_12v_skipped';
-                throw err;
-            }
-        }
-    }
-    const d = await r.json();
-    if (d.error) throw new Error(d.error);
-    const dashCache = JSON.parse(localStorage.getItem('ev_vehicle_data') || '{}');
-    for (const key in dashCache) {
-        if (d[key] === null || d[key] === undefined) d[key] = dashCache[key];
-    }
-    localStorage.setItem('ev_vehicle_data', JSON.stringify(d));
-    return d;
-}
-
-async function fetchVehicle(btn) {
-    const origHtml = btn.innerHTML;
-    btn.innerHTML = '<span class="spinner-border spinner-border-sm"></span>';
-    btn.disabled = true;
-    try {
-        const d = await _statusFetch(true);
-        btn.innerHTML = origHtml;
-        btn.disabled = false;
-        return d;
-    } catch(e) {
-        btn.innerHTML = origHtml;
-        btn.disabled = false;
-        throw e;
-    }
-}
-
-// Quiet status fetch — like fetchVehicle but doesn't touch the button UI
-// so the retry loop can manage its own spinner/label without races.
-// allowConfirm=false: background poll must never pop a blocking confirm.
-async function fetchVehicleQuiet() {
-    return await _statusFetch(false);
-}
-
-// Start-with-retry: the click timestamp is ALWAYS the charge start — if
-// the initial /api/vehicle/status?force=1 fails (car offline or busy
-// reporting state to the Kia/Hyundai cloud), the loop polls every 30 s
-// up to ~20 min. On eventual success the fields are filled with a note
-// that the charge was started retroactively at the click time, so the
-// timer reflects the actual connect moment rather than "whenever the
-// server came back".
-let startRetryTimer = null;
-const START_RETRY_INTERVAL_MS = 30_000;
-const START_RETRY_MAX_MIN = 20;
-
-function cancelStartRetry() {
-    if (startRetryTimer) { clearTimeout(startRetryTimer); startRetryTimer = null; }
-}
-
-function fmtHHMM(d) {
-    return String(d.getHours()).padStart(2, '0') + ':' + String(d.getMinutes()).padStart(2, '0');
-}
-
-async function tryStart(clickTime, attempt, deadline) {
-    const chargeType = document.getElementById('chargeTypeHidden').value;
-    try {
-        const data = await fetchVehicleQuiet();
-        chargeStartTime = clickTime;
-
-        document.getElementById('date').value = clickTime.toISOString().slice(0, 10);
-        document.getElementById('charge_hour').value = clickTime.getHours();
-        if (data.soc != null) document.getElementById('soc_from').value = data.soc;
-        if (data.odometer != null) document.getElementById('odometer').value = data.odometer;
-
-        localStorage.setItem(CHARGE_KEY, JSON.stringify({
-            startTime: clickTime.toISOString(),
-            date: document.getElementById('date').value,
-            hour: clickTime.getHours().toString(),
-            socFrom: data.soc,
-            odometer: data.odometer,
-            chargeType: chargeType,
-        }));
-
-        btnStart.disabled = true;
-        btnStart.classList.replace('btn-success', 'btn-secondary');
-        btnStart.innerHTML = '<i class="bi bi-check-circle"></i> ' + T.started;
-        btnStop.disabled = false;
-        timerEl.style.display = '';
-        document.getElementById('kwh_loaded').dataset.manual = '';
-        document.getElementById('soc_to').dataset.manual = '';
-        const lblEl = document.getElementById('btnSaveLabel');
-        if (lblEl) lblEl.textContent = T.save_intermediate;
-        startTimer();
-        startAutoPolling();
-
-        if (attempt > 0) {
-            alert(T.started_retroactively.replace('{time}', fmtHHMM(clickTime)));
-        }
-        return true;
-    } catch(e) {
-        if (Date.now() >= deadline) {
-            btnStart.disabled = false;
-            btnStart.classList.replace('btn-secondary', 'btn-success');
-            btnStart.innerHTML = '<i class="bi bi-play-circle"></i> ' + T.start;
-            alert(T.retry_failed + '\n' + e.message);
-            return false;
-        }
-        const secsLeft = Math.ceil((deadline - Date.now()) / 1000);
-        const mins = Math.ceil(secsLeft / 60);
-        btnStart.innerHTML = '<span class="spinner-border spinner-border-sm"></span> ' +
-            T.waiting_for_car + ' (' + mins + 'm)';
-        startRetryTimer = setTimeout(() => tryStart(clickTime, attempt + 1, deadline),
-                                     START_RETRY_INTERVAL_MS);
-        return false;
-    }
-}
-
-btnStart.addEventListener('click', () => {
-    // Recovery path: a previously stopped-but-unsaved session is in
-    // localStorage. Clicking Start in that state means "discard the old
-    // charge and start fresh" — confirm to avoid losing manual entries.
-    if (btnStart.dataset.discardAndRestart === '1') {
-        if (!confirm(T.discard_stopped_confirm)) return;
-        localStorage.removeItem(CHARGE_KEY);
-        delete btnStart.dataset.discardAndRestart;
-        btnStop.disabled = true;
-        btnStop.classList.replace('btn-secondary', 'btn-danger');
-        btnStop.innerHTML = '<i class="bi bi-stop-circle"></i> ' + T.stop;
-        const lblEl = document.getElementById('btnSaveLabel');
-        if (lblEl) lblEl.textContent = T.save;
-        document.getElementById('chargeIdHidden').value = '';
-        // Wipe form fields the stopped session may have populated, so the
-        // fresh /api/vehicle/status fetch starts from a clean slate.
-        ['soc_from', 'soc_to', 'odometer', 'kwh_loaded', 'co2_g_per_kwh',
-         'eur_per_kwh', 'notes', 'start_fee_eur', 'blocking_fee_eur'].forEach(id => {
-            const el = document.getElementById(id);
-            if (el) el.value = '';
-        });
-        const kwhField = document.getElementById('kwh_loaded');
-        if (kwhField) kwhField.dataset.manual = '';
-        const socToField = document.getElementById('soc_to');
-        if (socToField) socToField.dataset.manual = '';
-        const tDisp = document.getElementById('timerDisplay');
-        if (tDisp) tDisp.textContent = '00:00';
-        timerEl.style.display = 'none';
-        const badge = timerDisplay.parentNode.querySelector('.badge.bg-info');
-        if (badge) badge.remove();
-    }
-    cancelStartRetry();
-    const clickTime = new Date();
-    const deadline = Date.now() + START_RETRY_MAX_MIN * 60_000;
-    btnStart.disabled = true;
-    btnStart.classList.replace('btn-success', 'btn-secondary');
-    btnStart.innerHTML = '<span class="spinner-border spinner-border-sm"></span> ' + T.waiting_for_car;
-    tryStart(clickTime, 0, deadline);
-});
-
-// === Auto-Polling: react quickly when the car finishes charging ===
-//
-// v3.0.22: poll the lightweight /api/vehicle/last_sync (DB-only read of
-// the latest VehicleSync row, no cloud call, no API quota) every 60 s.
-// The bg sync loop already polls the cloud on a 10-min cached cadence,
-// so this is the same freshness as the old approach — just free and
-// responsive enough that doStop fires within a minute of the bg loop
-// catching the 1→0 transition, instead of up to 10 min later.
-let pollInterval = null;
-const POLL_MS = 60 * 1000;
-
-function startAutoPolling() {
-    if (pollInterval) clearInterval(pollInterval);
-    // Fire one tick right away so a charge that ended *before* the user
-    // even opened the page gets caught on first load, not 60 s in.
-    autoCheck();
-    pollInterval = setInterval(autoCheck, POLL_MS);
-}
-
-async function autoCheck() {
-    try {
-        const r = await fetch('/api/vehicle/last_sync');
-        const d = await r.json();
-        if (d.error) return;
-
-        // Update SoC live display
-        if (d.soc != null) {
-            document.getElementById('kwhHint').textContent = '(' + T.current + d.soc + '%)';
-            // Pin soc_to to the polled value when the user hasn't typed
-            // their own. The 1-second timer keeps a time-based estimate
-            // running too, but a real SoC reading from the car overrides
-            // it on every poll for a more accurate live value.
-            const socToField = document.getElementById('soc_to');
-            const socFromVal = parseInt(document.getElementById('soc_from').value);
-            if (!socToField.dataset.manual && (isNaN(socFromVal) || d.soc >= socFromVal)) {
-                socToField.value = d.soc;
-            }
-        }
-
-        // Auto-stop: trigger when the latest sync says the car is no
-        // longer charging AND SoC has risen since session start (so we
-        // don't mis-fire on a sync that arrived before is_charging
-        // flipped to true). 100 % is treated as a stop signal too in
-        // case the cloud forgets to flip the flag.
-        const socFromVal = parseInt(document.getElementById('soc_from').value);
-        const chargeEnded = (d.is_charging === false && d.soc != null
-                             && !isNaN(socFromVal) && d.soc > socFromVal);
-        const reachedFull = (d.soc != null && d.soc >= 100);
-        if (chargeEnded || reachedFull) {
-            await doStop(d);
-        }
-    } catch(e) { console.error('Auto-poll error:', e); }
-}
-
-async function doStop(data) {
-    // If no data passed, do a force fetch
-    if (!data) {
-        try {
-            data = await fetchVehicle(btnStop);
-        } catch(e) {
-            alert(T.error_prefix + e.message);
-            return;
-        }
-    }
-
-    // Fill end values
-    if (data.soc != null) document.getElementById('soc_to').value = data.soc;
-
-    // Calculate kWh from SoC if available
-    const socFrom = parseInt(document.getElementById('soc_from').value);
-    const socTo = parseInt(document.getElementById('soc_to').value);
-    const stopType = document.getElementById('chargeTypeHidden').value;
-    if (!isNaN(socFrom) && !isNaN(socTo) && socTo > socFrom) {
-        // v3.0.16: record GROSS for AC/PV (net ÷ eff) so the recorded
-        // kwh_loaded already includes the charge loss instead of being
-        // the loss-free theoretical figure that froze loss at 0.
-        const net = (socTo - socFrom) / 100 * BATTERY_KWH;
-        const useEff = (stopType === 'AC' || stopType === 'PV') && CHARGE_EFF > 0;
-        const kwh = useEff ? net / CHARGE_EFF : net;
-        document.getElementById('kwh_loaded').value = kwh.toFixed(3);
-        document.getElementById('kwhHint').textContent =
-            '(' + T.from_soc + (useEff ? ' · −' + Math.round((1-CHARGE_EFF)*100) + '% ' + (T.loss_label || 'Verlust') : '') + ')';
-    } else if (chargeStartTime) {
-        const type = document.getElementById('chargeTypeHidden').value;
-        if (type === 'AC') {
-            const hours = (Date.now() - chargeStartTime.getTime()) / 3600000;
-            document.getElementById('kwh_loaded').value = (hours * MAX_AC_KW).toFixed(3);
-            document.getElementById('kwhHint').textContent = '(' + T.from_time + ' × ' + MAX_AC_KW + ' kW)';
-        }
-    }
-    updateCalcPrice();
-
-    // Fetch CO2 for charge time range
-    if (chargeStartTime) {
-        const startH = chargeStartTime.getHours();
-        const endH = new Date().getHours();
-        const dateStr = document.getElementById('date').value;
-        try {
-            const co2r = await fetch('/api/co2/range?date=' + dateStr + '&start_hour=' + startH + '&end_hour=' + endH);
-            const co2d = await co2r.json();
-            if (co2d.co2_g_per_kwh) {
-                document.getElementById('co2_g_per_kwh').value = co2d.co2_g_per_kwh;
-                document.getElementById('co2_g_per_kwh').title = co2d.hours_covered + '/' + co2d.hours_total + ' ' + T.hours_covered;
-            }
-        } catch(e) { console.error('CO2 range fetch error:', e); }
-    }
-
-    // Stop timer & polling
-    if (timerInterval) clearInterval(timerInterval);
-    if (pollInterval) clearInterval(pollInterval);
-    const session = JSON.parse(localStorage.getItem(CHARGE_KEY) || '{}');
-    session.endTime = new Date().toISOString();
-    session.stopped = true;
-    localStorage.setItem(CHARGE_KEY, JSON.stringify(session));
-    chargeStartTime = null;
-
-    btnStop.disabled = true;
-    btnStop.innerHTML = '<i class="bi bi-check-circle"></i> ' + T.stopped;
-    btnStop.classList.replace('btn-danger', 'btn-secondary');
-    timerDisplay.insertAdjacentHTML('afterend', ' <span class="badge bg-info">' + T.ready_to_save + '</span>');
-
-    // v3.0.17: AUTO-PERSIST ON STOP. The #1 data-loss trap was that
-    // Start/Stop are client-only — a charge was never written to the DB
-    // until the user also pressed the green Save button. Users (rightly)
-    // assumed Stop = saved and lost charges. Now stopping immediately
-    // submits an intermediate save so the row lands in the DB; the form
-    // is restored after the redirect so the user can still refine the
-    // operator/price/notes and Save again (folds into the same row).
-    if (!_autoPersisted) {
-        _autoPersisted = true;
-        _persistOnStop = true;
-        // Defer so the field writes above are committed to the DOM first.
-        setTimeout(() => {
-            try { document.getElementById('chargeForm').requestSubmit(); }
-            catch(e) { document.getElementById('chargeForm').submit(); }
-        }, 50);
-    }
-}
-let _autoPersisted = false;
-let _persistOnStop = false;
-
-let _stopInFlight = false;
-btnStop.addEventListener('click', async () => {
-    // Guard against the 3×-tap the user reported: ignore re-clicks while
-    // a stop is already running.
-    if (_stopInFlight) return;
-    _stopInFlight = true;
-    try {
-        const data = await fetchVehicle(btnStop);
-        await doStop(data);
-    } catch(e) {
-        if (e && e.code === 'low_12v_skipped') {
-            // 12 V too low to wake the car AND the user declined the
-            // override. Don't leave Stop "dead" — stop the session on
-            // the last cached SoC so the charge can still be saved
-            // manually. doStop() handles a partial/cached snapshot.
-            try {
-                const cached = JSON.parse(localStorage.getItem('ev_vehicle_data') || '{}');
-                await doStop(cached || {});
-            } catch(e2) {}
-            alert(T.low_12v_skipped);
-        } else {
-            alert(T.error_prefix + e.message);
-        }
-    } finally {
-        _stopInFlight = false;
-    }
-});
-
-// Submit handler: if the charge session is still running (user clicked
-// Start but not Stop), treat this as an intermediate save — keep the
-// session in localStorage and tell the server to redirect with the new
-// charge_id so we don't re-insert on the next save. Stopped or
-// non-session saves fall through to the old "wipe and start fresh" path.
-let _formSubmitted = false;
-document.getElementById('chargeForm').addEventListener('submit', (ev) => {
-    // v3.0.15 client-side double-submit guard. The btnSave had no
-    // debounce — a 3× tap fired three POSTs before the redirect landed,
-    // each inserting a fresh row (server-side 90 s fold is the backstop;
-    // this avoids even sending the extra requests).
-    if (_formSubmitted) { ev.preventDefault(); return; }
-    _formSubmitted = true;
-    const sb = document.getElementById('btnSave');
-    if (sb) {
-        sb.disabled = true;
-        const lbl = document.getElementById('btnSaveLabel');
-        if (lbl) lbl.innerHTML = '<span class="spinner-border spinner-border-sm"></span>';
-        // Safety net: if navigation somehow doesn't happen (validation
-        // error kept us on the page), re-enable after 8 s so the user
-        // isn't stuck with a dead button.
-        setTimeout(() => { _formSubmitted = false; sb.disabled = false;
-            if (lbl) lbl.textContent = T.save_label; }, 8000);
-    }
-    try {
-        const saved = JSON.parse(localStorage.getItem(CHARGE_KEY) || 'null');
-        const activeFlag = document.getElementById('sessionActiveHidden');
-        // Persist-on-stop OR a still-running session → intermediate save:
-        // keep the session + tell the server to redirect with the new
-        // charge_id so the next Save folds into the same row.
-        if (_persistOnStop || (saved && saved.startTime && !saved.stopped)) {
-            if (activeFlag) activeFlag.value = '1';
-            return;
-        }
-    } catch(e) {}
-    localStorage.removeItem(CHARGE_KEY);
-});
-{% endif %}
 
 // ── Location capture ─────────────────────────────────────────────
 (function() {
@@ -1182,7 +571,6 @@ document.getElementById('chargeForm').addEventListener('submit', (ev) => {
         latIn.value = parseFloat(lat).toFixed(6);
         lonIn.value = parseFloat(lon).toFixed(6);
         if (name) nameIn.value = name;
-        if (typeof persistFormCache === 'function') persistFormCache();
     }
 
     async function reverseGeocode(lat, lon) {
@@ -1312,7 +700,6 @@ document.getElementById('chargeForm').addEventListener('submit', (ev) => {
     function commit(value, opts) {
         hidden.value = value || '';
         tryAutoFillPrice(hidden.value, opts);
-        if (typeof persistFormCache === 'function') persistFormCache();
     }
 
     sel.addEventListener('change', () => {
@@ -1331,7 +718,6 @@ document.getElementById('chargeForm').addEventListener('submit', (ev) => {
     // name (input events would fire for every keystroke).
     custom.addEventListener('input', () => {
         hidden.value = custom.value.trim();
-        if (typeof persistFormCache === 'function') persistFormCache();
     });
     custom.addEventListener('blur', () => { commit(custom.value, {force: true}); });
 
@@ -1363,10 +749,9 @@ document.getElementById('chargeForm').addEventListener('submit', (ev) => {
             // date field is pre-filled with today — don't treat that as input
             el.id !== 'date');
         if (hasInput && !confirm(T_CANCEL_CONFIRM)) return;
-        try {
-            // Key is only defined when vehicle_configured, so guard access.
-            if (typeof CHARGE_KEY !== 'undefined') localStorage.removeItem(CHARGE_KEY);
-        } catch (e) { /* ignore */ }
+        // Best-effort sweep of any legacy localStorage key from the
+        // pre-removal Start/Stop session flow.
+        try { localStorage.removeItem('ev_charge_session'); } catch (e) {}
         window.location.href = '/';
     });
 })();

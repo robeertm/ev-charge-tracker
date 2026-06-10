@@ -1,5 +1,19 @@
 # Changelog
 
+## v3.0.52 (2026-06-10)
+
+### Charge input: Start/Stop removed — auto-detection owns live sessions
+
+The "+ Neue Ladung" modal no longer offers Start/Stop buttons, a live timer, the active-session badge, the localStorage `ev_charge_session` round-trip, or the intermediate-save / saved_id flow. Auto-detection (`_detect_auto_charge` for is_charging 1→0 transitions, the v3.0.47/v3.0.49 SoC-rise fallback for brands like Skoda) now reliably catches active sessions and writes the canonical Charge row itself, so the manual UI's job is reduced to **retroactive manual entry** — adding a charge after the fact with all fields (date, start hour, SoC range, kWh, €/kWh, charge type, operator, location, fees, notes, CO2). The Cancel button and the server-side 90 s double-submit fold both stay; ~590 lines of session-restore / timer / auto-poll / retry-loop JS plus the `?saved_id=X&active=1` server path are gone.
+
+### Fahrtenbuch: live-patch "Adresse wird ermittelt…" without a reload
+
+When the page rendered before the background geocoder had caught up, address cells showed "Adresse wird ermittelt…" until the user navigated away and back. A new lightweight `POST /api/trips/parking_addresses` returns currently-resolved addresses for a given set of parking-event IDs; the trips page polls every 2 s (max ~60 s) and patches each cell in place as Nominatim results land. The page-load background geocode is also bumped from `limit=50` to `limit=200` so it covers the full visible window in one shot.
+
+### Skoda: yes, the v3 API exposes location + trips + charging history
+
+Spot-research (no code change). The MySkoda v3 API exposes `get_positions` (live GPS), `get_parking_position` (last known parking spot + formatted address), `get_single_trip_statistics` (per-trip detail), `get_trip_statistics` (week/month aggregate), `get_charging_history`, `get_all_charging_sessions`, `get_charging_statistics`, and `get_driving_score`. The dedicated `myskoda` Python lib wraps all of them and is used by the Home Assistant integration. Our connector goes through `carconnectivity-connector-skoda` instead, whose README explicitly says "Not all items that are presented in the data from the server are already implemented" — i.e. the data does arrive, just unmapped. Surfacing it locally would mean adding a parallel `myskoda` adapter for the Skoda brand. Privacy precondition: the in-app "Share my position" setting must be enabled.
+
 ## v3.0.51 (2026-06-08)
 
 ### Charge edit views: operator pick now auto-fills the price

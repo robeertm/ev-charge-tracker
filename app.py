@@ -2518,10 +2518,6 @@ def register_routes(app):
                     db.session.add(charge)
                 db.session.commit()
                 cost_str = f'€{charge.total_cost:.2f}' if charge.total_cost is not None else '€—'
-                session_active = request.form.get('session_active') == '1'
-                if session_active:
-                    flash(t('flash.charge_intermediate_saved'), 'info')
-                    return redirect(url_for('input_charge', saved_id=charge.id, active=1))
                 flash(t('flash.charge_saved', date=charge.date.strftime("%d.%m.%Y"), kwh=charge.kwh_loaded or 0, cost=cost_str), 'success')
                 return redirect(url_for('input_charge'))
 
@@ -2531,79 +2527,13 @@ def register_routes(app):
 
         # Pre-fill date with today
         last_charge = Charge.query.order_by(Charge.date.desc()).first()
-        vehicle_configured = bool(AppConfig.get('vehicle_api_brand', ''))
+        # Manual retroactive entry only — no more saved_id / active_session
+        # / Start-Stop intermediate-save round-trip. Auto-detection now owns
+        # the live path; this form is purely for "Ladung nachtragen".
         pre_charge = None
-        active_session = False
-        active_saved_id = None
-        saved_id = _int(request.args.get('saved_id'))
-        if saved_id:
-            pre_charge = Charge.query.get(saved_id)
-            active_session = request.args.get('active') == '1'
-            if active_session:
-                active_saved_id = saved_id
 
-        # v3.0.42: server tells the client whether there's any real
-        # activity worth keeping localStorage state for. If no vehicle
-        # is currently charging AND no Charge row has been created in
-        # the last 2 h, the client auto-purges CHARGE_KEY on render
-        # — kills the localStorage path to the banner without needing
-        # the user to tap anything.
-        no_recent_activity = True
-        try:
-            from datetime import timedelta as _td
-            _two_h_ago = datetime.now() - _td(hours=2)
-            _has_recent_charge = bool(
-                Charge.query.filter(Charge.created_at >= _two_h_ago).first())
-            _has_active_charging = bool(
-                VehicleSync.query
-                .filter(VehicleSync.is_charging.is_(True))
-                .filter(VehicleSync.timestamp >= _two_h_ago)
-                .first())
-            no_recent_activity = not (_has_recent_charge or _has_active_charging)
-        except Exception:
-            no_recent_activity = False
-
-        # v3.0.41: idiot-proof auto-dismiss. Banner only ever shows
-        # when the user reasonably might want to resume the session.
-        if active_session and active_saved_id is not None:
-            try:
-                _dlist = json.loads(
-                    AppConfig.get('dismissed_charge_session_ids', '[]') or '[]')
-                if not isinstance(_dlist, list):
-                    _dlist = []
-            except (ValueError, TypeError):
-                _dlist = []
-            _force_off_reason = None
-            # 1. Explicitly dismissed via Verwerfen.
-            if str(active_saved_id) in [str(x) for x in _dlist]:
-                _force_off_reason = 'dismissed'
-            # 2. Orphan: saved_id doesn't reference an existing charge.
-            elif pre_charge is None:
-                _force_off_reason = 'orphan'
-            # 3. Stale: charge exists but it's older than 6 h. A real
-            # active session would have been finalised long before
-            # then; anything older is leftover from an abandoned
-            # Zwischenspeichern.
-            elif pre_charge.created_at is not None and (
-                    datetime.now() - pre_charge.created_at
-                ).total_seconds() > 6 * 3600:
-                _force_off_reason = 'stale'
-            if _force_off_reason:
-                active_session = False
-                active_saved_id = None
-                # Self-heal: persist the dismissal so even older
-                # browsers without v3.0.40+ JS get clean state from now
-                # on. No-op when already dismissed.
-                if saved_id and str(saved_id) not in [str(x) for x in _dlist]:
-                    _dlist.append(str(saved_id))
-                    if len(_dlist) > 200:
-                        _dlist = _dlist[-200:]
-                    AppConfig.set('dismissed_charge_session_ids',
-                                  json.dumps(_dlist))
-        # v3.0.21: prefill location/operator from the latest sync GPS for
-        # a fresh form (no pre_charge round-trip). Mirrors the resolution
-        # that _detect_auto_charge does on charge-end so a manually-started
-        # charge at home/work/a favorite arrives with the right operator,
+        # Prefill location/operator from the latest sync GPS so a charge
+        # at home/work/a favorite arrives with the right operator,
         # location name, and configured price already filled in.
         auto_loc = None
         if pre_charge is None:
@@ -2663,14 +2593,10 @@ def register_routes(app):
                                last_charge=last_charge,
                                pre_charge=pre_charge,
                                auto_loc=auto_loc,
-                               active_session=active_session,
-                               active_saved_id=active_saved_id,
-                               no_recent_activity=no_recent_activity,
                                pv_co2=_get_pv_co2(),
                                pv_price=AppConfig.get('pv_price_eur_per_kwh', '0.00'),
                                max_ac_kw=AppConfig.get('max_ac_kw', '11'),
                                battery_kwh=_get_battery_kwh(),
-                               vehicle_configured=vehicle_configured,
                                home_lat=AppConfig.get('home_lat', ''),
                                home_lon=AppConfig.get('home_lon', ''),
                                home_label=AppConfig.get('home_label', ''),
@@ -4190,7 +4116,7 @@ def register_routes(app):
                     with captured_app.app_context():
                         try:
                             from services.trips_service import geocode_missing_events
-                            n = geocode_missing_events(limit=50)
+                            n = geocode_missing_events(limit=200)
                             logger.info(f"trips_page: geocoded {n} events")
                         except Exception as e:
                             logger.warning(f"trips_page geocode failed: {e}")
@@ -4739,6 +4665,31 @@ def register_routes(app):
             return jsonify({'ok': True, 'filled': n})
         except Exception as e:
             return jsonify({'error': str(e)}), 500
+
+    @app.route('/api/trips/parking_addresses', methods=['POST'])
+    def api_trips_parking_addresses():
+        """Cheap read for the trips page polling loop.
+
+        Body: ``{ids: [int, ...]}``. Returns ``{addresses: {id: addr}}``
+        with only the events that already have a non-null address.
+        Does NOT trigger any geocoding work — the page-load background
+        worker (services.trips_service.geocode_missing_events) does
+        that. Caller polls every couple of seconds to patch
+        "Resolving…" cells into actual addresses without a reload.
+        """
+        from models.database import ParkingEvent
+        data = request.get_json(silent=True) or {}
+        try:
+            ids = [int(x) for x in (data.get('ids') or [])][:400]
+        except (TypeError, ValueError):
+            return jsonify({'error': 'invalid_ids'}), 400
+        if not ids:
+            return jsonify({'addresses': {}})
+        rows = (db.session.query(ParkingEvent.id, ParkingEvent.address)
+                .filter(ParkingEvent.id.in_(ids))
+                .filter(ParkingEvent.address.isnot(None))
+                .all())
+        return jsonify({'addresses': {r[0]: r[1] for r in rows}})
 
     @app.route('/api/trips/backfill', methods=['POST'])
     def api_trips_backfill():

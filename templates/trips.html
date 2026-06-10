@@ -164,7 +164,7 @@
                             {% elif tr.from.label == 'favorite' %}<i class="bi bi-star-fill text-info"></i> {{ tr.from.name }}
                             {% elif tr.from.label == 'unknown' %}<span class="text-muted"><i class="bi bi-geo-alt-slash"></i> {{ t('trips.unknown_location') }}</span>
                             {% elif tr.from.address %}{{ tr.from.address }}
-                            {% else %}<span class="text-muted fst-italic">{{ t('trips.resolving') }}</span>{% endif %}
+                            {% else %}<span class="text-muted fst-italic trip-resolving">{{ t('trips.resolving') }}</span>{% endif %}
                         </td>
                         <td class="small trip-endpoint" data-evt-id="{{ tr.to.id }}" role="button"
                             title="{{ t('trips.edit_title') }}">
@@ -173,7 +173,7 @@
                             {% elif tr.to.label == 'favorite' %}<i class="bi bi-star-fill text-info"></i> {{ tr.to.name }}
                             {% elif tr.to.label == 'unknown' %}<span class="text-muted"><i class="bi bi-geo-alt-slash"></i> {{ t('trips.unknown_location') }}</span>
                             {% elif tr.to.address %}{{ tr.to.address }}
-                            {% else %}<span class="text-muted fst-italic">{{ t('trips.resolving') }}</span>{% endif %}
+                            {% else %}<span class="text-muted fst-italic trip-resolving">{{ t('trips.resolving') }}</span>{% endif %}
                         </td>
                         <td class="text-end">{% if tr.km %}{{ tr.km }}{% endif %}</td>
                         <td class="text-end">{% if tr.soc_used %}{% if tr.soc_estimated %}<i class="bi bi-asterisk small text-muted" title="{{ t('trips.soc_estimated') }}"></i> {% endif %}−{{ tr.soc_used }}%{% endif %}</td>
@@ -1076,6 +1076,55 @@
             btnSdk.innerHTML = orig;
         });
     }
+})();
+
+// ── Live-patch "Resolving…" address cells without a reload ───────
+(function addressPoller() {
+    function collectPending() {
+        const cells = document.querySelectorAll('.trip-endpoint');
+        const ids = new Set();
+        cells.forEach(td => {
+            if (td.querySelector('.trip-resolving')) {
+                const id = td.dataset.evtId;
+                if (id) ids.add(id);
+            }
+        });
+        return [...ids];
+    }
+    function patch(addresses) {
+        for (const [id, addr] of Object.entries(addresses)) {
+            if (!addr) continue;
+            document.querySelectorAll('.trip-endpoint[data-evt-id="' + id + '"]').forEach(td => {
+                if (td.querySelector('.trip-resolving')) {
+                    td.textContent = addr;
+                }
+            });
+        }
+    }
+    let pending = collectPending();
+    if (!pending.length) return;
+    let attempts = 0;
+    const MAX_ATTEMPTS = 30;   // ~60s at 2s cadence
+    const INTERVAL_MS = 2000;
+    async function tick() {
+        attempts += 1;
+        try {
+            const r = await fetch('/api/trips/parking_addresses', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({ids: pending}),
+            });
+            if (r.ok) {
+                const d = await r.json();
+                if (d && d.addresses) patch(d.addresses);
+            }
+        } catch (_) { /* ignore — try again next tick */ }
+        pending = collectPending();
+        if (pending.length && attempts < MAX_ATTEMPTS) {
+            setTimeout(tick, INTERVAL_MS);
+        }
+    }
+    setTimeout(tick, INTERVAL_MS);
 })();
 
 // ── Trip editor: two-sided (from/to) modal + shared Leaflet map ──
