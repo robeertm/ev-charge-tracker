@@ -74,9 +74,22 @@ def _save_refresh_token(email: str, rt: str) -> None:
         logger.debug(f"myskoda refresh-token persist failed: {e}")
 
 
+# Network timeouts. aiohttp's default is "wait forever" — we've seen the
+# bg-sync loop wedge for 70+ min on a stalled MySkoda call (post-move
+# reconcile right after a service restart, before the refresh-token cache
+# warmed up). 60 s total per call is generous enough for Skoda's slow
+# /v3/maps lookups while bounding the worst case.
+_AIOHTTP_TOTAL_TIMEOUT = aiohttp.ClientTimeout(total=60, sock_connect=20)
+# Outer wall-clock guard for the entire connect+call+disconnect sequence
+# — protects against deadlocks deeper than the HTTP layer (e.g. aiomqtt
+# init even with mqtt_enabled=False, or the firebase-messaging side-effect
+# the myskoda lib imports unconditionally).
+_OVERALL_DEADLINE_SEC = 90
+
+
 async def _run_call(email: str, password: str, fn):
     """Open one aiohttp session, log in, call ``fn(ms)``, log out."""
-    async with aiohttp.ClientSession() as session:
+    async with aiohttp.ClientSession(timeout=_AIOHTTP_TOTAL_TIMEOUT) as session:
         ms = MySkoda(session, mqtt_enabled=False)
         rt = _load_refresh_token(email)
         used_rt = False
@@ -107,8 +120,16 @@ async def _run_call(email: str, password: str, fn):
                 pass
 
 
+async def _with_deadline(coro):
+    """Wrap a coroutine with a hard wall-clock deadline. Raises
+    asyncio.TimeoutError if it doesn't finish in time."""
+    return await asyncio.wait_for(coro, timeout=_OVERALL_DEADLINE_SEC)
+
+
 def _run_sync(coro):
-    """Drive an async coroutine to completion in a fresh event loop."""
+    """Drive an async coroutine to completion in a fresh event loop,
+    bounded by ``_OVERALL_DEADLINE_SEC``. Raises ``TimeoutError`` if
+    the underlying MySkoda call (or its OAuth handshake) hangs."""
     try:
         running = asyncio.get_event_loop().is_running()
     except RuntimeError:
@@ -119,7 +140,7 @@ def _run_sync(coro):
         # that does.
         raise RuntimeError(
             "myskoda_client: refuses to run inside an active event loop")
-    return asyncio.run(coro)
+    return asyncio.run(_with_deadline(coro))
 
 
 class MySkodaSync:

@@ -1,5 +1,20 @@
 # Changelog
 
+## v3.0.59 (2026-06-11)
+
+### MySkoda client: bounded timeouts so a stalled call can't wedge the bg-loop
+
+Symptom on the Skoda host: bg-loop ticked once at service start, then went silent for 70+ minutes. Dashboard badge went red ("bg_loop_silent_for_69min"). User-triggered `src=dashboard` syncs still worked; only the background loop was stuck.
+
+Root cause: `aiohttp.ClientSession()` was constructed with no timeout (the lib defaults to "wait forever"), and `asyncio.run(coro)` had no outer deadline. The first MySkoda call after each service restart hits a cold refresh-token cache and does the full OAuth handshake; when one of those round-trips stalled (network blip, server-side hang), the bg-loop's `_maybe_post_move_reconcile` call sat forever waiting and never returned to the loop's sleep-then-tick rhythm.
+
+Two layers of timeout now:
+
+- `aiohttp.ClientTimeout(total=60, sock_connect=20)` on the session — every individual HTTP request bounded.
+- `asyncio.wait_for(..., timeout=90)` wrapping the whole connect-then-call-then-disconnect sequence — guards against deadlocks deeper than the HTTP layer (firebase-messaging import side-effects, anything that might still wedge under `mqtt_enabled=False`).
+
+A hang now surfaces as a `TimeoutError`, the wrapper logs a `WARNING`, and the bg-loop continues its normal 10-min cadence instead of getting stuck forever.
+
 ## v3.0.58 (2026-06-11)
 
 ### SDK-fallback destination: cap PE-after lookup to 12 h
