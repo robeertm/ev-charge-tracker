@@ -696,9 +696,6 @@ def start_sync(app):
 
     with app.app_context():
         from models.database import AppConfig, Vehicle
-        enabled = AppConfig.get('vehicle_sync_enabled', 'false')
-        if enabled != 'true':
-            return False
         # v2.29: require at least one non-archived vehicle with API
         # credentials and auto_sync set. Falls back to the legacy
         # AppConfig check so installs that haven't migrated their
@@ -710,6 +707,21 @@ def start_sync(app):
                  .first())
         legacy_brand = AppConfig.get('vehicle_api_brand', '')
         if ready is None and not legacy_brand:
+            return False
+        # Self-heal: if the install has working credentials but the
+        # ``vehicle_sync_enabled`` flag was never explicitly set
+        # (key absent from AppConfig — common for ev-provisioned hosts
+        # where the user never visited Settings → "Auto-Sync"), opt in
+        # by default. An explicit 'false' from the user still wins —
+        # only the unset case is auto-flipped.
+        enabled = AppConfig.get('vehicle_sync_enabled')
+        if enabled is None:
+            AppConfig.set('vehicle_sync_enabled', 'true')
+            enabled = 'true'
+            logger.info(
+                "vehicle_sync_enabled was unset and credentials exist — "
+                "auto-enabling background sync")
+        if enabled != 'true':
             return False
 
     logger.info("Starting vehicle sync service")

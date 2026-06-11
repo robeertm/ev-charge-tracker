@@ -1,5 +1,15 @@
 # Changelog
 
+## v3.0.57 (2026-06-11)
+
+### Self-heal: auto-enable background sync when credentials exist but the toggle was never set
+
+The Skoda host (ev-mike) had `vehicle_sync_enabled=false` from day one — the setup wizard never sets the flag, and the user has to find the "Auto-Sync" checkbox in Settings → Fahrzeuge to opt in. Symptom: no `src=bg-loop` entries in the logs, no GPS in any VehicleSync, 0 ParkingEvents, and every Fahrtenbuch row stuck on "Ort unbekannt" even though MySkoda was returning data fine.
+
+Fix in `start_sync()`: distinguish "key unset" from "user said false". When at least one fleet vehicle has API credentials and `AppConfig.vehicle_sync_enabled` is `None` (key absent), auto-flip to `'true'` once and start the loop. An explicit `'false'` from the user still wins — only the unset case gets healed.
+
+Manually applied to ev-mike during diagnosis (flag set, service restarted) — first bg-loop sync caught GPS, PE#1 created at home (label='home'). This release ships the same self-heal to every install so the next provision doesn't repeat the symptom.
+
 ## v3.0.56 (2026-06-10)
 
 ### Skoda: subscription-tier endpoint probing + import path fix
