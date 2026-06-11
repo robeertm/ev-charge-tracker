@@ -902,11 +902,29 @@ def _find_pe_containing(events, ts):
     return None
 
 
-def _find_pe_after(events, ts):
-    """First PE whose ``arrived_at`` is at or after ``ts``. Returns None
-    when none exists (i.e. no later confirmed location)."""
+_SDK_DEST_MAX_GAP_HOURS = 12
+
+
+def _find_pe_after(events, ts, max_gap_hours: float = _SDK_DEST_MAX_GAP_HOURS):
+    """First PE whose ``arrived_at`` is at or after ``ts`` AND within
+    ``max_gap_hours`` of it. Returns None when no PE opens close enough
+    in time.
+
+    The gap matters because the SDK-only fallback uses this to infer a
+    Skoda/Kia trip's destination from a later parking event. Without
+    the cap, the FIRST PE the install ever created becomes the "Nach"
+    field of every historical SDK trip that predates it — even by
+    weeks — which is what the user sees on a fresh Skoda host whose
+    PE timeline is still empty. 12 h covers the worst case (a trip
+    ending late evening followed by the smart-window night sleep and
+    the next morning's first sync) without bleeding across days.
+    """
+    from datetime import timedelta as _td
+    cap = ts + _td(hours=max_gap_hours)
     for pe in events:
-        if pe.arrived_at is not None and pe.arrived_at >= ts:
+        if pe.arrived_at is None:
+            continue
+        if ts <= pe.arrived_at <= cap:
             return pe
     return None
 

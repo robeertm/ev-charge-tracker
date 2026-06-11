@@ -1,5 +1,15 @@
 # Changelog
 
+## v3.0.58 (2026-06-11)
+
+### SDK-fallback destination: cap PE-after lookup to 12 h
+
+On a fresh Skoda install whose ParkingEvent timeline only has its first PE (the one that opened when the user finally enabled bg-sync), every historical MySkoda trip ending before that PE was rendered as "Nach Zuhause" — because `_find_pe_after` returned the first PE in the timeline regardless of how many days separated the trip's end from the PE's `arrived_at`.
+
+`_find_pe_after` now requires the candidate PE to open within `max_gap_hours` of the trip's end (default 12 h). 12 h covers the worst case where a trip ends late in the evening, the smart-window goes to sleep at 22:00, and the next morning's first sync (~06:10) opens the destination PE — without bleeding into "next-ever PE wins" for trips weeks earlier.
+
+Polled (PE-pair) trips are unaffected; this only changes the SDK-only fallback path used when no PE pair brackets the drive window.
+
 ## v3.0.57 (2026-06-11)
 
 ### Self-heal: auto-enable background sync when credentials exist but the toggle was never set
