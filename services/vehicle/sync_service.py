@@ -628,11 +628,20 @@ def _sync_loop(app):
             )
 
         # Sleep in small increments so we can stop quickly and react to
-        # a queued force-refresh request within ~10 seconds.
+        # a queued force-refresh request within ~10 seconds. v3.0.63:
+        # also refresh ``_last_bg_loop_tick`` every minute during sleep
+        # so the dashboard's "bg-loop alive?" heartbeat stays green
+        # through the overnight close (smart window 22→06 = 8 h of
+        # continuous sleep — the dashboard previously went red after
+        # 60 min even though the loop was healthy).
         slept = 0
+        last_heartbeat = 0
         while slept < sleep_secs and _sync_running and not _force_refresh_pending and not _post_move_reconcile_pending:
             time.sleep(min(10, sleep_secs - slept))
             slept += 10
+            if slept - last_heartbeat >= 60:
+                _last_bg_loop_tick = datetime.now()
+                last_heartbeat = slept
 
     _sync_running = False
     logger.info("Vehicle sync service stopped")

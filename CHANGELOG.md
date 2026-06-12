@@ -1,5 +1,13 @@
 # Changelog
 
+## v3.0.63 (2026-06-12)
+
+### Bg-loop heartbeat: refresh during inner sleep so the overnight close doesn't fake a dead loop
+
+The dashboard's sync badge reads `_last_bg_loop_tick` and goes yellow at 30 min stale, red at 60 min. The bg-loop set that tick at the top of every iteration — but each iteration runs `_compute_sleep_secs` and sleeps the returned duration in 10 s slices. During the smart-window overnight close (default 22:00 → 06:00 next day = 8 h) the loop enters the sleep slice loop at 22:00 and doesn't re-tick until 06:00, so the dashboard sees the tick going stale and starts alarming red around 23:00 every night.
+
+The inner 10 s sleep loop now refreshes `_last_bg_loop_tick` every minute. The thread proves it's alive without burning any extra API quota — the sleep cadence and wake-up logic are unchanged. Net effect: the dashboard stays green through the overnight close, and a *real* hang (loop thread actually wedged inside `time.sleep` or stuck before the inner loop runs at all) still surfaces as stale within the existing 30/60 min thresholds.
+
 ## v3.0.62 (2026-06-12)
 
 ### Trip edit modal: pin dialog to visualViewport on iOS portrait
