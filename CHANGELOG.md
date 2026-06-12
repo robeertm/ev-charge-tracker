@@ -1,5 +1,18 @@
 # Changelog
 
+## v3.0.60 (2026-06-12)
+
+### Quiet the MySkoda VEHICLE_IN_MOTION log spam
+
+While the driver is on the road, the Skoda v3 API returns a privacy-shaped `{"errors":["VEHICLE_IN_MOTION"]}` payload from `/v3/maps/positions/.../parking`. The myskoda lib doesn't model that case as a clean None — instead `mashumaro` fails to deserialize and the lib's `myskoda.rest_api` logger paints an ERROR + traceback on every poll (the bg-loop hits the endpoint every 10 min during the active window). Our wrapper then added its own WARNING on top. Net result on the morning commute: a long red wall in the /logs feed for the user's normal driving.
+
+Two filters:
+
+- A `logging.Filter` on `myskoda.rest_api` that drops records containing `VEHICLE_IN_MOTION` or `Field "parking_position"` — those are the API's normal "no parking data right now" responses, not faults.
+- The wrapper's own `get_parking_position` / `get_positions` exception path now logs at DEBUG (not WARNING) when the exception text matches the VEHICLE_IN_MOTION shape, and at WARNING otherwise so real errors still surface.
+
+Functional behaviour unchanged: VehicleSync just gets `GPS=no` for that tick, the next sync after the car parks fills it in.
+
 ## v3.0.59 (2026-06-11)
 
 ### MySkoda client: bounded timeouts so a stalled call can't wedge the bg-loop

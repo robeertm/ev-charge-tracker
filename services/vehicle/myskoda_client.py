@@ -34,6 +34,29 @@ except Exception as _imp_err:  # ImportError or missing system deps
     HAS_MYSKODA = False
     logger.debug(f"myskoda lib not available, skoda v3 endpoints disabled: {_imp_err}")
 
+
+# Silence the noisy ``myskoda.rest_api`` ERROR + traceback that fires
+# every time the parking / positions endpoint returns ``VEHICLE_IN_MOTION``
+# (the API's privacy-shaped "no data right now" response). It's an
+# expected runtime state, not a fault — our wrapper still returns None
+# and the caller skips the GPS update. Without this filter, every 10
+# min of driving paints a red traceback in the user's /logs feed.
+class _VehicleInMotionFilter(logging.Filter):
+    def filter(self, record):  # noqa: D401
+        try:
+            msg = record.getMessage()
+        except Exception:
+            return True
+        if 'VEHICLE_IN_MOTION' in msg:
+            return False
+        if 'Field "parking_position"' in msg or 'parking_position is missing' in msg:
+            return False
+        return True
+
+
+if HAS_MYSKODA:
+    logging.getLogger('myskoda.rest_api').addFilter(_VehicleInMotionFilter())
+
 _TOKEN_DIR = os.path.join(DATA_DIR, 'myskoda')
 try:
     os.makedirs(_TOKEN_DIR, exist_ok=True)
@@ -189,7 +212,13 @@ class MySkodaSync:
     # ── Position ──────────────────────────────────────────────────
     def get_parking_position(self) -> Optional[Any]:
         """``ParkingPositionV3`` with ``parking_position.gps_coordinates``
-        and ``formatted_address``. Returns None on any failure."""
+        and ``formatted_address``. Returns None on any failure.
+
+        VEHICLE_IN_MOTION manifests as a ``mashumaro.MissingField`` on
+        ``parking_position``: that's the API's privacy-shaped "no data
+        right now, car is driving" response, not a bug. Log it at DEBUG
+        so the /logs feed stays quiet while the driver is on the road.
+        """
         if not self._require():
             return None
 
@@ -198,7 +227,11 @@ class MySkodaSync:
         try:
             return _run_sync(_run_call(self.email, self.password, fn))
         except Exception as e:
-            logger.warning(f"myskoda get_parking_position failed: {type(e).__name__}: {e}")
+            msg = f"myskoda get_parking_position failed: {type(e).__name__}: {e}"
+            if 'parking_position' in str(e) or 'VEHICLE_IN_MOTION' in str(e):
+                logger.debug(msg + " (vehicle in motion)")
+            else:
+                logger.warning(msg)
             return None
 
     def get_positions(self) -> Optional[Any]:
@@ -211,7 +244,11 @@ class MySkodaSync:
         try:
             return _run_sync(_run_call(self.email, self.password, fn))
         except Exception as e:
-            logger.warning(f"myskoda get_positions failed: {type(e).__name__}: {e}")
+            msg = f"myskoda get_positions failed: {type(e).__name__}: {e}"
+            if 'VEHICLE_IN_MOTION' in str(e):
+                logger.debug(msg + " (vehicle in motion)")
+            else:
+                logger.warning(msg)
             return None
 
     # ── Trips ─────────────────────────────────────────────────────
