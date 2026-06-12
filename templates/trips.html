@@ -7,17 +7,14 @@
 <link rel="stylesheet" href="https://unpkg.com/leaflet.markercluster@1.5.3/dist/MarkerCluster.Default.css" />
 <script src="https://unpkg.com/leaflet.markercluster@1.5.3/dist/leaflet.markercluster.js"></script>
 <style>
-/* Mobile-friendly trip edit modal:
-   - Sticky footer so Speichern stays reachable while the map is in view.
-   - iOS safe-area padding so the button isn't hidden behind the browser's
-     own bottom chrome (address bar, gesture hint).
-   - Large tap-targets for the pick-on-map buttons. */
+/* Mobile-friendly trip edit modal. v3.0.61: modal-dialog-scrollable +
+   modal-fullscreen-md-down so the footer is always anchored to the
+   modal frame (never to a free-scrolling page). iOS Safari's address
+   bar floats over the page, not the modal frame — pinning the footer
+   inside the dialog is the only way it stays tap-able. Safe-area
+   padding on the footer keeps the button clear of the home-indicator
+   on iPhones. */
 #tripEditModal .modal-footer {
-    position: sticky;
-    bottom: 0;
-    background: #fff;
-    z-index: 1056;
-    border-top: 1px solid rgba(0,0,0,0.125);
     padding-bottom: calc(0.75rem + env(safe-area-inset-bottom, 0px));
 }
 #tripEditModal .tripEditPickBtn {
@@ -31,9 +28,6 @@
     margin-bottom: .5rem;
 }
 #tripEditMapPick .btn {
-    /* Min 160 px per button means both fit side-by-side on screens
-       >= 340 px (typical phone in portrait including padding) and
-       stack on narrower viewports instead of being clipped. */
     flex: 1 1 160px;
     min-height: 44px;
     font-weight: 600;
@@ -140,7 +134,7 @@
                 {% set _veh_by_id = {} %}
                 {% for v in fleet_vehicles %}{% set _ = _veh_by_id.update({v.id: v}) %}{% endfor %}
                 {% for tr in trips %}
-                    <tr data-from-id="{{ tr.from.id }}" data-to-id="{{ tr.to.id }}" data-source="{{ tr.source or 'polled' }}">
+                    <tr data-from-id="{{ tr.from.id or '' }}" data-to-id="{{ tr.to.id or '' }}" data-sdk-trip-id="{{ tr.sdk_trip_id or '' }}" data-source="{{ tr.source or 'polled' }}">
                         <td class="small">
                             {% if tr.from.departed_at %}{{ tr.from.departed_at[:16] | replace('T', ' ') }}{% endif %}
                             {% if tr.drive_min %}
@@ -157,7 +151,7 @@
                             {% else %}<span class="text-muted">—</span>{% endif %}
                         </td>
                         {% endif %}
-                        <td class="small trip-endpoint" data-evt-id="{{ tr.from.id }}" role="button"
+                        <td class="small trip-endpoint" data-evt-id="{{ tr.from.id or '' }}" role="button"
                             title="{{ t('trips.edit_title') }}">
                             {% if tr.from.label == 'home' %}<i class="bi bi-house-fill text-success"></i> {{ tr.from.name or t('trips.home') }}
                             {% elif tr.from.label == 'work' %}<i class="bi bi-briefcase-fill text-warning"></i> {{ tr.from.name or t('trips.work') }}
@@ -166,7 +160,7 @@
                             {% elif tr.from.address %}{{ tr.from.address }}
                             {% else %}<span class="text-muted fst-italic trip-resolving">{{ t('trips.resolving') }}</span>{% endif %}
                         </td>
-                        <td class="small trip-endpoint" data-evt-id="{{ tr.to.id }}" role="button"
+                        <td class="small trip-endpoint" data-evt-id="{{ tr.to.id or '' }}" role="button"
                             title="{{ t('trips.edit_title') }}">
                             {% if tr.to.label == 'home' %}<i class="bi bi-house-fill text-success"></i> {{ tr.to.name or t('trips.home') }}
                             {% elif tr.to.label == 'work' %}<i class="bi bi-briefcase-fill text-warning"></i> {{ tr.to.name or t('trips.work') }}
@@ -203,7 +197,7 @@
 
 <!-- Edit Modal ─────────────────────────────────────────────────── -->
 <div class="modal fade" id="tripEditModal" tabindex="-1" aria-hidden="true">
-  <div class="modal-dialog modal-xl">
+  <div class="modal-dialog modal-xl modal-dialog-scrollable modal-fullscreen-md-down">
     <div class="modal-content">
       <div class="modal-header">
         <h5 class="modal-title"><i class="bi bi-pencil-square"></i> {{ t('trips.edit_trip_heading') }}</h5>
@@ -1188,6 +1182,9 @@
     const pickStatus = document.getElementById('tripEditPickStatus');
 
     let ids = { from: null, to: null };
+    let sdkTripId = null;  // v3.0.61: VehicleTrip id for SDK-only fallback
+                           // trips. Lets the save handler create backing PEs
+                           // on demand when both ids[*] are null.
     let maxAgeDays = 0;
     let pickMode = null;  // 'from' | 'to' | null
 
@@ -1345,10 +1342,11 @@
         updateFavVisibility(side);
     }
 
-    async function openTripEditor(fromId, toId) {
+    async function openTripEditor(fromId, toId, sdkId) {
         const m = getModal();
         if (!m) { alert('Bootstrap not loaded'); return; }
         ids = { from: fromId, to: toId };
+        sdkTripId = sdkId || null;
         maxAgeDays = 0;
         confirm.checked = false;
         ageWarn.style.display = 'none';
@@ -1421,23 +1419,22 @@
         }
     }
 
+    function openFromRow(row) {
+        if (!row) return;
+        const fid = parseInt(row.dataset.fromId || '', 10);
+        const tid = parseInt(row.dataset.toId || '', 10);
+        const sid = parseInt(row.dataset.sdkTripId || '', 10);
+        openTripEditor(
+            isNaN(fid) ? null : fid,
+            isNaN(tid) ? null : tid,
+            isNaN(sid) ? null : sid,
+        );
+    }
     document.querySelectorAll('.btn-edit-trip').forEach(el => {
-        el.addEventListener('click', () => {
-            const row = el.closest('tr');
-            if (!row) return;
-            const fid = parseInt(row.dataset.fromId || '', 10);
-            const tid = parseInt(row.dataset.toId || '', 10);
-            openTripEditor(isNaN(fid) ? null : fid, isNaN(tid) ? null : tid);
-        });
+        el.addEventListener('click', () => openFromRow(el.closest('tr')));
     });
     document.querySelectorAll('.trip-endpoint').forEach(el => {
-        el.addEventListener('click', () => {
-            const row = el.closest('tr');
-            if (!row) return;
-            const fid = parseInt(row.dataset.fromId || '', 10);
-            const tid = parseInt(row.dataset.toId || '', 10);
-            openTripEditor(isNaN(fid) ? null : fid, isNaN(tid) ? null : tid);
-        });
+        el.addEventListener('click', () => openFromRow(el.closest('tr')));
     });
 
     function collectSide(side) {
@@ -1488,6 +1485,33 @@
         saveBtn.disabled = true;
         try {
             const confirmOld = confirm.checked ? true : false;
+
+            // v3.0.61: SDK-only fallback trips (e.g. MySkoda historical
+            // backfill on Skoda hosts) have no backing ParkingEvent for
+            // one or both endpoints. Previously, the save loop silently
+            // skipped these sides and the page reloaded with a fake
+            // "saved" status — the user's input vanished. Materialize
+            // PEs from the SDK trip first, then proceed with the normal
+            // per-side POST.
+            if (sdkTripId != null && (ids.from == null || ids.to == null)) {
+                const r = await fetch('/api/trips/sdk_create_pes', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({
+                        sdk_trip_id: sdkTripId,
+                        from_id: ids.from,
+                        to_id: ids.to,
+                    }),
+                });
+                const d = await r.json();
+                if (!(r.ok && d.ok)) {
+                    throw new Error('create: ' + (d.error || r.status));
+                }
+                ids.from = d.from_id;
+                ids.to = d.to_id;
+            }
+
+            let savedAny = false;
             for (const side of ['from', 'to']) {
                 const id = ids[side];
                 if (id == null) continue;
@@ -1502,6 +1526,10 @@
                 if (!(r.ok && d.ok)) {
                     throw new Error(side + ': ' + (d.error || r.status));
                 }
+                savedAny = true;
+            }
+            if (!savedAny) {
+                throw new Error('no_endpoint');
             }
             setStatus(T_EDIT.saved, 'success');
             setTimeout(() => location.reload(), 800);

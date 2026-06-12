@@ -6,7 +6,7 @@ import shutil
 import subprocess
 import sys
 import logging
-from datetime import datetime, date
+from datetime import datetime, date, timedelta
 from pathlib import Path
 from flask import Flask, render_template, request, redirect, url_for, flash, jsonify, send_file
 
@@ -4348,6 +4348,72 @@ def register_routes(app):
             'arrived_at': _iso(evt.arrived_at),
             'departed_at': _iso(evt.departed_at),
         })
+
+    @app.route('/api/trips/sdk_create_pes', methods=['POST'])
+    def api_trip_sdk_create_pes():
+        """Materialise ParkingEvents for an SDK-only fallback trip so the
+        user can edit it via the standard ParkingEvent editor.
+
+        Required body fields::
+
+            sdk_trip_id : int   — VehicleTrip row id
+            from_id     : int|null
+            to_id       : int|null
+
+        For each side that is null on the request, a single-instant PE is
+        created whose ``arrived_at``/``departed_at`` anchor on the SDK
+        trip's start/end timestamps. The trip then has real PE backing
+        and ``trips_service.get_trips`` picks it up as a polled-pair
+        trip on the next render. Sides whose id is already populated are
+        returned verbatim — caller is expected to also POST the actual
+        label/address/coordinates to the standard PE endpoint after this.
+        """
+        from models.database import ParkingEvent, VehicleTrip
+        data = request.get_json() or {}
+        sdk_trip_id = data.get('sdk_trip_id')
+        if not sdk_trip_id:
+            return jsonify({'error': 'sdk_trip_id_required'}), 400
+        row = VehicleTrip.query.get(sdk_trip_id)
+        if row is None:
+            return jsonify({'error': 'sdk_trip_not_found'}), 404
+        if not row.start_time:
+            return jsonify({'error': 'sdk_trip_missing_start_time'}), 400
+
+        total_min = (row.drive_minutes or 0) + (row.idle_minutes or 0)
+        end_time = (row.start_time + timedelta(minutes=total_min)
+                    if total_min > 0 else row.start_time)
+
+        out_from_id = data.get('from_id')
+        out_to_id = data.get('to_id')
+
+        if out_from_id in (None, '', 'None'):
+            from_pe = ParkingEvent(
+                vehicle_id=row.vehicle_id,
+                arrived_at=row.start_time,
+                departed_at=row.start_time,
+                label='other',
+            )
+            db.session.add(from_pe)
+            db.session.flush()
+            out_from_id = from_pe.id
+
+        if out_to_id in (None, '', 'None'):
+            to_pe = ParkingEvent(
+                vehicle_id=row.vehicle_id,
+                arrived_at=end_time,
+                departed_at=None,
+                label='other',
+            )
+            db.session.add(to_pe)
+            db.session.flush()
+            out_to_id = to_pe.id
+
+        try:
+            db.session.commit()
+        except Exception as e:
+            db.session.rollback()
+            return jsonify({'error': str(e)}), 500
+        return jsonify({'ok': True, 'from_id': out_from_id, 'to_id': out_to_id})
 
     @app.route('/api/trips/<int:from_id>/<int:to_id>/split_data', methods=['GET'])
     def api_trip_split_data(from_id, to_id):

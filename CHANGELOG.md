@@ -1,5 +1,24 @@
 # Changelog
 
+## v3.0.61 (2026-06-12)
+
+### Manual trip-log edits for SDK-only trips + iOS save button reachability
+
+Two reports from the Skoda host:
+
+1. Tapping a trip endpoint opens the editor, the user fills in label / address / coordinates, hits **Speichern** — page reloads, nothing was saved.
+2. On iPhone, the Speichern button itself is partly hidden behind Safari's bottom address bar, even though the modal footer had a sticky position + safe-area padding.
+
+**(1) is a silent-skip bug in the save handler.** Most rows on the Skoda host are SDK-only fallback trips (MySkoda historical backfill) with no backing `ParkingEvent` for either endpoint. The template was rendering `data-from-id="None"` (Python's `None` → string `"None"`), the click handler parsed that to `NaN` and passed `null` for both ids, and the save loop's `if (id == null) continue;` skipped both sides — but the success status was still set and the page reloaded, so the user thought it had saved.
+
+Fix:
+- Trip rows now carry `data-sdk-trip-id` when the trip is SDK-only.
+- When the user saves a trip whose `from_id` and/or `to_id` are null, the editor first POSTs to a new endpoint `/api/trips/sdk_create_pes` that materialises single-instant `ParkingEvent`s anchored on the SDK trip's `start_time` / computed `end_time`. The standard per-side save then runs against real ids.
+- The save loop now tracks whether any side was actually saved and surfaces a `no_endpoint` error instead of fake-success if neither side has an id and there's no SDK trip to back it.
+- Empty `tr.from.id` / `tr.to.id` now render as `""` instead of `"None"` (Jinja `|default('', true)` semantics via `or ''`).
+
+**(2) is a Bootstrap modal mode mismatch.** The modal used the default mode where the *page* scrolls and the footer was sticky-positioned. iOS Safari's address bar floats over the page, not the modal frame — so a page-sticky footer slides under it. Switched to `modal-dialog-scrollable modal-fullscreen-md-down`: the modal body scrolls inside a fixed-height dialog and the footer is anchored to the dialog frame, which lives above Safari's overlay. Combined with the existing `env(safe-area-inset-bottom)` padding the button is now always reachable.
+
 ## v3.0.60 (2026-06-12)
 
 ### Quiet the MySkoda VEHICLE_IN_MOTION log spam
