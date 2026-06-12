@@ -1,5 +1,15 @@
 # Changelog
 
+## v3.0.62 (2026-06-12)
+
+### Trip edit modal: pin dialog to visualViewport on iOS portrait
+
+v3.0.61's `modal-dialog-scrollable modal-fullscreen-md-down` was a partial fix — the save button stayed reachable in landscape but slid behind Safari's address bar in portrait. Bootstrap's `modal-fullscreen-md-down` sets the dialog to `height: 100%`, which on iOS Safari resolves against the *layout* viewport (always full screen including Safari's chrome). In portrait the address bar is much taller, so the dialog ended up taller than the visible area and the footer sat behind it.
+
+Fix: when the modal opens, JS reads `window.visualViewport.height` — the actual visible-pixel height excluding browser chrome — and pins the `.modal-dialog`'s `height`/`maxHeight` to that value on phone-sized viewports (`window.innerWidth < 768`). A `visualViewport` `resize` listener re-applies whenever Safari's address bar slides in/out (and `orientationchange` retriggers it 200 ms after rotation). Desktop modals are untouched.
+
+Combined with the still-present `modal-dialog-scrollable`, the body scrolls and the footer is now always anchored to the actual visible bottom of the modal in both orientations.
+
 ## v3.0.61 (2026-06-12)
 
 ### Manual trip-log edits for SDK-only trips + iOS save button reachability

@@ -7,13 +7,23 @@
 <link rel="stylesheet" href="https://unpkg.com/leaflet.markercluster@1.5.3/dist/MarkerCluster.Default.css" />
 <script src="https://unpkg.com/leaflet.markercluster@1.5.3/dist/leaflet.markercluster.js"></script>
 <style>
-/* Mobile-friendly trip edit modal. v3.0.61: modal-dialog-scrollable +
-   modal-fullscreen-md-down so the footer is always anchored to the
-   modal frame (never to a free-scrolling page). iOS Safari's address
-   bar floats over the page, not the modal frame — pinning the footer
-   inside the dialog is the only way it stays tap-able. Safe-area
-   padding on the footer keeps the button clear of the home-indicator
-   on iPhones. */
+/* Mobile-friendly trip edit modal. v3.0.62: footer-reachability fix
+   for iOS Safari portrait mode.
+   - modal-dialog-scrollable: body scrolls inside the dialog, footer
+     stays anchored to the bottom of the dialog frame.
+   - modal-fullscreen-md-down: dialog fills the screen on phones.
+   - But on iOS in portrait, Safari's address bar overlays the bottom
+     of the LAYOUT viewport (which Bootstrap's `height: 100%` resolves
+     against) — so the dialog ended up TALLER than the VISIBLE
+     viewport and the footer sat behind the address bar. We now pin
+     the dialog's own height/max-height to `window.visualViewport.
+     height` from JS on shown.bs.modal + on every visualViewport
+     resize, which is the actual visible-pixel height (re-fires when
+     the address bar slides in/out). Landscape mode used to work
+     because the address bar there is much thinner, so the gap below
+     the dialog was already too small to hide the footer.
+   - Safe-area padding on the footer keeps the button clear of the
+     home-indicator on iPhones. */
 #tripEditModal .modal-footer {
     padding-bottom: calc(0.75rem + env(safe-area-inset-bottom, 0px));
 }
@@ -1141,11 +1151,41 @@
         gap_hint:        {{ t('trips.edit_gap_hint')|tojson }},
     };
     let _modal = null;
+    // v3.0.62: pin the dialog's height to the *visible* viewport so
+    // iOS Safari's portrait address bar doesn't push the footer behind
+    // its overlay. layout vh / 100% / 100vh all include the address
+    // bar; visualViewport.height is the real visible pixels.
+    function applyDialogHeight() {
+        const dialog = modalEl.querySelector('.modal-dialog');
+        if (!dialog) return;
+        const vv = window.visualViewport;
+        const h = vv ? vv.height : window.innerHeight;
+        // Only on phones (≤ md). On larger viewports Bootstrap's default
+        // centered layout is fine and forcing a height would shrink
+        // the desktop modal unnecessarily.
+        if (window.innerWidth >= 768) {
+            dialog.style.maxHeight = '';
+            dialog.style.height = '';
+            return;
+        }
+        dialog.style.maxHeight = h + 'px';
+        dialog.style.height = h + 'px';
+    }
+    if (window.visualViewport) {
+        window.visualViewport.addEventListener('resize', () => {
+            if (modalEl.classList.contains('show')) applyDialogHeight();
+        });
+    }
+    window.addEventListener('orientationchange', () => {
+        if (modalEl.classList.contains('show')) setTimeout(applyDialogHeight, 200);
+    });
+
     function getModal() {
         if (_modal) return _modal;
         if (typeof bootstrap === 'undefined' || !bootstrap.Modal) return null;
         _modal = new bootstrap.Modal(modalEl);
         modalEl.addEventListener('shown.bs.modal', () => {
+            applyDialogHeight();
             // Leaflet measures container on init — if the modal was
             // hidden when the map was created, tiles render at 0x0 and
             // any fitBounds called before the slide-in finished targets
