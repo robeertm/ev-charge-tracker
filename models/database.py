@@ -91,7 +91,12 @@ class Charge(db.Model):
     # currently-active vehicle picker.
     vehicle_id = db.Column(db.Integer, db.ForeignKey('vehicles.id'), index=True)
     date = db.Column(db.Date, nullable=False, index=True)
-    charge_hour = db.Column(db.Integer)  # 0-23, hour of charging
+    charge_hour = db.Column(db.Integer)  # 0-23, hour of charging start
+    # v3.0.64: charging-end hour. Used to compute a time-weighted CO2
+    # intensity across the whole charge window (start..end) instead of
+    # just the start-hour snapshot. NULL = legacy / single-hour entry
+    # (callers must fall back to ``get_co2_intensity`` for those).
+    charge_end_hour = db.Column(db.Integer)  # 0-23, hour of charging end
     odometer = db.Column(db.Integer)  # km-Stand bei Ladung
     eur_per_kwh = db.Column(db.Float)
     kwh_loaded = db.Column(db.Float)
@@ -173,6 +178,7 @@ class Charge(db.Model):
             'id': self.id,
             'date': self.date.isoformat() if self.date else None,
             'charge_hour': self.charge_hour,
+            'charge_end_hour': self.charge_end_hour,
             'odometer': self.odometer,
             'eur_per_kwh': self.eur_per_kwh,
             'kwh_loaded': self.kwh_loaded,

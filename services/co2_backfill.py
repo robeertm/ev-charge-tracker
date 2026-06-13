@@ -50,12 +50,28 @@ def backfill_co2(app):
                 break
 
             try:
-                from services.entsoe_service import get_co2_intensity
-                co2 = get_co2_intensity(
-                    api_key,
-                    datetime.combine(charge.date, datetime.min.time()),
-                    hour=charge.charge_hour,
+                from datetime import timedelta as _td
+                from services.entsoe_service import (
+                    get_co2_intensity, get_co2_intensity_window,
                 )
+                base_dt = datetime.combine(charge.date, datetime.min.time())
+                # v3.0.64: prefer a time-weighted window query when the
+                # charge has a known end-hour. Falls back to the legacy
+                # single-hour path for pre-v3.0.64 rows (charge_end_hour
+                # NULL) so historical charges still get backfilled.
+                if (charge.charge_hour is not None
+                        and charge.charge_end_hour is not None
+                        and charge.charge_end_hour != charge.charge_hour):
+                    start = base_dt.replace(hour=charge.charge_hour)
+                    end_off = 1 if charge.charge_end_hour < charge.charge_hour else 0
+                    end = (base_dt.replace(hour=charge.charge_end_hour)
+                           + _td(days=end_off)
+                           + _td(hours=1))  # include end-hour bucket
+                    co2 = get_co2_intensity_window(api_key, start, end)
+                else:
+                    co2 = get_co2_intensity(
+                        api_key, base_dt, hour=charge.charge_hour,
+                    )
 
                 if co2:
                     charge.co2_g_per_kwh = co2

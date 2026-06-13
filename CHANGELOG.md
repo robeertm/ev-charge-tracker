@@ -1,5 +1,23 @@
 # Changelog
 
+## v3.0.64 (2026-06-13)
+
+### CO2 intensity: time-weighted across the full charging window + no more ghost values
+
+The 441 g/kWh that wouldn't go away was not an ENTSO-E reading — it was the **previous** charge's CO2 value, copied forward by a v3.0.15 fallback whenever ENTSO-E hadn't published the current hour yet. Combined with charge_hour = single start hour (so a charge running 12:00–18:00 was attributed to the 12:00 grid mix even though most of the energy actually flowed during the 14:00–17:00 solar peak), the displayed CO2 had two independent ways to drift far from reality.
+
+Fix (three things):
+
+1. **`get_co2_intensity_window(start_dt, end_dt)`** in `services/entsoe_service.py`. For each 15 min / 1 h ENTSO-E generation bucket that overlaps [start, end], we compute the per-fuel weighted intensity and the seconds the charge actually overlapped that bucket; the final number is the bucket-time-weighted average. A charge that runs across the solar peak now gets a number that reflects the high-PV middle of the window, not just the start hour.
+
+2. **`charge_end_hour` column on `Charge`**. Auto-detect populates it from the end-of-charge sync. Manual `/input` and `/edit` forms expose an optional end-hour dropdown next to the existing start-hour dropdown. When both are set, the server averages across the window; when only start is set we fall back to the single-hour query as before (legacy compatibility).
+
+3. **Drop the "previous charge's CO2" fallback**. Auto-detect and `/input` no longer copy forward an old CO2 value when ENTSO-E is silent — they leave `co2_g_per_kwh = NULL` and the existing background backfill thread retries later when ENTSO-E has the data. This kills the ghosting.
+
+PV CO2 defaults updated. The legacy 1000 kg/kWp production + 950 kWh/y yield + 25 y lifetime → 42 g/kWh was based on early-2010s European LCAs. New defaults reflect post-2020 silicon: 700 kg/kWp + 1000 kWh/y/kWp + 30 y → ~23 g/kWh. Users with explicit settings keep their values (they can recompute by re-saving the PV section in Settings).
+
+One-time boot cleanup: charges from the last 7 days with `needs_review=True` (the auto-detected ones most likely to carry a ghosted CO2) get their `co2_g_per_kwh` cleared so the backfill thread refreshes them under the new window logic. Every PV charge gets its CO2 recomputed from current settings so the new defaults (or any user override) cascade through history.
+
 ## v3.0.63 (2026-06-12)
 
 ### Bg-loop heartbeat: refresh during inner sleep so the overnight close doesn't fake a dead loop

@@ -81,6 +81,11 @@ def create_app(config_class=Config):
         if 'odometer' not in columns:
             db.session.execute(text('ALTER TABLE charges ADD COLUMN odometer INTEGER'))
             db.session.commit()
+        # v3.0.64: charge_end_hour — enables time-weighted CO2 across
+        # the full charging window, not just the start-hour snapshot.
+        if 'charge_end_hour' not in columns:
+            db.session.execute(text('ALTER TABLE charges ADD COLUMN charge_end_hour INTEGER'))
+            db.session.commit()
 
         # Migrate: add extended history columns to vehicle_syncs
         sync_columns = [c['name'] for c in inspector.get_columns('vehicle_syncs')]
@@ -168,6 +173,52 @@ def create_app(config_class=Config):
         # in Wh, so the correct divisor is /1000 end-to-end. v2 applies the
         # remaining /10 on top of v1 to reach /100 total for pre-v2.5.4 rows
         # and /10 for v2.5.4 rows, so either path lands on raw/1000 kWh.
+        # v3.0.64: one-time CO2 cleanup. (1) Auto-detected charges of
+        # the last 7 days had their CO2 ghosted forward from the most
+        # recent prior charge whenever ENTSO-E hadn't published the
+        # current hour yet — null those out so the backfill thread
+        # re-queries with the correct (now time-weighted) window. (2)
+        # Recompute every PV charge's CO2 from current settings, so the
+        # new defaults (or any user override) propagate through history.
+        if AppConfig.get('co2_v3_0_64_cleanup', '') != 'done':
+            from datetime import timedelta as _td
+            cutoff = (datetime.now() - _td(days=7)).date()
+            stale = Charge.query.filter(
+                Charge.needs_review == True,
+                Charge.charge_type != 'PV',
+                Charge.date >= cutoff,
+                Charge.co2_g_per_kwh.isnot(None),
+            ).all()
+            for c in stale:
+                c.co2_g_per_kwh = None
+                c.co2_kg = None
+            try:
+                pv_co2 = _get_pv_co2()
+            except Exception:
+                pv_co2 = None
+            if pv_co2 is not None:
+                bk_fallback = None
+                try:
+                    pv_charges = Charge.query.filter_by(charge_type='PV').all()
+                    for pc in pv_charges:
+                        if bk_fallback is None:
+                            try:
+                                bk_fallback = _get_battery_kwh(vehicle_id=pc.vehicle_id)
+                            except Exception:
+                                bk_fallback = None
+                        pc.co2_g_per_kwh = pv_co2
+                        if pc.kwh_loaded:
+                            pc.co2_kg = round(pc.kwh_loaded * pv_co2 / 1000, 2)
+                except Exception as _e:
+                    logger.warning(f"PV CO2 recompute failed: {_e}")
+            db.session.commit()
+            AppConfig.set('co2_v3_0_64_cleanup', 'done')
+            logger.info(
+                f"Applied v3.0.64 CO2 cleanup: nulled {len(stale)} "
+                f"recent auto-detected entries (backfill will refresh) "
+                f"+ recomputed PV charges at {pv_co2} g/kWh"
+            )
+
         if AppConfig.get('regen_scale_fix_v1', '') != 'done':
             db.session.execute(text(
                 'UPDATE vehicle_syncs SET total_regenerated_kwh = total_regenerated_kwh / 10.0 '
@@ -388,22 +439,29 @@ def create_app(config_class=Config):
 def _get_pv_co2():
     """Calculate PV CO2 in g/kWh from settings.
 
+    Defaults (v3.0.64): 700 kg CO2 / kWp manufacturing, 1000 kWh/y/kWp
+    yield, 30 y lifetime → ~23 g/kWh. The previous defaults
+    (1000/950/25 → 42 g/kWh) were drawn from older European panel
+    LCAs; modern Si modules (post-2020) ship at ~600-800 kg/kWp
+    cradle-to-grave, Germany averages 1000+ kWh/y/kWp at decent
+    orientation, and 30 y is a realistic lifetime with the typical
+    25 y performance warranty. Users with custom AppConfig values
+    keep them — only fresh installs see the new defaults.
+
     If the user has explicitly zeroed the inputs (yield=0 or lifetime=0
     means "treat my PV as carbon-neutral"), return 0 — not the legacy
-    42 g/kWh fallback. The 42 only fires when the values are missing or
-    unparseable (truly absent), so a fresh install still gets a sane
-    estimate while a deliberate zero stays zero.
+    fallback.
     """
     try:
-        yield_kwp = float(AppConfig.get('pv_yield_per_kwp', '950'))
-        lifetime = float(AppConfig.get('pv_lifetime', '25'))
-        prod_co2 = float(AppConfig.get('pv_production_co2', '1000'))
+        yield_kwp = float(AppConfig.get('pv_yield_per_kwp', '1000'))
+        lifetime = float(AppConfig.get('pv_lifetime', '30'))
+        prod_co2 = float(AppConfig.get('pv_production_co2', '700'))
         if yield_kwp > 0 and lifetime > 0:
             return int(round(prod_co2 / (yield_kwp * lifetime)))
-        # Explicit zero on yield or lifetime → user wants 0, not 42.
+        # Explicit zero on yield or lifetime → user wants 0, not the default.
         return 0
     except (ValueError, TypeError):
-        return 42  # truly unparseable — fall back
+        return 23  # truly unparseable — modern-PV fallback
 
 
 def _get_vehicle_credentials():
@@ -1110,12 +1168,22 @@ def _detect_auto_charge(end_sync):
         if op and op in prices:
             eur = prices[op]
 
-    # CO2 fallback to the vehicle's most recent non-PV charge.
-    fb = (Charge.query.filter(Charge.co2_g_per_kwh.isnot(None),
-                              Charge.charge_type != 'PV',
-                              Charge.vehicle_id == vid)
-          .order_by(Charge.date.desc()).first())
-    co2 = fb.co2_g_per_kwh if fb else None
+    # v3.0.64: live CO2 for the actual charging window. Time-weighted
+    # average across [start_ts, end_sync.timestamp] from ENTSO-E. We
+    # NO LONGER fall back to a previous charge's value — that produced
+    # the 441 g/kWh ghost we kept seeing whenever ENTSO-E hadn't
+    # published the current hour yet. Leaving NULL is honest: the
+    # backfill thread retries later and fills the real number in.
+    api_key = AppConfig.get('entsoe_api_key', Config.ENTSOE_API_KEY)
+    co2 = None
+    if api_key:
+        try:
+            from services.entsoe_service import get_co2_intensity_window
+            co2 = get_co2_intensity_window(
+                api_key, start_ts, end_sync.timestamp,
+            )
+        except Exception as e:
+            logger.warning(f"ENTSO-E window query failed: {e}")
 
     def _gross_for(span_from, span_to, ctype):
         n = (span_to - span_from) / 100.0 * bk
@@ -1147,11 +1215,15 @@ def _detect_auto_charge(end_sync):
         merge_target.loss_kwh = None          # force re-derive over full span
         merge_target.odometer = end_sync.odometer_km
         merge_target.created_at = end_sync.timestamp   # advance merge anchor
+        # v3.0.64: extend the CO2 window with the merge — the absorbing
+        # shard may have ended hours later, so re-query ENTSO-E over the
+        # widened start..end window for a true time-weighted average.
+        merge_target.charge_end_hour = end_sync.timestamp.hour
         if loc_name and not merge_target.location_name:
             merge_target.location_name = loc_name
             merge_target.operator = merge_target.operator or op
             merge_target.eur_per_kwh = merge_target.eur_per_kwh or eur
-        if co2 is not None and merge_target.co2_g_per_kwh is None:
+        if co2 is not None:
             merge_target.co2_g_per_kwh = co2
         merge_target.calculate_fields(bk, eff)
         db.session.commit()
@@ -1164,6 +1236,7 @@ def _detect_auto_charge(end_sync):
     gross = _gross_for(soc_from, soc_to, charge_type)
     c = Charge(
         vehicle_id=vid, date=charge_date, charge_hour=start_ts.hour,
+        charge_end_hour=end_sync.timestamp.hour,
         charge_type=charge_type, soc_from=soc_from, soc_to=soc_to,
         kwh_loaded=gross, eur_per_kwh=eur, operator=op,
         odometer=end_sync.odometer_km,
@@ -1327,11 +1400,20 @@ def _detect_auto_charge_from_soc_rise(end_sync):
         if op and op in prices:
             eur = prices[op]
 
-    fb = (Charge.query.filter(Charge.co2_g_per_kwh.isnot(None),
-                              Charge.charge_type != 'PV',
-                              Charge.vehicle_id == vid)
-          .order_by(Charge.date.desc()).first())
-    co2 = fb.co2_g_per_kwh if fb else None
+    # v3.0.64: live CO2 over the actual SoC-rise window. Window =
+    # [valley.timestamp, end_sync.timestamp]. No stale fallback — leave
+    # NULL if ENTSO-E hasn't published yet; the backfill thread picks
+    # it up later.
+    api_key = AppConfig.get('entsoe_api_key', Config.ENTSOE_API_KEY)
+    co2 = None
+    if api_key:
+        try:
+            from services.entsoe_service import get_co2_intensity_window
+            co2 = get_co2_intensity_window(
+                api_key, valley.timestamp, end_sync.timestamp,
+            )
+        except Exception as e:
+            logger.warning(f"ENTSO-E window query failed: {e}")
 
     charge_type = 'AC'
 
@@ -1345,13 +1427,14 @@ def _detect_auto_charge_from_soc_rise(end_sync):
         merge_target.loss_kwh = None
         merge_target.odometer = end_sync.odometer_km
         merge_target.created_at = end_sync.timestamp
+        merge_target.charge_end_hour = end_sync.timestamp.hour  # v3.0.64
         if loc_name and not merge_target.location_name:
             merge_target.location_name = loc_name
         if op and not merge_target.operator:
             merge_target.operator = op
         if eur and not merge_target.eur_per_kwh:
             merge_target.eur_per_kwh = eur
-        if co2 is not None and merge_target.co2_g_per_kwh is None:
+        if co2 is not None:
             merge_target.co2_g_per_kwh = co2
         merge_target.calculate_fields(bk, eff)
         db.session.commit()
@@ -1366,6 +1449,7 @@ def _detect_auto_charge_from_soc_rise(end_sync):
 
     c = Charge(
         vehicle_id=vid, date=charge_date, charge_hour=valley.timestamp.hour,
+        charge_end_hour=end_sync.timestamp.hour,
         charge_type=charge_type, soc_from=soc_from, soc_to=soc_to,
         kwh_loaded=gross, eur_per_kwh=eur, operator=op,
         odometer=end_sync.odometer_km,
@@ -2443,6 +2527,7 @@ def register_routes(app):
 
                 charge.date = datetime.strptime(request.form['date'], '%Y-%m-%d').date()
                 charge.charge_hour = _int(request.form.get('charge_hour'))
+                charge.charge_end_hour = _int(request.form.get('charge_end_hour'))
                 charge.odometer = _int(request.form.get('odometer'))
                 charge.eur_per_kwh = _float(request.form.get('eur_per_kwh'))
                 charge.kwh_loaded = _float(request.form.get('kwh_loaded'))
@@ -2487,7 +2572,14 @@ def register_routes(app):
                         return redirect(url_for('input_charge'))
                 charge.calculate_fields(_bk, _eff)
 
-                # If no CO2 provided, set automatically
+                # v3.0.64: CO2 lookup. PV uses the lifecycle estimate.
+                # AC/DC: when end-hour is set we average across the full
+                # charging window (more accurate over multi-hour charges
+                # where grid mix shifts during the day); otherwise fall
+                # back to the single-hour query. NO MORE stale "previous
+                # charge's CO2" fallback — that ghosted the 441 g/kWh
+                # value forward into every new auto-detected charge.
+                # Backfill thread retries later if ENTSO-E is silent now.
                 if charge.co2_g_per_kwh is None:
                     if charge.charge_type == 'PV':
                         charge.co2_g_per_kwh = _get_pv_co2()
@@ -2497,35 +2589,31 @@ def register_routes(app):
                         api_key = AppConfig.get('entsoe_api_key', Config.ENTSOE_API_KEY)
                         co2 = None
                         if api_key:
-                            from services.entsoe_service import get_co2_intensity
-                            co2 = get_co2_intensity(api_key, datetime.combine(charge.date, datetime.min.time()), hour=charge.charge_hour)
+                            from services.entsoe_service import (
+                                get_co2_intensity, get_co2_intensity_window,
+                            )
+                            base_dt = datetime.combine(charge.date, datetime.min.time())
+                            if (charge.charge_hour is not None
+                                    and charge.charge_end_hour is not None
+                                    and charge.charge_end_hour != charge.charge_hour):
+                                start = base_dt.replace(hour=charge.charge_hour)
+                                end_hour = charge.charge_end_hour
+                                # End-hour < start-hour means the charge
+                                # ran past midnight — push end onto the
+                                # next day so the window stays forward.
+                                end_offset = 1 if end_hour < charge.charge_hour else 0
+                                end = base_dt.replace(hour=end_hour) + timedelta(days=end_offset)
+                                # +1 h so the end-hour bucket is included
+                                # in the average (charge that ends at 18
+                                # spans the [18:00, 19:00) bucket).
+                                co2 = get_co2_intensity_window(api_key, start, end + timedelta(hours=1))
+                            else:
+                                co2 = get_co2_intensity(api_key, base_dt, hour=charge.charge_hour)
                         if co2:
                             charge.co2_g_per_kwh = co2
                             charge.calculate_fields(_bk, _eff)
                             hour_label = f" ({charge.charge_hour}:00 Uhr)" if charge.charge_hour is not None else ""
                             flash(t('flash.co2_fetched', value=co2, hour=hour_label), 'info')
-                        else:
-                            # v3.0.15: ENTSO-E often has no intensity for
-                            # the current hour yet during an active /
-                            # just-finished charge — that's why CO2 was
-                            # "sometimes missing". Fall back to the most
-                            # recent charge that does have a CO2 value
-                            # (same vehicle preferred) so the field is
-                            # never left empty; the nightly job can still
-                            # refine it later.
-                            _fb_q = Charge.query.filter(
-                                Charge.co2_g_per_kwh.isnot(None),
-                                Charge.charge_type != 'PV',
-                            )
-                            if charge.vehicle_id is not None:
-                                _fb_q = _fb_q.filter(
-                                    Charge.vehicle_id == charge.vehicle_id)
-                            _fb = _fb_q.order_by(Charge.date.desc()).first()
-                            if _fb is not None and _fb.co2_g_per_kwh:
-                                charge.co2_g_per_kwh = _fb.co2_g_per_kwh
-                                charge.calculate_fields(_bk, _eff)
-                                flash(t('flash.co2_estimated',
-                                        value=_fb.co2_g_per_kwh), 'info')
 
                 if not is_update:
                     db.session.add(charge)
@@ -2699,6 +2787,7 @@ def register_routes(app):
             try:
                 charge.date = datetime.strptime(request.form['date'], '%Y-%m-%d').date()
                 charge.charge_hour = _int(request.form.get('charge_hour'))
+                charge.charge_end_hour = _int(request.form.get('charge_end_hour'))
                 charge.odometer = _int(request.form.get('odometer'))
                 charge.eur_per_kwh = _float(request.form.get('eur_per_kwh'))
                 charge.kwh_loaded = _float(request.form.get('kwh_loaded'))

@@ -107,14 +107,14 @@
 
                     <!-- Datum & Uhrzeit -->
                     <div class="row g-3 mb-3">
-                        <div class="col-7">
+                        <div class="col-12 col-sm-6">
                             <label for="date" class="form-label fw-bold">
                                 <i class="bi bi-calendar3"></i> {{ t('input.date') }}
                             </label>
                             <input type="date" class="form-control form-control-lg" id="date" name="date"
                                    value="{{ pre_charge.date.isoformat() if pre_charge else today }}" required>
                         </div>
-                        <div class="col-5">
+                        <div class="col-6 col-sm-3">
                             <label for="charge_hour" class="form-label fw-bold">
                                 <i class="bi bi-clock"></i> {{ t('input.start_time') }}
                             </label>
@@ -122,6 +122,23 @@
                                 <option value="">–</option>
                                 {% for h in range(24) %}
                                 <option value="{{ h }}" {% if pre_charge and pre_charge.charge_hour == h %}selected{% endif %}>{{ "%02d"|format(h) }}:00</option>
+                                {% endfor %}
+                            </select>
+                        </div>
+                        {# v3.0.64: optional end hour. When set together with
+                           start hour, the server averages CO2 across the
+                           full window via ENTSO-E (time-weighted across
+                           bucket-fractions) instead of only the start-hour
+                           snapshot — important for multi-hour charges that
+                           span the solar peak. #}
+                        <div class="col-6 col-sm-3">
+                            <label for="charge_end_hour" class="form-label fw-bold">
+                                <i class="bi bi-clock-history"></i> {{ t('input.end_time') }}
+                            </label>
+                            <select class="form-select form-select-lg" id="charge_end_hour" name="charge_end_hour">
+                                <option value="">–</option>
+                                {% for h in range(24) %}
+                                <option value="{{ h }}" {% if pre_charge and pre_charge.charge_end_hour == h %}selected{% endif %}>{{ "%02d"|format(h) }}:00</option>
                                 {% endfor %}
                             </select>
                         </div>

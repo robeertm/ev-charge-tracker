@@ -11,17 +11,30 @@
             <div class="card-body">
                 <form method="POST">
                     <div class="row g-3 mb-3">
-                        <div class="col-7">
+                        <div class="col-12 col-sm-6">
                             <label for="date" class="form-label fw-bold">{{ t('edit.date') }}</label>
                             <input type="date" class="form-control" id="date" name="date"
                                    value="{{ charge.date.isoformat() }}" required>
                         </div>
-                        <div class="col-5">
+                        <div class="col-6 col-sm-3">
                             <label for="charge_hour" class="form-label fw-bold">{{ t('edit.hour') }}</label>
                             <select class="form-select" id="charge_hour" name="charge_hour">
                                 <option value="">–</option>
                                 {% for h in range(24) %}
                                 <option value="{{ h }}" {% if charge.charge_hour == h %}selected{% endif %}>{{ "%02d"|format(h) }}:00</option>
+                                {% endfor %}
+                            </select>
+                        </div>
+                        {# v3.0.64: optional end hour — when set with
+                           start hour the server averages ENTSO-E CO2
+                           across the full window instead of just the
+                           start-hour snapshot. #}
+                        <div class="col-6 col-sm-3">
+                            <label for="charge_end_hour" class="form-label fw-bold">{{ t('edit.end_hour') }}</label>
+                            <select class="form-select" id="charge_end_hour" name="charge_end_hour">
+                                <option value="">–</option>
+                                {% for h in range(24) %}
+                                <option value="{{ h }}" {% if charge.charge_end_hour == h %}selected{% endif %}>{{ "%02d"|format(h) }}:00</option>
                                 {% endfor %}
                             </select>
                         </div>
