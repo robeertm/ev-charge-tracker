@@ -173,51 +173,59 @@ def create_app(config_class=Config):
         # in Wh, so the correct divisor is /1000 end-to-end. v2 applies the
         # remaining /10 on top of v1 to reach /100 total for pre-v2.5.4 rows
         # and /10 for v2.5.4 rows, so either path lands on raw/1000 kWh.
-        # v3.0.64: one-time CO2 cleanup. (1) Auto-detected charges of
-        # the last 7 days had their CO2 ghosted forward from the most
-        # recent prior charge whenever ENTSO-E hadn't published the
-        # current hour yet — null those out so the backfill thread
-        # re-queries with the correct (now time-weighted) window. (2)
-        # Recompute every PV charge's CO2 from current settings, so the
-        # new defaults (or any user override) propagate through history.
-        if AppConfig.get('co2_v3_0_64_cleanup', '') != 'done':
-            from datetime import timedelta as _td
-            cutoff = (datetime.now() - _td(days=7)).date()
-            stale = Charge.query.filter(
-                Charge.needs_review == True,
-                Charge.charge_type != 'PV',
-                Charge.date >= cutoff,
-                Charge.co2_g_per_kwh.isnot(None),
-            ).all()
-            for c in stale:
+        # v3.0.65 cleanup — supersedes v3.0.64's. Two fixes worth
+        # re-running for:
+        #   (a) The unit bug in _get_pv_co2 (missing kg→g conversion)
+        #       wrote PV CO2 = 0 for every install with default-ish
+        #       settings. Recompute every PV charge from the now-
+        #       correct formula.
+        #   (b) The 441 g/kWh ghost (v3.0.15 fallback to "previous
+        #       charge's CO2") could land on ANY historical charge,
+        #       not just recent or needs_review=True ones. Null
+        #       co2_g_per_kwh on EVERY non-PV charge so the backfill
+        #       thread re-queries ENTSO-E end-to-end with the new
+        #       window logic. The backfill respects ENTSO-E rate
+        #       limits (2 s per request) so a few-hundred-charge
+        #       history will take several minutes; that's fine — it
+        #       runs as a daemon and only blocks itself.
+        if AppConfig.get('co2_v3_0_65_cleanup', '') != 'done':
+            grid = (Charge.query
+                .filter(Charge.charge_type != 'PV',
+                        Charge.co2_g_per_kwh.isnot(None))
+                .all())
+            for c in grid:
                 c.co2_g_per_kwh = None
                 c.co2_kg = None
             try:
                 pv_co2 = _get_pv_co2()
             except Exception:
                 pv_co2 = None
+            pv_count = 0
             if pv_co2 is not None:
-                bk_fallback = None
                 try:
                     pv_charges = Charge.query.filter_by(charge_type='PV').all()
                     for pc in pv_charges:
-                        if bk_fallback is None:
-                            try:
-                                bk_fallback = _get_battery_kwh(vehicle_id=pc.vehicle_id)
-                            except Exception:
-                                bk_fallback = None
                         pc.co2_g_per_kwh = pv_co2
                         if pc.kwh_loaded:
                             pc.co2_kg = round(pc.kwh_loaded * pv_co2 / 1000, 2)
+                    pv_count = len(pv_charges)
                 except Exception as _e:
                     logger.warning(f"PV CO2 recompute failed: {_e}")
             db.session.commit()
-            AppConfig.set('co2_v3_0_64_cleanup', 'done')
+            AppConfig.set('co2_v3_0_65_cleanup', 'done')
             logger.info(
-                f"Applied v3.0.64 CO2 cleanup: nulled {len(stale)} "
-                f"recent auto-detected entries (backfill will refresh) "
-                f"+ recomputed PV charges at {pv_co2} g/kWh"
+                f"Applied v3.0.65 CO2 cleanup: nulled {len(grid)} grid "
+                f"entries (backfill will refresh ALL of history) + "
+                f"recomputed {pv_count} PV charges at {pv_co2} g/kWh"
             )
+            # Kick the backfill thread immediately so the user doesn't
+            # have to click anything — it'll grind through history at
+            # ~2 s per charge under ENTSO-E's rate limit.
+            try:
+                from services.co2_backfill import start_backfill as _sbk
+                _sbk(app)
+            except Exception as _e:
+                logger.warning(f"Could not auto-start CO2 backfill: {_e}")
 
         if AppConfig.get('regen_scale_fix_v1', '') != 'done':
             db.session.execute(text(
@@ -439,17 +447,23 @@ def create_app(config_class=Config):
 def _get_pv_co2():
     """Calculate PV CO2 in g/kWh from settings.
 
-    Defaults (v3.0.64): 700 kg CO2 / kWp manufacturing, 1000 kWh/y/kWp
-    yield, 30 y lifetime → ~23 g/kWh. The previous defaults
-    (1000/950/25 → 42 g/kWh) were drawn from older European panel
-    LCAs; modern Si modules (post-2020) ship at ~600-800 kg/kWp
-    cradle-to-grave, Germany averages 1000+ kWh/y/kWp at decent
-    orientation, and 30 y is a realistic lifetime with the typical
-    25 y performance warranty. Users with custom AppConfig values
-    keep them — only fresh installs see the new defaults.
+    Units:
+      prod_co2 — kg CO2 cradle-to-gate per kWp of installed capacity
+      yield_kwp — kWh produced per year per kWp
+      lifetime — years the system operates
+    g/kWh = prod_co2 (kg) × 1000 (kg→g) / (yield_kwp × lifetime) (kWh).
+
+    v3.0.65 bugfix: the previous formula returned ``int(round(prod_co2
+    / (yield_kwp × lifetime)))`` which is in **kg/kWh**, not g/kWh. With
+    the legacy defaults (1000 kg, 950 kWh/y, 25 y) that produced
+    ``int(round(0.042)) = 0`` — so every install with defaults was
+    silently writing PV CO2 = 0. A hardcoded ``return 42`` covered the
+    ValueError path but not the normal one. Now multiplies by 1000 so
+    1000/(950×25) actually returns 42 g/kWh as the comments always
+    claimed, and modern defaults 700/1000/30 land at ~23 g/kWh.
 
     If the user has explicitly zeroed the inputs (yield=0 or lifetime=0
-    means "treat my PV as carbon-neutral"), return 0 — not the legacy
+    means "treat my PV as carbon-neutral"), return 0 — not the
     fallback.
     """
     try:
@@ -457,8 +471,8 @@ def _get_pv_co2():
         lifetime = float(AppConfig.get('pv_lifetime', '30'))
         prod_co2 = float(AppConfig.get('pv_production_co2', '700'))
         if yield_kwp > 0 and lifetime > 0:
-            return int(round(prod_co2 / (yield_kwp * lifetime)))
-        # Explicit zero on yield or lifetime → user wants 0, not the default.
+            return int(round(prod_co2 * 1000 / (yield_kwp * lifetime)))
+        # Explicit zero on yield or lifetime → user wants 0, not the fallback.
         return 0
     except (ValueError, TypeError):
         return 23  # truly unparseable — modern-PV fallback

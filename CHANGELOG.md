@@ -1,5 +1,17 @@
 # Changelog
 
+## v3.0.65 (2026-06-13)
+
+### PV CO2 unit bug + full-history grid CO2 re-backfill + history-modal end-hour field
+
+Three follow-ups to v3.0.64:
+
+1. **PV CO2 was always 0 g/kWh on default settings.** `_get_pv_co2` computed `prod_co2 / (yield × lifetime)` and `int(round(...))`. With defaults 1000 kg / 950 kWh/y / 25 y that's `0.042` → rounds to `0`. A hardcoded `return 42` only fired on the `ValueError` path, so the bug only surfaced for users running the formula. Missing the kg→g conversion: the correct formula is `prod_co2 × 1000 / (yield × lifetime)`, which yields 42 g/kWh with the legacy defaults and ~23 g/kWh with the modern (700/1000/30) defaults. Net effect on the two affected hosts: every PV charge had been silently storing 0 kg CO2 saved.
+
+2. **The boot cleanup needs to cover the full charge history, not just the last 7 days.** v3.0.64 only nulled `needs_review=True` charges from the last 7 days — but the 441 g/kWh ghost can ride on any reviewed entry from any date. v3.0.65 broadens the scrub to *every* non-PV charge and kicks the backfill thread immediately so ENTSO-E re-queries history end-to-end under the new window logic. Bounded by ENTSO-E's 2 s per-request rate limit, so a few-hundred-charge install takes several minutes to finish — runs as a daemon, doesn't block anything.
+
+3. **History-page inline edit modal now has the end-hour selector** too (`templates/_history_section.html`). v3.0.64 only added it to `input.html` + `edit.html`. The history modal's JS hydrate also reads `charge_end_hour` from `/api/charges/<id>`.
+
 ## v3.0.64 (2026-06-13)
 
 ### CO2 intensity: time-weighted across the full charging window + no more ghost values

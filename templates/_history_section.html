@@ -216,13 +216,23 @@
           </div>
 
           <div class="row g-2 mb-2">
-            <div class="col-7">
+            <div class="col-12 col-sm-6">
               <label class="form-label small mb-0 fw-semibold">{{ t('input.date') }}</label>
               <input type="date" class="form-control form-control-sm" name="date" id="chgEditDate" required>
             </div>
-            <div class="col-5">
+            <div class="col-6 col-sm-3">
               <label class="form-label small mb-0 fw-semibold">{{ t('input.start_time') }}</label>
               <select class="form-select form-select-sm" name="charge_hour" id="chgEditHour">
+                <option value="">–</option>
+                {% for h in range(24) %}<option value="{{ h }}">{{ "%02d"|format(h) }}:00</option>{% endfor %}
+              </select>
+            </div>
+            {# v3.0.64: optional end hour. When set with start hour, the
+               server averages CO2 across the full window via ENTSO-E
+               (time-weighted across bucket-fractions). #}
+            <div class="col-6 col-sm-3">
+              <label class="form-label small mb-0 fw-semibold">{{ t('input.end_time') }}</label>
+              <select class="form-select form-select-sm" name="charge_end_hour" id="chgEditEndHour">
                 <option value="">–</option>
                 {% for h in range(24) %}<option value="{{ h }}">{{ "%02d"|format(h) }}:00</option>{% endfor %}
               </select>
@@ -479,6 +489,7 @@
         const F = {
             date:    document.getElementById('chgEditDate'),
             hour:    document.getElementById('chgEditHour'),
+            endHour: document.getElementById('chgEditEndHour'),
             type:    document.getElementById('chgEditType'),
             socFrom: document.getElementById('chgEditSocFrom'),
             socTo:   document.getElementById('chgEditSocTo'),
@@ -573,6 +584,7 @@
                 const d = await r.json();
                 F.date.value    = d.date || '';
                 F.hour.value    = d.charge_hour != null ? d.charge_hour : '';
+                if (F.endHour) F.endHour.value = d.charge_end_hour != null ? d.charge_end_hour : '';
                 F.type.value    = d.charge_type || 'AC';
                 F.socFrom.value = d.soc_from != null ? d.soc_from : '';
                 F.socTo.value   = d.soc_to   != null ? d.soc_to   : '';
