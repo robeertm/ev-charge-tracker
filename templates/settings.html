@@ -483,22 +483,26 @@
                             <label for="pv_kwp" class="form-label">{{ t('set.pv_kwp') }}</label>
                             <input type="number" class="form-control" id="pv_kwp" name="pv_kwp"
                                    value="{{ pv_kwp }}" step="0.1" min="0" placeholder="10">
+                            <div class="form-text">{{ t('set.pv_kwp_hint') }}</div>
                         </div>
+                        {# v3.0.66: replaced the per-kWp yield input. The
+                           user enters their actual annual production in
+                           kWh — the formula derives the rest. #}
                         <div class="col-sm-6">
-                            <label for="pv_yield_per_kwp" class="form-label">{{ t('set.pv_yield') }}</label>
-                            <input type="number" class="form-control" id="pv_yield_per_kwp" name="pv_yield_per_kwp"
-                                   value="{{ pv_yield_per_kwp }}" step="1" min="0" placeholder="950">
-                            <div class="form-text">{{ t('set.pv_yield_hint') }}</div>
+                            <label for="pv_annual_yield_kwh" class="form-label">{{ t('set.pv_annual_yield') }}</label>
+                            <input type="number" class="form-control" id="pv_annual_yield_kwh" name="pv_annual_yield_kwh"
+                                   value="{{ pv_annual_yield_kwh }}" step="1" min="0" placeholder="9500">
+                            <div class="form-text">{{ t('set.pv_annual_yield_hint') }}</div>
                         </div>
                         <div class="col-sm-6">
                             <label for="pv_lifetime" class="form-label">{{ t('set.pv_lifetime') }}</label>
                             <input type="number" class="form-control" id="pv_lifetime" name="pv_lifetime"
-                                   value="{{ pv_lifetime }}" step="1" min="1" placeholder="25">
+                                   value="{{ pv_lifetime }}" step="1" min="1" placeholder="30">
                         </div>
                         <div class="col-sm-6">
                             <label for="pv_production_co2" class="form-label">{{ t('set.pv_co2_prod') }}</label>
                             <input type="number" class="form-control" id="pv_production_co2" name="pv_production_co2"
-                                   value="{{ pv_production_co2 }}" step="1" min="0" placeholder="1000">
+                                   value="{{ pv_production_co2 }}" step="1" min="0" placeholder="700">
                             <div class="form-text">{{ t('set.pv_co2_hint') }}</div>
                         </div>
                         <div class="col-sm-6">
@@ -517,14 +521,16 @@
                     </button>
                 </form>
                 <script>
+                // v3.0.66 formula:
+                //   g/kWh = prod_co2 (kg/kWp) \u00d7 kwp \u00d7 1000 / (annual \u00d7 lifetime)
                 function calcPvCo2() {
                     const kwp = parseFloat(document.getElementById('pv_kwp').value);
-                    const yield_ = parseFloat(document.getElementById('pv_yield_per_kwp').value);
+                    const annual = parseFloat(document.getElementById('pv_annual_yield_kwh').value);
                     const lifetime = parseFloat(document.getElementById('pv_lifetime').value);
                     const prodCo2 = parseFloat(document.getElementById('pv_production_co2').value);
                     const el = document.getElementById('pvCo2Result');
-                    if (kwp > 0 && yield_ > 0 && lifetime > 0 && prodCo2 > 0) {
-                        const co2 = Math.round(prodCo2 / (yield_ * lifetime));
+                    if (kwp > 0 && annual > 0 && lifetime > 0 && prodCo2 > 0) {
+                        const co2 = Math.round(prodCo2 * kwp * 1000 / (annual * lifetime));
                         el.textContent = co2 + ' g CO\u2082/kWh';
                         el.classList.add('text-success');
                     } else {
@@ -532,7 +538,7 @@
                         el.classList.remove('text-success');
                     }
                 }
-                ['pv_kwp','pv_yield_per_kwp','pv_lifetime','pv_production_co2'].forEach(id =>
+                ['pv_kwp','pv_annual_yield_kwh','pv_lifetime','pv_production_co2'].forEach(id =>
                     document.getElementById(id).addEventListener('input', calcPvCo2));
                 calcPvCo2();
                 </script>

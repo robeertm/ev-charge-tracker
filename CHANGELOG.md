@@ -1,5 +1,26 @@
 # Changelog
 
+## v3.0.66 (2026-06-14)
+
+### PV settings: ask for actual kWh produced per year, not per-kWp math
+
+The old PV settings asked for "Jahresertrag (kWh/kWp)" — yield *per kWp installed*. To enter sensible data the user had to either look up their region average (≈950 in DE) or do mental arithmetic on the inverter app's annual total divided by their installed kWp. Predictable result: the field gets misused, the formula misfires. Both production hosts had this exact failure mode — one had the regional average copied in without checking, the other had the system's total annual production typed into the per-kWp field.
+
+The new flow asks for the two numbers the user actually knows from their inverter app or utility meter:
+
+- **Installierte Anlagengröße (kWp)** — peak capacity from the module datasheet
+- **Tatsächlicher Jahresertrag (kWh)** — total annual energy production
+
+Formula: `g/kWh = prod_co2 (kg/kWp) × kwp × 1000 / (annual_yield × lifetime)` — derives correctly without the user touching arithmetic. Live preview underneath the form updates as you type.
+
+Backwards compatibility: `_get_pv_co2` falls back to the legacy per-kWp shape when the new fields are empty, so installs that haven't visited Settings since the upgrade keep producing values. The new "Jahresertrag (kWh)" input pre-fills from whichever legacy value the install has on hand:
+
+- Both `pv_kwp` and `pv_yield_per_kwp` set → `kwp × per_kwp` (correct cross-multiplication).
+- Only `pv_yield_per_kwp` set → use that value directly (the common case: users typed their full annual into the per-kWp field).
+- Neither → empty.
+
+Save handler clears the legacy `pv_yield_per_kwp` key so the new Path A always wins going forward. The existing PV-charge cascade still re-runs on save, so every PV row immediately reflects the new value.
+
 ## v3.0.65 (2026-06-13)
 
 ### PV CO2 unit bug + full-history grid CO2 re-backfill + history-modal end-hour field

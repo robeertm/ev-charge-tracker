@@ -447,35 +447,82 @@ def create_app(config_class=Config):
 def _get_pv_co2():
     """Calculate PV CO2 in g/kWh from settings.
 
-    Units:
-      prod_co2 — kg CO2 cradle-to-gate per kWp of installed capacity
-      yield_kwp — kWh produced per year per kWp
-      lifetime — years the system operates
-    g/kWh = prod_co2 (kg) × 1000 (kg→g) / (yield_kwp × lifetime) (kWh).
+    Two input shapes are accepted:
 
-    v3.0.65 bugfix: the previous formula returned ``int(round(prod_co2
-    / (yield_kwp × lifetime)))`` which is in **kg/kWh**, not g/kWh. With
-    the legacy defaults (1000 kg, 950 kWh/y, 25 y) that produced
-    ``int(round(0.042)) = 0`` — so every install with defaults was
-    silently writing PV CO2 = 0. A hardcoded ``return 42`` covered the
-    ValueError path but not the normal one. Now multiplies by 1000 so
-    1000/(950×25) actually returns 42 g/kWh as the comments always
-    claimed, and modern defaults 700/1000/30 land at ~23 g/kWh.
+    A. **v3.0.66 (preferred)** — the user enters their installed
+       capacity ``pv_kwp`` and the system's **actual annual yield in
+       kWh** (``pv_annual_yield_kwh``, total — no per-kWp arithmetic).
+       Formula::
 
-    If the user has explicitly zeroed the inputs (yield=0 or lifetime=0
-    means "treat my PV as carbon-neutral"), return 0 — not the
-    fallback.
+           g/kWh = prod_co2 (kg/kWp) × kwp × 1000 / (annual_yield × lifetime)
+
+    B. **Legacy (≤ v3.0.65)** — only ``pv_yield_per_kwp`` is set
+       (kWh/y per kWp). Formula::
+
+           g/kWh = prod_co2 (kg/kWp) × 1000 / (yield_per_kwp × lifetime)
+
+       Path B keeps installs that haven't visited Settings since the
+       v3.0.66 form change working — they'll fall back here until the
+       user fills in the new fields.
+
+    Both paths return ``int(round(...))``. A zero on any required
+    multiplier (kwp, annual, yield_per_kwp, lifetime) means "treat my
+    PV as carbon-neutral" → return 0.
     """
     try:
-        yield_kwp = float(AppConfig.get('pv_yield_per_kwp', '1000'))
         lifetime = float(AppConfig.get('pv_lifetime', '30'))
         prod_co2 = float(AppConfig.get('pv_production_co2', '700'))
-        if yield_kwp > 0 and lifetime > 0:
-            return int(round(prod_co2 * 1000 / (yield_kwp * lifetime)))
-        # Explicit zero on yield or lifetime → user wants 0, not the fallback.
+        if lifetime <= 0 or prod_co2 < 0:
+            return 0
+
+        # Path A: kWp + actual annual yield (preferred new shape).
+        kwp_raw = AppConfig.get('pv_kwp', '')
+        annual_raw = AppConfig.get('pv_annual_yield_kwh', '')
+        if kwp_raw and annual_raw:
+            kwp = float(kwp_raw)
+            annual = float(annual_raw)
+            if kwp > 0 and annual > 0:
+                return int(round(prod_co2 * kwp * 1000 / (annual * lifetime)))
+            return 0  # explicit zero → carbon-neutral
+
+        # Path B: legacy per-kWp yield. Kept so pre-v3.0.66 installs
+        # keep producing sensible numbers until the user opens
+        # Settings and fills in the new actual-yield field.
+        legacy = AppConfig.get('pv_yield_per_kwp', '')
+        if legacy:
+            yp = float(legacy)
+            if yp > 0:
+                return int(round(prod_co2 * 1000 / (yp * lifetime)))
+            return 0
+
         return 0
     except (ValueError, TypeError):
         return 23  # truly unparseable — modern-PV fallback
+
+
+def _pv_annual_yield_for_form() -> str:
+    """Pre-fill value for the v3.0.66 ``pv_annual_yield_kwh`` settings
+    input. Prefers the new key; falls back to legacy values so an
+    upgraded install opens Settings with their existing data visible
+    in the new field instead of a blank.
+    """
+    new = AppConfig.get('pv_annual_yield_kwh', '')
+    if new:
+        return new
+    kwp = AppConfig.get('pv_kwp', '')
+    legacy_per_kwp = AppConfig.get('pv_yield_per_kwp', '')
+    if legacy_per_kwp:
+        # Both kWp + per-kWp present → user filled in both correctly.
+        # Multiply to get annual total.
+        try:
+            if kwp:
+                return str(int(round(float(kwp) * float(legacy_per_kwp))))
+        except (ValueError, TypeError):
+            pass
+        # Only per-kWp filled in → likely the user typed their full
+        # annual yield into that field (the old UI was ambiguous).
+        return legacy_per_kwp
+    return ''
 
 
 def _get_vehicle_credentials():
@@ -2995,8 +3042,14 @@ def register_routes(app):
                 flash(t('flash.operators_saved'), 'success')
 
             elif action == 'save_pv':
+                # v3.0.66: the user-facing input is now kWp + actual
+                # annual yield in kWh (no per-kWp arithmetic). The
+                # legacy ``pv_yield_per_kwp`` key is cleared on save so
+                # ``_get_pv_co2`` always lands on Path A going forward.
                 AppConfig.set('pv_kwp', request.form.get('pv_kwp', ''))
-                AppConfig.set('pv_yield_per_kwp', request.form.get('pv_yield_per_kwp', ''))
+                AppConfig.set('pv_annual_yield_kwh',
+                              request.form.get('pv_annual_yield_kwh', ''))
+                AppConfig.set('pv_yield_per_kwp', '')
                 AppConfig.set('pv_lifetime', request.form.get('pv_lifetime', ''))
                 AppConfig.set('pv_production_co2', request.form.get('pv_production_co2', ''))
                 AppConfig.set('pv_price_eur_per_kwh', request.form.get('pv_price_eur_per_kwh', ''))
@@ -3242,9 +3295,17 @@ def register_routes(app):
                                measured_recup_rate=measured_recup,
                                measured_recup_source=measured_recup_source,
                                pv_kwp=AppConfig.get('pv_kwp', ''),
-                               pv_yield_per_kwp=AppConfig.get('pv_yield_per_kwp', '950'),
-                               pv_lifetime=AppConfig.get('pv_lifetime', '25'),
-                               pv_production_co2=AppConfig.get('pv_production_co2', '1000'),
+                               # v3.0.66: pre-fill the new "actual annual yield"
+                               # field from whichever value the install has on
+                               # hand — preferring the new key, falling back to
+                               # ``per_kwp × kwp`` for installs that filled in
+                               # both legacy fields, and finally treating the
+                               # bare legacy ``per_kwp`` value as the annual
+                               # total for installs (like Mike) that wrote
+                               # their full annual into it.
+                               pv_annual_yield_kwh=_pv_annual_yield_for_form(),
+                               pv_lifetime=AppConfig.get('pv_lifetime', '30'),
+                               pv_production_co2=AppConfig.get('pv_production_co2', '700'),
                                pv_price_eur_per_kwh=AppConfig.get('pv_price_eur_per_kwh', '0.00'),
                                home_lat=AppConfig.get('home_lat', ''),
                                home_lon=AppConfig.get('home_lon', ''),
