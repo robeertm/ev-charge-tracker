@@ -1,5 +1,21 @@
 # Changelog
 
+## v3.0.67 (2026-07-06)
+
+### Kia/Hyundai bg-loop hang recovery: bounded SDK-call timeouts + heartbeat watchdog
+
+Observed on ev-robert on 2026-07-06: the bg-loop ticked normally through the 06:00 morning wake-up window (smart→force + three follow-up cached ticks), then went silent from 06:30:46 until 15:51:27 — nine and a half hours of no syncs while the systemd process reported "active (running)" the whole time. Same symptom shape as the MySkoda hang v3.0.59 addressed, this time on the Kia/Hyundai path: the underlying `hyundai_kia_connect_api` has no socket-level timeout, so a stalled cloud response wedges the calling thread on a socket read forever. v3.0.5's watchdog only covered the `force_refresh_vehicle_state` path; the cached-mode calls that fire every 10 min during the smart window (`check_and_refresh_token`, `update_all_vehicles_with_cached_state`, `update_vehicle_with_cached_state`) had no protection.
+
+Two-layer fix:
+
+1. **SDK-call deadlines** in `connector_hyundai_kia.py`. A module-level `_sdk_call_executor` (ThreadPoolExecutor, 4 workers) runs every BlueLink/UVO call with a 60 s hard wall-clock deadline via `_call_with_deadline(fn, *args, label=…)`. On timeout the future is abandoned (rogue thread leaks — same pattern the force-refresh executor already uses; can't interrupt a Python thread), and a `TimeoutError` propagates up to the sync loop's outer try/except which sets `_last_bg_loop_outcome = 'error'` and continues on the next tick. Applied at three previously-unbounded call sites: token refresh (including the retry-after-clear path), initial vehicle list fetch, and per-tick cached-state fetch.
+
+2. **Heartbeat watchdog** in `sync_service.py`. New `_sync_watchdog_loop` thread started alongside `_sync_loop` in `start_sync`. Every 60 s it checks `_last_bg_loop_tick` age; if the heartbeat is more than 20 min stale while `_sync_running` is True, it respawns `_sync_thread` on a fresh stack, resets `_last_bg_loop_tick`, and increments `_watchdog_respawn_count` (exposed via `get_bg_loop_health` for observability). The old thread is abandoned. 20 min covers the smart-mode 10 min interval plus one 60 s SDK-call timeout plus generous margin. Belt-and-braces for hangs in code paths we haven't wrapped (DB lock, parking-hook edge cases, etc.).
+
+Threads are now named (`sync-loop`, `sync-nightly`, `sync-watchdog`, plus `sync-loop-respawn-N` after a watchdog trip) so `ps H` / `top -H` reads clearly.
+
+Mike (Skoda) already had this coverage via v3.0.59's MySkoda `ClientTimeout` + `asyncio.wait_for`; the new watchdog benefits him too as a generic safety net.
+
 ## v3.0.66 (2026-06-14)
 
 ### PV settings: ask for actual kWh produced per year, not per-kWp math

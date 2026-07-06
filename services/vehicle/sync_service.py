@@ -105,12 +105,27 @@ DEFAULT_SMART_END_HOUR = 22
 _last_bg_loop_tick: datetime | None = None
 _last_bg_loop_outcome: str | None = None  # 'sync' | 'sleep' | 'error'
 
+# v3.0.67 watchdog. Even with the connector-level timeouts (v3.0.67
+# also wraps every BlueLink/UVO SDK call in a 60 s deadline), a rare
+# hang can still happen in code paths we haven't wrapped (DB lock,
+# nested lock in the parking hook, etc.). If ``_last_bg_loop_tick``
+# hasn't advanced in this many minutes AND ``_sync_running`` is True,
+# the watchdog respawns the sync thread. The wedged thread leaks
+# (Python has no interrupt-a-thread) but the loop resumes on a fresh
+# stack. The 20-min threshold covers the smart-mode 10-min interval
+# plus a normal SDK call (< 60 s) plus a generous safety margin.
+_WATCHDOG_STALE_MIN = 20
+_WATCHDOG_CHECK_SEC = 60
+_watchdog_thread = None
+_watchdog_respawn_count = 0
+
 
 def get_bg_loop_health() -> dict:
     return {
         'last_tick_at': _last_bg_loop_tick,
         'last_outcome': _last_bg_loop_outcome,
         'running': _sync_running,
+        'watchdog_respawn_count': _watchdog_respawn_count,
     }
 
 
@@ -695,9 +710,57 @@ def _nightly_maintenance_loop(app):
     logger.info("Nightly maintenance thread stopped")
 
 
+def _sync_watchdog_loop(app):
+    """Defense-in-depth: respawn ``_sync_thread`` if its heartbeat has
+    stopped advancing.
+
+    Fires when ``_last_bg_loop_tick`` is more than ``_WATCHDOG_STALE_MIN``
+    minutes old while ``_sync_running`` is True. The connector-level
+    60 s SDK-call timeouts should make this unreachable in practice,
+    but we've been bitten before by hangs in code paths we didn't
+    wrap. A watchdog is cheap and lets a wedged host self-heal
+    without needing an SSH restart.
+    """
+    global _sync_thread, _last_bg_loop_tick, _watchdog_respawn_count
+    while _sync_running:
+        # Sleep in small increments so stop_sync() is snappy.
+        slept = 0
+        while slept < _WATCHDOG_CHECK_SEC and _sync_running:
+            time.sleep(min(5, _WATCHDOG_CHECK_SEC - slept))
+            slept += 5
+        if not _sync_running:
+            break
+        try:
+            tick = _last_bg_loop_tick
+            if tick is None:
+                continue  # sync loop hasn't started yet
+            age_min = (datetime.now() - tick).total_seconds() / 60.0
+            if age_min <= _WATCHDOG_STALE_MIN:
+                continue
+            logger.critical(
+                f"Bg-loop heartbeat stale for {age_min:.1f} min "
+                f"(> {_WATCHDOG_STALE_MIN} min threshold) — respawning "
+                f"sync thread. Old thread abandoned; count now "
+                f"{_watchdog_respawn_count + 1}."
+            )
+            _watchdog_respawn_count += 1
+            # Reset the tick so we don't immediately re-fire before the
+            # new thread has a chance to write its own tick.
+            _last_bg_loop_tick = datetime.now()
+            new_thread = threading.Thread(
+                target=_sync_loop, args=(app,), daemon=True,
+                name=f'sync-loop-respawn-{_watchdog_respawn_count}',
+            )
+            new_thread.start()
+            _sync_thread = new_thread
+        except Exception as e:
+            logger.warning(f"Sync watchdog error: {e}")
+    logger.info("Sync watchdog thread stopped")
+
+
 def start_sync(app):
     """Start periodic vehicle sync in a background thread."""
-    global _sync_thread, _nightly_thread, _sync_running
+    global _sync_thread, _nightly_thread, _watchdog_thread, _sync_running
 
     if _sync_running:
         logger.info("Vehicle sync already running")
@@ -735,10 +798,18 @@ def start_sync(app):
 
     logger.info("Starting vehicle sync service")
     _sync_running = True  # set before threads start so they see True immediately
-    _sync_thread = threading.Thread(target=_sync_loop, args=(app,), daemon=True)
+    _sync_thread = threading.Thread(target=_sync_loop, args=(app,), daemon=True,
+                                    name='sync-loop')
     _sync_thread.start()
-    _nightly_thread = threading.Thread(target=_nightly_maintenance_loop, args=(app,), daemon=True)
+    _nightly_thread = threading.Thread(target=_nightly_maintenance_loop, args=(app,), daemon=True,
+                                       name='sync-nightly')
     _nightly_thread.start()
+    # v3.0.67: heartbeat watchdog. Cheap; respawns _sync_thread if the
+    # heartbeat goes stale (last-resort recovery when a hang slips
+    # past the connector-level SDK-call timeouts).
+    _watchdog_thread = threading.Thread(target=_sync_watchdog_loop, args=(app,), daemon=True,
+                                        name='sync-watchdog')
+    _watchdog_thread.start()
     return True
 
 

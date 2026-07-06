@@ -32,6 +32,39 @@ _force_refresh_executor = concurrent.futures.ThreadPoolExecutor(
     max_workers=2, thread_name_prefix='hkc-force-refresh'
 )
 
+# v3.0.67: same wedge risk on the *cached* code paths. The BlueLink/UVO
+# cloud API also has no socket-level timeout in the SDK — a stalled
+# ``check_and_refresh_token`` or ``update_vehicle_with_cached_state``
+# call sits on a socket read forever. Ev-robert wedged for 9 h on
+# 2026-07-06 exactly here (last log line was a cached-mode sync, then
+# silence until manual restart). Every SDK call is now submitted to this
+# executor with a 60 s deadline; timeouts raise, the bg-loop's outer
+# try/except catches, sets 'error' outcome and continues on the next
+# tick. Rogue thread leaks the same way the force-refresh one does.
+_SDK_CALL_TIMEOUT_SEC = 60
+_sdk_call_executor = concurrent.futures.ThreadPoolExecutor(
+    max_workers=4, thread_name_prefix='hkc-sdk-call'
+)
+
+
+def _call_with_deadline(fn, *args, timeout=_SDK_CALL_TIMEOUT_SEC, label='sdk'):
+    """Run an SDK call in the executor with a hard wall-clock deadline.
+
+    Raises ``TimeoutError`` on deadline; SDK exceptions propagate as-is.
+    The underlying thread is abandoned on timeout (leaks until the SDK
+    eventually errors) — we do not wait for it, because doing so would
+    re-introduce the hang we are protecting against.
+    """
+    fut = _sdk_call_executor.submit(fn, *args)
+    try:
+        return fut.result(timeout=timeout)
+    except concurrent.futures.TimeoutError:
+        logger.warning(
+            f"BlueLink/UVO call {label!r} timed out after {timeout}s — "
+            f"abandoning; sync will retry next tick"
+        )
+        raise TimeoutError(f"{label} exceeded {timeout}s")
+
 # Watchdog telemetry — read by the dashboard health badge so the user can
 # tell at a glance whether the BlueLink/UVO call path is healthy.
 _force_refresh_stats: dict = {
@@ -194,19 +227,28 @@ class _HyundaiKiaBase(VehicleConnector):
         """Refresh the access token using the stored refresh_token."""
         mgr = self._get_manager()
         try:
-            return mgr.check_and_refresh_token()
+            return _call_with_deadline(
+                mgr.check_and_refresh_token, label='check_and_refresh_token'
+            )
+        except TimeoutError:
+            raise
         except Exception as e:
             # If token refresh fails, clear cache and retry once
             logger.warning(f"Token refresh failed, retrying: {e}")
             _managers.pop(self._cache_key, None)
             mgr = self._get_manager()
-            return mgr.check_and_refresh_token()
+            return _call_with_deadline(
+                mgr.check_and_refresh_token, label='check_and_refresh_token_retry'
+            )
 
     def _get_vehicle(self) -> 'Vehicle':
         if self._vehicle is None:
             mgr = self._get_manager()
             if not mgr.vehicles:
-                mgr.update_all_vehicles_with_cached_state()
+                _call_with_deadline(
+                    mgr.update_all_vehicles_with_cached_state,
+                    label='update_all_vehicles_with_cached_state',
+                )
             if not mgr.vehicles:
                 raise RuntimeError("Kein Fahrzeug im Account gefunden")
             self._vehicle = list(mgr.vehicles.values())[0]
@@ -267,7 +309,10 @@ class _HyundaiKiaBase(VehicleConnector):
             if vehicle.car_battery_percentage is None and cached_12v is not None:
                 vehicle.car_battery_percentage = cached_12v
         else:
-            mgr.update_vehicle_with_cached_state(vehicle.id)
+            _call_with_deadline(
+                mgr.update_vehicle_with_cached_state, vehicle.id,
+                label='update_vehicle_with_cached_state',
+            )
 
         return VehicleStatus(
             soc_percent=vehicle.ev_battery_percentage,
