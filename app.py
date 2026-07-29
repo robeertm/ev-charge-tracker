@@ -1126,11 +1126,32 @@ def _detect_auto_charge(end_sync):
     if not charging_rows:
         return
     start_row = charging_rows[-1]   # first sync of the charging run
-    # SoC at charge start: prefer the pre-charge row (true starting SoC),
-    # else the first charging sample.
-    soc_from = (pre_charge_row.soc_percent if pre_charge_row
+    # SoC at charge start: prefer the pre-charge row (true starting SoC
+    # before the car started drawing), else the first charging sample.
+    # v3.0.68: guard against BlueLink/UVO echoing a stale cached SoC on
+    # the pre-charge row. Observed on ev-robert 2026-07-29: SoC held at
+    # 97 % for 15 h after a drive to 37 %, then the force-refresh landed
+    # simultaneously with is_charging=True (SoC=37, odo jumped +236 km
+    # in the same tick). The pre-charge row carried the stale 97 %,
+    # producing 87 - 97 = -10 → sub-threshold silent drop of the whole
+    # 32 kWh charge. Analogous to v3.0.32 (stale echo on END sync).
+    # If pre_charge_row SoC is HIGHER than the first is_charging=True
+    # sample, treat it as a stale echo and use the first-charging sample
+    # instead (within ~1 % of the true start).
+    _pre_soc = (pre_charge_row.soc_percent if pre_charge_row
                 and pre_charge_row.soc_percent is not None
-                else start_row.soc_percent)
+                else None)
+    _start_soc = start_row.soc_percent
+    if (_pre_soc is not None and _start_soc is not None
+            and _pre_soc > _start_soc):
+        logger.info(
+            f"Auto-charge: pre-charge SoC {_pre_soc}% > first-charging "
+            f"SoC {_start_soc}% — treating pre-charge row as stale "
+            f"cached echo, using {_start_soc}% as start"
+        )
+        soc_from = _start_soc
+    else:
+        soc_from = _pre_soc if _pre_soc is not None else _start_soc
     # v3.0.32: guard against the BlueLink/UVO cloud occasionally echoing
     # the charge-START SoC on the very first is_charging=0 response. Real
     # report from 2026-05-30: a 50→82 % home charge produced
@@ -1146,8 +1167,17 @@ def _detect_auto_charge(end_sync):
     if charge_top_soc is not None and (soc_to is None or charge_top_soc > soc_to):
         soc_to = charge_top_soc
     if soc_from is None or soc_to is None:
+        logger.info(
+            f"Auto-charge skipped: SoC bounds missing "
+            f"(from={soc_from}, to={soc_to}, end_sync={end_sync.timestamp})"
+        )
         return
     if (soc_to - soc_from) < _AUTO_CHARGE_MIN_SOC_GAIN:
+        logger.info(
+            f"Auto-charge skipped: SoC gain {soc_to - soc_from}% below "
+            f"threshold {_AUTO_CHARGE_MIN_SOC_GAIN}% "
+            f"(from={soc_from}, to={soc_to}, end_sync={end_sync.timestamp})"
+        )
         return
 
     start_ts = start_row.timestamp

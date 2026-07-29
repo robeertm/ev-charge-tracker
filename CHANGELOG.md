@@ -1,5 +1,20 @@
 # Changelog
 
+## v3.0.68 (2026-07-29)
+
+### Charge auto-detect: guard against stale-cached pre-charge SoC echo
+
+Observed on ev-robert on 2026-07-29: the car was driven ~236 km (SoC dropped from 97 % → 37 %), parked, plugged in, and charged for 3.5 h back to 87 %. But the BlueLink/UVO cloud kept echoing the pre-drive SoC of 97 % on every cached poll for the full 15 h between the drive-end and the next force-refresh. When motion was finally detected and a force-refresh landed, the odometer jumped +236 km and is_charging flipped to True in the same tick — with SoC correctly reporting 37 %. The next non-charging sample after the session ended showed SoC 87 %, giving a real +50 % / ~32 kWh charge that the auto-detect nonetheless silently dropped.
+
+Root cause: `_detect_auto_charge` walks back from the charge-end sync to find the last `is_charging=False` row and uses its SoC as the "before charging" starting point. That row (10:22:33 in this incident) still carried the stale 97 % cache echo. The detector then computed `soc_to - soc_from = 87 - 97 = -10 %`, which is well below the +3 % minimum-gain threshold, and returned silently without a log line — leaving the whole 32 kWh charge unrecorded and no forensic trail.
+
+Analogous shape to v3.0.32 (BlueLink echoing the charge-START SoC on the first `is_charging=0` sample after a charge ended). Same defense pattern applied to the pre-charge side:
+
+- **Stale-echo guard** at the pre-charge sample: if `pre_charge_row.soc_percent` is **higher** than the first `is_charging=True` sample's SoC, treat it as a stale cache echo and use the first-charging sample as the starting SoC instead. That's within ~1 % of the real start value (one poll-interval into the session at most), which is well inside the noise floor of a charge estimate. Emits an INFO log line when it triggers so the correction is visible in the journal.
+- **Silent-return breadcrumbs**: the two "SoC bounds missing" and "gain below threshold" early returns in `_detect_auto_charge` now log an INFO line with the values that caused the skip. Previously the detector could refuse to create a charge with no observable trace — this session's diagnosis required pulling raw sync rows out of the DB to reconstruct why. Future misfires show up directly in `journalctl -u ev-tracker.service | grep 'Auto-charge skipped'`.
+
+Retroactive: the missing 2026-07-29 charge on ev-robert was inserted manually before the version bump (id=505, 38.15 kWh AC, SoC 37→87, 111 g/kWh CO2, `needs_review=True`).
+
 ## v3.0.67 (2026-07-06)
 
 ### Kia/Hyundai bg-loop hang recovery: bounded SDK-call timeouts + heartbeat watchdog
