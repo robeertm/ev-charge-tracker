@@ -1,5 +1,19 @@
 # Changelog
 
+## v3.0.69 (2026-07-30)
+
+### SoC-rise fallback detector no longer walks over is_charging=True rows
+
+Follow-up bug uncovered a day after v3.0.68 shipped. Observed on the Kia install 2026-07-30 06:00: the overnight wake-up sync arrived at the same SoC as the previous day's charge-end (both 87 %). The `_detect_auto_charge_from_soc_rise` fallback — meant for Skoda/VAG where cached polls rarely include an `is_charging=True` frame — walked back through the *entire* is_charging=True run of yesterday's charge to the valley at the actual charge-start (37 %), matched yesterday's `needs_review=True` Charge on SoC-range overlap, and rewrote the merge target's `charge_end_hour` (14 → 6) and `created_at` (yesterday-14:03 → this-morning-06:00) via the merge path. The Charge displayed in the UI as a 20-hour session from "10:00 to 06:00".
+
+**Root cause**: the walk-back loop only checked `recent[1].is_charging` (the immediate previous sync) before entering — it didn't check for is_charging=True rows deeper in the traversal. A day-boundary sync at the same SoC as the previous day's charge-end lands with `recent[1]` being yesterday's non-charging tail, but the walk continues past the entire charging run underneath.
+
+**Fix**: bail from the SoC-rise detector if *any* is_charging=True row is encountered while walking back to the valley. The primary `_detect_auto_charge` owns those windows (it fires on the 1→0 transition when the charge ended); running the fallback over the same session either produces a duplicate row or, worse, mutates the primary's Charge via the un-reviewed merge path.
+
+Skoda's normal case is unaffected: when the cloud never publishes an is_charging=True frame during a charging session, the walk-back sees only False rows and the detector runs as before.
+
+**Retroactive**: the wrecked Charge id=505 on the Kia install (charge_end_hour, created_at) was restored manually before the version bump — SoC bounds and kwh_loaded were untouched by the mutation, only the timestamps.
+
 ## v3.0.68 (2026-07-29)
 
 ### Charge auto-detect: guard against stale-cached pre-charge SoC echo

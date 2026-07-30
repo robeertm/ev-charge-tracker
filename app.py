@@ -1411,9 +1411,25 @@ def _detect_auto_charge_from_soc_rise(end_sync):
     # backwards; we stop at the first sync whose SoC is *higher* than
     # that minimum (that's the previous session's peak, beyond the
     # valley we want).
+    #
+    # v3.0.69: if any is_charging=True row lies between end_sync and the
+    # valley candidate, the primary _detect_auto_charge already owns (or
+    # attempted) this session — running the SoC-rise fallback over it
+    # would either produce a duplicate Charge OR mutate the primary
+    # detector's un-reviewed Charge via the merge path. Real report on
+    # ev-robert 2026-07-30 06:00: the overnight wake-up sync arrived
+    # with the same SoC as the previous day's charge-end, SoC-rise
+    # walked back through the whole is_charging=True run to the valley
+    # at the actual charge-start, matched yesterday's needs_review
+    # Charge on SoC-range overlap, and rewrote charge_end_hour 14→6
+    # + created_at to this morning — displaying the charge as
+    # "10:00-06:00" (20 h ghost). Bail on any charging row seen in
+    # the traversal.
     valley = end_sync
     min_soc = end_sync.soc_percent
     for s in recent[1:]:
+        if s.is_charging:
+            return
         if s.soc_percent is None:
             continue
         if s.soc_percent <= min_soc:
