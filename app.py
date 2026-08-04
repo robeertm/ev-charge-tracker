@@ -5329,6 +5329,21 @@ def register_routes(app):
             return jsonify({'operator': None})
         return jsonify(hit)
 
+    @app.route('/api/vehicles/spec_search')
+    def api_vehicles_spec_search():
+        """Suggest battery kWh + AC/DC charge power for the vehicle form from
+        the bundled open-ev-data spec table. Offline, read-only; an empty
+        ``q`` or missing bundle yields ``{results: []}`` so the form can call
+        it freely and just skip the datalist when nothing matches."""
+        q = request.args.get('q', '')
+        from services.vehicle.ev_specs_service import search, dataset_meta
+        try:
+            results = search(q)
+        except Exception as e:
+            logger.warning(f"EV spec search failed: {e}")
+            results = []
+        return jsonify({'results': results, 'source': dataset_meta()})
+
     # ── LOG VIEWER ─────────────────────────────────────────────
     @app.route('/logs')
     def logs_page():

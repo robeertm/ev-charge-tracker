@@ -2,7 +2,7 @@
 
 **Repo:** https://github.com/juherr/awesome-ev-charging (curated „Awesome"-Liste, ~155★)
 **Frage:** Ist die Liste für unseren Charge Tracker nützlich? Können wir etwas davon übernehmen?
-**Stand:** 2026-08-04 · geprüft gegen App-Version 3.0.69
+**Stand:** 2026-08-04 · geprüft gegen App-Version 3.0.70 (Fortschreibung: zweite Übernahme ergänzt)
 
 ---
 
@@ -17,11 +17,15 @@ Autos und protokolliert Ladungen, Kosten, CO₂, PV, Fahrten, Wartung. Die Domä
 Firmware, CPO/EMSP-Backends, Batterie-Emulatoren, Zephyr/RTOS, DATEX II …). Diese Dinge setzen
 voraus, dass man selbst eine Ladesäule oder ein Ladenetz betreibt — das tun wir nicht.
 
-**Genau ein Eintrag ist ein echter, sofort umsetzbarer Gewinn: Open Charge Map.** Er dockt
-1:1 an Funktionen an, die wir schon haben (GPS-Erfassung des Ladeorts am Formular, Anbieter-
-Verzeichnis mit Preis-Autofill, Nominatim-Reverse-Geocoding). → **Umgesetzt in diesem Commit.**
+**Zwei Einträge sind echte, sofort umsetzbare Gewinne — beide inzwischen übernommen:**
+1. **Open Charge Map** (v3.0.70) — Betreiber-Autoerkennung am Lade-Formular über GPS.
+2. **open-ev-data** (dieser Commit) — Akku-kWh + AC/DC-Leistung beim Fahrzeug-Anlegen vorbefüllen.
 
-Daneben gibt es 3–4 „interessant, aber später/größer"-Kandidaten (v. a. **evcc** als Datenquelle
+Beide docken 1:1 an Funktionen an, die wir schon haben (GPS-Erfassung des Ladeorts, Anbieter-
+Preis-Autofill; bzw. das manuelle `battery_kwh`/`max_ac_kw`-Feld, aus dem jede Lade-kWh berechnet
+wird). Beide sind **offline/no-cloud** umgesetzt — passend zur Grundhaltung der App.
+
+Daneben gibt es 2–3 „interessant, aber später/größer"-Kandidaten (v. a. **evcc** als Datenquelle
 für Heim-Ladungen) und ein paar reine Referenzen.
 
 ---
@@ -38,7 +42,7 @@ für Heim-Ladungen) und ein paar reine Referenzen.
 | Energie-Management | evcc, OpenEMS, SolarNetwork | **Teilweise** — evcc als Datenquelle, s. u. |
 | Home Automation / EEBUS | Homey-SmartEVSE, eebus-go | **Nein** — Steuerung, nicht Tracking |
 | Batterie | Battery-Emulator, open-battery-information | **Nein** — Second-Life-Speicher |
-| **Ladeort-Register / Datensätze** | **Open Charge Map**, chargeprice, EVMap, cars-dataset | **JA** — hier liegt der Nutzen |
+| **Ladeort-Register / Datensätze** | **Open Charge Map**, **open-ev-data**, chargeprice, EVMap, cars-dataset | **JA** — hier liegt der Nutzen |
 | Specs / Fehlercodes / DATEX II | schema-irve, unified-error-codes | **Nein** — für CPO-Datenaustausch |
 
 ---
@@ -67,7 +71,34 @@ für Heim-Ladungen) und ein paar reine Referenzen.
 - **Aufwand/Risiko:** klein, auf bestehendem Muster; kein DB-Migrationsschritt nötig (`create_all()`
   legt `ocm_cache` automatisch an).
 
-### 2. evcc — Datenquelle für Heim-Ladungen  🔶 Kandidat, größer
+### 2. open-ev-data — Fahrzeug-Stammdaten vorbefüllen  ✅ umgesetzt
+- **Repo:** `open-ev-data/open-ev-data-dataset` (Lizenz **CDLA-Permissive-2.0**), steht in der Liste
+  unter „Data & Analytics".
+- **Was es ist:** versionierter offener Datensatz mit ~1 200 EV-Varianten — je Auto u. a. **nutzbare
+  Akku-Kapazität (net kWh)** und **max. AC/DC-Ladeleistung**.
+- **Warum es passt:** Beim Fahrzeug-Anlegen tippt der User `battery_kwh` und `max_ac_kw` bisher von
+  Hand ab (Default 64). Aus `battery_kwh` × SoC-Delta wird aber **jede** Lade-kWh — und damit jede
+  Kosten-, CO₂- und Verlust-Zahl — berechnet; eine falsche Kapazität verzerrt alles. Der Datensatz
+  liefert genau diese zwei Zahlen zum Nachschlagen. (Sanity-Check: Ioniq 5 → 72,6 kWh, Enyaq → 77 kWh
+  stimmen mit der realen Flotte überein.)
+- **Warum open-ev-data statt cars-dataset (Kandidat aus der letzten Runde):** open-ev-data ist
+  **EV-spezifisch** (net/gross kWh, AC/DC statt allgemeiner KFZ-Specs), **permissiv lizenziert** und
+  vor allem **komplett offline bündelbar** — kein API-Key, keine Cloud, im Einklang mit der no-cloud-
+  Haltung der App. cars-dataset hängt an einer REST-API. Deshalb dieser Datensatz.
+- **Umsetzung (dieser Commit):**
+  - Slim-Extrakt `services/vehicle/ev_specs.json` (~120 kB, nur make/model/variant + net_kwh/ac_kw/
+    dc_kw) — der Upstream-Release ist ~3 MB mit Dutzenden ungenutzten Feldern, die nicht jede VM
+    braucht. Reproduzierbar via `services/vehicle/build_ev_specs.py` (Dev-Tool, braucht Netz).
+  - `services/vehicle/ev_specs_service.py` — lädt das Bundle einmal (`lru_cache`), akzent-tolerante
+    Substring-Suche (`skoda` findet `Škoda`); fehlt/kaputt das Bundle → `[]`, Formular läuft weiter.
+    Offline unit-getestet: `tests/test_ev_specs.py`.
+  - Read-only-Endpoint `GET /api/vehicles/spec_search?q=` (analog zum OCM-Muster).
+  - Fahrzeug-Formular (`settings.html`): Nachschlage-Feld mit Datalist; Auswahl füllt `battery_kwh`
+    + `max_ac_kw`, Marke/Modell nur wenn leer. Rein additiv, der User editiert/speichert wie gehabt.
+  - i18n in allen 6 Sprachen.
+- **Aufwand/Risiko:** klein, additiv; kein DB-Schema, keine Migration, kein Netz zur Laufzeit.
+
+### 3. evcc — Datenquelle für Heim-Ladungen  🔶 Kandidat, größer
 - **Repo:** `evcc-io/evcc` (Go, sehr populär, PV-Überschussladen)
 - **Idee:** Wenn Robert evcc an der Wallbox betreibt (vgl. Vault-Projekt *„Wallbox + Boiler auf
   Riemann-Power umstellen"*), protokolliert evcc **jede Heim-Ladesession** inkl. kWh, Kosten und
@@ -78,18 +109,20 @@ für Heim-Ladungen) und ein paar reine Referenzen.
   Ladungen; UX-Entscheidung, wie Auto-Import und Handeintrag koexistieren. Lohnt einen eigenen
   Mini-Spike, kein Blind-Bau.
 
-### 3. cars-dataset — Fahrzeug-Stammdaten vorbefüllen  🔷 nice-to-have
+### 4. cars-dataset — Fahrzeug-Stammdaten vorbefüllen  ⤳ ersetzt durch #2
 - **Repo:** `vbalagovic/cars-dataset` (globale KFZ-Spezifikationen + REST-API)
-- **Idee:** Beim Anlegen eines Fahrzeugs (Setup-Wizard Schritt 3 / Fahrzeug-HW) Akku-kWh, max. AC etc.
-  aus Modellnamen vorschlagen. Reiner Komfort; Datenqualität/Abdeckung vorher prüfen.
+- **Status:** Dieselbe Idee (Akku-kWh/AC beim Anlegen vorschlagen) ist mit **open-ev-data (#2)**
+  umgesetzt — EV-spezifischer, permissiv lizenziert, offline. cars-dataset bleibt nur als Fallback
+  relevant, falls einzelne Modelle in open-ev-data fehlen (z. B. Kia Niro EV ist dort aktuell nicht
+  enthalten → Feld bleibt manuell).
 
-### 4. Eichrecht / OCMF — signierte Ladequittungen importieren  🔷 Nische
+### 5. Eichrecht / OCMF — signierte Ladequittungen importieren  🔷 Nische
 - **Repo:** `SAFE-eV/OCMF-Open-Charge-Metering-Format`
 - **Idee:** Öffentliche Ladequittungen tragen kryptografisch signierte Zählerwerte (OCMF). Wer diese
   Datei/den QR hat, könnte die **exakt geeichte kWh** statt der Auto-SoC-Schätzung importieren.
   Sehr genau, aber Nischen-Workflow (man müsste die OCMF-Daten der Quittung erfassen).
 
-### 5. chargeprice — Tarife/Preise je Station  🔷 kommerziell
+### 6. chargeprice — Tarife/Preise je Station  🔷 kommerziell
 - **Repo:** `chargeprice/chargeprice-api-docs`
 - **Idee:** €/kWh je Station automatisch. Aber kommerzielle API mit Freigabe/Anmeldung → mehr Reibung
   als unser bestehendes Anbieter-Preis-Verzeichnis. Nur wenn OCM-Preise nicht reichen.
@@ -105,7 +138,9 @@ für Heim-Ladungen) und ein paar reine Referenzen.
 ## Fazit für Robert
 
 Die Liste ist als *Lesezeichen-Sammlung fürs E-Mobility-Ökosystem* wertvoll, aber sie ist nicht auf
-Verbrauchs-Tracker zugeschnitten. Der einzige direkte Treffer — **Open Charge Map zur Betreiber-
-Autoerkennung** — ist umgesetzt und getestet; ein OCM-Key in den Einstellungen aktiviert es. Der
-spannendste *nächste* Schritt wäre **evcc als Auto-Import für Heim-Ladungen**, falls evcc an der
-Wallbox läuft; das ist aber ein eigenes kleines Projekt, kein Beifang.
+Verbrauchs-Tracker zugeschnitten. Die zwei direkten Treffer sind jetzt umgesetzt und getestet:
+**Open Charge Map** (Betreiber-Autoerkennung, v3.0.70) und **open-ev-data** (Akku-/Ladeleistungs-
+Vorbefüllung beim Fahrzeug-Anlegen, dieser Commit). Beide laufen offline bzw. nur mit optionalem
+freien Key und können nichts kaputt machen. Der spannendste *nächste* Schritt bleibt **evcc als
+Auto-Import für Heim-Ladungen**, falls evcc an der Wallbox läuft — ein eigenes kleines Projekt,
+kein Beifang.

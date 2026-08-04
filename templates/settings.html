@@ -185,6 +185,14 @@
                                 <label class="form-label small">{{ t('set.fleet_field_model') }}</label>
                                 <input type="text" class="form-control form-control-sm" name="model" id="vf_model" maxlength="64">
                             </div>
+                            <div class="col-md-12">
+                                <label class="form-label small">{{ t('set.fleet_field_spec_lookup') }}</label>
+                                <input type="text" class="form-control form-control-sm" id="vf_spec_lookup"
+                                       list="vf_spec_list" autocomplete="off"
+                                       placeholder="{{ t('set.fleet_field_spec_lookup_ph') }}">
+                                <datalist id="vf_spec_list"></datalist>
+                                <div class="form-text small">{{ t('set.fleet_field_spec_lookup_hint') }}</div>
+                            </div>
                             <div class="col-md-3">
                                 <label class="form-label small">{{ t('set.fleet_field_color') }}</label>
                                 <input type="color" class="form-control form-control-color form-control-sm" name="color" id="vf_color" value="#0d6efd">
@@ -2154,6 +2162,61 @@
     });
     const newBtn = document.getElementById('btnNewVehicle');
     if (newBtn) newBtn.addEventListener('click', clearForm);
+
+    // ── v3.0.71 open-ev-data spec lookup: type a car → fill kWh/AC ───────
+    (function () {
+        const box = document.getElementById('vf_spec_lookup');
+        const list = document.getElementById('vf_spec_list');
+        if (!box || !list) return;
+        let byLabel = {};          // datalist option value → spec row
+        let timer = null;
+
+        function labelFor(r) {
+            let s = (r.make || '') + ' ' + (r.model || '');
+            if (r.variant) s += ' · ' + r.variant;
+            const bits = [];
+            if (r.net_kwh) bits.push(r.net_kwh + ' kWh');
+            if (r.ac_kw) bits.push('AC ' + r.ac_kw + ' kW');
+            return bits.length ? s + ' — ' + bits.join(', ') : s;
+        }
+        async function refresh() {
+            const q = box.value.trim();
+            if (q.length < 2) { list.innerHTML = ''; return; }
+            let rows = [];
+            try {
+                const r = await fetch('/api/vehicles/spec_search?q=' + encodeURIComponent(q));
+                rows = (await r.json()).results || [];
+            } catch (e) { return; }
+            byLabel = {};
+            list.innerHTML = '';
+            rows.forEach(row => {
+                const label = labelFor(row);
+                byLabel[label] = row;
+                const opt = document.createElement('option');
+                opt.value = label;
+                list.appendChild(opt);
+            });
+        }
+        function setIfEmpty(id, val) {
+            const el = document.getElementById(id);
+            if (el && !String(el.value || '').trim() && val != null) el.value = val;
+        }
+        function apply() {
+            const row = byLabel[box.value];
+            if (!row) return;
+            // capacity/power always win (that's the point); brand/model only fill blanks
+            if (row.net_kwh != null) document.getElementById('vf_battery_kwh').value = row.net_kwh;
+            if (row.ac_kw != null) document.getElementById('vf_max_ac_kw').value = row.ac_kw;
+            setIfEmpty('vf_brand', row.make);
+            setIfEmpty('vf_model', row.model);
+        }
+        box.addEventListener('input', () => {
+            clearTimeout(timer);
+            timer = setTimeout(refresh, 200);
+            apply();  // fires when a datalist entry is picked (input value becomes the label)
+        });
+        box.addEventListener('change', apply);
+    })();
 })();
 </script>
 <script>
