@@ -1105,6 +1105,21 @@
                         </button>
                     </div>
                 </form>
+                <hr>
+                <form method="POST">
+                    <div class="mb-3">
+                        <label for="ocm_key" class="form-label">{{ t('set.ocm_key') }}</label>
+                        <input type="password" class="form-control" id="ocm_key" name="ocm_key"
+                               value="{{ ocm_key }}" placeholder="{{ t('set.ocm_placeholder') }}">
+                        <div class="form-text">
+                            {{ t('set.ocm_hint') }}
+                            <a href="https://openchargemap.org/site/profile/applications" target="_blank">openchargemap.org</a>
+                        </div>
+                    </div>
+                    <button type="submit" name="action" value="save_ocm" class="btn btn-primary">
+                        <i class="bi bi-save"></i> {{ t('set.save') }}
+                    </button>
+                </form>
                 {% if co2_missing > 0 %}
                 <hr>
                 <div class="d-flex align-items-center gap-2" id="backfillSection">

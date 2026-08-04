@@ -568,6 +568,7 @@ document.getElementById('btnFetchCo2').addEventListener('click', async () => {
         car_none:        {{ t('input.loc_car_none')|tojson }},
         car_error:       {{ t('input.loc_car_error')|tojson }},
         car_stale:       {{ t('input.loc_car_stale')|tojson }},
+        operator_set:    {{ t('input.loc_operator_set')|tojson }},
         cancel_confirm:  {{ t('input.cancel_confirm')|tojson }},
     };
     const homeLat = {{ home_lat or 'null' }};
@@ -599,6 +600,23 @@ document.getElementById('btnFetchCo2').addEventListener('click', async () => {
         } catch (e) { return null; }
     }
 
+    // Best-effort: ask Open Charge Map which CPO sits at this coordinate
+    // and pre-fill the operator field (empty-only). Fully optional — if no
+    // OCM key is configured or nothing is close, the endpoint returns
+    // {operator: null} and we do nothing. Never blocks the GPS flow.
+    async function suggestOperator(lat, lon) {
+        try {
+            const r = await fetch(`/api/locations/operator?lat=${lat}&lon=${lon}`);
+            if (!r.ok) return;
+            const d = await r.json();
+            if (d && d.operator && typeof window.__suggestOperator === 'function') {
+                if (window.__suggestOperator(d.operator)) {
+                    setStatus(LOC.operator_set + ' ' + d.operator);
+                }
+            }
+        } catch (e) { /* silent — suggestion is a bonus, not a dependency */ }
+    }
+
     // Main "Mein Standort" button — fetches the car's last known GPS via
     // VehicleSync. Works without HTTPS and represents where the charge
     // actually happened (phone GPS only reflects where the phone is *now*).
@@ -618,6 +636,7 @@ document.getElementById('btnFetchCo2').addEventListener('click', async () => {
                 if (addr) nameIn.value = addr.split(',').slice(0, 2).join(',').slice(0, 60);
                 setStatus(LOC.car_set + ' (' + d.at + ')' + stale);
             }
+            suggestOperator(d.lat, d.lon);
         } catch (e) {
             setStatus(LOC.car_error + ' ' + e.message);
         }
@@ -646,6 +665,7 @@ document.getElementById('btnFetchCo2').addEventListener('click', async () => {
                     if (addr) nameIn.value = addr.split(',').slice(0, 2).join(',').slice(0, 60);
                     setStatus(LOC.gps_set + ' (±' + Math.round(pos.coords.accuracy) + ' m)');
                 }
+                suggestOperator(lat, lon);
             },
             err => { setStatus(LOC.gps_denied + ' ' + err.message); },
             { enableHighAccuracy: true, timeout: 10000, maximumAge: 60000 }
@@ -749,6 +769,31 @@ document.getElementById('btnFetchCo2').addEventListener('click', async () => {
     } else if (custom.value) {
         tryAutoFillPrice(custom.value.trim());
     }
+
+    // Exposed so the GPS/location block can offer an operator suggestion
+    // derived from Open Charge Map without reaching into this IIFE's
+    // private state. Only fills when the operator field is still empty —
+    // a manual pick always wins. Returns true when a value was applied.
+    window.__suggestOperator = function(name) {
+        if (!name) return false;
+        if ((hidden.value || '').trim()) return false;
+        const lower = String(name).toLowerCase();
+        let matched = null;
+        for (const opt of sel.options) {
+            if (opt.value && opt.value.toLowerCase() === lower) { matched = opt.value; break; }
+        }
+        if (matched) {
+            sel.value = matched;
+            custom.style.display = 'none';
+            commit(matched, {force: true});
+        } else {
+            sel.value = '__custom';
+            custom.style.display = '';
+            custom.value = name;
+            commit(name, {force: true});
+        }
+        return true;
+    };
 })();
 
 // ── Cancel: discard any in-progress charge timer + form state ────

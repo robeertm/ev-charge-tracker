@@ -1,5 +1,20 @@
 # Changelog
 
+## v3.0.70 (2026-08-04)
+
+### Open Charge Map: auto-suggest the operator from the charge location
+
+Evaluated the `juherr/awesome-ev-charging` list for anything usable here (full writeup in `docs/awesome-ev-charging-evaluation.md`). Conclusion: it's an infrastructure/protocol list (OCPP, OCPI, ISO 15118, Eichrecht, wallbox firmware, CPO/EMSP backends) — ~90 % irrelevant to a vehicle-side consumption tracker. The one clean, on-pattern win is **Open Charge Map**, a free open registry of ~600k charging stations with operator + coordinates. It slots directly onto features we already have: the charge form captures the car's GPS, reverse-geocodes it via Nominatim, and auto-fills price from the operator directory. OCM lets us derive *which CPO* that coordinate belongs to and pre-fill the operator field.
+
+- **`services/openchargemap_service.py`** — mirrors `geocode_service.py`: process-wide rate limiter, permanent DB cache (`OcmCache`, auto-created by `create_all()` — no migration), every failure path degrades to `None` so the charge form never hangs on a third-party API. Nearest-station selection recomputes distance locally via haversine rather than trusting OCM's unit-dependent `Distance` field. Placeholder operators ("(Unknown Operator)" etc.) are treated as no-operator. Pure logic is offline unit-tested in `tests/test_openchargemap.py` (15 checks).
+- **`GET /api/locations/operator?lat=&lon=`** — read-only, analogous to `/api/locations/reverse`. Returns `{operator: null}` on no-key / unreachable / nothing-close, so it's always safe to call.
+- **Charge form** (`input.html`) — after the car-GPS or phone-GPS button sets coordinates, it asks the endpoint and, **only if the operator field is still empty and the station is within 150 m**, pre-selects the operator (which then triggers the existing price auto-fill). A manual pick always wins. Fully additive, `try/catch`-guarded — if the suggestion path throws, the GPS/geocode flow is untouched.
+- **Settings** — optional Open Charge Map API key (`AppConfig['ocm_api_key']`), sitting next to the ENTSO-E token. OCM now gates its API behind a free key; without one the feature simply does nothing (no regression). New i18n strings added to all six locales.
+
+### Deployment: Dockerfile
+
+Added a `Dockerfile` (+ `.dockerignore`) that runs the app on its canonical internal port 7654 in HTTP mode (`python app.py`; `APP_HOST`/`APP_PORT` overridable), with `data/` declared as a volume so charge history survives container replacement. TLS is expected to be terminated by the deployment's reverse proxy.
+
 ## v3.0.69 (2026-07-30)
 
 ### SoC-rise fallback detector no longer walks over is_charging=True rows

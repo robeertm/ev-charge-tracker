@@ -379,6 +379,25 @@ class GeocodeCache(db.Model):
     fetched_at = db.Column(db.DateTime, default=datetime.now)
 
 
+class OcmCache(db.Model):
+    """Open Charge Map nearest-station lookup cache — keyed by rounded
+    lat/lon (same scheme as GeocodeCache) so repeated charge-form GPS
+    presses at the same spot don't re-hit the OCM API (which is rate-
+    limited and key-gated). ``operator`` is the derived CPO name or NULL
+    when OCM knows the station but not its operator; ``raw_json`` keeps
+    the picked POI so the formatting can evolve without a refetch."""
+    __tablename__ = 'ocm_cache'
+
+    id = db.Column(db.Integer, primary_key=True)
+    lat_key = db.Column(db.String(20), nullable=False, index=True)
+    lon_key = db.Column(db.String(20), nullable=False, index=True)
+    operator = db.Column(db.String(128))   # derived CPO name, e.g. "IONITY"
+    title = db.Column(db.String(200))       # station title, e.g. "IONITY Berlin"
+    distance_m = db.Column(db.Integer)      # metres from query point to the POI
+    raw_json = db.Column(db.Text)           # the picked OCM POI object
+    fetched_at = db.Column(db.DateTime, default=datetime.now)
+
+
 class WeatherCache(db.Model):
     """Daily mean temperature cache from Open-Meteo, keyed by date+coords."""
     __tablename__ = 'weather_cache'

@@ -3014,6 +3014,11 @@ def register_routes(app):
                 else:
                     flash(t('flash.entsoe_missing_key'), 'warning')
 
+            elif action == 'save_ocm':
+                key = request.form.get('ocm_key', '').strip()
+                AppConfig.set('ocm_api_key', key)
+                flash(t('flash.ocm_saved'), 'success')
+
             elif action == 'save_language':
                 lang = request.form.get('app_language', 'de')
                 AppConfig.set('app_language', lang)
@@ -3315,6 +3320,7 @@ def register_routes(app):
 
         return render_template('settings.html',
                                entsoe_key=AppConfig.get('entsoe_api_key', ''),
+                               ocm_key=AppConfig.get('ocm_api_key', ''),
                                car_model_val=AppConfig.get('car_model', Config.CAR_MODEL),
                                vehicle_brands=vehicle_brands,
                                installed_brand_keys=installed_brand_keys,
@@ -5301,6 +5307,27 @@ def register_routes(app):
         from services.geocode_service import reverse
         addr = reverse(lat, lon, language=AppConfig.get('app_language', 'de'))
         return jsonify({'address': addr})
+
+    @app.route('/api/locations/operator')
+    def api_locations_operator():
+        """Suggest the charging operator (CPO) at a coordinate via Open
+        Charge Map. Read-only; returns ``{operator: null}`` when no key is
+        configured, OCM is unreachable, or no station is close enough, so
+        the charge form can call it unconditionally and degrade silently."""
+        try:
+            lat = float(request.args.get('lat'))
+            lon = float(request.args.get('lon'))
+        except (TypeError, ValueError):
+            return jsonify({'error': 'invalid_coords'}), 400
+        from services.openchargemap_service import nearest_operator
+        try:
+            hit = nearest_operator(lat, lon)
+        except Exception as e:
+            logger.warning(f"OCM operator lookup failed: {e}")
+            hit = None
+        if not hit:
+            return jsonify({'operator': None})
+        return jsonify(hit)
 
     # ── LOG VIEWER ─────────────────────────────────────────────
     @app.route('/logs')
