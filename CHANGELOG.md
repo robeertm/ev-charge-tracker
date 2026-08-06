@@ -1,5 +1,13 @@
 # Changelog
 
+## v3.0.71 (2026-08-06)
+
+### Report: Zusatzkosten tile sub-line no longer shows cryptic "S €… / B €…"
+
+The secondary "Zusatzkosten" KPI tile broke its total (`€1,99`) down by component in the sub-line, but prefixed each component with a bare, unexplained single letter — `S €1,99` for the start fee, `B €…` for the blocking fee. With only a start fee present that read as "S €1,99" directly under "€1,99", which looks like nonsense rather than a breakdown.
+
+- **`templates/report.html`** — the sub-line now uses the already-loaded, translated labels `T.start_fee` ("Startgebühr") and `T.block_fee` ("Strafgebühr") instead of the hard-coded `S` / `B` letters, matching the labels used on the Zusatzkosten chart legend. No new strings, no backend change.
+
 ## v3.0.70 (2026-08-04)
 
 ### Open Charge Map: auto-suggest the operator from the charge location

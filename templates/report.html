@@ -460,8 +460,8 @@
             ? fmtNum(s.total_regen_kwh / s.total_km * 100, 2) + ' kWh/100km' : '';
         document.getElementById('kpiExtras').textContent = '€' + fmtNum(s.total_extras_eur, 2);
         const eParts = [];
-        if (s.total_start_fee_eur > 0) eParts.push('S €' + fmtNum(s.total_start_fee_eur, 2));
-        if (s.total_blocking_fee_eur > 0) eParts.push('B €' + fmtNum(s.total_blocking_fee_eur, 2));
+        if (s.total_start_fee_eur > 0) eParts.push(T.start_fee + ' €' + fmtNum(s.total_start_fee_eur, 2));
+        if (s.total_blocking_fee_eur > 0) eParts.push(T.block_fee + ' €' + fmtNum(s.total_blocking_fee_eur, 2));
         document.getElementById('kpiExtrasSub').textContent = eParts.join(' · ');
         document.getElementById('kpiAvgPrice').textContent = s.avg_eur_per_kwh > 0
             ? '€' + fmtNum(s.avg_eur_per_kwh, 3).replace('.', ',') + '/kWh' : '–';
