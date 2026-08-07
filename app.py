@@ -165,6 +165,19 @@ def create_app(config_class=Config):
         except Exception:
             pass  # fresh install — create_all() handles it
 
+        # Migrate: add Erstzulassung + gross battery capacity to vehicles
+        # (v3.0.74). first_registered_at drives the certificate's calendar
+        # age / degradation benchmark; battery_kwh_gross is the informational
+        # brutto pack size printed alongside the usable net capacity.
+        try:
+            veh_columns = [c['name'] for c in inspector.get_columns('vehicles')]
+            if 'first_registered_at' not in veh_columns:
+                db.session.execute(text('ALTER TABLE vehicles ADD COLUMN first_registered_at DATE'))
+            if 'battery_kwh_gross' not in veh_columns:
+                db.session.execute(text('ALTER TABLE vehicles ADD COLUMN battery_kwh_gross REAL'))
+        except Exception:
+            pass  # fresh install — create_all() handles it
+
         db.session.commit()
 
         # Scale fix v1 (shipped in v2.5.4): the pre-v2.5.4 code stored
@@ -2332,6 +2345,7 @@ def register_routes(app):
         v.model = (request.form.get('model', '') or '').strip() or None
         v.color = (request.form.get('color', '') or '').strip() or None
         v.battery_kwh = _float(request.form.get('battery_kwh'))
+        v.battery_kwh_gross = _float(request.form.get('battery_kwh_gross'))
         v.battery_soh_baseline = _float(request.form.get('battery_soh_baseline'))
         v.battery_co2_per_kwh = _float(request.form.get('battery_co2_per_kwh'))
         v.max_ac_kw = _float(request.form.get('max_ac_kw'))
@@ -2350,6 +2364,11 @@ def register_routes(app):
         v.api_region = (request.form.get('api_region', '') or '').strip().upper() or None
         v.api_vin = (request.form.get('api_vin', '') or '').strip().upper() or None
         v.auto_sync = request.form.get('auto_sync') == '1'
+        try:
+            fr = request.form.get('first_registered_at', '').strip()
+            v.first_registered_at = datetime.strptime(fr, '%Y-%m-%d').date() if fr else None
+        except ValueError:
+            v.first_registered_at = None
         try:
             ad = request.form.get('acquired_at', '').strip()
             v.acquired_at = datetime.strptime(ad, '%Y-%m-%d').date() if ad else None
@@ -2438,6 +2457,119 @@ def register_routes(app):
             as_attachment=True,
             download_name=filename,
         )
+
+    # ── OBD / ELM327 in-browser battery read (v3.0.74) ───────────────
+    @app.route('/obd')
+    def obd_page():
+        """Live OBD reader page. The browser talks to an ELM327 dongle over
+        Web Serial / Web Bluetooth, reads the BMS cell PIDs and posts them
+        back for decoding + storage. Vehicle is chosen from the fleet."""
+        from models.database import Vehicle, ObdReading
+        vehicles = Vehicle.query.order_by(Vehicle.is_archived.asc(),
+                                          Vehicle.id.asc()).all()
+        try:
+            sel = _int(request.args.get('vehicle'))
+        except Exception:
+            sel = None
+        active = None
+        if sel:
+            active = Vehicle.query.get(sel)
+        if active is None:
+            active = next((v for v in vehicles if not v.is_archived), None) or \
+                (vehicles[0] if vehicles else None)
+        last = None
+        if active is not None:
+            last = (ObdReading.query.filter_by(vehicle_id=active.id)
+                    .order_by(ObdReading.timestamp.desc()).first())
+        return render_template('obd.html', vehicles=vehicles,
+                               active=active,
+                               last=last.to_dict() if last else None,
+                               app_version=Config.APP_VERSION)
+
+    @app.route('/api/obd/profile/<int:vid>')
+    def api_obd_profile(vid):
+        """Return the ELM327 command profile (init lines, request header,
+        PID list) the browser should run for this vehicle's brand, so the
+        client stays a dumb transport and all knowledge lives server-side."""
+        from models.database import Vehicle
+        from services.vehicle.obd_decode import (
+            profile_for_brand, get_profile, PROFILES)
+        v = Vehicle.query.get_or_404(vid)
+        # Explicit override via ?profile= wins; else derive from brand.
+        key = request.args.get('profile') or profile_for_brand(v.brand or v.api_brand)
+        prof = get_profile(key)
+        if prof is None:
+            key = profile_for_brand(v.brand or v.api_brand)
+            prof = get_profile(key)
+        return jsonify({
+            'profile': key,
+            'label': prof['label'],
+            'header': prof['header'],
+            'init': prof['init'],
+            'pids': prof['pids'],
+            'available': [{'key': k, 'label': p['label']} for k, p in PROFILES.items()],
+        })
+
+    @app.route('/api/vehicles/<int:vid>/obd/ingest', methods=['POST'])
+    def api_obd_ingest(vid):
+        """Decode raw ELM327 frames from the browser, store an ObdReading
+        and return the decoded values. Body:
+            {profile: str, frames: {pid: "raw text"}, odometer_km?: int,
+             source?: str}
+        """
+        from models.database import Vehicle, ObdReading
+        from services.vehicle.obd_decode import decode, profile_for_brand
+        import json as _json
+        v = Vehicle.query.get_or_404(vid)
+        data = request.get_json(silent=True) or {}
+        frames = data.get('frames') or {}
+        if not isinstance(frames, dict) or not frames:
+            return jsonify({'ok': False, 'error': 'no frames'}), 400
+        profile = data.get('profile') or profile_for_brand(v.brand or v.api_brand)
+        try:
+            decoded = decode(profile, frames)
+        except Exception as e:
+            app.logger.exception('OBD decode failed')
+            return jsonify({'ok': False, 'error': str(e)}), 500
+        if decoded.get('error'):
+            return jsonify({'ok': False, 'error': decoded['error']}), 400
+
+        reading = ObdReading(
+            vehicle_id=v.id,
+            source=(data.get('source') or 'elm327')[:32],
+            profile=profile[:48],
+            soc_bms_pct=decoded.get('soc_bms_pct'),
+            soc_display_pct=decoded.get('soc_display_pct'),
+            soh_pct=decoded.get('soh_pct'),
+            pack_voltage_v=decoded.get('pack_voltage_v'),
+            pack_current_a=decoded.get('pack_current_a'),
+            aux_battery_v=decoded.get('aux_battery_v'),
+            cell_count=decoded.get('cell_count'),
+            cell_min_v=decoded.get('cell_min_v'),
+            cell_max_v=decoded.get('cell_max_v'),
+            cell_avg_v=decoded.get('cell_avg_v'),
+            cell_delta_mv=decoded.get('cell_delta_mv'),
+            temp_min_c=decoded.get('temp_min_c'),
+            temp_max_c=decoded.get('temp_max_c'),
+            temp_avg_c=decoded.get('temp_avg_c'),
+            cumulative_charge_ah=decoded.get('cumulative_charge_ah'),
+            cumulative_discharge_ah=decoded.get('cumulative_discharge_ah'),
+            odometer_km=_int(data.get('odometer_km')),
+            cell_voltages_json=(_json.dumps(decoded['cell_voltages'])
+                                if decoded.get('cell_voltages') else None),
+            cell_temps_json=(_json.dumps(decoded['cell_temps'])
+                             if decoded.get('cell_temps') else None),
+            raw_json=_json.dumps(frames)[:200000],
+        )
+        db.session.add(reading)
+        db.session.commit()
+        app.logger.info(
+            f"OBD reading #{reading.id} stored for vehicle {v.id} "
+            f"(SoH={reading.soh_pct}, cells={reading.cell_count}, "
+            f"delta={reading.cell_delta_mv}mV)")
+        result = reading.to_dict()
+        result['ok'] = True
+        return jsonify(result)
 
     @app.route('/vehicles/<int:vid>/test', methods=['POST'])
     def vehicles_test(vid):

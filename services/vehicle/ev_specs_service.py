@@ -70,7 +70,7 @@ def dataset_meta() -> dict:
 
 def _public(row: dict) -> dict:
     return {k: row[k] for k in ('make', 'model', 'variant', 'net_kwh',
-                                'ac_kw', 'dc_kw') if k in row}
+                                'gross_kwh', 'ac_kw', 'dc_kw') if k in row}
 
 
 def search(query: Optional[str], limit: int = 40) -> list[dict]:

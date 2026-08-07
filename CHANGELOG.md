@@ -1,5 +1,68 @@
 # Changelog
 
+## v3.0.74 (2026-08-07)
+
+### Erstzulassung + Netto/Brutto-Kapazität, und OBD/ELM327-Auslesen im Browser
+
+Drei zusammenhängende Ergänzungen rund um das Batteriezertifikat, alle aus
+Roberts Rückfragen: (1) man muss das **Alter / die Erstzulassung** eingeben
+können, (2) sein Kia hat **64 kWh netto / 67,3 kWh brutto** — muss das im
+Test/der Verarbeitung berücksichtigt werden?, und (3) er liest mit einem
+**ELM327-OBD-Dongle** (CarScanner) ohnehin alles von Zellspannung bis
+Temperatur aus — das soll direkt in der EV-Tracker-App im Browser gehen.
+
+**Netto vs. brutto (die Antwort):** SoH wird *immer* auf die **nutzbare
+Netto-Kapazität** bezogen (64 kWh), nie auf brutto. Sowohl die Coulomb-
+Zählung als auch der BMS-Wert messen das nutzbare Fenster — bezöge man sie
+auf 67,3 kWh brutto, käme systematisch eine zu niedrige SoH heraus.
+`battery_kwh` bleibt also die Netto-Zahl (Grundlage für kWh, Kosten, CO₂,
+Verlust, SoH); brutto wird nur informativ mitgeführt und aufs Zertifikat
+gedruckt (Käufer erwarten beide Zahlen).
+
+- **`models/database.py`**
+  - `Vehicle.first_registered_at` (Erstzulassung) — die *Kalenderuhr*, auf
+    der die Batterie tatsächlich altert. Treibt Alter + Degradations-
+    Benchmark im Zertifikat. `acquired_at` bleibt der Besitzbeginn.
+  - `Vehicle.battery_kwh_gross` — optionale Bruttokapazität (Puffer-Info).
+  - **`ObdReading`** — neue Tabelle: ein Zell-Snapshot direkt aus dem BMS
+    (SoH-Register, Zellspannungen min/max/Ø + Spreizung in mV, Pack-
+    Spannung/-Strom, Temperaturen, 12V-Batterie, volle Zell-/Temp-Arrays
+    und die Roh-Frames zum späteren Re-Decodieren).
+- **`services/vehicle/obd_decode.py`** — neuer, reiner Decoder: ISO-TP-
+  Reassemblierung der ELM327-Frames + eine **datengetriebene PID-Tabelle**
+  pro Fahrzeug-Familie (`kia_hyundai_ext` für Kona/e-Niro/Soul auf Header
+  7E4, plus generischer `generic_ev`-Fallback über Standard-PID 015B).
+  Offsets folgen der Community-Map (EVNotify/SoulEV/CarScanner) und liegen
+  an *einer* klar kommentierten Stelle; die Roh-Frames werden gespeichert,
+  falls ein Offset für ein Modell korrigiert werden muss.
+- **`templates/obd.html` + `/obd`-Seite** — der Browser als Transport:
+  ELM327 per **Web Serial (USB)** oder **Web Bluetooth (BLE)** verbinden,
+  initialisieren, PIDs abfragen, Roh-Text an den Server posten. Live-
+  Fortschritt, Rohdaten-Log, Ergebnis-Karten (SoH, Zell-Spreizung mit
+  Ampel, Temperaturen, Pack, 12V). „So easy wie möglich": einstecken →
+  Knopf → Werte. (Chrome/Edge Desktop+Android; iOS kann kein Web
+  Serial/BLE.)
+- **`app.py`** — `GET /api/obd/profile/<id>` (Profil/Init/PID-Liste),
+  `POST /api/vehicles/<id>/obd/ingest` (decodiert + speichert, gibt Werte
+  zurück), `/obd`-Seite. Migration ergänzt die zwei Vehicle-Spalten;
+  `obd_readings` legt `create_all()` an.
+- **`services/battery_cert_service.py`** — Zertifikat nutzt jetzt die
+  Erstzulassung fürs **Batteriealter** (Fallback: Besitzbeginn), zeigt
+  **Netto/Brutto** getrennt, und bindet die **letzte OBD-Messung** ein: ein
+  neuer Abschnitt „Zelldaten (OBD)" mit Zell-Spreizung/Temperaturen (genau
+  das, was das reine Ladedaten-Zertifikat vorher explizit *nicht* konnte),
+  und die BMS-SoH per OBD zählt als eigene, priorisierte SoH-Quelle. Der
+  Limitationstext passt sich an, je nachdem ob Zelldaten vorliegen.
+- **`templates/settings.html`** — Formularfelder Erstzulassung + Akku
+  brutto (mit Netto/Brutto-Hinweisen), OBD-Button je Fahrzeugzeile, und der
+  open-ev-data-Lookup füllt brutto mit, wenn vorhanden.
+- **`services/vehicle/build_ev_specs.py` / `ev_specs_service.py`** — der
+  Spec-Extrakt trägt jetzt `gross_kwh` (wenn ≠ netto) mit.
+- **Tests** — `tests/test_obd_decode.py` (ISO-TP-Reassemblierung, signed/
+  unsigned-Extraktion, Kia-Profil-Roundtrip, generischer Fallback, Teil-
+  daten); `tests/test_battery_cert.py` erweitert um Erstzulassungs-Alter,
+  Netto/Brutto und OBD-gespeiste Zertifikate.
+
 ## v3.0.73 (2026-08-07)
 
 ### Battery-health certificate (AVILOO-style, self-generated)

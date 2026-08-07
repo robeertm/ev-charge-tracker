@@ -20,7 +20,7 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, ROOT)
 
 from flask import Flask  # noqa: E402
-from models.database import db, Vehicle, Charge, VehicleSync  # noqa: E402
+from models.database import db, Vehicle, Charge, VehicleSync, ObdReading  # noqa: E402
 
 
 def _make_app():
@@ -106,6 +106,49 @@ def main():
         # Nearly all throughput is DC (one small AC charge in the mix).
         check('dc share ~98%', data['behaviour']['dc_share_pct'] > 95.0)
         check('age computed', data['age_years'] is not None and data['age_years'] > 2)
+
+    # ── Erstzulassung drives calendar age, not acquisition ───────────
+    app_er = _make_app()
+    with app_er.app_context():
+        db.create_all()
+        # Bought used in 2024 but first registered in 2020 → battery is old
+        # even though ownership is young.
+        v = Vehicle(name='Used Kona', brand='Hyundai', battery_kwh=64.0,
+                    battery_kwh_gross=67.3, is_archived=False,
+                    first_registered_at=date(2020, 3, 1),
+                    acquired_at=date(2024, 1, 1),
+                    retired_at=date(2025, 1, 1))
+        db.session.add(v)
+        db.session.commit()
+        d = bc.compute_battery_health(v.id)
+        # calendar age 2020-03 -> 2025-01 ≈ 4.8 yr; ownership only ~1.0 yr
+        check('age from Erstzulassung (~4.8y)', abs(d['age_years'] - 4.8) < 0.2)
+        check('ownership separate (~1.0y)', abs(d['ownership_years'] - 1.0) < 0.1)
+        check('gross carried', abs(d['vehicle']['gross_kwh'] - 67.3) < 0.01)
+        pdf = bc.generate_certificate(v.id)
+        check('used-car pdf renders', isinstance(pdf, (bytes, bytearray)) and len(pdf) > 1000)
+
+    # ── OBD reading feeds the certificate ────────────────────────────
+    app_obd = _make_app()
+    with app_obd.app_context():
+        db.create_all()
+        v = Vehicle(name='OBD Niro', brand='Kia', battery_kwh=64.0,
+                    is_archived=False, acquired_at=date(2021, 1, 1))
+        db.session.add(v)
+        db.session.commit()
+        db.session.add(ObdReading(
+            vehicle_id=v.id, soh_pct=95.5, cell_count=98,
+            cell_min_v=3.98, cell_max_v=4.01, cell_avg_v=4.0,
+            cell_delta_mv=30.0, temp_min_c=18, temp_max_c=22, temp_avg_c=20,
+            pack_voltage_v=360.0, aux_battery_v=13.6))
+        db.session.commit()
+        d = bc.compute_battery_health(v.id)
+        check('obd present in cert data', d['obd'] is not None and abs(d['obd']['soh_pct'] - 95.5) < 0.01)
+        # No wide charges → measured None → OBD SoH becomes the headline.
+        check('certified source obd', d['certified_source'] == 'obd')
+        check('certified soh from obd', abs(d['certified_soh'] - 95.5) < 0.01)
+        pdf = bc.generate_certificate(v.id)
+        check('obd pdf renders', isinstance(pdf, (bytes, bytearray)) and len(pdf) > 1000)
 
         pdf = bc.generate_certificate(v.id)
         check('pdf bytes produced', isinstance(pdf, (bytes, bytearray)) and len(pdf) > 1000)

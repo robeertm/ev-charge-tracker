@@ -27,7 +27,18 @@ class Vehicle(db.Model):
 
     # Hardware — falls back to AppConfig defaults when NULL during
     # the migration window, but new vehicles should always set these.
+    # ``battery_kwh`` is the *usable / net* capacity (what actually cycles
+    # between 0–100 % usable SoC). Every kWh-from-SoC, cost, CO2, loss and
+    # SoH figure is derived against this net number — it MUST be the net
+    # value (e.g. 64.0 for a Kia e-Niro), never the gross pack size.
     battery_kwh = db.Column(db.Float)
+    # v3.0.74: gross / brutto pack size (e.g. 67.3 kWh). Purely
+    # informational — the manufacturer keeps a top/bottom buffer the car
+    # never exposes, so SoH is *always* referenced to the usable net
+    # capacity above. We store gross only to print it on the battery-health
+    # certificate (a buyer expects to see both numbers) and to show the
+    # buffer share. NULL = not entered → certificate simply omits it.
+    battery_kwh_gross = db.Column(db.Float)
     battery_soh_baseline = db.Column(db.Float)
     battery_co2_per_kwh = db.Column(db.Float)
     max_ac_kw = db.Column(db.Float)
@@ -48,6 +59,13 @@ class Vehicle(db.Model):
 
     # Lifecycle
     is_archived = db.Column(db.Boolean, default=False, nullable=False)
+    # v3.0.74: Erstzulassung — the date the car was FIRST registered (new),
+    # not when Robert bought it. This is the calendar clock the battery has
+    # actually aged on, so the certificate's age / degradation benchmark is
+    # driven by this. ``acquired_at`` stays the *ownership* start (used for
+    # the "Besitzzeitraum" line and for how long WE have data). For a car
+    # bought new the two coincide; for a used car they differ by years.
+    first_registered_at = db.Column(db.Date)
     acquired_at = db.Column(db.Date)
     retired_at = db.Column(db.Date)
     notes = db.Column(db.Text)
@@ -62,6 +80,7 @@ class Vehicle(db.Model):
             'color': self.color,
             'icon': self.icon,
             'battery_kwh': self.battery_kwh,
+            'battery_kwh_gross': self.battery_kwh_gross,
             'battery_soh_baseline': self.battery_soh_baseline,
             'battery_co2_per_kwh': self.battery_co2_per_kwh,
             'max_ac_kw': self.max_ac_kw,
@@ -74,6 +93,7 @@ class Vehicle(db.Model):
             'api_vin': self.api_vin,
             'auto_sync': self.auto_sync,
             'is_archived': self.is_archived,
+            'first_registered_at': self.first_registered_at.isoformat() if self.first_registered_at else None,
             'acquired_at': self.acquired_at.isoformat() if self.acquired_at else None,
             'retired_at': self.retired_at.isoformat() if self.retired_at else None,
             'notes': self.notes,
@@ -408,3 +428,91 @@ class WeatherCache(db.Model):
     lon_key = db.Column(db.String(20), nullable=False)
     temp_mean_c = db.Column(db.Float)
     fetched_at = db.Column(db.DateTime, default=datetime.now)
+
+
+class ObdReading(db.Model):
+    """A single cell-level battery snapshot read straight from the car's BMS
+    over an ELM327 OBD-II dongle (v3.0.74).
+
+    This is the data the charge-history-based certificate explicitly *could
+    not* see: individual cell voltages, the cell-voltage spread (the single
+    best imbalance / weak-cell indicator), pack temperatures and the BMS'
+    own SoH register. Robert reads it with CarScanner today; now the tracker
+    reads the very same PIDs itself — the browser talks to the dongle
+    (Web Serial / Web Bluetooth), ships the raw hex frames here, and the
+    server decodes + stores them so the certificate and the vehicle page can
+    show a Flash-Test-grade cell report.
+
+    Every decoded scalar is nullable — a profile that only answers some PIDs
+    (or a decode that can't find a field) still stores what it got. The full
+    per-cell arrays and the raw frames live in the JSON blobs so nothing is
+    lost and a future decoder revision can re-parse historical captures.
+    """
+    __tablename__ = 'obd_readings'
+
+    id = db.Column(db.Integer, primary_key=True)
+    vehicle_id = db.Column(db.Integer, db.ForeignKey('vehicles.id'), index=True)
+    timestamp = db.Column(db.DateTime, nullable=False, default=datetime.now, index=True)
+    source = db.Column(db.String(32), default='elm327')  # transport used
+    profile = db.Column(db.String(48))  # decoder profile key, e.g. 'kia_hyundai_ext'
+
+    # Pack-level
+    soc_bms_pct = db.Column(db.Float)        # BMS "real" SoC (before display buffer)
+    soc_display_pct = db.Column(db.Float)    # dashboard SoC, if reported
+    soh_pct = db.Column(db.Float)            # BMS State-of-Health register
+    pack_voltage_v = db.Column(db.Float)
+    pack_current_a = db.Column(db.Float)     # + = discharge, - = charge (sign per profile)
+    aux_battery_v = db.Column(db.Float)      # 12 V auxiliary battery
+
+    # Cell voltages (V) — summary + full array in cell_voltages_json
+    cell_count = db.Column(db.Integer)
+    cell_min_v = db.Column(db.Float)
+    cell_max_v = db.Column(db.Float)
+    cell_avg_v = db.Column(db.Float)
+    cell_delta_mv = db.Column(db.Float)      # (max-min) in millivolts — the imbalance number
+
+    # Temperatures (°C) — summary + full array in cell_temps_json
+    temp_min_c = db.Column(db.Float)
+    temp_max_c = db.Column(db.Float)
+    temp_avg_c = db.Column(db.Float)
+
+    # Optional counters some BMS expose
+    cumulative_charge_ah = db.Column(db.Float)
+    cumulative_discharge_ah = db.Column(db.Float)
+    odometer_km = db.Column(db.Integer)
+
+    cell_voltages_json = db.Column(db.Text)  # JSON list[float] volts
+    cell_temps_json = db.Column(db.Text)     # JSON list[float] °C
+    raw_json = db.Column(db.Text)            # {pid: "raw hex response", ...} — audit / re-decode
+
+    def to_dict(self):
+        import json as _json
+        def _arr(blob):
+            try:
+                return _json.loads(blob) if blob else None
+            except (ValueError, TypeError):
+                return None
+        return {
+            'id': self.id,
+            'vehicle_id': self.vehicle_id,
+            'timestamp': self.timestamp.isoformat() if self.timestamp else None,
+            'source': self.source,
+            'profile': self.profile,
+            'soc_bms_pct': self.soc_bms_pct,
+            'soc_display_pct': self.soc_display_pct,
+            'soh_pct': self.soh_pct,
+            'pack_voltage_v': self.pack_voltage_v,
+            'pack_current_a': self.pack_current_a,
+            'aux_battery_v': self.aux_battery_v,
+            'cell_count': self.cell_count,
+            'cell_min_v': self.cell_min_v,
+            'cell_max_v': self.cell_max_v,
+            'cell_avg_v': self.cell_avg_v,
+            'cell_delta_mv': self.cell_delta_mv,
+            'temp_min_c': self.temp_min_c,
+            'temp_max_c': self.temp_max_c,
+            'temp_avg_c': self.temp_avg_c,
+            'odometer_km': self.odometer_km,
+            'cell_voltages': _arr(self.cell_voltages_json),
+            'cell_temps': _arr(self.cell_temps_json),
+        }

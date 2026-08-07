@@ -144,6 +144,10 @@
                                     <button type="button" class="btn btn-sm btn-outline-primary" data-edit-vehicle='{{ v.to_dict()|tojson }}'>
                                         <i class="bi bi-pencil"></i>
                                     </button>
+                                    <a href="/obd?vehicle={{ v.id }}" class="btn btn-sm btn-outline-dark"
+                                       title="{{ t('set.fleet_obd', default='Batterie per OBD/ELM327 auslesen') }}">
+                                        <i class="bi bi-usb-plug"></i>
+                                    </a>
                                     <a href="/vehicles/{{ v.id }}/certificate.pdf" class="btn btn-sm btn-outline-dark"
                                        title="{{ t('set.fleet_certificate', default='Batterie-Gesundheitszertifikat (PDF)') }}">
                                         <i class="bi bi-patch-check"></i>
@@ -202,8 +206,14 @@
                                 <input type="color" class="form-control form-control-color form-control-sm" name="color" id="vf_color" value="#0d6efd">
                             </div>
                             <div class="col-md-3">
-                                <label class="form-label small">{{ t('set.fleet_field_battery') }}</label>
+                                <label class="form-label small">{{ t('set.fleet_field_battery', default='Akku netto (kWh)') }}</label>
                                 <input type="number" step="0.1" class="form-control form-control-sm" name="battery_kwh" id="vf_battery_kwh">
+                                <div class="form-text small">{{ t('set.fleet_field_battery_hint', default='Nutzbare (Netto-)Kapazität — Basis für kWh, Kosten, CO₂ und SoH.') }}</div>
+                            </div>
+                            <div class="col-md-3">
+                                <label class="form-label small">{{ t('set.fleet_field_battery_gross', default='Akku brutto (kWh)') }}</label>
+                                <input type="number" step="0.1" class="form-control form-control-sm" name="battery_kwh_gross" id="vf_battery_kwh_gross">
+                                <div class="form-text small">{{ t('set.fleet_field_battery_gross_hint', default='Optional. Bruttokapazität inkl. Puffer (z. B. 67,3). Nur fürs Zertifikat.') }}</div>
                             </div>
                             <div class="col-md-3">
                                 <label class="form-label small">{{ t('set.fleet_field_max_ac') }}</label>
@@ -292,6 +302,11 @@
                         <hr class="my-3">
                         <div class="row g-2">
                             <div class="col-md-3">
+                                <label class="form-label small">{{ t('set.fleet_field_first_registered', default='Erstzulassung') }}</label>
+                                <input type="date" class="form-control form-control-sm" name="first_registered_at" id="vf_first_registered_at">
+                                <div class="form-text small">{{ t('set.fleet_field_first_registered_hint', default='Alter der Batterie (Kalenderuhr fürs Zertifikat).') }}</div>
+                            </div>
+                            <div class="col-md-3">
                                 <label class="form-label small">{{ t('set.fleet_field_acquired') }}</label>
                                 <input type="date" class="form-control form-control-sm" name="acquired_at" id="vf_acquired_at">
                             </div>
@@ -299,7 +314,7 @@
                                 <label class="form-label small">{{ t('set.fleet_field_retired') }}</label>
                                 <input type="date" class="form-control form-control-sm" name="retired_at" id="vf_retired_at">
                             </div>
-                            <div class="col-md-6">
+                            <div class="col-md-3">
                                 <label class="form-label small">{{ t('set.fleet_field_notes') }}</label>
                                 <input type="text" class="form-control form-control-sm" name="notes" id="vf_notes">
                             </div>
@@ -2109,7 +2124,8 @@
     const collapse = bootstrap.Collapse.getOrCreateInstance(form, { toggle: false });
     const fieldMap = {
         id: 'vf_id', name: 'vf_name', brand: 'vf_brand', model: 'vf_model',
-        color: 'vf_color', battery_kwh: 'vf_battery_kwh', max_ac_kw: 'vf_max_ac_kw',
+        color: 'vf_color', battery_kwh: 'vf_battery_kwh',
+        battery_kwh_gross: 'vf_battery_kwh_gross', max_ac_kw: 'vf_max_ac_kw',
         recuperation_kwh_per_km: 'vf_recup',
         battery_soh_baseline: 'vf_soh_baseline',
         battery_co2_per_kwh: 'vf_battery_co2_per_kwh',
@@ -2120,6 +2136,7 @@
         api_region: 'vf_api_region',
         api_vin: 'vf_api_vin',
         auto_sync: 'vf_auto_sync',
+        first_registered_at: 'vf_first_registered_at',
         acquired_at: 'vf_acquired_at', retired_at: 'vf_retired_at',
         notes: 'vf_notes',
     };
@@ -2210,6 +2227,7 @@
             if (!row) return;
             // capacity/power always win (that's the point); brand/model only fill blanks
             if (row.net_kwh != null) document.getElementById('vf_battery_kwh').value = row.net_kwh;
+            if (row.gross_kwh != null) document.getElementById('vf_battery_kwh_gross').value = row.gross_kwh;
             if (row.ac_kw != null) document.getElementById('vf_max_ac_kw').value = row.ac_kw;
             setIfEmpty('vf_brand', row.make);
             setIfEmpty('vf_model', row.model);

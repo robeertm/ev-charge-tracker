@@ -73,8 +73,8 @@ def build(version: str | None = None) -> dict:
         if not make or not model:
             continue
         batt = entry.get('battery') or {}
-        net = _num(batt.get('pack_capacity_kwh_net')) or \
-            _num(batt.get('pack_capacity_kwh_gross'))
+        gross = _num(batt.get('pack_capacity_kwh_gross'))
+        net = _num(batt.get('pack_capacity_kwh_net')) or gross
         if not net:
             continue  # useless for a kWh-from-SoC tracker without a capacity
         charging = entry.get('charging') or {}
@@ -86,6 +86,10 @@ def build(version: str | None = None) -> dict:
             continue
         seen.add(dedup)
         row = {'make': make, 'model': model, 'net_kwh': net}
+        # Keep gross only when it's a distinct number from net (buffer info
+        # for the battery certificate; net stays the SoH reference).
+        if gross and (not net or abs(gross - net) > 0.05):
+            row['gross_kwh'] = gross
         if label:
             row['variant'] = label
         if ac is not None:

@@ -46,7 +46,7 @@ import tempfile
 from datetime import date, datetime
 from statistics import median
 
-from models.database import Charge, Vehicle
+from models.database import Charge, Vehicle, ObdReading
 from services.stats_service import (
     get_soh_baseline, get_summary_stats, get_vehicle_history,
     get_ac_dc_stats, _vehicle_field,
@@ -171,6 +171,36 @@ def _measured_capacity(vehicle_id, nominal_kwh):
     }
 
 
+def _latest_obd(vehicle_id):
+    """Return the most recent OBD/ELM327 cell snapshot for the vehicle as a
+    plain dict, or ``None``. This is the Flash-Test-grade data the pure
+    charge-history certificate can't see: real BMS SoH, cell-voltage spread
+    and pack temperatures read straight from the battery-management system.
+    """
+    q = ObdReading.query.order_by(ObdReading.timestamp.desc())
+    if vehicle_id is not None:
+        q = q.filter(ObdReading.vehicle_id == vehicle_id)
+    row = q.first()
+    if row is None:
+        return None
+    return {
+        'timestamp': row.timestamp.isoformat() if row.timestamp else None,
+        'soh_pct': row.soh_pct,
+        'soc_bms_pct': row.soc_bms_pct,
+        'pack_voltage_v': row.pack_voltage_v,
+        'pack_current_a': row.pack_current_a,
+        'aux_battery_v': row.aux_battery_v,
+        'cell_count': row.cell_count,
+        'cell_min_v': row.cell_min_v,
+        'cell_max_v': row.cell_max_v,
+        'cell_avg_v': row.cell_avg_v,
+        'cell_delta_mv': row.cell_delta_mv,
+        'temp_min_c': row.temp_min_c,
+        'temp_max_c': row.temp_max_c,
+        'temp_avg_c': row.temp_avg_c,
+    }
+
+
 def compute_battery_health(vehicle_id):
     """Assemble every battery-health metric for one vehicle.
 
@@ -182,7 +212,12 @@ def compute_battery_health(vehicle_id):
     if vehicle is None:
         return None
 
+    # SoH is *always* referenced to the usable NET capacity — the coulomb
+    # count and the BMS both measure the usable window, so the nominal must
+    # be net (e.g. 64 kWh), never the gross pack (67.3). Gross is carried
+    # only for display on the certificate.
     nominal_kwh = _vehicle_field(vehicle_id, 'battery_kwh', 'battery_kwh', 0.0) or None
+    gross_kwh = vehicle.battery_kwh_gross or None
     stats = get_summary_stats(vehicle_id=vehicle_id) or {}
     history = get_vehicle_history(vehicle_id=vehicle_id)
     acdc = get_ac_dc_stats(vehicle_id=vehicle_id) or {}
@@ -205,14 +240,25 @@ def compute_battery_health(vehicle_id):
     # ── Measured SoH (Premium-Test equivalent) ───────────────────────
     measured = _measured_capacity(vehicle_id, nominal_kwh)
 
-    # ── Certified headline SoH: prefer the measured value when we have a
-    # decent sample base, else fall back to the BMS number. ──────────
+    # ── OBD/ELM327 cell snapshot (Flash-Test equivalent, direct BMS) ──
+    obd = _latest_obd(vehicle_id)
+    obd_soh = obd.get('soh_pct') if obd else None
+
+    # ── Certified headline SoH. Priority:
+    #   1. measured coulomb-count with a solid sample base (Premium-grade,
+    #      independent of the BMS' own estimate);
+    #   2. a direct OBD SoH register read (real BMS value, fresh);
+    #   3. the BMS SoH sampled via the cloud sync;
+    #   4. a thin measured value as a last resort. ────────────────────
     measured_soh = measured['soh_pct'] if measured else None
     certified_soh = None
     certified_source = None
     if measured and measured['sample_count'] >= 3:
         certified_soh = measured_soh
         certified_source = 'measured'
+    elif obd_soh is not None:
+        certified_soh = obd_soh
+        certified_source = 'obd'
     elif bms['current'] is not None:
         certified_soh = bms['current']
         certified_source = 'bms'
@@ -228,10 +274,19 @@ def compute_battery_health(vehicle_id):
         odometer = max(odometer, history['summary']['last']['odometer_km'] or 0)
 
     acquired = vehicle.acquired_at
+    first_reg = vehicle.first_registered_at
     end_ref = vehicle.retired_at or date.today()
-    age_years = None
+    # Ownership span — how long WE have had the car (and data for it).
+    ownership_years = None
     if acquired:
-        age_years = round((end_ref - acquired).days / 365.25, 1)
+        ownership_years = round((end_ref - acquired).days / 365.25, 1)
+    # Battery calendar age — from Erstzulassung, the real degradation clock.
+    # Falls back to the ownership start when no Erstzulassung is entered
+    # (bought-new case, where the two coincide anyway).
+    age_basis = first_reg or acquired
+    age_years = None
+    if age_basis:
+        age_years = round((end_ref - age_basis).days / 365.25, 1)
 
     # ── Charging behaviour / stress factors ──────────────────────────
     ac_kwh = acdc.get('AC', {}).get('total_kwh', 0) or 0
@@ -286,17 +341,21 @@ def compute_battery_health(vehicle_id):
             'vin': vehicle.api_vin,
             'color': vehicle.color,
             'is_archived': vehicle.is_archived,
+            'first_registered_at': first_reg.isoformat() if first_reg else None,
             'acquired_at': acquired.isoformat() if acquired else None,
             'retired_at': vehicle.retired_at.isoformat() if vehicle.retired_at else None,
             'nominal_kwh': nominal_kwh,
+            'gross_kwh': gross_kwh,
         },
         'odometer_km': int(odometer or 0),
         'age_years': age_years,
+        'ownership_years': ownership_years,
         'certified_soh': certified_soh,
         'certified_source': certified_source,
         'grade': {'letter': letter, 'label_key': label_key, 'color': color},
         'bms': bms,
         'measured': measured,
+        'obd': obd,
         'expected_soh': expected_soh,
         'vs_benchmark': vs_benchmark,
         'behaviour': {
@@ -472,11 +531,16 @@ def generate_certificate(vehicle_id):
     pdf.kv(t('cert.veh_name', default='Fahrzeug'), name)
     pdf.kv(t('cert.veh_brand', default='Marke / Modell'), brandmodel)
     pdf.kv('VIN', veh['vin'] or t('cert.na', default='nicht hinterlegt'))
-    pdf.kv(t('cert.veh_battery', default='Akku (Nennkapazitaet)'),
-           _fmt(veh['nominal_kwh'], '{:.1f} kWh'))
+    # Battery: net (SoH reference) plus gross when known.
+    batt_val = _fmt(veh['nominal_kwh'], '{:.1f} kWh netto', dash='—')
+    if veh.get('gross_kwh'):
+        batt_val += f" / {veh['gross_kwh']:.1f} kWh brutto"
+    pdf.kv(t('cert.veh_battery', default='Akku (Nennkapazitaet)'), batt_val)
     pdf.kv(t('cert.veh_odometer', default='Tachostand'),
            f"{data['odometer_km']:,} km".replace(',', '.'))
-    pdf.kv(t('cert.veh_age', default='Alter'),
+    pdf.kv(t('cert.veh_first_reg', default='Erstzulassung'),
+           veh.get('first_registered_at') or t('cert.na', default='nicht hinterlegt'))
+    pdf.kv(t('cert.veh_age', default='Batteriealter'),
            _fmt(data['age_years'], '{} Jahre'))
     period = '—'
     if veh['acquired_at']:
@@ -512,6 +576,7 @@ def generate_certificate(vehicle_id):
     src = data['certified_source']
     src_label = {
         'measured': t('cert.src_measured', default='gemessen (Ladedaten, Coulomb-Zaehlung)'),
+        'obd': t('cert.src_obd', default='BMS-Wert per OBD (ELM327)'),
         'bms': t('cert.src_bms', default='BMS-Wert des Fahrzeugs'),
     }.get(src, t('cert.na', default='keine Datengrundlage'))
     pdf.cell(0, 6, pdf._clean(f"State of Health - {src_label}"),
@@ -551,6 +616,42 @@ def generate_certificate(vehicle_id):
     else:
         pdf.kv(t('cert.bms_soh', default='BMS-SoH (Fahrzeug)'),
                t('cert.bms_none', default='vom Fahrzeug nicht gemeldet'))
+
+    # ── OBD cell snapshot (direct BMS read) ──────────────────────────
+    obd = data.get('obd')
+    if obd:
+        pdf.section(t('cert.sec_obd', default='Zelldaten (OBD / ELM327, direkter BMS-Zugriff)'))
+        if obd.get('timestamp'):
+            ts_disp = obd['timestamp'].replace('T', ' ')[:16]
+            pdf.kv(t('cert.obd_time', default='Auslesezeitpunkt'), ts_disp)
+        if obd.get('soh_pct') is not None:
+            pdf.kv(t('cert.obd_soh', default='BMS-SoH (OBD-Register)'),
+                   f"{obd['soh_pct']:.1f} %")
+        if obd.get('cell_count'):
+            pdf.kv(t('cert.obd_cells', default='Zellen'), f"{obd['cell_count']}")
+        if obd.get('cell_min_v') is not None and obd.get('cell_max_v') is not None:
+            pdf.kv(t('cert.obd_cell_v', default='Zellspannung min / max / O'),
+                   f"{obd['cell_min_v']:.3f} / {obd['cell_max_v']:.3f}"
+                   + (f" / {obd['cell_avg_v']:.3f} V" if obd.get('cell_avg_v') is not None else " V"))
+        if obd.get('cell_delta_mv') is not None:
+            # Spread is THE imbalance indicator — small is healthy.
+            spread = obd['cell_delta_mv']
+            verdict = (t('cert.obd_spread_ok', default='sehr gut') if spread <= 30
+                       else t('cert.obd_spread_mid', default='ok') if spread <= 60
+                       else t('cert.obd_spread_bad', default='auffaellig'))
+            pdf.kv(t('cert.obd_spread', default='Zell-Spreizung (max-min)'),
+                   f"{spread:.0f} mV ({verdict})")
+        if obd.get('temp_min_c') is not None and obd.get('temp_max_c') is not None:
+            pdf.kv(t('cert.obd_temp', default='Batterietemperatur min / max'),
+                   f"{obd['temp_min_c']:.0f} / {obd['temp_max_c']:.0f} C"
+                   + (f" (O {obd['temp_avg_c']:.0f} C)" if obd.get('temp_avg_c') is not None else ""))
+        if obd.get('pack_voltage_v') is not None:
+            pv = f"{obd['pack_voltage_v']:.1f} V"
+            if obd.get('pack_current_a') is not None:
+                pv += f" @ {obd['pack_current_a']:+.1f} A"
+            pdf.kv(t('cert.obd_pack', default='Packspannung / -strom'), pv)
+        if obd.get('aux_battery_v') is not None:
+            pdf.kv(t('cert.obd_aux', default='12V-Batterie'), f"{obd['aux_battery_v']:.1f} V")
 
     # ── Benchmark ────────────────────────────────────────────────────
     if data['expected_soh'] is not None:
@@ -613,13 +714,24 @@ def generate_certificate(vehicle_id):
                 if basis['first_charge'] else ''))
     pdf.multi_cell(0, 4.2, pdf._clean(basis_line))
     pdf.ln(1)
-    limits = t(
-        'cert.limits',
-        default='Nicht enthalten: Einzelzellspannungen, Zellbalancing und '
-                'Zelltemperaturen - diese erfordern einen direkten BMS-/OBD-'
-                'Zellzugriff, den dieses Tracking nicht erfasst. Das Zertifikat '
-                'ist eine datenbasierte Eigenermittlung und ersetzt keine '
-                'akkreditierte Batterieprüfung (z. B. AVILOO, TUV).')
+    if data.get('obd'):
+        # Cell voltages / temperatures ARE included (read via OBD/ELM327).
+        limits = t(
+            'cert.limits_with_obd',
+            default='Zellspannungen, Zell-Spreizung und Batterietemperaturen '
+                    'wurden per OBD/ELM327 direkt aus dem BMS ausgelesen und sind '
+                    'oben aufgefuehrt. Das Zertifikat ist eine datenbasierte '
+                    'Eigenermittlung und ersetzt keine akkreditierte '
+                    'Batterieprüfung (z. B. AVILOO, TUV).')
+    else:
+        limits = t(
+            'cert.limits',
+            default='Nicht enthalten: Einzelzellspannungen, Zellbalancing und '
+                    'Zelltemperaturen - diese erfordern einen direkten BMS-/OBD-'
+                    'Zellzugriff. Mit einem ELM327-Dongle koennen diese Werte in '
+                    'der App ausgelesen und dann hier ergaenzt werden. Das '
+                    'Zertifikat ist eine datenbasierte Eigenermittlung und ersetzt '
+                    'keine akkreditierte Batterieprüfung (z. B. AVILOO, TUV).')
     pdf.multi_cell(0, 4.2, pdf._clean(limits))
 
     # ── Signature line ───────────────────────────────────────────────

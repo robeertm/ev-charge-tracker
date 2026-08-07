@@ -1,0 +1,389 @@
+{% extends "base.html" %}
+
+{% block title %}{{ t('obd.title', default='OBD Batterie-Auslesen') }} — EV Charge Tracker{% endblock %}
+
+{% block content %}
+<div class="container py-3" id="obdApp"
+     data-vid="{{ active.id if active else '' }}">
+  <div class="d-flex align-items-center justify-content-between flex-wrap gap-2 mb-3">
+    <h4 class="mb-0">
+      <i class="bi bi-usb-plug"></i> {{ t('obd.title', default='Batterie direkt auslesen (OBD / ELM327)') }}
+    </h4>
+    {% if vehicles %}
+    <form method="GET" action="/obd" class="d-flex align-items-center gap-2">
+      <label class="small text-muted mb-0">{{ t('obd.vehicle', default='Fahrzeug') }}</label>
+      <select class="form-select form-select-sm" name="vehicle" onchange="this.form.submit()" style="max-width:16rem">
+        {% for v in vehicles %}
+        <option value="{{ v.id }}" {% if active and v.id == active.id %}selected{% endif %}>
+          {{ v.name }}{% if v.brand %} · {{ v.brand }}{% endif %}{% if v.is_archived %} ({{ t('nav.archived') }}){% endif %}
+        </option>
+        {% endfor %}
+      </select>
+    </form>
+    {% endif %}
+  </div>
+
+  {% if not active %}
+    <div class="alert alert-warning">{{ t('obd.no_vehicle', default='Lege zuerst ein Fahrzeug an (Einstellungen → Fahrzeuge).') }}</div>
+  {% else %}
+
+  <div class="row g-3">
+    <div class="col-lg-5">
+      <div class="card">
+        <div class="card-body">
+          <h6 class="card-title">{{ t('obd.connect_title', default='Dongle verbinden') }}</h6>
+          <p class="small text-muted mb-2">
+            {{ t('obd.connect_hint', default='ELM327 einstecken, verbinden, auslesen. Funktioniert in Chrome/Edge (Desktop & Android). USB ist am zuverlässigsten; Bluetooth braucht einen kompatiblen BLE-Dongle.') }}
+          </p>
+          <div class="mb-2">
+            <label class="form-label small mb-1">{{ t('obd.profile', default='Auslese-Profil') }}</label>
+            <select class="form-select form-select-sm" id="obdProfile"></select>
+          </div>
+          <div class="row g-2 mb-2">
+            <div class="col-6">
+              <label class="form-label small mb-1">{{ t('obd.baud', default='USB-Baudrate') }}</label>
+              <select class="form-select form-select-sm" id="obdBaud">
+                <option value="38400">38400</option>
+                <option value="9600">9600</option>
+                <option value="115200">115200</option>
+                <option value="500000">500000</option>
+              </select>
+            </div>
+            <div class="col-6">
+              <label class="form-label small mb-1">{{ t('obd.odometer', default='km-Stand (optional)') }}</label>
+              <input type="number" class="form-control form-control-sm" id="obdOdo" min="0" step="1">
+            </div>
+          </div>
+          <div class="d-grid gap-2">
+            <button class="btn btn-primary" id="btnSerial">
+              <i class="bi bi-usb-symbol"></i> {{ t('obd.btn_usb', default='Per USB verbinden & auslesen') }}
+            </button>
+            <button class="btn btn-outline-primary" id="btnBle">
+              <i class="bi bi-bluetooth"></i> {{ t('obd.btn_ble', default='Per Bluetooth verbinden & auslesen') }}
+            </button>
+          </div>
+          <div id="obdUnsupported" class="alert alert-warning small mt-2 d-none">
+            {{ t('obd.unsupported', default='Dieser Browser unterstützt weder Web Serial noch Web Bluetooth. Nutze Chrome oder Edge (Desktop/Android). Auf iPhone/iPad ist der Zugriff leider nicht möglich.') }}
+          </div>
+          <div class="mt-3">
+            <div class="progress" style="height:.5rem" id="obdProgWrap">
+              <div class="progress-bar" id="obdProg" style="width:0%"></div>
+            </div>
+            <div class="small text-muted mt-1" id="obdStatus">{{ t('obd.idle', default='Bereit.') }}</div>
+          </div>
+          <details class="mt-2">
+            <summary class="small text-muted">{{ t('obd.rawlog', default='Rohdaten-Protokoll') }}</summary>
+            <pre class="small bg-body-tertiary p-2 mt-1 mb-0" id="obdLog" style="max-height:14rem; overflow:auto; white-space:pre-wrap"></pre>
+          </details>
+        </div>
+      </div>
+    </div>
+
+    <div class="col-lg-7">
+      <div class="card">
+        <div class="card-body">
+          <h6 class="card-title d-flex justify-content-between">
+            <span>{{ t('obd.result_title', default='Auslese-Ergebnis') }}</span>
+            <span class="small text-muted" id="obdResultTime"></span>
+          </h6>
+          <div id="obdResult" class="row g-2">
+            <div class="col-12 text-muted small" id="obdResultEmpty">
+              {% if last %}{{ t('obd.last_shown', default='Letzte gespeicherte Messung wird angezeigt.') }}{% else %}{{ t('obd.result_empty', default='Noch keine Messung. Verbinde den Dongle und lies aus.') }}{% endif %}
+            </div>
+          </div>
+          <div class="mt-3">
+            <a href="/vehicles/{{ active.id }}/certificate.pdf" class="btn btn-sm btn-outline-dark">
+              <i class="bi bi-patch-check"></i> {{ t('obd.to_cert', default='Ins Batteriezertifikat übernehmen (PDF)') }}
+            </a>
+            <span class="small text-muted ms-1">{{ t('obd.cert_hint', default='Die letzte Messung fließt automatisch ins Zertifikat ein.') }}</span>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+  {% endif %}
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+// ── OBD / ELM327 in-browser reader (v3.0.74) ─────────────────────────
+// The browser is a dumb transport: it initialises the ELM327, sends each
+// PID the server told it to, and posts the raw text back. The server owns
+// all ISO-TP reassembly + byte decoding (services/vehicle/obd_decode.py).
+(function () {
+  const app = document.getElementById('obdApp');
+  if (!app) return;
+  const VID = app.dataset.vid;
+  if (!VID) return;
+
+  const T = {
+    fields: {{ {
+      'connecting': t('obd.st_connecting', default='Verbinde…'),
+      'init': t('obd.st_init', default='Initialisiere ELM327…'),
+      'reading': t('obd.st_reading', default='Lese PID'),
+      'saving': t('obd.st_saving', default='Speichere…'),
+      'done': t('obd.st_done', default='Fertig.'),
+      'failed': t('obd.st_failed', default='Fehlgeschlagen'),
+      'no_data': t('obd.st_no_data', default='Keine auswertbaren Daten empfangen.'),
+    }|tojson }}
+  };
+
+  const logEl = document.getElementById('obdLog');
+  const statusEl = document.getElementById('obdStatus');
+  const progEl = document.getElementById('obdProg');
+  const profileSel = document.getElementById('obdProfile');
+  const resultEl = document.getElementById('obdResult');
+  const emptyEl = document.getElementById('obdResultEmpty');
+  const timeEl = document.getElementById('obdResultTime');
+
+  function log(msg) {
+    const t = new Date().toLocaleTimeString();
+    logEl.textContent += `[${t}] ${msg}\n`;
+    logEl.scrollTop = logEl.scrollHeight;
+  }
+  function status(msg) { statusEl.textContent = msg; }
+  function progress(p) { progEl.style.width = Math.round(p * 100) + '%'; }
+
+  // Feature detection
+  const hasSerial = 'serial' in navigator;
+  const hasBle = 'bluetooth' in navigator;
+  if (!hasSerial) document.getElementById('btnSerial').disabled = true;
+  if (!hasBle) document.getElementById('btnBle').disabled = true;
+  if (!hasSerial && !hasBle) document.getElementById('obdUnsupported').classList.remove('d-none');
+
+  // ── Load available profiles ────────────────────────────────────────
+  let PROFILE = null;
+  fetch(`/api/obd/profile/${VID}`).then(r => r.json()).then(p => {
+    PROFILE = p;
+    profileSel.innerHTML = '';
+    (p.available || []).forEach(a => {
+      const o = document.createElement('option');
+      o.value = a.key; o.textContent = a.label;
+      if (a.key === p.profile) o.selected = true;
+      profileSel.appendChild(o);
+    });
+  }).catch(() => { status('Profil konnte nicht geladen werden.'); });
+
+  async function profileFor(key) {
+    const r = await fetch(`/api/obd/profile/${VID}?profile=${encodeURIComponent(key)}`);
+    return r.json();
+  }
+
+  // ── Transport abstraction ──────────────────────────────────────────
+  // Each transport exposes: write(str), readUntil(prompt, timeout), close().
+  function makeSerialTransport(port, baud) {
+    let reader, writer, decoder, encoder;
+    let buffer = '';
+    return {
+      async open() {
+        await port.open({ baudRate: baud });
+        writer = port.writable.getWriter();
+        reader = port.readable.getReader();
+        decoder = new TextDecoder();
+        encoder = new TextEncoder();
+        // Background pump
+        (async () => {
+          try {
+            while (true) {
+              const { value, done } = await reader.read();
+              if (done) break;
+              if (value) buffer += decoder.decode(value);
+            }
+          } catch (e) { /* closed */ }
+        })();
+      },
+      async write(str) { await writer.write(encoder.encode(str)); },
+      async readUntil(prompt, timeout) {
+        const start = Date.now();
+        while (Date.now() - start < timeout) {
+          if (buffer.includes(prompt)) {
+            const out = buffer.slice(0, buffer.indexOf(prompt));
+            buffer = buffer.slice(buffer.indexOf(prompt) + 1);
+            return out;
+          }
+          await new Promise(r => setTimeout(r, 20));
+        }
+        const out = buffer; buffer = '';
+        return out;
+      },
+      resetBuffer() { buffer = ''; },
+      async close() {
+        try { await reader.cancel(); } catch (e) {}
+        try { reader.releaseLock(); } catch (e) {}
+        try { await writer.close(); } catch (e) {}
+        try { await port.close(); } catch (e) {}
+      },
+    };
+  }
+
+  // Common BLE ELM327 clone service/characteristics (fff0 family).
+  const BLE_SERVICES = [
+    0xFFF0,
+    '0000fff0-0000-1000-8000-00805f9b34fb',
+    '0000ffe0-0000-1000-8000-00805f9b34fb',
+    '18f0e400-0000-1000-8000-00805f9b34fb',
+  ];
+  function makeBleTransport(device) {
+    let writeChar, buffer = '';
+    return {
+      async open() {
+        const server = await device.gatt.connect();
+        let service, chars = [];
+        for (const su of BLE_SERVICES) {
+          try { service = await server.getPrimaryService(su); } catch (e) { continue; }
+          if (service) { chars = await service.getCharacteristics(); break; }
+        }
+        if (!service) throw new Error('Kein kompatibler BLE-Dienst gefunden');
+        const dec = new TextDecoder();
+        for (const c of chars) {
+          if (c.properties.notify || c.properties.indicate) {
+            await c.startNotifications();
+            c.addEventListener('characteristicvaluechanged', ev => {
+              buffer += dec.decode(ev.target.value);
+            });
+          }
+          if (c.properties.write || c.properties.writeWithoutResponse) writeChar = c;
+        }
+        if (!writeChar) throw new Error('Keine beschreibbare Charakteristik');
+      },
+      async write(str) {
+        const enc = new TextEncoder().encode(str);
+        if (writeChar.properties.writeWithoutResponse && writeChar.writeValueWithoutResponse)
+          await writeChar.writeValueWithoutResponse(enc);
+        else await writeChar.writeValue(enc);
+      },
+      async readUntil(prompt, timeout) {
+        const start = Date.now();
+        while (Date.now() - start < timeout) {
+          if (buffer.includes(prompt)) {
+            const out = buffer.slice(0, buffer.indexOf(prompt));
+            buffer = buffer.slice(buffer.indexOf(prompt) + 1);
+            return out;
+          }
+          await new Promise(r => setTimeout(r, 20));
+        }
+        const out = buffer; buffer = '';
+        return out;
+      },
+      resetBuffer() { buffer = ''; },
+      async close() { try { device.gatt.disconnect(); } catch (e) {} },
+    };
+  }
+
+  // ── ELM327 command helper ──────────────────────────────────────────
+  async function cmd(tr, command, timeout) {
+    tr.resetBuffer();
+    await tr.write(command + '\r');
+    const resp = await tr.readUntil('>', timeout || 3000);
+    log(command + '  ->  ' + resp.replace(/\r/g, ' ').trim());
+    return resp;
+  }
+
+  // ── Full read sequence ─────────────────────────────────────────────
+  async function runSequence(tr) {
+    const key = profileSel.value;
+    const prof = await profileFor(key);
+    status(T.fields.init);
+    for (const line of prof.init) {
+      // ATZ resets the chip; give it more time.
+      await cmd(tr, line, line.toUpperCase() === 'ATZ' ? 4000 : 2500);
+    }
+    await cmd(tr, 'ATSH' + prof.header, 2500);
+    const frames = {};
+    const pids = prof.pids;
+    for (let i = 0; i < pids.length; i++) {
+      status(`${T.fields.reading} ${pids[i]} (${i + 1}/${pids.length})`);
+      progress((i + 1) / (pids.length + 1));
+      frames[pids[i]] = await cmd(tr, pids[i], 4000);
+    }
+    status(T.fields.saving);
+    progress(0.98);
+    const odo = document.getElementById('obdOdo').value;
+    const body = { profile: key, frames };
+    if (odo) body.odometer_km = parseInt(odo, 10);
+    body.source = tr._kind || 'elm327';
+    const res = await fetch(`/api/vehicles/${VID}/obd/ingest`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    }).then(r => r.json());
+    progress(1);
+    if (!res.ok) { status(T.fields.failed + ': ' + (res.error || '')); return; }
+    renderResult(res);
+    status(T.fields.done);
+  }
+
+  function card(label, value, sub, cls) {
+    if (value == null) return '';
+    return `<div class="col-6 col-md-4">
+      <div class="border rounded p-2 h-100">
+        <div class="small text-muted">${label}</div>
+        <div class="fs-5 fw-semibold ${cls || ''}">${value}</div>
+        ${sub ? `<div class="small text-muted">${sub}</div>` : ''}
+      </div></div>`;
+  }
+
+  function renderResult(r) {
+    if (emptyEl) emptyEl.remove();
+    if (timeEl && r.timestamp) timeEl.textContent = new Date(r.timestamp).toLocaleString();
+    const fmt = (v, d, u) => v == null ? null : (Number(v).toFixed(d) + (u || ''));
+    let deltaCls = '';
+    if (r.cell_delta_mv != null) deltaCls = r.cell_delta_mv <= 30 ? 'text-success'
+      : r.cell_delta_mv <= 60 ? 'text-warning' : 'text-danger';
+    let html = '';
+    html += card('SoH (BMS)', fmt(r.soh_pct, 1, ' %'), 'State of Health', 'text-primary');
+    html += card('SoC (BMS)', fmt(r.soc_bms_pct, 1, ' %'));
+    html += card('Zell-Spreizung', fmt(r.cell_delta_mv, 0, ' mV'),
+                 (r.cell_min_v != null ? `${fmt(r.cell_min_v,3,'')}–${fmt(r.cell_max_v,3,' V')}` : ''), deltaCls);
+    html += card('Zellen', r.cell_count != null ? r.cell_count : null,
+                 r.cell_avg_v != null ? `Ø ${fmt(r.cell_avg_v,3,' V')}` : '');
+    html += card('Temperatur', (r.temp_min_c != null ? `${fmt(r.temp_min_c,0,'')}–${fmt(r.temp_max_c,0,' °C')}` : null),
+                 r.temp_avg_c != null ? `Ø ${fmt(r.temp_avg_c,0,' °C')}` : '');
+    html += card('Pack', fmt(r.pack_voltage_v, 1, ' V'),
+                 r.pack_current_a != null ? `${fmt(r.pack_current_a,1,' A')}` : '');
+    html += card('12V-Batterie', fmt(r.aux_battery_v, 1, ' V'));
+    resultEl.innerHTML = html || `<div class="col-12 text-warning small">${T.fields.no_data}</div>`;
+  }
+
+  {% if last %}
+  renderResult({{ last|tojson }});
+  {% endif %}
+
+  // ── Button handlers ────────────────────────────────────────────────
+  async function withGuard(fn) {
+    document.getElementById('btnSerial').disabled = true;
+    document.getElementById('btnBle').disabled = true;
+    logEl.textContent = '';
+    progress(0);
+    try { await fn(); }
+    catch (e) { log('FEHLER: ' + (e && e.message || e)); status(T.fields.failed + ': ' + (e.message || e)); }
+    finally {
+      if (hasSerial) document.getElementById('btnSerial').disabled = false;
+      if (hasBle) document.getElementById('btnBle').disabled = false;
+    }
+  }
+
+  document.getElementById('btnSerial').addEventListener('click', () => withGuard(async () => {
+    status(T.fields.connecting);
+    const port = await navigator.serial.requestPort();
+    const tr = makeSerialTransport(port, parseInt(document.getElementById('obdBaud').value, 10));
+    tr._kind = 'elm327-usb';
+    await tr.open();
+    try { await runSequence(tr); }
+    finally { await tr.close(); }
+  }));
+
+  document.getElementById('btnBle').addEventListener('click', () => withGuard(async () => {
+    status(T.fields.connecting);
+    const device = await navigator.bluetooth.requestDevice({
+      acceptAllDevices: true, optionalServices: BLE_SERVICES,
+    });
+    const tr = makeBleTransport(device);
+    tr._kind = 'elm327-ble';
+    await tr.open();
+    try { await runSequence(tr); }
+    finally { await tr.close(); }
+  }));
+})();
+</script>
+{% endblock %}
