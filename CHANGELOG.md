@@ -1,5 +1,48 @@
 # Changelog
 
+## v3.0.73 (2026-08-07)
+
+### Battery-health certificate (AVILOO-style, self-generated)
+
+When Robert sells or archives a vehicle he wanted a self-created battery
+certificate — like an independent AVILOO test — that he can hand a buyer,
+runnable at any time. AVILOO's Premium test measures usable capacity by
+integrating the energy delivered over a full 100→10 % discharge and
+dividing by the pack's nominal capacity (`SoH = usable_now / nominal`);
+its Flash test just reads the BMS' own SoH. We already log *thousands* of
+charge sessions, so we reconstruct the same measurement without a lab
+discharge: every charge with a wide-enough SoC window is a partial
+capacity sample, and the median over many sessions cancels the noise.
+
+- **`services/battery_cert_service.py`** — new service.
+  - `_measured_capacity()`: coulomb/energy counting per charge —
+    `net_kWh / (SoC_window/100)` extrapolated to a full pack, where
+    `net = kWh_loaded − loss_kWh`. Only counts windows ≥ 25 % SoC (small
+    windows amplify the ±1 % SoC quantisation into huge capacity error),
+    rejects per-session capacities outside 40–115 % of nominal, and takes
+    the **median** so outliers don't move the number. Splits early-vs-
+    recent thirds for a degradation trend.
+  - `compute_battery_health()`: assembles the certified SoH (measured
+    when ≥ 3 samples, else the baseline-scaled BMS SoH), an A–F grade,
+    the age/mileage benchmark vs the ~2.3 %/yr fleet mean, warranty-floor
+    headroom (70 %), charging-stress factors (DC share, equivalent full
+    cycles, deepest logged discharge, avg window) and the data basis.
+    Degrades gracefully — sparse cars still get a certificate that marks
+    SoH "not determinable".
+  - `generate_certificate()`: renders a signed-style FPDF certificate
+    (grade badge, both SoH signals, benchmark, usage, SoH-trend chart,
+    methodology + honest limitations note — cell-level voltages/balancing
+    are explicitly out of scope as they need direct BMS/OBD cell access).
+- **`app.py`** — `GET /vehicles/<id>/certificate.pdf` streams the PDF for
+  any vehicle (active *or* archived), available on demand at any time.
+- **`templates/settings.html`** — a certificate (badge) button on every
+  row of the Fahrzeuge table.
+- **`translations/de.json`, `en.json`** — full `cert.*` string set (other
+  languages fall back to German).
+- **`tests/test_battery_cert.py`** — seeds an in-memory fleet and verifies
+  the coulomb-count math, the narrow-window/outlier filters, the grade,
+  PDF rendering and the sparse-data fallback.
+
 ## v3.0.72 (2026-08-07)
 
 ### Add XPENG vehicle brand via the Enode aggregator API

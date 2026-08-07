@@ -144,6 +144,10 @@
                                     <button type="button" class="btn btn-sm btn-outline-primary" data-edit-vehicle='{{ v.to_dict()|tojson }}'>
                                         <i class="bi bi-pencil"></i>
                                     </button>
+                                    <a href="/vehicles/{{ v.id }}/certificate.pdf" class="btn btn-sm btn-outline-dark"
+                                       title="{{ t('set.fleet_certificate', default='Batterie-Gesundheitszertifikat (PDF)') }}">
+                                        <i class="bi bi-patch-check"></i>
+                                    </a>
                                     <form method="POST" action="/vehicles/{{ v.id }}/archive" class="d-inline">
                                         <button type="submit" class="btn btn-sm btn-outline-secondary"
                                                 title="{{ t('set.fleet_archive') if not v.is_archived else t('set.fleet_restore') }}">

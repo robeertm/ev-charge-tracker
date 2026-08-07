@@ -2409,6 +2409,36 @@ def register_routes(app):
         flash(t('flash.vehicle_archived' if v.is_archived else 'flash.vehicle_restored'), 'success')
         return redirect('/settings#sec-fleet')
 
+    @app.route('/vehicles/<int:vid>/certificate.pdf', methods=['GET'])
+    def vehicles_certificate(vid):
+        """Generate a self-created battery-health certificate (AVILOO-style)
+        for one vehicle from its own charge/sync history. Available any time
+        — not just at archive/sale — so Robert can print a current SoH proof
+        whenever a buyer asks."""
+        from models.database import Vehicle
+        v = Vehicle.query.get_or_404(vid)
+        from services.battery_cert_service import generate_certificate
+        try:
+            pdf_bytes = generate_certificate(vid)
+        except Exception as e:
+            app.logger.exception('battery certificate generation failed')
+            flash(t('flash.cert_failed', name=v.name, error=str(e),
+                    default='Zertifikat für {name} fehlgeschlagen: {error}'), 'danger')
+            return redirect('/settings#sec-fleet')
+        if not pdf_bytes:
+            flash(t('flash.cert_no_data', name=v.name,
+                    default='Für {name} liegen keine auswertbaren Batteriedaten vor.'),
+                  'warning')
+            return redirect('/settings#sec-fleet')
+        safe_name = ''.join(ch if ch.isalnum() else '_' for ch in (v.name or 'EV'))
+        filename = f'Batteriezertifikat_{safe_name}_{date.today().strftime("%Y%m%d")}.pdf'
+        return send_file(
+            io.BytesIO(pdf_bytes),
+            mimetype='application/pdf',
+            as_attachment=True,
+            download_name=filename,
+        )
+
     @app.route('/vehicles/<int:vid>/test', methods=['POST'])
     def vehicles_test(vid):
         """Probe a vehicle's API credentials without persisting anything.
