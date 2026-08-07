@@ -1,5 +1,41 @@
 # Changelog
 
+## v3.0.76 (2026-08-07)
+
+### Alle 6 Sprachen auf volle Parität (Standing Order „alles übersetzen")
+
+Robert: „alles übersetzen und das immer machen — standing order". Bisher
+wurden nur **de/en** auf voller Parität gehalten; **fr/es/it/nl** liefen als
+„best-effort" mit einem historischen Rückstand von je **293 Keys**, die per
+Deutsch-Fallback von `t()` überbrückt wurden. Das ist ab jetzt keine gültige
+Politik mehr: **alle 6 Sprachen werden vollständig übersetzt und auf Parität
+gehalten**.
+
+**Was gemacht wurde:**
+- **293 fehlende Keys** in **fr, es, it, nl** vollständig übersetzt
+  (dash/edit/err/flash/input/maint/msg/raw/report/set/trips) — betrifft u.a.
+  den kompletten **Bericht**, den **CSV-Import-Assistenten** (Vorschau,
+  Modi, Warnungen), die **Fahrten-/Stopp-Bearbeitung**, die
+  **Ladeanbieter-Verwaltung**, **Fahrzeug-Rohdaten** und die Standort-Picker.
+- Zwei verwaiste Wizard-Keys (`wiz.step_1_of_2`, `wiz.step_2_of_2`) aus einem
+  früheren 2-Schritt-Assistenten entfernt (in de/en längst weg, nirgends
+  mehr referenziert).
+- **Ergebnis:** de, en, fr, es, it, nl liegen jetzt bei **je 1251 Keys** —
+  identische Key-Mengen, **null** fehlende Keys über alle Sprachen.
+
+**Nebenbefund + Fix (Platzhalter-Bug):** Beim Parity-Check fielen drei
+vorbestehende Platzhalter-Divergenzen in fr/es/it/nl auf:
+- `flash.vehicle_test_ok` enthielt fälschlich `{info}`, obwohl der Aufrufer
+  (`app.py:2595`) nur `name=` übergibt → `str.format()` warf `KeyError`, der
+  String wurde unformatiert mit sichtbarem `{info}` angezeigt. **Behoben.**
+- `flash.vehicle_sync_no_data` (fehlendes `{name}`) und
+  `flash.vehicle_sync_ok` (fehlendes `{summary}`) verloren still ihre
+  Werte → Platzhalter wieder aufgenommen.
+
+**Politik-Update (gilt fortan):** Neue/geänderte user-facing Strings werden
+in **allen 6 Sprachen** ergänzt, nicht nur de/en. Inline-`default=` bleibt
+nur Notnagel, kein Ersatz für echte Keys.
+
 ## v3.0.75 (2026-08-07)
 
 ### i18n-Nachzug für Zertifikat + OBD (Roberts Rückfrage)
