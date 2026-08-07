@@ -181,6 +181,26 @@ MATRIX = {
         'climate':         'no',
         'tires':           'no',
     },
+
+    # XPENG — via the Enode aggregator (no native XPENG SDK exists).
+    # Enode normalises battery/charge/odometer/location across brands, so
+    # location IS available here (unlike most non-Bluelink connectors).
+    # 12V, SoH, regen, consumption, doors and tires aren't in Enode's
+    # vehicle schema. charge_eta comes from chargeState.chargeTimeRemaining
+    # but isn't populated by every vendor → 'partial'.
+    'xpeng': {
+        'soc_range_odo':   'yes',
+        'live_status':     'yes',
+        'location':        'yes',
+        'battery_12v':     'no',
+        'soh':             'no',
+        'regenerated':     'no',
+        'consumption_30d': 'no',
+        'doors_locks':     'no',
+        'climate':         'no',
+        'tires':           'no',
+        'charge_eta':      'partial',
+    },
 }
 
 

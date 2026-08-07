@@ -1,6 +1,6 @@
 # EV Charge Tracker
 
-> **Self-hosted dashboard for tracking your electric vehicle charges** — costs, kWh, CO2, recuperation, charging losses, and live vehicle status. Multi-vehicle / fleet support, connects to 14 EV brands via API. Available in 6 languages.
+> **Self-hosted dashboard for tracking your electric vehicle charges** — costs, kWh, CO2, recuperation, charging losses, and live vehicle status. Multi-vehicle / fleet support, connects to 15 EV brands via API. Available in 6 languages.
 
 [![Latest Release](https://img.shields.io/github/v/release/robeertm/ev-charge-tracker)](https://github.com/robeertm/ev-charge-tracker/releases)
 [![License](https://img.shields.io/badge/license-MIT-blue)](LICENSE)
@@ -47,7 +47,7 @@ Built for EV owners who want **full control over their charging data** — runs 
 
 ### Settings — Vehicle API
 ![Settings](docs/screenshots/settings.png)
-*Vehicle API auto-sync with configurable smart window (default 06:00 – 22:00, every 10 min). 14 supported brands, GHG quota, ENTSO-E, HTTPS, PV system — all configurable from the UI.*
+*Vehicle API auto-sync with configurable smart window (default 06:00 – 22:00, every 10 min). 15 supported brands, GHG quota, ENTSO-E, HTTPS, PV system — all configurable from the UI.*
 
 ---
 
@@ -113,7 +113,7 @@ Built for EV owners who want **full control over their charging data** — runs 
 - **THG quota reminder** — banner Jan 1 - Mar 31 if no quota is logged for the previous year
 
 ### Integrations
-- **14 vehicle brands** via API (see table below) — auto-fetch SoC, odometer, charging status
+- **15 vehicle brands** via API (see table below) — auto-fetch SoC, odometer, charging status
 - **Brand feature matrix** in Settings — 10-item green/yellow/red grid per brand (SoC, GPS, 12V, SoH, recuperation, 30-day consumption, doors, climate, tires, live status). No more "wait, why isn't my car showing X" surprises.
 - **ENTSO-E integration** — fetch hourly CO2 grid intensity for Germany, auto-backfill missing values
 - **Open-Meteo** — daily mean temperatures for the range calculator and weather correlation, with DB cache (no key, no rate limits)
@@ -203,10 +203,13 @@ Connect your car to automatically fetch SoC, odometer, and charging status. All 
 | **MG (SAIC)** | `saic-ismart-client-ng` | Username / Password |
 | **Smart #1/#3** | `pySmartHashtag` | Username / Password |
 | **Porsche** | `pyporscheconnectapi` | Username / Password |
+| **XPENG** | *(none — built-in)* | Enode Client ID / Secret |
 
 After installing, configure credentials in Settings > Vehicle API. Optional background sync polls your vehicle at a configurable interval (1-12h).
 
 **Kia/Hyundai note:** Password login is blocked by reCAPTCHA. Use the "Fetch Token" button in settings — opens Chrome with mobile user-agent for the OAuth flow. Token is valid for ~1 year.
+
+**XPENG note:** XPENG has no public brand SDK, so it connects through the [Enode](https://enode.com) aggregator (the same route the community Home Assistant integrations use). Create an Enode app (Client ID + Secret), link your XPENG account once via Enode's hosted flow, then enter the keys under Settings > Vehicle API — brand *XPENG*, Client ID as username, Client Secret as password. Needs no extra package (rides on `requests`). Provides SoC, range, odometer, charging status and location.
 
 ---
 
@@ -279,7 +282,7 @@ Switchable from Settings > Language:
 - **Frontend:** Bootstrap 5.3 (with dark mode), Chart.js
 - **PDF:** matplotlib + fpdf2
 - **Data:** ENTSO-E Transparency Platform API
-- **Vehicle APIs:** hyundai-kia-connect-api, teslapy, renault-api, pypolestar, saic-ismart-client-ng, pySmartHashtag, pyporscheconnectapi, carconnectivity
+- **Vehicle APIs:** hyundai-kia-connect-api, teslapy, renault-api, pypolestar, saic-ismart-client-ng, pySmartHashtag, pyporscheconnectapi, carconnectivity; XPENG via the Enode aggregator (REST over `requests`, no extra package)
 
 ---
 

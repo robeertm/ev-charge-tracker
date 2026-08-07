@@ -21,3 +21,5 @@ cryptography>=42.0.0  # for self-signed HTTPS cert generation
 # saic-ismart-client-ng>=0.5.0   # MG (SAIC iSMART)
 # pySmartHashtag>=0.1.0           # Smart #1 / #3
 # pyporscheconnectapi>=0.1.0      # Porsche Connect
+# XPENG needs NO extra package — its connector rides on `requests` (above)
+# and talks to the Enode aggregator REST API (see connector_xpeng.py).
