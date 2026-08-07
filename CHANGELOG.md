@@ -1,5 +1,18 @@
 # Changelog
 
+## v3.0.72 (2026-08-07)
+
+### Add XPENG vehicle brand via the Enode aggregator API
+
+XPENG ships no public brand SDK (its open platform is geo-restricted and
+account-gated), so — like the community Home Assistant integrations and
+Homey's XPENG Car Manager — this connects through the Enode aggregator's
+documented OAuth2 + REST API.
+- services/vehicle/connector_xpeng.py: new XpengConnector. OAuth2
+  client_credentials against Enode (HTTP Basic with the app keys) yields a
+  Bearer token, cached module-side until ~60 s before expiry, then
+  GET /vehicles enriched with chargeState/odometer/location/information.
+
 ## v3.0.71 (2026-08-06)
 
 ### Report: Zusatzkosten tile sub-line no longer shows cryptic "S €… / B €…"
