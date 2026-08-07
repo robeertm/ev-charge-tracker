@@ -1,5 +1,42 @@
 # Changelog
 
+## v3.0.75 (2026-08-07)
+
+### i18n-Nachzug für Zertifikat + OBD (Roberts Rückfrage)
+
+Robert fragte, ob bei den letzten Änderungen (v3.0.73 Batteriezertifikat,
+v3.0.74 OBD/ELM327 + Netto/Brutto) an **i18n** gedacht wurde. Antwort: nur
+teilweise — der Nachzug ist jetzt vollständig.
+
+**Was gefehlt hat:**
+- Die komplette **OBD-Seite** (`obd.html`) hatte alle Texte nur als
+  deutsche `default=`-Inline-Fallbacks — es gab **keine** `obd.*`-Keys in
+  einer einzigen Sprachdatei. Englische (und alle anderen) Nutzer sahen
+  Deutsch.
+- Im JavaScript der OBD-Seite waren die **Ergebnis-Kachel-Labels**
+  („Zell-Spreizung", „Zellen", „Temperatur", „12V-Batterie" …) sowie zwei
+  Status-/Log-Strings **hart auf Deutsch** verdrahtet, komplett an `t()`
+  vorbei.
+- **7 Keys** (`nav.obd`, `set.fleet_field_battery_gross`, …) waren in
+  `de.json`, fehlten aber in `en.json`.
+
+**Was jetzt gemacht ist:**
+- Alle harten JS-Labels der OBD-Seite laufen über ein `t()`-gespeistes
+  `T.res`/`T.fields`-Objekt (neue Keys `obd.res_*`, `obd.profile_load_failed`,
+  `obd.log_error`).
+- **35 `obd.*`-Keys** (Seite + Ergebnis-Labels) in `de.json` **und**
+  `en.json` ergänzt; die 7 fehlenden `set.*`/`nav.obd`-Keys in `en.json`
+  nachgezogen → **de und en wieder bei voller Parität** (je 1251 Keys).
+- Alle **101 Keys der letzten Änderungen** (`cert.*`, `flash.cert_*`,
+  `obd.*`, neue `set.fleet_*`) mit sauberen Übersetzungen nach **es, fr, it,
+  nl** propagiert — inkl. korrekt erhaltener Platzhalter (`{n}`, `{name}`,
+  `{e:.1f}` …) und Fachbegriffe (SoH, BMS, kWh, CO₂, AVILOO, TÜV).
+
+**Hinweis:** es/fr/it/nl haben einen **vorbestehenden** Rückstand von ~291
+Keys (nicht aus diesen Änderungen); dafür greift weiterhin der deutsche
+Fallback von `t()`. Die Backend-Ergänzungen (XPENG-Connector, Marken-Namen)
+brauchen kein i18n.
+
 ## v3.0.74 (2026-08-07)
 
 ### Erstzulassung + Netto/Brutto-Kapazität, und OBD/ELM327-Auslesen im Browser

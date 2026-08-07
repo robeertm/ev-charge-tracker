@@ -126,6 +126,18 @@
       'done': t('obd.st_done', default='Fertig.'),
       'failed': t('obd.st_failed', default='Fehlgeschlagen'),
       'no_data': t('obd.st_no_data', default='Keine auswertbaren Daten empfangen.'),
+      'profile_load_failed': t('obd.profile_load_failed', default='Profil konnte nicht geladen werden.'),
+      'error': t('obd.log_error', default='FEHLER'),
+    }|tojson }},
+    res: {{ {
+      'soh': t('obd.res_soh', default='SoH (BMS)'),
+      'soh_sub': t('obd.res_soh_sub', default='State of Health'),
+      'soc': t('obd.res_soc', default='SoC (BMS)'),
+      'spread': t('obd.res_spread', default='Zell-Spreizung'),
+      'cells': t('obd.res_cells', default='Zellen'),
+      'temp': t('obd.res_temp', default='Temperatur'),
+      'pack': t('obd.res_pack', default='Pack'),
+      'aux': t('obd.res_aux', default='12V-Batterie'),
     }|tojson }}
   };
 
@@ -163,7 +175,7 @@
       if (a.key === p.profile) o.selected = true;
       profileSel.appendChild(o);
     });
-  }).catch(() => { status('Profil konnte nicht geladen werden.'); });
+  }).catch(() => { status(T.fields.profile_load_failed); });
 
   async function profileFor(key) {
     const r = await fetch(`/api/obd/profile/${VID}?profile=${encodeURIComponent(key)}`);
@@ -331,17 +343,17 @@
     if (r.cell_delta_mv != null) deltaCls = r.cell_delta_mv <= 30 ? 'text-success'
       : r.cell_delta_mv <= 60 ? 'text-warning' : 'text-danger';
     let html = '';
-    html += card('SoH (BMS)', fmt(r.soh_pct, 1, ' %'), 'State of Health', 'text-primary');
-    html += card('SoC (BMS)', fmt(r.soc_bms_pct, 1, ' %'));
-    html += card('Zell-Spreizung', fmt(r.cell_delta_mv, 0, ' mV'),
+    html += card(T.res.soh, fmt(r.soh_pct, 1, ' %'), T.res.soh_sub, 'text-primary');
+    html += card(T.res.soc, fmt(r.soc_bms_pct, 1, ' %'));
+    html += card(T.res.spread, fmt(r.cell_delta_mv, 0, ' mV'),
                  (r.cell_min_v != null ? `${fmt(r.cell_min_v,3,'')}–${fmt(r.cell_max_v,3,' V')}` : ''), deltaCls);
-    html += card('Zellen', r.cell_count != null ? r.cell_count : null,
+    html += card(T.res.cells, r.cell_count != null ? r.cell_count : null,
                  r.cell_avg_v != null ? `Ø ${fmt(r.cell_avg_v,3,' V')}` : '');
-    html += card('Temperatur', (r.temp_min_c != null ? `${fmt(r.temp_min_c,0,'')}–${fmt(r.temp_max_c,0,' °C')}` : null),
+    html += card(T.res.temp, (r.temp_min_c != null ? `${fmt(r.temp_min_c,0,'')}–${fmt(r.temp_max_c,0,' °C')}` : null),
                  r.temp_avg_c != null ? `Ø ${fmt(r.temp_avg_c,0,' °C')}` : '');
-    html += card('Pack', fmt(r.pack_voltage_v, 1, ' V'),
+    html += card(T.res.pack, fmt(r.pack_voltage_v, 1, ' V'),
                  r.pack_current_a != null ? `${fmt(r.pack_current_a,1,' A')}` : '');
-    html += card('12V-Batterie', fmt(r.aux_battery_v, 1, ' V'));
+    html += card(T.res.aux, fmt(r.aux_battery_v, 1, ' V'));
     resultEl.innerHTML = html || `<div class="col-12 text-warning small">${T.fields.no_data}</div>`;
   }
 
@@ -356,7 +368,7 @@
     logEl.textContent = '';
     progress(0);
     try { await fn(); }
-    catch (e) { log('FEHLER: ' + (e && e.message || e)); status(T.fields.failed + ': ' + (e.message || e)); }
+    catch (e) { log(T.fields.error + ': ' + (e && e.message || e)); status(T.fields.failed + ': ' + (e.message || e)); }
     finally {
       if (hasSerial) document.getElementById('btnSerial').disabled = false;
       if (hasBle) document.getElementById('btnBle').disabled = false;
