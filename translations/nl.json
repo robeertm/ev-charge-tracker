@@ -1291,7 +1291,7 @@
   "obd.scan_probe": "Adres {h} controleren…",
   "obd.scan_done": "ECU-scan voltooid.",
   "obd.scan_apply": "Aanbevolen profiel toepassen en uitlezen",
-  "obd.scan_hint_nodata": "Geen bruikbare data — start de ECU-scan om het juiste adres te vinden.",
+  "obd.scan_hint_nodata": "Geen bruikbare data. Meest voorkomende oorzaak: de auto slaapt — zet het contact aan (contact-/accessoirestand) zodat de accu-ECU antwoordt en lees opnieuw uit. Helpt dat niet, start dan de ECU-scan om het juiste adres te vinden.",
   "obd.scan_protocol": "Gedetecteerd protocol: {p}",
   "obd.scan_ecus": "Reagerende regeleenheden: {list}",
   "obd.scan_no_ecus": "Geen enkele regeleenheid antwoordde op de standaardopvraging.",

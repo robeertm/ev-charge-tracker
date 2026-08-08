@@ -1291,7 +1291,7 @@
   "obd.scan_probe": "Prüfe Adresse {h}…",
   "obd.scan_done": "ECU-Scan abgeschlossen.",
   "obd.scan_apply": "Empfohlenes Profil übernehmen & auslesen",
-  "obd.scan_hint_nodata": "Keine auswertbaren Daten — starte den ECU-Scan, um die passende Adresse zu finden.",
+  "obd.scan_hint_nodata": "Keine auswertbaren Daten. Häufigste Ursache: Das Auto schläft — schalte die Zündung ein (Zünd-/ACC-Stellung), damit das Batterie-Steuergerät antwortet, und lies erneut aus. Hilft das nicht, starte den ECU-Scan, um die passende Adresse zu finden.",
   "obd.scan_protocol": "Erkanntes Protokoll: {p}",
   "obd.scan_ecus": "Antwortende Steuergeräte: {list}",
   "obd.scan_no_ecus": "Kein Steuergerät hat auf die Standard-Abfrage geantwortet.",

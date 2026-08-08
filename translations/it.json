@@ -1291,7 +1291,7 @@
   "obd.scan_probe": "Verifica indirizzo {h}…",
   "obd.scan_done": "Scansione ECU completata.",
   "obd.scan_apply": "Applica profilo consigliato e leggi",
-  "obd.scan_hint_nodata": "Nessun dato utilizzabile — avvia la scansione ECU per trovare l'indirizzo giusto.",
+  "obd.scan_hint_nodata": "Nessun dato utilizzabile. Causa più comune: l'auto è in standby — inserisci il quadro (posizione quadro/accessori) affinché la centralina della batteria risponda e rileggi. Se non basta, avvia la scansione ECU per trovare l'indirizzo giusto.",
   "obd.scan_protocol": "Protocollo rilevato: {p}",
   "obd.scan_ecus": "Centraline che rispondono: {list}",
   "obd.scan_no_ecus": "Nessuna centralina ha risposto alla richiesta standard.",

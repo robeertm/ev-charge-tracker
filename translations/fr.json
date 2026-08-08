@@ -1291,7 +1291,7 @@
   "obd.scan_probe": "Vérification de l'adresse {h}…",
   "obd.scan_done": "Scan ECU terminé.",
   "obd.scan_apply": "Appliquer le profil recommandé et lire",
-  "obd.scan_hint_nodata": "Aucune donnée exploitable — lancez le scan ECU pour trouver la bonne adresse.",
+  "obd.scan_hint_nodata": "Aucune donnée exploitable. Cause la plus fréquente : la voiture est en veille — mettez le contact (position contact/accessoires) pour que le calculateur de batterie réponde, puis relancez la lecture. Si cela ne suffit pas, lancez le scan ECU pour trouver la bonne adresse.",
   "obd.scan_protocol": "Protocole détecté : {p}",
   "obd.scan_ecus": "Calculateurs qui répondent : {list}",
   "obd.scan_no_ecus": "Aucun calculateur n'a répondu à la requête standard.",

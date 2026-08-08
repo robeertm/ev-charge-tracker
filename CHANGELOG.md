@@ -1,5 +1,18 @@
 # Changelog
 
+## v3.0.85 (2026-08-08)
+
+### Fix: "NO DATA" now points at the most common cause first (car asleep)
+
+When every battery query comes back `NO DATA`, the reader used to send the user
+straight to the ECU scan, implying the profile addressed the wrong ECU. For a
+correctly matched profile that is rarely the reason: a parked car puts its
+battery control unit to sleep, and an asleep BMS answers nothing on any address.
+The all-`NO DATA` hint now leads with that — switch the ignition on (accessory
+position) so the BMS wakes, then read again — and only falls back to "run the
+ECU scan to find the right address" if waking the car does not help. Text
+updated in all six languages. No behaviour change beyond the guidance copy.
+
 ## v3.0.84 (2026-08-08)
 
 ### Fix: XPENG battery read returned only "NO DATA" + new ECU scan

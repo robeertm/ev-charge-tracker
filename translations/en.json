@@ -1291,7 +1291,7 @@
   "obd.scan_probe": "Checking address {h}…",
   "obd.scan_done": "ECU scan finished.",
   "obd.scan_apply": "Apply recommended profile & read",
-  "obd.scan_hint_nodata": "No usable data — run the ECU scan to find the right address.",
+  "obd.scan_hint_nodata": "No usable data. Most common cause: the car is asleep — switch the ignition on (accessory/ignition position) so the battery ECU responds, then read again. If that doesn't help, run the ECU scan to find the right address.",
   "obd.scan_protocol": "Detected protocol: {p}",
   "obd.scan_ecus": "Responding control units: {list}",
   "obd.scan_no_ecus": "No control unit answered the standard query.",

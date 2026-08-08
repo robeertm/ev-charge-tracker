@@ -1291,7 +1291,7 @@
   "obd.scan_probe": "Comprobando dirección {h}…",
   "obd.scan_done": "Escaneo de ECU finalizado.",
   "obd.scan_apply": "Aplicar perfil recomendado y leer",
-  "obd.scan_hint_nodata": "Sin datos utilizables — ejecuta el escaneo de ECU para encontrar la dirección correcta.",
+  "obd.scan_hint_nodata": "Sin datos utilizables. Causa más común: el coche está en reposo — enciende el contacto (posición de contacto/accesorios) para que la ECU de la batería responda y vuelve a leer. Si no ayuda, ejecuta el escaneo de ECU para encontrar la dirección correcta.",
   "obd.scan_protocol": "Protocolo detectado: {p}",
   "obd.scan_ecus": "Unidades de control que responden: {list}",
   "obd.scan_no_ecus": "Ninguna unidad de control respondió a la consulta estándar.",
