@@ -1,5 +1,28 @@
 # Changelog
 
+## v3.0.82 (2026-08-08)
+
+### Live pairing feedback so connecting is never a silent box
+
+Connecting a dongle used to jump straight from "Connecting…" to either a result
+or "Failed", with nothing in between — no sign the pairing was running, which
+device was chosen, or how far it got. The OBD page now narrates every phase.
+
+- **Connection-state pill** (`templates/obd.html`) — a coloured badge above the
+  progress bar always shows the current phase (Ready → Connecting → Pairing →
+  Connected → Reading → Done, or Failed), with a spinner while work is in
+  flight and a green check when it succeeds.
+- **Which device** — the name of the adapter actually being talked to is shown
+  next to the badge (the Bluetooth device name, or the USB vendor:product id),
+  so it's obvious the right dongle was picked.
+- **Step-by-step Bluetooth trace** — pairing now reports each stage as it
+  happens: connecting to the adapter, searching for OBD services, how many
+  services were found, and confirmation once a readable data channel is open.
+  A patience hint reminds the user that first-time pairing can take a few
+  seconds while the blue LED is still blinking.
+- **Full 6-language parity** — 15 new strings added to all of de/en/es/fr/it/nl
+  (1285 keys each).
+
 ## v3.0.81 (2026-08-08)
 
 ### Reliable Bluetooth dongle discovery + auto-reconnect

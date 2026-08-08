@@ -88,6 +88,17 @@
             {{ t('obd.unsupported', default='Dieser Browser unterstützt weder Web Serial noch Web Bluetooth. Nutze Chrome oder Edge (Desktop/Android). Auf iPhone/iPad ist der Zugriff leider nicht möglich.') }}
           </div>
           <div class="mt-3">
+            <!-- Visible pairing/connection state so it's obvious what is
+                 happening, which device it is, and whether it worked. -->
+            <div class="d-flex align-items-center flex-wrap gap-2 mb-1">
+              <span class="badge rounded-pill text-bg-secondary d-inline-flex align-items-center gap-1"
+                    id="obdConnBadge">
+                <span class="spinner-border spinner-border-sm d-none" id="obdConnSpin" role="status"></span>
+                <i class="bi bi-circle" id="obdConnIcon"></i>
+                <span id="obdConnState">{{ t('obd.state_ready', default='Bereit') }}</span>
+              </span>
+              <span class="small text-muted" id="obdDeviceName"></span>
+            </div>
             <div class="progress" style="height:.5rem" id="obdProgWrap">
               <div class="progress-bar" id="obdProg" style="width:0%"></div>
             </div>
@@ -226,6 +237,25 @@
       'remembered': t('obd.remembered', default='Gemerkter Adapter — verbinde direkt…'),
       'ble_try': t('obd.ble_connecting_try', default='Verbinde (Versuch {n})…'),
       'ble_no_service': t('obd.ble_no_service', default='Verbunden, aber kein lesbarer OBD-Dienst gefunden. Wenn die Dongle-LED blau blinkt, ist er nicht verbunden: Zündung einschalten, Dongle kurz ab- und wieder anstecken und erneut versuchen. Klassische-Bluetooth-Dongles lassen sich vom Browser nicht ansprechen — nimm einen Bluetooth-LE- oder USB-Adapter.'),
+    }|tojson }},
+    st: {{ {
+      'ready': t('obd.state_ready', default='Bereit'),
+      'connecting': t('obd.state_connecting', default='Verbinde…'),
+      'pairing': t('obd.state_pairing', default='Kopple…'),
+      'connected': t('obd.state_connected', default='Verbunden ✓'),
+      'reading': t('obd.state_reading', default='Lese aus…'),
+      'done': t('obd.state_done', default='Fertig ✓'),
+      'failed': t('obd.state_failed', default='Fehlgeschlagen'),
+    }|tojson }},
+    step: {{ {
+      'dev_label': t('obd.dev_label', default='Gerät: {name}'),
+      'dev_unknown': t('obd.dev_unknown', default='unbenannter Adapter'),
+      'gatt': t('obd.step_gatt', default='Verbinde mit dem Adapter…'),
+      'services': t('obd.step_services', default='Suche OBD-Dienste am Adapter…'),
+      'services_found': t('obd.step_services_found', default='{n} Dienst(e) gefunden — suche Lesekanal…'),
+      'channel_ok': t('obd.step_channel_ok', default='Lesekanal gefunden — Adapter ist bereit.'),
+      'port_open': t('obd.step_port_open', default='USB-Port geöffnet ({baud} Baud).'),
+      'pairing_wait': t('obd.pairing_wait', default='Erstmaliges Koppeln kann ein paar Sekunden dauern — solange blinkt die blaue LED noch.'),
     }|tojson }}
   };
 
@@ -247,6 +277,38 @@
   }
   function status(msg) { statusEl.textContent = msg; }
   function progress(p) { progEl.style.width = Math.round(p * 100) + '%'; }
+
+  // ── Visible connection state ───────────────────────────────────────
+  // A coloured pill that always says which phase we're in, so pairing is
+  // never a silent black box. Phases: ready | connecting | pairing |
+  // connected | reading | done | failed.
+  const connBadge = document.getElementById('obdConnBadge');
+  const connIcon = document.getElementById('obdConnIcon');
+  const connSpin = document.getElementById('obdConnSpin');
+  const connStateEl = document.getElementById('obdConnState');
+  const deviceNameEl = document.getElementById('obdDeviceName');
+  const CONN = {
+    ready:      { cls: 'text-bg-secondary', icon: 'bi-circle',           spin: false, label: () => T.st.ready },
+    connecting: { cls: 'text-bg-info',      icon: 'bi-bluetooth',        spin: true,  label: () => T.st.connecting },
+    pairing:    { cls: 'text-bg-info',      icon: 'bi-bluetooth',        spin: true,  label: () => T.st.pairing },
+    connected:  { cls: 'text-bg-primary',   icon: 'bi-check-circle',     spin: false, label: () => T.st.connected },
+    reading:    { cls: 'text-bg-primary',   icon: 'bi-arrow-repeat',     spin: true,  label: () => T.st.reading },
+    done:       { cls: 'text-bg-success',   icon: 'bi-check-circle-fill',spin: false, label: () => T.st.done },
+    failed:     { cls: 'text-bg-danger',    icon: 'bi-x-circle-fill',    spin: false, label: () => T.st.failed },
+  };
+  function connState(phase) {
+    const s = CONN[phase] || CONN.ready;
+    connBadge.className = 'badge rounded-pill d-inline-flex align-items-center gap-1 ' + s.cls;
+    connIcon.className = 'bi ' + s.icon;
+    connIcon.classList.toggle('d-none', s.spin);
+    connSpin.classList.toggle('d-none', !s.spin);
+    connStateEl.textContent = s.label();
+  }
+  // Show which device we're actually talking to — proof it's the right one.
+  function setDevice(name) {
+    deviceNameEl.textContent = name
+      ? T.step.dev_label.replace('{name}', name) : '';
+  }
 
   // Feature detection
   const hasSerial = 'serial' in navigator;
@@ -391,6 +453,8 @@
     return {
       async open() {
         await port.open({ baudRate: baud });
+        status(T.step.port_open.replace('{baud}', baud));
+        connState('connected');
         writer = port.writable.getWriter();
         reader = port.readable.getReader();
         decoder = new TextDecoder();
@@ -461,7 +525,10 @@
     let writeChar, buffer = '';
     return {
       async open() {
+        connState('pairing');
+        status(T.step.gatt); log(T.step.gatt);
         const server = await bleConnect(device, 4);
+        status(T.step.services); log(T.step.services);
         // Collect the named services first (fast path); if none respond, ask
         // the device for everything it has and scan those instead.
         let services = [];
@@ -472,6 +539,8 @@
         if (!services.length) {
           try { services = await server.getPrimaryServices(); } catch (e) { services = []; }
         }
+        const foundMsg = T.step.services_found.replace('{n}', services.length);
+        status(foundMsg); log(foundMsg);
         const dec = new TextDecoder();
         // Pick the first service that yields a writable characteristic, and
         // subscribe to any notify/indicate characteristics on it.
@@ -494,6 +563,8 @@
           if (localWrite) { writeChar = localWrite; break; }
         }
         if (!writeChar) throw new Error(T.dongle.ble_no_service);
+        status(T.step.channel_ok); log(T.step.channel_ok);
+        connState('connected');
       },
       async write(str) {
         const enc = new TextEncoder().encode(str);
@@ -538,6 +609,7 @@
       await cmd(tr, line, line.toUpperCase() === 'ATZ' ? 4000 : 2500);
     }
     await cmd(tr, 'ATSH' + prof.header, 2500);
+    connState('reading');
     const frames = {};
     const pids = prof.pids;
     for (let i = 0; i < pids.length; i++) {
@@ -556,8 +628,9 @@
       body: JSON.stringify(body),
     }).then(r => r.json());
     progress(1);
-    if (!res.ok) { status(T.fields.failed + ': ' + (res.error || '')); return; }
+    if (!res.ok) { connState('failed'); status(T.fields.failed + ': ' + (res.error || '')); return; }
     renderResult(res);
+    connState('done');
     status(T.fields.done);
   }
 
@@ -603,17 +676,36 @@
     document.getElementById('btnBle').disabled = true;
     logEl.textContent = '';
     progress(0);
+    setDevice('');
+    connState('connecting');
     try { await fn(); }
-    catch (e) { log(T.fields.error + ': ' + (e && e.message || e)); status(T.fields.failed + ': ' + (e.message || e)); }
+    catch (e) {
+      connState('failed');
+      log(T.fields.error + ': ' + (e && e.message || e));
+      status(T.fields.failed + ': ' + (e.message || e));
+    }
     finally {
       // Re-enable per the chosen adapter's constraints (not blindly both).
       applyDongle();
     }
   }
 
+  // Human-readable name for a granted USB serial port (VID:PID in hex).
+  function serialName(port) {
+    try {
+      const info = port.getInfo ? port.getInfo() : {};
+      if (info.usbVendorId != null) {
+        const h = n => n.toString(16).padStart(4, '0').toUpperCase();
+        return `USB ${h(info.usbVendorId)}:${h(info.usbProductId || 0)}`;
+      }
+    } catch (e) {}
+    return T.step.dev_unknown;
+  }
+
   document.getElementById('btnSerial').addEventListener('click', () => withGuard(async () => {
     status(T.fields.connecting);
     const port = await chooseSerialPort();
+    setDevice(serialName(port));
     if (usedRemembered) status(T.dongle.remembered);
     const tr = makeSerialTransport(port, parseInt(document.getElementById('obdBaud').value, 10));
     tr._kind = 'elm327-usb';
@@ -623,8 +715,10 @@
   }));
 
   document.getElementById('btnBle').addEventListener('click', () => withGuard(async () => {
-    status(T.fields.connecting);
+    connState('pairing');
+    status(T.step.pairing_wait);
     const device = await chooseBleDevice();
+    setDevice(device.name || T.step.dev_unknown);
     if (usedRemembered) status(T.dongle.remembered);
     const tr = makeBleTransport(device);
     tr._kind = 'elm327-ble';
