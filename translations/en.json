@@ -24,6 +24,7 @@
   "cert.veh_period": "Ownership period",
   "cert.sec_result": "Result",
   "cert.src_measured": "measured (charge data, coulomb counting)",
+  "cert.src_reconciled": "mean of charge-data measurement and BMS register (OBD)",
   "cert.src_bms": "vehicle BMS value",
   "cert.sec_soh": "SoH determination (two independent signals)",
   "cert.meas_soh": "Measured SoH (charge data)",

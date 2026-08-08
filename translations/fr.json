@@ -24,6 +24,7 @@
   "cert.veh_period": "Période de possession",
   "cert.sec_result": "Résultat",
   "cert.src_measured": "mesuré (données de charge, comptage coulombique)",
+  "cert.src_reconciled": "moyenne de la mesure des données de charge et du registre BMS (OBD)",
   "cert.src_bms": "Valeur du BMS du véhicule",
   "cert.sec_soh": "Détermination du SoH (deux signaux indépendants)",
   "cert.meas_soh": "SoH mesuré (données de charge)",

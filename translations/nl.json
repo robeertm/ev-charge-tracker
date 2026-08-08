@@ -24,6 +24,7 @@
   "cert.veh_period": "Bezitsperiode",
   "cert.sec_result": "Resultaat",
   "cert.src_measured": "gemeten (laadgegevens, Coulomb-telling)",
+  "cert.src_reconciled": "gemiddelde van laadgegevensmeting en BMS-register (OBD)",
   "cert.src_bms": "BMS-waarde van het voertuig",
   "cert.sec_soh": "SoH-bepaling (twee onafhankelijke signalen)",
   "cert.meas_soh": "Gemeten SoH (laadgegevens)",

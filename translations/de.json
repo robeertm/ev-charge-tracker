@@ -24,6 +24,7 @@
   "cert.veh_period": "Besitzzeitraum",
   "cert.sec_result": "Ergebnis",
   "cert.src_measured": "gemessen (Ladedaten, Coulomb-Zaehlung)",
+  "cert.src_reconciled": "gemittelt aus Ladedaten-Messung und BMS-Register (OBD)",
   "cert.src_bms": "BMS-Wert des Fahrzeugs",
   "cert.sec_soh": "SoH-Bestimmung (zwei unabhaengige Signale)",
   "cert.meas_soh": "Gemessene SoH (Ladedaten)",

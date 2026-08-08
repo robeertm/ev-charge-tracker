@@ -156,6 +156,15 @@ def _measured_capacity(vehicle_id, nominal_kwh):
 
     caps = [s[1] for s in samples]
     med = median(caps)
+
+    # SoH is capped at 100 %: a *measured* usable capacity above nominal is a
+    # measurement artefact (charging-loss under-counting on legacy rows, ±1 %
+    # SoC quantisation), not a battery that is healthier than new. Without the
+    # cap an optimistic median reads e.g. "109 %", which is physically
+    # meaningless and inflates the grade. Capacity is still shown as measured.
+    def _soh(cap_kwh):
+        return round(min(cap_kwh / nominal_kwh * 100, 100.0), 1)
+
     # Trend: compare the earliest third to the most-recent third when we
     # have enough samples to make the split meaningful.
     trend = None
@@ -166,14 +175,14 @@ def _measured_capacity(vehicle_id, nominal_kwh):
         trend = {
             'early_capacity_kwh': round(early, 2),
             'recent_capacity_kwh': round(recent, 2),
-            'early_soh': round(early / nominal_kwh * 100, 1),
-            'recent_soh': round(recent / nominal_kwh * 100, 1),
+            'early_soh': _soh(early),
+            'recent_soh': _soh(recent),
             'from': samples[0][0].isoformat() if samples[0][0] else None,
             'to': samples[-1][0].isoformat() if samples[-1][0] else None,
         }
     return {
         'capacity_kwh': round(med, 2),
-        'soh_pct': round(med / nominal_kwh * 100, 1),
+        'soh_pct': _soh(med),
         'sample_count': len(samples),
         'min_capacity_kwh': round(min(caps), 2),
         'max_capacity_kwh': round(max(caps), 2),
@@ -268,15 +277,27 @@ def compute_battery_health(vehicle_id):
     obd_soh = obd.get('soh_pct') if obd else None
 
     # ── Certified headline SoH. Priority:
-    #   1. measured coulomb-count with a solid sample base (Premium-grade,
-    #      independent of the BMS' own estimate);
-    #   2. a direct OBD SoH register read (real BMS value, fresh);
-    #   3. the BMS SoH sampled via the cloud sync;
-    #   4. a thin measured value as a last resort. ────────────────────
+    #   1. BOTH a solid coulomb-count AND a direct OBD BMS-register read →
+    #      reconcile them (mean of the two independent estimates). The
+    #      coulomb-count is optimistically biased and noisy (loss modelling,
+    #      SoC quantisation); the BMS register is the car's own considered
+    #      estimate. Averaging the two independent signals cancels part of the
+    #      coulomb bias and is more defensible than trusting either alone.
+    #      Deliberately NOT folded in: the cloud-API BMS SoH — it is
+    #      baseline-scaled and can read >100 % (unphysical), so it would only
+    #      corrupt the mean. It is still printed separately for reference.
+    #   2. measured coulomb-count with a solid sample base (independent of the
+    #      BMS' own estimate);
+    #   3. a direct OBD SoH register read (real BMS value, fresh);
+    #   4. the BMS SoH sampled via the cloud sync;
+    #   5. a thin measured value as a last resort. ────────────────────
     measured_soh = measured['soh_pct'] if measured else None
     certified_soh = None
     certified_source = None
-    if measured and measured['sample_count'] >= 3:
+    if measured and measured['sample_count'] >= 3 and obd_soh is not None:
+        certified_soh = round((measured_soh + obd_soh) / 2, 1)
+        certified_source = 'reconciled'
+    elif measured and measured['sample_count'] >= 3:
         certified_soh = measured_soh
         certified_source = 'measured'
     elif obd_soh is not None:
@@ -682,6 +703,8 @@ def generate_certificate(vehicle_id):
     pdf.set_text_color(110, 110, 110)
     src = data['certified_source']
     src_label = {
+        'reconciled': t('cert.src_reconciled',
+                        default='gemittelt aus Ladedaten-Messung und BMS-Register (OBD)'),
         'measured': t('cert.src_measured', default='gemessen (Ladedaten, Coulomb-Zaehlung)'),
         'obd': t('cert.src_obd', default='BMS-Wert per OBD (ELM327)'),
         'bms': t('cert.src_bms', default='BMS-Wert des Fahrzeugs'),

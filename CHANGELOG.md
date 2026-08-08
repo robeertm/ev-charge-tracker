@@ -1,5 +1,29 @@
 # Changelog
 
+## v3.0.90 (2026-08-08)
+
+### Change: reconcile the certificate SoH from both independent signals
+
+The battery certificate previously headlined the coulomb-counted SoH from the
+charge history on its own. That figure is optimistically biased and noisy —
+charging-loss modelling and ±1 % SoC quantisation push it up, and on a real
+read its per-session spread was wide (e.g. 49–70 kWh), so the median could land
+at a falsely perfect **100 %**.
+
+* **Cap the measured SoH at 100 %.** A *measured* usable capacity above nominal
+  is a measurement artefact, not a battery healthier than new, so the coulomb
+  count can no longer read above 100 %.
+* **Reconcile two independent signals.** When both a solid coulomb-count and a
+  direct OBD BMS-register read exist, the headline SoH is now the **mean** of
+  the two — the independent charge-history measurement and the car's own
+  considered estimate. Averaging cancels part of the coulomb bias and is more
+  defensible than trusting either alone. The cloud-API BMS value is
+  deliberately excluded from the mean (it is baseline-scaled and can read
+  >100 %, which is unphysical); it is still printed separately for reference.
+* Both source values remain listed on the certificate, so the reconciliation
+  is fully transparent. When only one signal is available the behaviour is
+  unchanged.
+
 ## v3.0.89 (2026-08-08)
 
 ### Add: live OBD dashboard — every sensor, graphically

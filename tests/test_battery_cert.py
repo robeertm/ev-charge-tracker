@@ -165,6 +165,37 @@ def main():
         from services.i18n import t
         check('grade label localised', t(gl) not in ('', gl))
 
+    # ── Reconciled path: BOTH a coulomb-count AND an OBD BMS register ────
+    # When both independent signals exist the headline is their mean, so a
+    # noisy/optimistic coulomb count can't headline 100 % on its own.
+    app_rec = _make_app()
+    with app_rec.app_context():
+        db.create_all()
+        v = Vehicle(name='Recon Niro', brand='Kia', battery_kwh=64.0,
+                    is_archived=False, acquired_at=date(2021, 7, 2))
+        db.session.add(v)
+        db.session.commit()
+        base = date(2024, 1, 1)
+        # Wide charges implying the FULL 64 kWh (coulomb SoH ~100 %).
+        for i in range(6):
+            db.session.add(Charge(vehicle_id=v.id, date=base + timedelta(days=i * 7),
+                                  charge_type='DC', soc_from=15, soc_to=85,
+                                  kwh_loaded=46.0, loss_kwh=1.2,
+                                  odometer=80000 + i * 300))
+        # Fresh OBD register read: 94.7 % (the plausible real-world value).
+        db.session.add(ObdReading(vehicle_id=v.id, soh_pct=94.7, cell_count=96,
+                                  cell_min_v=3.82, cell_max_v=3.82, cell_avg_v=3.82,
+                                  cell_delta_mv=0.0, temp_min_c=28, temp_max_c=29))
+        db.session.commit()
+        d = bc.compute_battery_health(v.id)
+        check('recon: measured capped at 100 %', d['measured']['soh_pct'] <= 100.0)
+        check('recon: source reconciled', d['certified_source'] == 'reconciled')
+        # mean(measured<=100, 94.7) lands strictly between the two inputs.
+        check('recon: headline between OBD and measured',
+              94.7 <= d['certified_soh'] <= d['measured']['soh_pct'] + 0.05)
+        pdf = bc.generate_certificate(v.id)
+        check('recon: pdf renders', isinstance(pdf, (bytes, bytearray)) and len(pdf) > 1000)
+
     # ── Sparse-data path: only narrow windows, no BMS SoH ────────────
     app2 = _make_app()
     with app2.app_context():
