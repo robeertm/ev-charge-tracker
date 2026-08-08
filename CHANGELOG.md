@@ -1,5 +1,26 @@
 # Changelog
 
+## v3.0.77 (2026-08-08)
+
+### Markenname aus dem Zertifikat entfernt (Markenschutz)
+
+Robert: „der Name AVILOO sollte aus markenschutzrechtlichen Gründen nicht in
+meiner App vorkommen." Der fremde Markenname wurde **restlos** aus der App
+entfernt — nicht nur aus dem sichtbaren PDF-Text, sondern auch aus allen
+Inline-Fallbacks, Kommentaren, Docstrings und dem Changelog. Die Methodik
+selbst (Coulomb-Zählung, SoH = nutzbar / nominal) bleibt unverändert; nur die
+Formulierung ist jetzt generisch.
+
+- **Sichtbarer Zertifikatstext (`cert.basis_line`, `cert.limits`)** in **allen
+  6 Sprachen** umformuliert: „AVILOO-Premium-Test" → „professioneller
+  Batterietest per Vollentladung"; „(z. B. AVILOO, TÜV)" → „(z. B. TÜV)".
+- **`services/battery_cert_service.py`** — Docstring, Grade-Kommentar und die
+  drei deutschen Inline-`default=`-Texte (`cert.basis_line`, `cert.limits`,
+  `cert.limits_with_obd`) neutralisiert.
+- **`app.py`** — Docstring der Zertifikats-Route entmarkt.
+- **`CHANGELOG.md`** — v3.0.73-Eintrag und der v3.0.75-Fachbegriff-Hinweis
+  entmarkt.
+
 ## v3.0.76 (2026-08-07)
 
 ### Alle 6 Sprachen auf volle Parität (Standing Order „alles übersetzen")
@@ -66,7 +87,7 @@ teilweise — der Nachzug ist jetzt vollständig.
 - Alle **101 Keys der letzten Änderungen** (`cert.*`, `flash.cert_*`,
   `obd.*`, neue `set.fleet_*`) mit sauberen Übersetzungen nach **es, fr, it,
   nl** propagiert — inkl. korrekt erhaltener Platzhalter (`{n}`, `{name}`,
-  `{e:.1f}` …) und Fachbegriffe (SoH, BMS, kWh, CO₂, AVILOO, TÜV).
+  `{e:.1f}` …) und Fachbegriffe (SoH, BMS, kWh, CO₂, TÜV).
 
 **Hinweis:** es/fr/it/nl haben einen **vorbestehenden** Rückstand von ~291
 Keys (nicht aus diesen Änderungen); dafür greift weiterhin der deutsche
@@ -138,14 +159,15 @@ gedruckt (Käufer erwarten beide Zahlen).
 
 ## v3.0.73 (2026-08-07)
 
-### Battery-health certificate (AVILOO-style, self-generated)
+### Battery-health certificate (self-generated)
 
 When Robert sells or archives a vehicle he wanted a self-created battery
-certificate — like an independent AVILOO test — that he can hand a buyer,
-runnable at any time. AVILOO's Premium test measures usable capacity by
-integrating the energy delivered over a full 100→10 % discharge and
-dividing by the pack's nominal capacity (`SoH = usable_now / nominal`);
-its Flash test just reads the BMS' own SoH. We already log *thousands* of
+certificate — like an independent professional battery test — that he can
+hand a buyer, runnable at any time. A professional full-discharge test
+measures usable capacity by integrating the energy delivered over a full
+100→10 % discharge and dividing by the pack's nominal capacity
+(`SoH = usable_now / nominal`); a quick/flash test just reads the BMS' own
+SoH. We already log *thousands* of
 charge sessions, so we reconstruct the same measurement without a lab
 discharge: every charge with a wide-enough SoC window is a partial
 capacity sample, and the median over many sessions cancels the noise.

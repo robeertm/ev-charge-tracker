@@ -2430,7 +2430,7 @@ def register_routes(app):
 
     @app.route('/vehicles/<int:vid>/certificate.pdf', methods=['GET'])
     def vehicles_certificate(vid):
-        """Generate a self-created battery-health certificate (AVILOO-style)
+        """Generate a self-created battery-health certificate
         for one vehicle from its own charge/sync history. Available any time
         — not just at archive/sale — so Robert can print a current SoH proof
         whenever a buyer asks."""

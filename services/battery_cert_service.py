@@ -1,20 +1,20 @@
-"""Battery-Health Certificate service (Avilo-style, self-generated).
+"""Battery-Health Certificate service (self-generated).
 
 Robert asked for a self-created battery-health certificate he can hand a
-buyer when he sells / archives a vehicle — comparable to the independent
-AVILOO battery test, but derived from the *own* charge/sync history this
-app has been logging for months.
+buyer when he sells / archives a vehicle — comparable to an independent
+professional battery test, but derived from the *own* charge/sync history
+this app has been logging for months.
 
-## How AVILOO determines SoH (and how we mirror it)
+## How professional battery tests determine SoH (and how we mirror it)
 
-AVILOO runs two products:
+Independent battery testers typically offer two kinds of test:
 
-* **Flash Test** — a ~3-minute OBD snapshot. Reads the BMS' own SoH plus
-  per-cell voltages and derives a health grade from cell-voltage spread
-  and the manufacturer capacity estimate.
-* **Premium Test** — a real discharge run from ~100 % down to ~10 % with
-  a data logger. The delivered energy over that window is integrated
-  (coulomb / energy counting) to *measure* the usable capacity
+* **Quick/flash test** — a ~3-minute OBD snapshot. Reads the BMS' own SoH
+  plus per-cell voltages and derives a health grade from cell-voltage
+  spread and the manufacturer capacity estimate.
+* **Full-discharge test** — a real discharge run from ~100 % down to
+  ~10 % with a data logger. The delivered energy over that window is
+  integrated (coulomb / energy counting) to *measure* the usable capacity
   independent of the BMS, then compared against the nominal pack size:
 
       SoH = usable_capacity_now / nominal_capacity_when_new × 100 %
@@ -23,18 +23,18 @@ We can't force a controlled discharge, but every logged charge session
 is effectively a *partial* capacity measurement: energy that actually
 entered the battery divided by the SoC window it filled, extrapolated to
 100 %. Averaged (median) over many sessions the noise cancels out and we
-get a measured usable-capacity estimate — the same quantity AVILOO's
-Premium Test reports, just reconstructed from historical data instead of
-one lab discharge.
+get a measured usable-capacity estimate — the same quantity a
+full-discharge lab test reports, just reconstructed from historical data
+instead of one lab discharge.
 
 The certificate reports BOTH signals when available:
 
 * **BMS-SoH** — what the car's own battery-management system claims
   (from ``VehicleSync.battery_soh_percent``, baseline-scaled). This is
-  the Flash-Test equivalent.
+  the quick/flash-test equivalent.
 * **Gemessene SoH** — our coulomb-counted capacity ÷ nominal. This is the
-  Premium-Test equivalent and the headline number when we have enough
-  qualifying sessions.
+  full-discharge-test equivalent and the headline number when we have
+  enough qualifying sessions.
 
 Everything degrades gracefully: with no BMS SoH and no wide-window charge
 sessions the certificate still prints throughput, cycle-equivalents and
@@ -71,8 +71,8 @@ CAP_HIGH_FRAC = 1.15
 AVG_DEGRADATION_PCT_PER_YEAR = 2.3
 
 # Grade scale (SoH % → letter, label-key, hex colour). Aligned with the
-# industry-common A–F resale grading (AVILOO itself publishes only a SoH %
-# and a 3-band above/average/below scale, not letters). The 70 % line is
+# industry-common A–F resale grading (professional testers often publish
+# only a SoH % and a 3-band above/average/below scale, not letters). The 70 % line is
 # the typical OEM warranty floor (8 yr / 160 000 km ≥ 70 % SoH).
 _GRADE_TABLE = [
     (90, 'A', 'cert.grade_a', '#2e7d32'),
@@ -708,7 +708,7 @@ def generate_certificate(vehicle_id):
                 'Die nutzbare Kapazitaet wird je Ladung aus geladener Energie '
                 '(abzueglich Ladeverlust) geteilt durch das gefuellte SoC-Fenster '
                 'ermittelt und ueber viele Ladungen gemittelt (Median) - dieselbe '
-                'Groesse, die ein AVILOO-Premium-Test per Vollentladung misst.',
+                'Groesse, die ein professioneller Batterietest per Vollentladung misst.',
         c=basis['charge_count'] or 0, s=basis['sync_count'] or 0,
         period=(f", {basis['first_charge']} bis {basis['last_charge']}"
                 if basis['first_charge'] else ''))
@@ -722,7 +722,7 @@ def generate_certificate(vehicle_id):
                     'wurden per OBD/ELM327 direkt aus dem BMS ausgelesen und sind '
                     'oben aufgefuehrt. Das Zertifikat ist eine datenbasierte '
                     'Eigenermittlung und ersetzt keine akkreditierte '
-                    'Batterieprüfung (z. B. AVILOO, TUV).')
+                    'Batterieprüfung (z. B. TUV).')
     else:
         limits = t(
             'cert.limits',
@@ -731,7 +731,7 @@ def generate_certificate(vehicle_id):
                     'Zellzugriff. Mit einem ELM327-Dongle koennen diese Werte in '
                     'der App ausgelesen und dann hier ergaenzt werden. Das '
                     'Zertifikat ist eine datenbasierte Eigenermittlung und ersetzt '
-                    'keine akkreditierte Batterieprüfung (z. B. AVILOO, TUV).')
+                    'keine akkreditierte Batterieprüfung (z. B. TUV).')
     pdf.multi_cell(0, 4.2, pdf._clean(limits))
 
     # ── Signature line ───────────────────────────────────────────────
