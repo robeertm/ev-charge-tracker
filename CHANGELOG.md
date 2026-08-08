@@ -1,5 +1,34 @@
 # Changelog
 
+## v3.0.87 (2026-08-08)
+
+### Change: no battery certificate without an actual state-of-health
+
+A battery-*health* certificate is only meaningful if it can state a real SoH.
+Until now the certificate was issued even when no SoH could be determined at
+all — it simply printed an "n/a" grade. For a car whose cloud API never reports
+a BMS SoH (e.g. ev-mike), that produced a certificate with no health figure,
+which is worse than none.
+
+The certificate is now refused outright when **none** of the three SoH sources
+yields a value:
+
+* the car reports no BMS SoH over the cloud API, **and**
+* no OBD/ELM327 reading is on file, **and**
+* there aren't enough wide-window charge sessions to coulomb-count a measured
+  SoH from the charge history.
+
+Charge and drive data alone remain fully sufficient the moment they produce a
+measured SoH — that path is unchanged and still issues a certificate without any
+dongle. Only the genuinely empty case is blocked. When it is, the OBD page and
+the export button both explain that the vehicle reports no SoH via the API and
+the charge history isn't enough to measure one, and point the owner to reading
+the battery with an OBD dongle (or logging more near-full charges).
+
+`compute_battery_health` now exposes a `can_certify` flag; the inline preview,
+the export route and `generate_certificate` all gate on it. Messages updated in
+all six languages.
+
 ## v3.0.86 (2026-08-08)
 
 ### Fix: battery reads returned "NO DATA" on a fully awake, drive-ready car

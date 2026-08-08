@@ -194,7 +194,7 @@
       </div>
       {% else %}
       <div class="alert alert-secondary small mb-0">
-        {{ t('obd.cert_none', default='Noch keine auswertbaren Batteriedaten für ein Zertifikat. Lies die Batterie aus oder erfasse Ladevorgänge – dann erscheint das Zertifikat hier.') }}
+        {{ t('obd.cert_none', default='Kein Batteriezustand (SoH) ermittelbar – daher noch kein Zertifikat. Dieses Fahrzeug meldet keinen SoH über die API und die Ladehistorie reicht nicht zur Messung. Lies die Batterie oben mit dem OBD-Dongle aus oder erfasse mehr (möglichst volle) Ladevorgänge – dann erscheint das Zertifikat hier.') }}
       </div>
       {% endif %}
     </div>

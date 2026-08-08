@@ -36,10 +36,21 @@ The certificate reports BOTH signals when available:
   full-discharge-test equivalent and the headline number when we have
   enough qualifying sessions.
 
-Everything degrades gracefully: with no BMS SoH and no wide-window charge
-sessions the certificate still prints throughput, cycle-equivalents and
-charging-behaviour stress factors, and simply marks SoH as "not
-determinable from the available data".
+A battery-*health* certificate is only meaningful when it can state an
+actual SoH. So the certificate is refused outright when NONE of the three
+SoH sources yields a value — i.e. the car reports no BMS SoH over the
+cloud API (e.g. ev-mike), no OBD/ELM327 read is on file, AND there aren't
+enough wide-window charge sessions to coulomb-count one. In that case
+``compute_battery_health`` sets ``can_certify = False`` and
+``generate_certificate`` returns ``None`` instead of printing an "n/a"
+grade; the UI then tells the owner to log more (near-full) charges or read
+the battery with an OBD dongle. Charge/drive data alone ARE sufficient the
+moment they produce a measured SoH — that is exactly the "unless" case.
+
+Once at least one SoH signal exists, everything else still degrades
+gracefully: missing secondary signals come back as ``None`` and the
+certificate prints throughput, cycle-equivalents and charging-behaviour
+stress factors alongside the SoH it could determine.
 """
 import os
 import tempfile
@@ -352,6 +363,10 @@ def compute_battery_health(vehicle_id):
         'ownership_years': ownership_years,
         'certified_soh': certified_soh,
         'certified_source': certified_source,
+        # A certificate is only issued when SoH is actually determinable —
+        # from a measured coulomb-count, an OBD read, or the API/BMS value.
+        # No source → no health figure → no certificate (see module docstring).
+        'can_certify': certified_soh is not None,
         'grade': {'letter': letter, 'label_key': label_key, 'color': color},
         'bms': bms,
         'measured': measured,
@@ -484,6 +499,12 @@ def generate_certificate(vehicle_id):
     """Build the battery-health certificate PDF. Returns bytes or None."""
     data = compute_battery_health(vehicle_id)
     if data is None or not _HAVE_FPDF:
+        return None
+    # Refuse to issue a battery-health certificate with no health figure.
+    # SoH could not be derived from the API/BMS, an OBD read, or the charge
+    # history — a certificate would be a blank "n/a" grade, which is worse
+    # than none. The caller surfaces the "use an OBD dongle" hint instead.
+    if not data.get('can_certify'):
         return None
 
     tmp_dir = tempfile.mkdtemp()

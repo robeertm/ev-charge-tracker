@@ -120,6 +120,12 @@ def main():
                     retired_at=date(2025, 1, 1))
         db.session.add(v)
         db.session.commit()
+        # A BMS SoH sync so the car is certifiable — this block tests the
+        # Erstzulassung/gross rendering, not the no-SoH refusal path.
+        db.session.add(VehicleSync(vehicle_id=v.id, timestamp=datetime(2024, 6, 1, 8),
+                                   soc_percent=70, odometer_km=42000,
+                                   battery_soh_percent=92.0))
+        db.session.commit()
         d = bc.compute_battery_health(v.id)
         # calendar age 2020-03 -> 2025-01 ≈ 4.8 yr; ownership only ~1.0 yr
         check('age from Erstzulassung (~4.8y)', abs(d['age_years'] - 4.8) < 0.2)
@@ -176,8 +182,37 @@ def main():
         check('sparse: no measured SoH', data['measured'] is None)
         check('sparse: certified SoH None', data['certified_soh'] is None)
         check('sparse: grade unknown', data['grade']['letter'] == '?')
+        # No SoH from any source → not certifiable → no PDF is issued.
+        check('sparse: can_certify False', data['can_certify'] is False)
         pdf = bc.generate_certificate(v.id)
-        check('sparse: pdf still renders', isinstance(pdf, (bytes, bytearray)) and len(pdf) > 1000)
+        check('sparse: pdf refused (no SoH)', pdf is None)
+
+    # ── No-SoH API vehicle WITH enough wide charges → certifiable ────────
+    # ev-mike case: the cloud API reports no BMS SoH at all, but the charge
+    # history alone is enough to coulomb-count a measured SoH, so the
+    # certificate IS issued (charge/drive data are the "unless" clause).
+    app3 = _make_app()
+    with app3.app_context():
+        db.create_all()
+        v = Vehicle(name='Mike no-API-SoH', brand='Tesla', battery_kwh=60.0,
+                    is_archived=False, acquired_at=date(2022, 1, 1))
+        db.session.add(v)
+        db.session.commit()
+        base = date(2024, 1, 1)
+        for i in range(5):
+            db.session.add(Charge(vehicle_id=v.id, date=base + timedelta(days=i * 7),
+                                  charge_type='AC', soc_from=20, soc_to=80,
+                                  kwh_loaded=34.0, loss_kwh=1.5,
+                                  odometer=20000 + i * 300))
+        db.session.commit()
+        d = bc.compute_battery_health(v.id)
+        check('no-api-soh: bms None', d['bms']['current'] is None)
+        check('no-api-soh: obd None', d['obd'] is None)
+        check('no-api-soh: measured drives cert', d['certified_source'] == 'measured')
+        check('no-api-soh: can_certify True', d['can_certify'] is True)
+        pdf = bc.generate_certificate(v.id)
+        check('no-api-soh: pdf renders from charge data',
+              isinstance(pdf, (bytes, bytearray)) and len(pdf) > 1000)
 
     print('\n%d check(s) failed' % fails if fails else '\nAll checks passed')
     return 1 if fails else 0

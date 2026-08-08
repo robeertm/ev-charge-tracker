@@ -2446,7 +2446,11 @@ def register_routes(app):
             return redirect('/settings#sec-fleet')
         if not pdf_bytes:
             flash(t('flash.cert_no_data', name=v.name,
-                    default='Für {name} liegen keine auswertbaren Batteriedaten vor.'),
+                    default='Für {name} konnte kein Batteriezustand (SoH) ermittelt '
+                            'werden: Das Fahrzeug meldet keinen SoH über die API und '
+                            'die Ladehistorie reicht nicht zur Messung. Lies die '
+                            'Batterie mit einem OBD-Dongle aus – dann wird das '
+                            'Zertifikat erstellt.'),
                   'warning')
             return redirect('/settings#sec-fleet')
         safe_name = ''.join(ch if ch.isalnum() else '_' for ch in (v.name or 'EV'))
@@ -2497,12 +2501,10 @@ def register_routes(app):
                 app.logger.exception('battery health computation failed')
                 cert = None
             if cert:
-                basis = cert.get('data_basis') or {}
-                cert_available = bool(
-                    (basis.get('charge_count') or 0) > 0
-                    or basis.get('sync_count')
-                    or cert.get('obd')
-                    or cert.get('certified_soh') is not None)
+                # A certificate is only offered when SoH is actually
+                # determinable (measured / OBD / API). No SoH → no health
+                # figure → no certificate, matching generate_certificate().
+                cert_available = bool(cert.get('can_certify'))
         return render_template('obd.html', vehicles=vehicles,
                                active=active,
                                last=last.to_dict() if last else None,
