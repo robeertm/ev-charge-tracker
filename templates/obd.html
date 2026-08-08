@@ -628,6 +628,25 @@
     return resp;
   }
 
+  // ── ISO-TP single-frame framing under ATCAF0 ───────────────────────
+  // Every profile inits with ATCAF0 (CAN auto-formatting OFF) so we can
+  // reassemble multi-frame replies ourselves. But with CAF off the ELM327
+  // also stops prepending the ISO-TP PCI length byte to what we SEND. A bare
+  // "220101" then hits the wire as 22 01 01 …, whose first nibble (2) reads
+  // as a consecutive-frame marker — so every ECU drops it and the request
+  // comes back NO DATA even on a fully awake car. Prepend the byte ourselves:
+  // a single frame is 0N followed by N data bytes (N = 1..7).
+  function cafOffFor(initLines) {
+    return (initLines || []).some(l => /^ATCAF0$/i.test(String(l).trim()));
+  }
+  function wireReq(reqHex, cafOff) {
+    const clean = String(reqHex).replace(/\s+/g, '');
+    if (!cafOff) return clean;
+    const nbytes = clean.length / 2;
+    if (nbytes < 1 || nbytes > 7) return clean;   // only single frames here
+    return nbytes.toString(16).padStart(2, '0') + clean;
+  }
+
   // ── Full read sequence ─────────────────────────────────────────────
   async function runSequence(tr) {
     const key = profileSel.value;
@@ -639,12 +658,14 @@
     }
     await cmd(tr, 'ATSH' + prof.header, 2500);
     connState('reading');
+    const cafOff = cafOffFor(prof.init);
     const frames = {};
     const pids = prof.pids;
     for (let i = 0; i < pids.length; i++) {
       status(`${T.fields.reading} ${pids[i]} (${i + 1}/${pids.length})`);
       progress((i + 1) / (pids.length + 1));
-      frames[pids[i]] = await cmd(tr, pids[i], 4000);
+      // Key the reply by the logical PID; only the wire request is framed.
+      frames[pids[i]] = await cmd(tr, wireReq(pids[i], cafOff), 4000);
     }
     // If every PID came back NO DATA, the header we addressed has no ECU
     // answering — wrong profile for this car. Point the user at the scan
@@ -809,18 +830,19 @@
     for (const line of plan.init) {
       await cmd(tr, line, line.toUpperCase() === 'ATZ' ? 4000 : 2500);
     }
+    const cafOff = cafOffFor(plan.init);
     const results = { probes: {} };
     // Enumerate first: with ATSP0 the ELM only settles on a protocol after a
     // real request, so ATDPN is only meaningful once 0100 has been sent.
     await cmd(tr, 'ATSH' + plan.enumerate.header, 1500);
-    results.enumerate = await cmd(tr, plan.enumerate.cmd, 4000);
+    results.enumerate = await cmd(tr, wireReq(plan.enumerate.cmd, cafOff), 4000);
     results.protocol = await cmd(tr, plan.protocol_cmd, 2500);
     for (let i = 0; i < plan.probes.length; i++) {
       const p = plan.probes[i];
       status(T.scan.probe.replace('{h}', p.header));
       progress((i + 1) / (plan.probes.length + 1));
       await cmd(tr, 'ATSH' + p.header, 1500);
-      results.probes[p.key] = await cmd(tr, p.cmd, 3000);
+      results.probes[p.key] = await cmd(tr, wireReq(p.cmd, cafOff), 3000);
     }
     progress(1);
     const rep = await fetch('/api/obd/scan', {

@@ -1,5 +1,26 @@
 # Changelog
 
+## v3.0.86 (2026-08-08)
+
+### Fix: battery reads returned "NO DATA" on a fully awake, drive-ready car
+
+The real cause of the persistent `NO DATA` — seen even with the ignition on and
+the car ready to drive — was in how requests were framed, not the profile or the
+car being asleep. Every read profile initialises the ELM327 with `ATCAF0` (CAN
+auto-formatting off) so the app can reassemble multi-frame replies itself. But
+with auto-formatting off the ELM327 also stops adding the ISO-TP PCI length byte
+to what it *sends*. A request such as `220101` then went on the wire as
+`22 01 01 …`, whose leading nibble reads as a "consecutive frame" marker rather
+than a valid single-frame request — so the battery control unit silently dropped
+every query and answered nothing.
+
+The reader now prepends the length byte itself whenever auto-formatting is off,
+turning `220101` into `03220101` (and `0100` into `020100`, etc.). This applies
+to both the normal read and the ECU scan probes, which were malformed the same
+way. Replies are still keyed by the logical PID, so decoding is unchanged. A
+correctly matched profile on an awake car now gets real frames back instead of
+`NO DATA`.
+
 ## v3.0.85 (2026-08-08)
 
 ### Fix: "NO DATA" now points at the most common cause first (car asleep)
