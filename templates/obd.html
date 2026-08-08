@@ -81,6 +81,9 @@
               <i class="bi bi-bluetooth"></i> {{ t('obd.btn_ble', default='Per Bluetooth verbinden & auslesen') }}
             </button>
           </div>
+          <div class="text-end mt-1 d-none" id="obdPickOtherWrap">
+            <a href="#" class="small text-muted" id="obdPickOther">{{ t('obd.pick_other', default='Anderes Gerät wählen') }}</a>
+          </div>
           <div id="obdUnsupported" class="alert alert-warning small mt-2 d-none">
             {{ t('obd.unsupported', default='Dieser Browser unterstützt weder Web Serial noch Web Bluetooth. Nutze Chrome oder Edge (Desktop/Android). Auf iPhone/iPad ist der Zugriff leider nicht möglich.') }}
           </div>
@@ -220,6 +223,9 @@
       'bt_classic': t('obd.dongle_bt_classic', default='Dieser Adapter nutzt klassisches Bluetooth — Browser können darauf nicht direkt zugreifen. Nimm einen USB- oder Bluetooth-LE-Adapter.'),
       'wifi': t('obd.dongle_wifi', default='Dieser Adapter nutzt WLAN — Browser können darauf nicht direkt zugreifen. Nimm einen USB- oder Bluetooth-LE-Adapter.'),
       'saved': t('obd.dongle_saved', default='Als bevorzugter Adapter gemerkt.'),
+      'remembered': t('obd.remembered', default='Gemerkter Adapter — verbinde direkt…'),
+      'ble_try': t('obd.ble_connecting_try', default='Verbinde (Versuch {n})…'),
+      'ble_no_service': t('obd.ble_no_service', default='Verbunden, aber kein lesbarer OBD-Dienst gefunden. Wenn die Dongle-LED blau blinkt, ist er nicht verbunden: Zündung einschalten, Dongle kurz ab- und wieder anstecken und erneut versuchen. Klassische-Bluetooth-Dongles lassen sich vom Browser nicht ansprechen — nimm einen Bluetooth-LE- oder USB-Adapter.'),
     }|tojson }}
   };
 
@@ -250,6 +256,57 @@
   if (!hasSerial) btnSerial.disabled = true;
   if (!hasBle) btnBle.disabled = true;
   if (!hasSerial && !hasBle) document.getElementById('obdUnsupported').classList.remove('d-none');
+
+  // ── Remember the granted adapter ───────────────────────────────────
+  // First connect shows the browser's device chooser. After that the SAME
+  // dongle is granted for this origin, so getPorts()/getDevices() hand it
+  // back and we connect straight to it — no picker, "it just finds it". The
+  // "choose a different device" link forces the picker again when needed.
+  const pickOtherWrap = document.getElementById('obdPickOtherWrap');
+  let forcePicker = false;
+  let usedRemembered = false;
+
+  async function chooseSerialPort() {
+    usedRemembered = false;
+    if (!forcePicker) {
+      try {
+        const ports = await navigator.serial.getPorts();
+        if (ports.length === 1) { usedRemembered = true; return ports[0]; }
+      } catch (e) { /* fall through to picker */ }
+    }
+    forcePicker = false;
+    return navigator.serial.requestPort();
+  }
+
+  async function chooseBleDevice() {
+    usedRemembered = false;
+    if (!forcePicker && navigator.bluetooth.getDevices) {
+      try {
+        const devs = await navigator.bluetooth.getDevices();
+        if (devs.length === 1) { usedRemembered = true; return devs[0]; }
+      } catch (e) { /* fall through to picker */ }
+    }
+    forcePicker = false;
+    return navigator.bluetooth.requestDevice({
+      acceptAllDevices: true, optionalServices: BLE_SERVICES,
+    });
+  }
+
+  // Show the override link only once at least one adapter has been granted.
+  async function refreshPickOther() {
+    let known = 0;
+    try { if (hasSerial) known += (await navigator.serial.getPorts()).length; } catch (e) {}
+    try { if (hasBle && navigator.bluetooth.getDevices) known += (await navigator.bluetooth.getDevices()).length; } catch (e) {}
+    pickOtherWrap.classList.toggle('d-none', known === 0);
+  }
+  refreshPickOther();
+  const pickOtherLink = document.getElementById('obdPickOther');
+  if (pickOtherLink) pickOtherLink.addEventListener('click', (e) => {
+    e.preventDefault(); forcePicker = true; status(T.fields.connecting);
+  });
+  // Re-connect the status line when a USB adapter is plugged back in.
+  if (hasSerial && navigator.serial.addEventListener)
+    navigator.serial.addEventListener('connect', refreshPickOther);
 
   // ── Preferred dongle ───────────────────────────────────────────────
   // Selecting an adapter presets its USB baud rate, steers the user to the
@@ -373,35 +430,70 @@
     };
   }
 
-  // Common BLE ELM327 clone service/characteristics (fff0 family).
+  // Known BLE service UUIDs across the common ELM327 clones. These must be
+  // declared as optionalServices so the browser lets us read them; we then
+  // probe each, and if none of the named ones is present we fall back to
+  // enumerating *every* primary service the device exposes. That combination
+  // makes practically any Bluetooth-LE ELM327 usable regardless of its UUID.
   const BLE_SERVICES = [
-    0xFFF0,
+    0xFFF0, 0xFFE0, 0xFFB0, 0xFFC0, 0xFFD0, 0xFFE5,
     '0000fff0-0000-1000-8000-00805f9b34fb',
     '0000ffe0-0000-1000-8000-00805f9b34fb',
+    '0000ffb0-0000-1000-8000-00805f9b34fb',
+    '0000ffc0-0000-1000-8000-00805f9b34fb',
     '18f0e400-0000-1000-8000-00805f9b34fb',
+    '6e400001-b5a3-f393-e0a9-e50e24dcca9e', // Nordic UART (some vLinker/OBDLink)
   ];
+
+  // Cheap BLE dongles routinely reject the first GATT connect (the blue LED
+  // is still blinking = not yet paired). Retry a few times with backoff.
+  async function bleConnect(device, tries) {
+    let lastErr;
+    for (let i = 0; i < tries; i++) {
+      if (i > 0) status(T.dongle.ble_try.replace('{n}', i + 1));
+      try { return await device.gatt.connect(); }
+      catch (e) { lastErr = e; await new Promise(r => setTimeout(r, 400 * (i + 1))); }
+    }
+    throw lastErr || new Error('GATT connect failed');
+  }
+
   function makeBleTransport(device) {
     let writeChar, buffer = '';
     return {
       async open() {
-        const server = await device.gatt.connect();
-        let service, chars = [];
+        const server = await bleConnect(device, 4);
+        // Collect the named services first (fast path); if none respond, ask
+        // the device for everything it has and scan those instead.
+        let services = [];
         for (const su of BLE_SERVICES) {
-          try { service = await server.getPrimaryService(su); } catch (e) { continue; }
-          if (service) { chars = await service.getCharacteristics(); break; }
+          try { const s = await server.getPrimaryService(su); if (s) services.push(s); }
+          catch (e) { /* not present on this device */ }
         }
-        if (!service) throw new Error('Kein kompatibler BLE-Dienst gefunden');
+        if (!services.length) {
+          try { services = await server.getPrimaryServices(); } catch (e) { services = []; }
+        }
         const dec = new TextDecoder();
-        for (const c of chars) {
-          if (c.properties.notify || c.properties.indicate) {
-            await c.startNotifications();
-            c.addEventListener('characteristicvaluechanged', ev => {
-              buffer += dec.decode(ev.target.value);
-            });
+        // Pick the first service that yields a writable characteristic, and
+        // subscribe to any notify/indicate characteristics on it.
+        for (const service of services) {
+          let chars;
+          try { chars = await service.getCharacteristics(); } catch (e) { continue; }
+          let localWrite = null;
+          for (const c of chars) {
+            if (c.properties.notify || c.properties.indicate) {
+              try {
+                await c.startNotifications();
+                c.addEventListener('characteristicvaluechanged', ev => {
+                  buffer += dec.decode(ev.target.value);
+                });
+              } catch (e) { /* some chars refuse notify; ignore */ }
+            }
+            if (!localWrite && (c.properties.write || c.properties.writeWithoutResponse))
+              localWrite = c;
           }
-          if (c.properties.write || c.properties.writeWithoutResponse) writeChar = c;
+          if (localWrite) { writeChar = localWrite; break; }
         }
-        if (!writeChar) throw new Error('Keine beschreibbare Charakteristik');
+        if (!writeChar) throw new Error(T.dongle.ble_no_service);
       },
       async write(str) {
         const enc = new TextEncoder().encode(str);
@@ -521,24 +613,24 @@
 
   document.getElementById('btnSerial').addEventListener('click', () => withGuard(async () => {
     status(T.fields.connecting);
-    const port = await navigator.serial.requestPort();
+    const port = await chooseSerialPort();
+    if (usedRemembered) status(T.dongle.remembered);
     const tr = makeSerialTransport(port, parseInt(document.getElementById('obdBaud').value, 10));
     tr._kind = 'elm327-usb';
     await tr.open();
     try { await runSequence(tr); }
-    finally { await tr.close(); }
+    finally { await tr.close(); refreshPickOther(); }
   }));
 
   document.getElementById('btnBle').addEventListener('click', () => withGuard(async () => {
     status(T.fields.connecting);
-    const device = await navigator.bluetooth.requestDevice({
-      acceptAllDevices: true, optionalServices: BLE_SERVICES,
-    });
+    const device = await chooseBleDevice();
+    if (usedRemembered) status(T.dongle.remembered);
     const tr = makeBleTransport(device);
     tr._kind = 'elm327-ble';
     await tr.open();
     try { await runSequence(tr); }
-    finally { await tr.close(); }
+    finally { await tr.close(); refreshPickOther(); }
   }));
 })();
 </script>

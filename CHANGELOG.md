@@ -1,5 +1,33 @@
 # Changelog
 
+## v3.0.81 (2026-08-08)
+
+### Reliable Bluetooth dongle discovery + auto-reconnect
+
+A blinking-blue BLE dongle that "isn't found" traces back to two gaps in the
+in-browser reader: it probed only four hard-coded service UUIDs and gave up if
+none matched, and it re-showed the device chooser on every visit. Both are now
+fixed so the same adapter connects on the next try without fuss.
+
+- **Wider BLE service discovery** (`templates/obd.html`) — the known-UUID list
+  grew (fff0/ffe0/ffb0/ffc0/ffd0/ffe5 plus the Nordic UART service), and when
+  none of the named services is present the reader now enumerates *every*
+  primary service the device exposes and picks the first one with a writable
+  characteristic, subscribing to its notify/indicate channels. This makes
+  practically any Bluetooth-LE ELM327 usable regardless of its UUID.
+- **Connect retry** — cheap clones routinely reject the first GATT connect
+  while the LED is still blinking; the reader now retries the connection a few
+  times with backoff before failing.
+- **Remembered adapter, no more picker** — once an adapter is granted, USB
+  `getPorts()` / Bluetooth `getDevices()` hand it straight back, so the next
+  read connects directly without the chooser dialog. A "choose a different
+  device" link forces the picker again when needed.
+- **Actionable failure hint** — if a device connects but exposes no readable
+  OBD service, the message now explains the blinking-blue (not-connected)
+  case and that classic-Bluetooth dongles can't be reached from a browser.
+- **i18n** — four new `obd.*` keys across all six languages (full parity,
+  1270 keys each).
+
 ## v3.0.80 (2026-08-08)
 
 ### OBD adapter picker with a remembered preferred dongle
