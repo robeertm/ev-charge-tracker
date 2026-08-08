@@ -236,6 +236,7 @@
       'saved': t('obd.dongle_saved', default='Als bevorzugter Adapter gemerkt.'),
       'remembered': t('obd.remembered', default='Gemerkter Adapter — verbinde direkt…'),
       'ble_try': t('obd.ble_connecting_try', default='Verbinde (Versuch {n})…'),
+      'regrant': t('obd.ble_regrant', default='Gemerkter Adapter ohne lesbaren Dienst — wähle ihn im Dialog noch einmal aus, damit der Zugriff neu erteilt wird…'),
       'ble_no_service': t('obd.ble_no_service', default='Verbunden, aber kein lesbarer OBD-Dienst gefunden. Wenn die Dongle-LED blau blinkt, ist er nicht verbunden: Zündung einschalten, Dongle kurz ab- und wieder anstecken und erneut versuchen. Klassische-Bluetooth-Dongles lassen sich vom Browser nicht ansprechen — nimm einen Bluetooth-LE- oder USB-Adapter.'),
     }|tojson }},
     st: {{ {
@@ -494,19 +495,27 @@
     };
   }
 
-  // Known BLE service UUIDs across the common ELM327 clones. These must be
-  // declared as optionalServices so the browser lets us read them; we then
-  // probe each, and if none of the named ones is present we fall back to
-  // enumerating *every* primary service the device exposes. That combination
-  // makes practically any Bluetooth-LE ELM327 usable regardless of its UUID.
+  // Known BLE service UUIDs across the common ELM327 clones. Web Bluetooth
+  // ONLY exposes services listed here: getPrimaryServices() returns the
+  // *allow-listed* services this device actually has, NOT every service on the
+  // chip — anything not declared as an optionalService is invisible. So a
+  // dongle whose UUID is missing here connects but shows "0 services". The
+  // list below therefore has to name every UUID we ever want to reach; keep it
+  // broad. Covers the FFxx HM-10 clones, the Vgate iCar/vLinker "IOS-Vlink"
+  // (Laird virtual serial port e7810a71…), the iCar Pro 2S (18f0) and Nordic
+  // UART variants.
   const BLE_SERVICES = [
-    0xFFF0, 0xFFE0, 0xFFB0, 0xFFC0, 0xFFD0, 0xFFE5,
+    0xFFF0, 0xFFE0, 0xFFB0, 0xFFC0, 0xFFD0, 0xFFE5, 0xFEE0, 0x18F0,
     '0000fff0-0000-1000-8000-00805f9b34fb',
     '0000ffe0-0000-1000-8000-00805f9b34fb',
     '0000ffb0-0000-1000-8000-00805f9b34fb',
     '0000ffc0-0000-1000-8000-00805f9b34fb',
-    '18f0e400-0000-1000-8000-00805f9b34fb',
+    '0000ffd0-0000-1000-8000-00805f9b34fb',
+    '0000ffe5-0000-1000-8000-00805f9b34fb',
+    '0000fee0-0000-1000-8000-00805f9b34fb',
+    '000018f0-0000-1000-8000-00805f9b34fb', // Vgate iCar Pro 2S (2af0/2af1)
     '6e400001-b5a3-f393-e0a9-e50e24dcca9e', // Nordic UART (some vLinker/OBDLink)
+    'e7810a71-73ae-499d-8c15-faa9aef0c3f2', // Vgate iCar / vLinker "IOS-Vlink"
   ];
 
   // Cheap BLE dongles routinely reject the first GATT connect (the blue LED
@@ -529,8 +538,11 @@
         status(T.step.gatt); log(T.step.gatt);
         const server = await bleConnect(device, 4);
         status(T.step.services); log(T.step.services);
-        // Collect the named services first (fast path); if none respond, ask
-        // the device for everything it has and scan those instead.
+        // Probe each named service; keep the ones this device actually has.
+        // The no-argument getPrimaryServices() fallback still only returns
+        // allow-listed services (see BLE_SERVICES) — it catches a device that
+        // exposes one of our UUIDs under a form the per-UUID lookup missed, but
+        // it can never reveal a service whose UUID is absent from the list.
         let services = [];
         for (const su of BLE_SERVICES) {
           try { const s = await server.getPrimaryService(su); if (s) services.push(s); }
@@ -562,7 +574,7 @@
           }
           if (localWrite) { writeChar = localWrite; break; }
         }
-        if (!writeChar) throw new Error(T.dongle.ble_no_service);
+        if (!writeChar) { const e = new Error(T.dongle.ble_no_service); e.noService = true; throw e; }
         status(T.step.channel_ok); log(T.step.channel_ok);
         connState('connected');
       },
@@ -714,17 +726,37 @@
     finally { await tr.close(); refreshPickOther(); }
   }));
 
-  document.getElementById('btnBle').addEventListener('click', () => withGuard(async () => {
-    connState('pairing');
-    status(T.step.pairing_wait);
+  // Connect over BLE, and self-heal the "0 services" case: a device handed
+  // back by getDevices() keeps the service allow-list it was first granted
+  // with. Since we have since widened BLE_SERVICES (e.g. the IOS-Vlink UUID),
+  // an already-remembered dongle can still come up serviceless. When that
+  // happens, re-run the chooser ONCE so a fresh requestDevice re-grants it
+  // with the current, wider optionalServices list — after that it sticks.
+  async function bleConnectAndRun(allowRegrant) {
     const device = await chooseBleDevice();
     setDevice(device.name || T.step.dev_unknown);
     if (usedRemembered) status(T.dongle.remembered);
     const tr = makeBleTransport(device);
     tr._kind = 'elm327-ble';
-    await tr.open();
+    try {
+      await tr.open();
+    } catch (e) {
+      if (e && e.noService && usedRemembered && allowRegrant) {
+        try { await tr.close(); } catch (_) {}
+        status(T.dongle.regrant); log(T.dongle.regrant);
+        forcePicker = true;                // force a fresh requestDevice
+        return await bleConnectAndRun(false);
+      }
+      throw e;
+    }
     try { await runSequence(tr); }
     finally { await tr.close(); refreshPickOther(); }
+  }
+
+  document.getElementById('btnBle').addEventListener('click', () => withGuard(async () => {
+    connState('pairing');
+    status(T.step.pairing_wait);
+    await bleConnectAndRun(true);
   }));
 })();
 </script>

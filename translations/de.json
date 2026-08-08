@@ -1233,6 +1233,7 @@
   "obd.pick_other": "Anderes Gerät wählen",
   "obd.remembered": "Gemerkter Adapter — verbinde direkt…",
   "obd.ble_connecting_try": "Verbinde (Versuch {n})…",
+  "obd.ble_regrant": "Gemerkter Adapter ohne lesbaren Dienst — wähle ihn im Dialog noch einmal aus, damit der Zugriff neu erteilt wird…",
   "obd.ble_no_service": "Verbunden, aber kein lesbarer OBD-Dienst gefunden. Wenn die Dongle-LED blau blinkt, ist er nicht verbunden: Zündung einschalten, Dongle kurz ab- und wieder anstecken und erneut versuchen. Klassische-Bluetooth-Dongles lassen sich vom Browser nicht ansprechen — nimm einen Bluetooth-LE- oder USB-Adapter.",
   "obd.baud": "USB-Baudrate",
   "obd.odometer": "km-Stand (optional)",

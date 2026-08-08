@@ -1233,6 +1233,7 @@
   "obd.pick_other": "Scegli un altro dispositivo",
   "obd.remembered": "Adattatore memorizzato — connessione diretta…",
   "obd.ble_connecting_try": "Connessione (tentativo {n})…",
+  "obd.ble_regrant": "Adattatore memorizzato senza servizio leggibile — riselezionalo nella finestra di dialogo per concedere di nuovo l'accesso…",
   "obd.ble_no_service": "Connesso, ma nessun servizio OBD leggibile trovato. Se il LED del dongle lampeggia in blu non è connesso: accendi il quadro, scollega e ricollega brevemente il dongle, poi riprova. I dongle Bluetooth classici non sono raggiungibili da un browser — usa un adattatore Bluetooth LE o USB.",
   "obd.baud": "Baud rate USB",
   "obd.odometer": "Chilometraggio (facoltativo)",

@@ -1233,6 +1233,7 @@
   "obd.pick_other": "Elegir otro dispositivo",
   "obd.remembered": "Adaptador recordado — conectando directamente…",
   "obd.ble_connecting_try": "Conectando (intento {n})…",
+  "obd.ble_regrant": "Adaptador recordado sin servicio legible — vuelve a seleccionarlo en el diálogo para que se conceda el acceso de nuevo…",
   "obd.ble_no_service": "Conectado, pero no se encontró ningún servicio OBD legible. Si el LED del dongle parpadea en azul, no está conectado: pon el contacto, desconecta y vuelve a conectar el dongle un momento y prueba de nuevo. Los dongles Bluetooth clásicos no son accesibles desde un navegador — usa un adaptador Bluetooth LE o USB.",
   "obd.baud": "Velocidad en baudios USB",
   "obd.odometer": "Kilometraje (opcional)",

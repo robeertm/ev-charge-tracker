@@ -1,5 +1,29 @@
 # Changelog
 
+## v3.0.83 (2026-08-08)
+
+### Fix: Bluetooth-LE dongles that connect but report "0 services"
+
+Some BLE adapters — notably the Vgate iCar / vLinker family that enumerates as
+"IOS-Vlink" — paired successfully but then stalled with "Connected, but no
+readable OBD service found" and the blue LED still blinking. The cause was in
+`templates/obd.html`: Web Bluetooth only ever exposes services that are declared
+up front in `optionalServices`, and `getPrimaryServices()` returns just that
+allow-listed subset — never every service on the chip. Adapters whose service
+UUID was missing from the list therefore connected but showed zero services.
+
+- **Broader service allow-list** (`templates/obd.html`) — added the Vgate
+  iCar / vLinker virtual-serial UUID (`e7810a71…`), the iCar Pro 2S service
+  (`000018f0…`) and a couple more common clone UUIDs. Fixed a malformed entry
+  (`18f0e400…`) that could never match.
+- **Self-healing re-grant** — a dongle remembered from an earlier session keeps
+  the service allow-list it was first granted with, so a previously-paired
+  adapter could stay serviceless even after the list was widened. When that
+  happens the chooser now re-opens once automatically so a fresh grant picks up
+  the current UUID list; after that it connects straight through.
+- Corrected the misleading in-code comment that claimed the fallback
+  enumerated every service.
+
 ## v3.0.82 (2026-08-08)
 
 ### Live pairing feedback so connecting is never a silent box

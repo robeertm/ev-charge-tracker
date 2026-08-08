@@ -1233,6 +1233,7 @@
   "obd.pick_other": "Choisir un autre appareil",
   "obd.remembered": "Adaptateur mémorisé — connexion directe…",
   "obd.ble_connecting_try": "Connexion (tentative {n})…",
+  "obd.ble_regrant": "Adaptateur mémorisé sans service lisible — resélectionnez-le dans la boîte de dialogue pour que l'accès soit à nouveau accordé…",
   "obd.ble_no_service": "Connecté, mais aucun service OBD lisible n'a été trouvé. Si la LED du dongle clignote en bleu, il n'est pas connecté : mettez le contact, débranchez puis rebranchez brièvement le dongle, puis réessayez. Les dongles Bluetooth classiques ne sont pas accessibles depuis un navigateur — utilisez un adaptateur Bluetooth LE ou USB.",
   "obd.baud": "Débit en bauds USB",
   "obd.odometer": "Kilométrage (facultatif)",

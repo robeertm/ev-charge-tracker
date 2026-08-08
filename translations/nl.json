@@ -1233,6 +1233,7 @@
   "obd.pick_other": "Ander apparaat kiezen",
   "obd.remembered": "Onthouden adapter — direct verbinden…",
   "obd.ble_connecting_try": "Verbinden (poging {n})…",
+  "obd.ble_regrant": "Onthouden adapter zonder leesbare service — selecteer hem opnieuw in het dialoogvenster zodat toegang opnieuw wordt verleend…",
   "obd.ble_no_service": "Verbonden, maar geen leesbare OBD-service gevonden. Als de led van de dongle blauw knippert, is hij niet verbonden: zet het contact aan, koppel de dongle even los en weer vast en probeer opnieuw. Klassieke Bluetooth-dongles zijn niet bereikbaar vanuit een browser — gebruik een Bluetooth LE- of USB-adapter.",
   "obd.baud": "USB-baudrate",
   "obd.odometer": "Kilometerstand (optioneel)",

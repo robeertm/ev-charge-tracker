@@ -1226,6 +1226,7 @@
   "obd.pick_other": "Choose a different device",
   "obd.remembered": "Remembered adapter — connecting directly…",
   "obd.ble_connecting_try": "Connecting (attempt {n})…",
+  "obd.ble_regrant": "Remembered adapter with no readable service — pick it again in the dialog so access is re-granted…",
   "obd.ble_no_service": "Connected, but no readable OBD service was found. If the dongle's LED is blinking blue it isn't connected: switch the ignition on, unplug and replug the dongle briefly, then try again. Classic-Bluetooth dongles can't be reached from a browser — use a Bluetooth-LE or USB adapter.",
   "obd.baud": "USB baud rate",
   "obd.odometer": "Odometer (optional)",
