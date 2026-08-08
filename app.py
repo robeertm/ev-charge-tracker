@@ -2451,10 +2451,13 @@ def register_routes(app):
             return redirect('/settings#sec-fleet')
         safe_name = ''.join(ch if ch.isalnum() else '_' for ch in (v.name or 'EV'))
         filename = f'Batteriezertifikat_{safe_name}_{date.today().strftime("%Y%m%d")}.pdf'
+        # ?inline=1 serves the PDF for in-page preview (e.g. embedded on the
+        # OBD page) instead of forcing a download; the export button omits it.
+        inline = request.args.get('inline') in ('1', 'true', 'yes')
         return send_file(
             io.BytesIO(pdf_bytes),
             mimetype='application/pdf',
-            as_attachment=True,
+            as_attachment=not inline,
             download_name=filename,
         )
 
@@ -2478,12 +2481,31 @@ def register_routes(app):
             active = next((v for v in vehicles if not v.is_archived), None) or \
                 (vehicles[0] if vehicles else None)
         last = None
+        cert = None
+        cert_available = False
         if active is not None:
             last = (ObdReading.query.filter_by(vehicle_id=active.id)
                     .order_by(ObdReading.timestamp.desc()).first())
+            # Battery certificate preview: compute the (cheap) health metrics
+            # so the OBD page can show the certificate inline once there is
+            # any data to base it on, with an export-to-PDF button.
+            try:
+                from services.battery_cert_service import compute_battery_health
+                cert = compute_battery_health(active.id)
+            except Exception:
+                app.logger.exception('battery health computation failed')
+                cert = None
+            if cert:
+                basis = cert.get('data_basis') or {}
+                cert_available = bool(
+                    (basis.get('charge_count') or 0) > 0
+                    or basis.get('sync_count')
+                    or cert.get('obd')
+                    or cert.get('certified_soh') is not None)
         return render_template('obd.html', vehicles=vehicles,
                                active=active,
                                last=last.to_dict() if last else None,
+                               cert=cert, cert_available=cert_available,
                                app_version=Config.APP_VERSION)
 
     @app.route('/api/obd/profile/<int:vid>')

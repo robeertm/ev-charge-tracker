@@ -101,6 +101,61 @@
       </div>
     </div>
   </div>
+
+  <!-- ── Battery certificate preview (v3.0.78) ─────────────────────────
+       The certificate exactly as it prints to PDF, embedded inline so it
+       shows up right here once there is data, with an export button. -->
+  <div class="card mt-3" id="obdCert">
+    <div class="card-body">
+      <div class="d-flex align-items-center justify-content-between flex-wrap gap-2 mb-2">
+        <h6 class="card-title mb-0 d-flex align-items-center gap-2">
+          <i class="bi bi-patch-check"></i>
+          {{ t('obd.cert_title', default='Batteriezertifikat') }}
+          {% if cert_available and cert and cert.certified_soh is not none %}
+          <span class="badge rounded-pill"
+                style="background-color: {{ cert.grade.color }}; color:#fff;">
+            {{ cert.grade.letter }} · {{ '%.1f'|format(cert.certified_soh) }} %
+          </span>
+          {% endif %}
+        </h6>
+        {% if cert_available %}
+        <div class="d-flex gap-2">
+          <a href="/vehicles/{{ active.id }}/certificate.pdf?inline=1" target="_blank"
+             rel="noopener" class="btn btn-sm btn-outline-secondary">
+            <i class="bi bi-box-arrow-up-right"></i>
+            {{ t('obd.cert_newtab', default='In neuem Tab öffnen') }}
+          </a>
+          <a href="/vehicles/{{ active.id }}/certificate.pdf"
+             class="btn btn-sm btn-primary">
+            <i class="bi bi-download"></i>
+            {{ t('obd.cert_export', default='Als PDF exportieren') }}
+          </a>
+        </div>
+        {% endif %}
+      </div>
+      <p class="small text-muted mb-2">
+        {{ t('obd.cert_subtitle', default='Vorschau des Zertifikats – so wie es als PDF aussieht. Die zuletzt ausgelesene Messung fließt automatisch ein.') }}
+      </p>
+      {% if cert_available %}
+      <div class="ratio" style="--bs-aspect-ratio: 130%; min-height: 42rem;">
+        <object data="/vehicles/{{ active.id }}/certificate.pdf?inline=1#zoom=page-width"
+                type="application/pdf" class="w-100 h-100 border rounded">
+          <iframe src="/vehicles/{{ active.id }}/certificate.pdf?inline=1"
+                  class="w-100 h-100 border rounded"
+                  title="{{ t('obd.cert_title', default='Batteriezertifikat') }}"></iframe>
+          <div class="alert alert-info small mb-0 mt-2">
+            {{ t('obd.cert_pdf_fallback', default='Die Vorschau kann in diesem Browser nicht angezeigt werden.') }}
+            <a href="/vehicles/{{ active.id }}/certificate.pdf">{{ t('obd.cert_export', default='Als PDF exportieren') }}</a>
+          </div>
+        </object>
+      </div>
+      {% else %}
+      <div class="alert alert-secondary small mb-0">
+        {{ t('obd.cert_none', default='Noch keine auswertbaren Batteriedaten für ein Zertifikat. Lies die Batterie aus oder erfasse Ladevorgänge – dann erscheint das Zertifikat hier.') }}
+      </div>
+      {% endif %}
+    </div>
+  </div>
   {% endif %}
 </div>
 {% endblock %}

@@ -1,5 +1,33 @@
 # Changelog
 
+## v3.0.78 (2026-08-08)
+
+### Batteriezertifikat direkt auf der OBD-Seite ansehen (+ Export-Button)
+
+Robert: „baue hinter dem Menüpunkt OBD das Batteriezertifikat ein, dass man es
+dort sehen kann wenn es erzeugt wurde, so wie das PDF aussieht, mit einem
+Export-Button." Umgesetzt: Unter dem OBD-Auslese-Bereich erscheint jetzt eine
+**eingebettete Live-Vorschau des Zertifikats** — es wird die **echte PDF**
+inline angezeigt (nicht eine nachgebaute HTML-Kopie), also **exakt so, wie sie
+gedruckt/exportiert aussieht**, ohne Gefahr, dass Vorschau und PDF auseinander
+laufen. Die zuletzt per OBD/ELM327 ausgelesene Messung fließt automatisch ein.
+
+- **Neue Inline-Auslieferung der Zertifikats-Route** (`app.py`,
+  `/vehicles/<id>/certificate.pdf`): Query-Parameter **`?inline=1`** liefert das
+  PDF mit `Content-Disposition: inline` für die Einbettung; ohne den Parameter
+  bleibt es ein Download (`attachment`) — der Export-Button nutzt genau das.
+- **OBD-Seite** (`templates/obd.html`): neuer Abschnitt „Batteriezertifikat"
+  mit **Noten-Badge** (Grade + SoH in der Grade-Farbe), eingebettetem PDF
+  (`<object>` mit `<iframe>`- und Text-Fallback), **„In neuem Tab öffnen"** und
+  **„Als PDF exportieren"**. Ist noch keine Datengrundlage vorhanden, erscheint
+  statt der Vorschau ein Hinweis.
+- **`obd_page`-Route** (`app.py`): berechnet die (günstigen) Health-Metriken
+  über `compute_battery_health` und blendet die Vorschau nur ein, wenn es
+  Ladevorgänge, Syncs oder eine OBD-Messung gibt (`cert_available`).
+- **i18n**: 6 neue Keys (`obd.cert_title`, `obd.cert_subtitle`,
+  `obd.cert_export`, `obd.cert_newtab`, `obd.cert_none`,
+  `obd.cert_pdf_fallback`) in **allen 6 Sprachen** (Parität 1257 Keys je Datei).
+
 ## v3.0.77 (2026-08-08)
 
 ### Markenname aus dem Zertifikat entfernt (Markenschutz)
