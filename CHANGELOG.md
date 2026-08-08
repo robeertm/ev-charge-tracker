@@ -1,5 +1,31 @@
 # Changelog
 
+## v3.0.89 (2026-08-08)
+
+### Add: live OBD dashboard — every sensor, graphically
+
+The OBD page now has a **live view** that reads the whole battery PID set on a
+loop and renders every sensor the car reports as its own gauge tile — value,
+a coloured meter bar and a rolling sparkline of the recent history — grouped
+into Battery, Power, Cells, Temperature and More. It shows SoC (BMS + display),
+SoH, pack voltage/current, instantaneous **power (kW, derived from V × A)**,
+cell average/min/max/spread/count, pack temperatures and the 12 V battery, plus
+the live per-cell voltage chart updating in real time — a continuous
+diagnostic-tool-style readout, in the browser over the same USB/BLE adapter.
+
+* **Connect once, poll in a loop.** The read sequence was refactored into
+  shared `initProfile` + `pollFrames` helpers so the one-shot read and the live
+  loop share the exact same init and framing (ISO-TP length byte under
+  `ATCAF0`, stray-frame skipping) — a fix in one benefits both.
+* **Decode without persisting.** A new `POST /api/vehicles/<id>/obd/live`
+  endpoint decodes each poll and returns the sensor values but stores nothing,
+  so a long live session doesn't fill the database. A **"save snapshot"** button
+  replays the last captured frames through the normal ingest path to store the
+  current state as a measurement that feeds the certificate.
+* Adjustable refresh (as-fast-as-possible / 1 s / 2 s / 5 s), a live status
+  pill, poll counter and per-cycle timing. New strings added in all six
+  languages.
+
 ## v3.0.88 (2026-08-08)
 
 ### Fix: correct Kia/Hyundai battery decode + per-cell certificate chart

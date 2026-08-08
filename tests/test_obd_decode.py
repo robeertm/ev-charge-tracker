@@ -125,6 +125,8 @@ def main():
     check('soh 98.5', abs(d['soh_pct'] - 98.5) < 0.01)
     check('soc display 79.0', abs(d['soc_display_pct'] - 79.0) < 0.01)
     check('cum charge 1000.0', abs(d['cumulative_charge_ah'] - 1000.0) < 0.01)
+    # Derived live power = pack V × pack A / 1000 = 360.0 × -15.0 / 1000 = -5.4 kW
+    check('power_kw -5.4', abs(d['power_kw'] + 5.4) < 0.01)
 
     # 96 cells across the three PIDs (min 199*0.02=3.98, max 201*0.02=4.02)
     check('96 cells', d['cell_count'] == 96)

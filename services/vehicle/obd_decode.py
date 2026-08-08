@@ -607,4 +607,10 @@ def decode(profile_key: str, frames: dict):
     if out.get('temp_avg_c') is None and out.get('temp_min_c') is not None and out.get('temp_max_c') is not None:
         out['temp_avg_c'] = round((out['temp_min_c'] + out['temp_max_c']) / 2, 1)
 
+    # Derived instantaneous pack power (kW). CarScanner shows this as a live
+    # gauge; it's just V×A, signed the same way as the current (negative =
+    # charging on the Kia/Hyundai sign convention). Only when both are present.
+    if out.get('pack_voltage_v') is not None and out.get('pack_current_a') is not None:
+        out['power_kw'] = round(out['pack_voltage_v'] * out['pack_current_a'] / 1000.0, 2)
+
     return out

@@ -145,6 +145,53 @@
     </div>
   </div>
 
+  <!-- ── Live view — every sensor the car reports (v3.0.89) ────────────
+       A CarScanner-style live dashboard: connect once, then poll the whole
+       PID set on a loop and render a gauge tile (value + meter + sparkline)
+       for every decoded sensor, plus the live per-cell voltage chart. The
+       server decodes each poll (no persistence) via /api/vehicles/<id>/obd/live. -->
+  <div class="card mt-3" id="obdLiveCard">
+    <div class="card-body">
+      <div class="d-flex align-items-center justify-content-between flex-wrap gap-2 mb-2">
+        <h6 class="card-title mb-0 d-flex align-items-center gap-2">
+          <i class="bi bi-activity"></i>
+          {{ t('obd.live_title', default='Live-Ansicht — alle Sensoren') }}
+        </h6>
+        <div class="d-flex align-items-center gap-2 flex-wrap">
+          <span class="badge rounded-pill text-bg-secondary d-inline-flex align-items-center gap-1" id="obdLiveBadge">
+            <span class="spinner-border spinner-border-sm d-none" id="obdLiveSpin" role="status"></span>
+            <i class="bi bi-circle" id="obdLiveIcon"></i>
+            <span id="obdLiveState">{{ t('obd.live_stopped', default='Gestoppt') }}</span>
+          </span>
+          <select class="form-select form-select-sm" id="obdLiveInterval" style="max-width:9rem" title="{{ t('obd.live_interval', default='Aktualisierung') }}">
+            <option value="0">{{ t('obd.live_int_fast', default='So schnell wie möglich') }}</option>
+            <option value="1000" selected>{{ t('obd.live_int_1s', default='alle 1 s') }}</option>
+            <option value="2000">{{ t('obd.live_int_2s', default='alle 2 s') }}</option>
+            <option value="5000">{{ t('obd.live_int_5s', default='alle 5 s') }}</option>
+          </select>
+          <button class="btn btn-sm btn-success" id="btnLiveStart">
+            <i class="bi bi-play-fill"></i> {{ t('obd.live_start', default='Live starten') }}
+          </button>
+          <button class="btn btn-sm btn-outline-danger d-none" id="btnLiveStop">
+            <i class="bi bi-stop-fill"></i> {{ t('obd.live_stop', default='Stopp') }}
+          </button>
+          <button class="btn btn-sm btn-outline-primary d-none" id="btnLiveSnapshot" title="{{ t('obd.live_snapshot_hint', default='Aktuellen Stand als Messung speichern') }}">
+            <i class="bi bi-camera"></i> {{ t('obd.live_snapshot', default='Snapshot speichern') }}
+          </button>
+        </div>
+      </div>
+      <p class="small text-muted mb-2">
+        {{ t('obd.live_hint', default='Zündung ein (Auto wach), Live starten — dann liest die App alle vom Auto gemeldeten Sensoren fortlaufend aus und zeigt sie grafisch. Nichts wird dabei gespeichert; nutze „Snapshot speichern“, um den aktuellen Stand als Messung fürs Zertifikat abzulegen.') }}
+      </p>
+      <div class="d-flex justify-content-between align-items-center small text-muted mb-2">
+        <span id="obdLiveStatus">{{ t('obd.live_idle', default='Bereit — Live starten, um alle Sensoren zu sehen.') }}</span>
+        <span id="obdLiveMeta"></span>
+      </div>
+      <div id="obdLiveGrid"></div>
+      <div id="obdLiveCells" class="mt-2"></div>
+    </div>
+  </div>
+
   <!-- ── Battery certificate preview (v3.0.78) ─────────────────────────
        The certificate exactly as it prints to PDF, embedded inline so it
        shows up right here once there is data, with an export button. -->
@@ -282,6 +329,44 @@
       'done': t('obd.scan_done', default='ECU-Scan abgeschlossen.'),
       'apply': t('obd.scan_apply', default='Empfohlenes Profil übernehmen & auslesen'),
       'hint_nodata': t('obd.scan_hint_nodata', default='Keine auswertbaren Daten — starte den ECU-Scan, um die passende Adresse zu finden.'),
+    }|tojson }},
+    live: {{ {
+      'connecting': t('obd.live_connecting', default='Verbinde für Live-Ansicht…'),
+      'init': t('obd.live_initing', default='Initialisiere Adapter…'),
+      'running': t('obd.live_running', default='Live — lese Sensoren fortlaufend.'),
+      'stopped': t('obd.live_stopped', default='Gestoppt'),
+      'live': t('obd.live_state_live', default='Live'),
+      'polls': t('obd.live_polls', default='{n} Messungen · {ms} ms/Zyklus'),
+      'updated': t('obd.live_updated', default='aktualisiert {t}'),
+      'no_data': t('obd.live_no_data', default='Keine auswertbaren Daten — Auto wach? Zündung ein und erneut starten.'),
+      'saved': t('obd.live_saved', default='Snapshot gespeichert ✓'),
+      'save_failed': t('obd.live_save_failed', default='Snapshot konnte nicht gespeichert werden.'),
+    }|tojson }},
+    grp: {{ {
+      'battery': t('obd.grp_battery', default='Batterie'),
+      'power': t('obd.grp_power', default='Leistung'),
+      'cells': t('obd.grp_cells', default='Zellen'),
+      'temp': t('obd.grp_temp', default='Temperatur'),
+      'other': t('obd.grp_other', default='Weitere'),
+    }|tojson }},
+    sens: {{ {
+      'soc_bms_pct': t('obd.s_soc_bms', default='SoC (BMS)'),
+      'soc_display_pct': t('obd.s_soc_display', default='SoC (Anzeige)'),
+      'soh_pct': t('obd.s_soh', default='SoH'),
+      'pack_voltage_v': t('obd.s_pack_v', default='Pack-Spannung'),
+      'pack_current_a': t('obd.s_pack_a', default='Pack-Strom'),
+      'power_kw': t('obd.s_power', default='Leistung'),
+      'cell_avg_v': t('obd.s_cell_avg', default='Zelle Ø'),
+      'cell_min_v': t('obd.s_cell_min', default='Zelle min'),
+      'cell_max_v': t('obd.s_cell_max', default='Zelle max'),
+      'cell_delta_mv': t('obd.s_cell_delta', default='Zell-Spreizung'),
+      'cell_count': t('obd.s_cell_count', default='Zellen'),
+      'temp_min_c': t('obd.s_temp_min', default='Temp. min'),
+      'temp_max_c': t('obd.s_temp_max', default='Temp. max'),
+      'temp_avg_c': t('obd.s_temp_avg', default='Temp. Ø'),
+      'aux_battery_v': t('obd.s_aux', default='12V-Batterie'),
+      'cumulative_charge_ah': t('obd.s_cum_charge', default='Kumuliert geladen'),
+      'cumulative_discharge_ah': t('obd.s_cum_discharge', default='Kumuliert entladen'),
     }|tojson }}
   };
 
@@ -299,6 +384,10 @@
   function log(msg) {
     const t = new Date().toLocaleTimeString();
     logEl.textContent += `[${t}] ${msg}\n`;
+    // The live view logs every poll's commands, so cap the buffer to keep it
+    // from growing without bound over a long session.
+    if (logEl.textContent.length > 40000)
+      logEl.textContent = logEl.textContent.slice(-20000);
     logEl.scrollTop = logEl.scrollHeight;
   }
   function status(msg) { statusEl.textContent = msg; }
@@ -655,33 +744,51 @@
     return nbytes.toString(16).padStart(2, '0') + clean;
   }
 
-  // ── Full read sequence ─────────────────────────────────────────────
-  async function runSequence(tr) {
-    const key = profileSel.value;
-    const prof = await profileFor(key);
+  // ── Init + poll helpers (shared by one-shot read and live view) ─────
+  // initProfile() runs the ELM327 setup + request header ONCE per connection.
+  // pollFrames() sends the PID list and returns the raw {pid: text} map. The
+  // one-shot read inits then polls once; the live view inits then polls in a
+  // loop — same code path, so a fix in one helps both.
+  async function initProfile(tr, prof) {
     status(T.fields.init);
     for (const line of prof.init) {
       // ATZ resets the chip; give it more time.
       await cmd(tr, line, line.toUpperCase() === 'ATZ' ? 4000 : 2500);
     }
     await cmd(tr, 'ATSH' + prof.header, 2500);
-    connState('reading');
+  }
+  async function pollFrames(tr, prof, onProgress) {
     const cafOff = cafOffFor(prof.init);
     const frames = {};
     const pids = prof.pids;
     for (let i = 0; i < pids.length; i++) {
-      status(`${T.fields.reading} ${pids[i]} (${i + 1}/${pids.length})`);
-      progress((i + 1) / (pids.length + 1));
+      if (onProgress) onProgress(i, pids.length, pids[i]);
       // Key the reply by the logical PID; only the wire request is framed.
       frames[pids[i]] = await cmd(tr, wireReq(pids[i], cafOff), 4000);
     }
+    return frames;
+  }
+  // True when at least one PID returned real hex data (not NO DATA / errors).
+  function framesHaveData(frames) {
+    return Object.values(frames).some(raw =>
+      raw && !/NO DATA|UNABLE|CAN ERROR|BUS INIT|STOPPED|ERROR|\?/i.test(raw)
+          && /[0-9A-Fa-f]{2}\s+[0-9A-Fa-f]{2}/.test(raw));
+  }
+
+  // ── Full read sequence ─────────────────────────────────────────────
+  async function runSequence(tr) {
+    const key = profileSel.value;
+    const prof = await profileFor(key);
+    await initProfile(tr, prof);
+    connState('reading');
+    const frames = await pollFrames(tr, prof, (i, n, pid) => {
+      status(`${T.fields.reading} ${pid} (${i + 1}/${n})`);
+      progress((i + 1) / (n + 1));
+    });
     // If every PID came back NO DATA, the header we addressed has no ECU
     // answering — wrong profile for this car. Point the user at the scan
     // instead of silently saving an empty reading.
-    const gotData = Object.values(frames).some(raw =>
-      raw && !/NO DATA|UNABLE|CAN ERROR|BUS INIT|STOPPED|ERROR|\?/i.test(raw)
-          && /[0-9A-Fa-f]{2}\s+[0-9A-Fa-f]{2}/.test(raw));
-    if (!gotData) {
+    if (!framesHaveData(frames)) {
       connState('failed');
       status(T.scan.hint_nodata);
       scanBody.innerHTML = `<div>${T.scan.hint_nodata}</div>`;
@@ -949,6 +1056,259 @@
 
   document.getElementById('btnScan').addEventListener('click',
     () => withGuard(connectScan));
+
+  // ── Live view — every sensor, CarScanner-style (v3.0.89) ────────────
+  // Connect once, then poll the whole PID set in a loop; the server decodes
+  // each poll (no persistence) and we render a gauge tile — value + meter +
+  // sparkline — for every reported sensor, plus the live per-cell chart. A
+  // "snapshot" button reuses the normal ingest path to save the current state.
+  const sleep = ms => new Promise(r => setTimeout(r, ms));
+
+  // Sensor layout: ordered groups → descriptors. Each descriptor: k (decoded
+  // key), unit, digits, [min,max] for the meter, tone (colour rule). Labels
+  // come from T.sens/T.grp so every string flows through i18n.
+  const LIVE_GROUPS = [
+    { key: 'battery', keys: [
+      { k: 'soc_bms_pct', unit: '%', digits: 1, min: 0, max: 100, tone: 'soc' },
+      { k: 'soc_display_pct', unit: '%', digits: 1, min: 0, max: 100, tone: 'soc' },
+      { k: 'soh_pct', unit: '%', digits: 1, min: 0, max: 100, tone: 'soh' },
+    ]},
+    { key: 'power', keys: [
+      { k: 'pack_voltage_v', unit: 'V', digits: 1, min: 250, max: 450, tone: 'primary' },
+      { k: 'pack_current_a', unit: 'A', digits: 1, min: -240, max: 240, tone: 'signed' },
+      { k: 'power_kw', unit: 'kW', digits: 2, min: -120, max: 120, tone: 'signed' },
+    ]},
+    { key: 'cells', keys: [
+      { k: 'cell_avg_v', unit: 'V', digits: 3, min: 2.8, max: 4.25, tone: 'primary' },
+      { k: 'cell_min_v', unit: 'V', digits: 3, min: 2.8, max: 4.25, tone: 'primary' },
+      { k: 'cell_max_v', unit: 'V', digits: 3, min: 2.8, max: 4.25, tone: 'primary' },
+      { k: 'cell_delta_mv', unit: 'mV', digits: 0, min: 0, max: 100, tone: 'delta' },
+      { k: 'cell_count', unit: '', digits: 0, tone: 'plain' },
+    ]},
+    { key: 'temp', keys: [
+      { k: 'temp_min_c', unit: '°C', digits: 0, min: -20, max: 60, tone: 'temp' },
+      { k: 'temp_max_c', unit: '°C', digits: 0, min: -20, max: 60, tone: 'temp' },
+      { k: 'temp_avg_c', unit: '°C', digits: 0, min: -20, max: 60, tone: 'temp' },
+    ]},
+    { key: 'other', keys: [
+      { k: 'aux_battery_v', unit: 'V', digits: 1, min: 11, max: 15, tone: 'primary' },
+      { k: 'cumulative_charge_ah', unit: 'Ah', digits: 1, tone: 'plain' },
+      { k: 'cumulative_discharge_ah', unit: 'Ah', digits: 1, tone: 'plain' },
+    ]},
+  ];
+
+  const liveGrid = document.getElementById('obdLiveGrid');
+  const liveCellsEl = document.getElementById('obdLiveCells');
+  const liveStatusEl = document.getElementById('obdLiveStatus');
+  const liveMetaEl = document.getElementById('obdLiveMeta');
+  const liveBadge = document.getElementById('obdLiveBadge');
+  const liveIconEl = document.getElementById('obdLiveIcon');
+  const liveSpinEl = document.getElementById('obdLiveSpin');
+  const liveStateEl = document.getElementById('obdLiveState');
+  const btnLiveStart = document.getElementById('btnLiveStart');
+  const btnLiveStop = document.getElementById('btnLiveStop');
+  const btnLiveSnapshot = document.getElementById('btnLiveSnapshot');
+  const liveIntervalSel = document.getElementById('obdLiveInterval');
+
+  const MAXHIST = 40;
+  const liveHist = {};      // key → recent values (for the sparkline)
+  const liveTileEls = {};   // key → {val, bar, prog, spark, d}
+  const liveGroupRows = {}; // groupKey → the .row element
+  let liveActive = false;
+  let liveKey = null;
+  let liveLastFrames = null;
+
+  if (!hasSerial && !hasBle) btnLiveStart.disabled = true;
+
+  function liveStatus(m) { liveStatusEl.textContent = m; }
+  function liveSetState(on) {
+    liveBadge.className = 'badge rounded-pill d-inline-flex align-items-center gap-1 '
+      + (on ? 'text-bg-success' : 'text-bg-secondary');
+    liveIconEl.className = 'bi ' + (on ? 'bi-broadcast' : 'bi-circle');
+    liveStateEl.textContent = on ? T.live.live : T.live.stopped;
+  }
+  function liveSpin(on) {
+    liveSpinEl.classList.toggle('d-none', !on);
+    liveIconEl.classList.toggle('d-none', on);
+  }
+
+  function pushHist(k, v) {
+    (liveHist[k] || (liveHist[k] = [])).push(v);
+    if (liveHist[k].length > MAXHIST) liveHist[k].shift();
+  }
+  function toneColor(tone, v) {
+    switch (tone) {
+      case 'delta':  return v <= 30 ? '#2e7d32' : (v <= 60 ? '#f9a825' : '#c62828');
+      case 'temp':   return v < 10 ? '#0277bd' : (v <= 35 ? '#2e7d32' : '#ef6c00');
+      case 'signed': return v < 0 ? '#2e7d32' : '#1565c0';   // <0 = charging
+      case 'soc': case 'soh': return 'var(--bs-success)';
+      case 'primary': return 'var(--bs-primary)';
+      default: return 'var(--bs-secondary)';
+    }
+  }
+  function meterFrac(d, v) {
+    if (d.min == null || d.max == null) return null;
+    const f = (v - d.min) / (d.max - d.min);
+    return Math.max(0, Math.min(1, f));
+  }
+  // Tiny inline-SVG sparkline of the recent history, coloured via currentColor.
+  function sparkline(vals, w = 64, h = 18) {
+    if (!vals || vals.length < 2) return '';
+    const lo = Math.min(...vals), hi = Math.max(...vals), span = (hi - lo) || 1;
+    const n = vals.length;
+    const pts = vals.map((v, i) => {
+      const x = (i / (n - 1)) * (w - 2) + 1;
+      const y = h - 1 - ((v - lo) / span) * (h - 2);
+      return x.toFixed(1) + ',' + y.toFixed(1);
+    }).join(' ');
+    return `<svg width="${w}" height="${h}" viewBox="0 0 ${w} ${h}" style="vertical-align:middle">
+      <polyline points="${pts}" fill="none" stroke="currentColor" stroke-width="1.25"
+        stroke-linejoin="round" stroke-linecap="round"/></svg>`;
+  }
+
+  function ensureGroupRow(gk) {
+    if (liveGroupRows[gk]) return liveGroupRows[gk];
+    const wrap = document.createElement('div');
+    wrap.className = 'mb-3';
+    wrap.innerHTML = `<div class="small text-uppercase text-muted fw-semibold mb-1">${T.grp[gk] || gk}</div>
+      <div class="row g-2"></div>`;
+    liveGrid.appendChild(wrap);
+    return (liveGroupRows[gk] = wrap.querySelector('.row'));
+  }
+  function ensureTile(gk, d) {
+    if (liveTileEls[d.k]) return liveTileEls[d.k];
+    const row = ensureGroupRow(gk);
+    const col = document.createElement('div');
+    col.className = 'col-6 col-md-4 col-xl-3';
+    col.innerHTML = `<div class="border rounded p-2 h-100">
+      <div class="small text-muted d-flex justify-content-between align-items-center gap-1">
+        <span>${T.sens[d.k] || d.k}</span><span class="obd-spark text-body-secondary"></span>
+      </div>
+      <div class="fs-5 fw-semibold"><span class="obd-val">–</span><span class="small text-muted ms-1">${d.unit || ''}</span></div>
+      <div class="progress ${d.tone === 'plain' ? 'd-none' : ''}" style="height:.35rem">
+        <div class="progress-bar" style="width:0%"></div></div>
+    </div>`;
+    row.appendChild(col);
+    return (liveTileEls[d.k] = {
+      val: col.querySelector('.obd-val'),
+      bar: col.querySelector('.progress-bar'),
+      spark: col.querySelector('.obd-spark'),
+      d,
+    });
+  }
+
+  function renderLive(dec) {
+    LIVE_GROUPS.forEach(g => g.keys.forEach(d => {
+      const v = dec[d.k];
+      if (v == null) return;
+      pushHist(d.k, v);
+      const tile = ensureTile(g.key, d);
+      const sign = (d.tone === 'signed' && v > 0) ? '+' : '';
+      tile.val.textContent = sign + Number(v).toFixed(d.digits);
+      const frac = meterFrac(d, v);
+      if (frac != null) {
+        tile.bar.style.width = (frac * 100).toFixed(1) + '%';
+        tile.bar.style.backgroundColor = toneColor(d.tone, v);
+      }
+      tile.spark.style.color = toneColor(d.tone, v);
+      tile.spark.innerHTML = sparkline(liveHist[d.k]);
+    }));
+    // Live per-cell voltage chart (reuses the one-shot renderer).
+    liveCellsEl.innerHTML = cellStrip(dec) || '';
+  }
+
+  async function runLive(tr) {
+    liveKey = profileSel.value;
+    const prof = await profileFor(liveKey);
+    liveStatus(T.live.init);
+    await initProfile(tr, prof);
+    liveSetState(true); liveSpin(false);
+    liveStatus(T.live.running);
+    let polls = 0;
+    while (liveActive) {
+      const t0 = Date.now();
+      let frames;
+      try { frames = await pollFrames(tr, prof); }
+      catch (e) { if (!liveActive) break; throw e; }
+      if (!liveActive) break;
+      if (!framesHaveData(frames)) {
+        liveStatus(T.live.no_data);
+        await sleep(1000);
+        continue;
+      }
+      liveLastFrames = frames;
+      let dec = null;
+      try {
+        dec = await fetch(`/api/vehicles/${VID}/obd/live`, {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ profile: liveKey, frames }),
+        }).then(r => r.json());
+      } catch (e) { if (!liveActive) break; continue; }
+      if (dec && dec.ok) {
+        polls++;
+        renderLive(dec);
+        liveMetaEl.textContent =
+          T.live.polls.replace('{n}', polls).replace('{ms}', Date.now() - t0)
+          + ' · ' + T.live.updated.replace('{t}', new Date().toLocaleTimeString());
+      }
+      const gap = parseInt(liveIntervalSel.value, 10) || 0;
+      const elapsed = Date.now() - t0;
+      if (gap > elapsed && liveActive) await sleep(gap - elapsed);
+    }
+  }
+
+  async function startLive() {
+    if (liveActive) return;
+    liveActive = true;
+    btnLiveStart.classList.add('d-none');
+    btnLiveStop.classList.remove('d-none');
+    btnLiveSnapshot.classList.remove('d-none');
+    btnSerial.disabled = true; btnBle.disabled = true;
+    liveSpin(true); liveStatus(T.live.connecting);
+    try {
+      const opt = dongleSel.options[dongleSel.selectedIndex];
+      const tp = opt ? (opt.dataset.transport || '') : '';
+      const useSerial = tp === 'usb' || (!hasBle && hasSerial);
+      if (useSerial) await serialCore(runLive);
+      else await bleCore(true, runLive);
+    } catch (e) {
+      liveStatus(T.fields.error + ': ' + (e && e.message || e));
+    } finally {
+      liveActive = false;
+      btnLiveStop.classList.add('d-none');
+      btnLiveStart.classList.remove('d-none');
+      liveSpin(false);
+      liveSetState(false);
+      applyDongle();   // restore USB/BLE button enabled-state per adapter
+    }
+  }
+  function stopLive() { liveActive = false; liveStatus(T.live.stopped); }
+
+  // Save the current live state as a real measurement (feeds the certificate)
+  // by replaying the last captured frames through the normal ingest path.
+  async function liveSnapshot() {
+    if (!liveLastFrames) return;
+    const body = { profile: liveKey, frames: liveLastFrames, source: 'elm327-live' };
+    const odo = document.getElementById('obdOdo').value;
+    if (odo) body.odometer_km = parseInt(odo, 10);
+    try {
+      const res = await fetch(`/api/vehicles/${VID}/obd/ingest`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      }).then(r => r.json());
+      if (res && res.ok) {
+        renderResult(res);
+        if (res.soh_pct != null || res.cell_count != null) refreshCert();
+        liveStatus(T.live.saved);
+      } else {
+        liveStatus(T.live.save_failed);
+      }
+    } catch (e) { liveStatus(T.live.save_failed); }
+  }
+
+  btnLiveStart.addEventListener('click', startLive);
+  btnLiveStop.addEventListener('click', stopLive);
+  btnLiveSnapshot.addEventListener('click', liveSnapshot);
 })();
 </script>
 {% endblock %}

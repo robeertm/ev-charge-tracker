@@ -2626,6 +2626,34 @@ def register_routes(app):
         result['ok'] = True
         return jsonify(result)
 
+    @app.route('/api/vehicles/<int:vid>/obd/live', methods=['POST'])
+    def api_obd_live(vid):
+        """Decode raw ELM327 frames for the LIVE view WITHOUT persisting.
+
+        Same body as /obd/ingest ({profile, frames}) and the same decoder, but
+        it stores nothing and writes no log — the live dashboard polls this
+        many times a second, so it must stay cheap and side-effect free. The
+        one-shot read (ingest) is what actually saves a measurement + feeds the
+        certificate; this endpoint only returns the decoded sensor values so
+        the browser can render every gauge in real time (CarScanner-style)."""
+        from models.database import Vehicle
+        from services.vehicle.obd_decode import decode, profile_for_brand
+        v = Vehicle.query.get_or_404(vid)
+        data = request.get_json(silent=True) or {}
+        frames = data.get('frames') or {}
+        if not isinstance(frames, dict) or not frames:
+            return jsonify({'ok': False, 'error': 'no frames'}), 400
+        profile = data.get('profile') or profile_for_brand(v.brand or v.api_brand)
+        try:
+            decoded = decode(profile, frames)
+        except Exception as e:
+            app.logger.exception('OBD live decode failed')
+            return jsonify({'ok': False, 'error': str(e)}), 500
+        if decoded.get('error'):
+            return jsonify({'ok': False, 'error': decoded['error']}), 400
+        decoded['ok'] = True
+        return jsonify(decoded)
+
     @app.route('/vehicles/<int:vid>/test', methods=['POST'])
     def vehicles_test(vid):
         """Probe a vehicle's API credentials without persisting anything.
