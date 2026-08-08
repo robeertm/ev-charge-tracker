@@ -1,197 +1,210 @@
 # Changelog
 
+## v3.0.79 (2026-08-08)
+
+### English changelog + README refresh for the new features
+
+Documentation pass, no behaviour change.
+
+- **`CHANGELOG.md`** — the recent entries (v3.0.74–v3.0.78) were still in German;
+  translated to English so the whole changelog is one language. The last
+  third-party trademark references were removed as well (`grep -i` now finds
+  none anywhere in the repo), and the personal-name attributions ("… asked/
+  wanted …") were dropped from the entries — the changelog describes *what*
+  changed, not who requested it. The `ev-robert` install hostname stays where it
+  appears in production incident notes, since it is a technical identifier.
+- **`README.md`** — documented the features shipped since the last README update:
+  the **self-generated battery-health certificate** (coulomb-count method, A–F
+  grade + benchmark, net-referenced SoH), the **in-browser OBD/ELM327 readout**
+  (Web Serial / Web Bluetooth, per-family PID table), the **certificate inline
+  on the OBD page** with export button, and the new **first registration** +
+  **net/gross capacity** vehicle settings. The i18n note now reflects **full
+  6-language parity** (1257 keys each) instead of the old "~800 strings, de/en
+  only" wording.
+
 ## v3.0.78 (2026-08-08)
 
-### Batteriezertifikat direkt auf der OBD-Seite ansehen (+ Export-Button)
+### View the battery certificate right on the OBD page (+ export button)
 
-Robert: „baue hinter dem Menüpunkt OBD das Batteriezertifikat ein, dass man es
-dort sehen kann wenn es erzeugt wurde, so wie das PDF aussieht, mit einem
-Export-Button." Umgesetzt: Unter dem OBD-Auslese-Bereich erscheint jetzt eine
-**eingebettete Live-Vorschau des Zertifikats** — es wird die **echte PDF**
-inline angezeigt (nicht eine nachgebaute HTML-Kopie), also **exakt so, wie sie
-gedruckt/exportiert aussieht**, ohne Gefahr, dass Vorschau und PDF auseinander
-laufen. Die zuletzt per OBD/ELM327 ausgelesene Messung fließt automatisch ein.
+The battery certificate can now be seen behind the OBD menu item, the way the
+PDF looks, with an export button. Below the OBD readout area there is now an
+**embedded live preview of the certificate** — the **real PDF** is shown inline
+(not a rebuilt HTML copy), so it looks **exactly the way it prints/exports**,
+with no risk of the preview and the PDF drifting apart. The most recent
+measurement read via OBD/ELM327 is pulled in automatically.
 
-- **Neue Inline-Auslieferung der Zertifikats-Route** (`app.py`,
-  `/vehicles/<id>/certificate.pdf`): Query-Parameter **`?inline=1`** liefert das
-  PDF mit `Content-Disposition: inline` für die Einbettung; ohne den Parameter
-  bleibt es ein Download (`attachment`) — der Export-Button nutzt genau das.
-- **OBD-Seite** (`templates/obd.html`): neuer Abschnitt „Batteriezertifikat"
-  mit **Noten-Badge** (Grade + SoH in der Grade-Farbe), eingebettetem PDF
-  (`<object>` mit `<iframe>`- und Text-Fallback), **„In neuem Tab öffnen"** und
-  **„Als PDF exportieren"**. Ist noch keine Datengrundlage vorhanden, erscheint
-  statt der Vorschau ein Hinweis.
-- **`obd_page`-Route** (`app.py`): berechnet die (günstigen) Health-Metriken
-  über `compute_battery_health` und blendet die Vorschau nur ein, wenn es
-  Ladevorgänge, Syncs oder eine OBD-Messung gibt (`cert_available`).
-- **i18n**: 6 neue Keys (`obd.cert_title`, `obd.cert_subtitle`,
+- **New inline delivery of the certificate route** (`app.py`,
+  `/vehicles/<id>/certificate.pdf`): the query parameter **`?inline=1`** serves
+  the PDF with `Content-Disposition: inline` for embedding; without the
+  parameter it stays a download (`attachment`) — the export button uses exactly
+  that.
+- **OBD page** (`templates/obd.html`): new "Battery certificate" section with a
+  **grade badge** (grade + SoH in the grade colour), the embedded PDF
+  (`<object>` with `<iframe>` and text fallback), **"Open in new tab"** and
+  **"Export as PDF"**. If there is no data basis yet, a hint appears instead of
+  the preview.
+- **`obd_page` route** (`app.py`): computes the (cheap) health metrics via
+  `compute_battery_health` and shows the preview only when there are charges,
+  syncs or an OBD reading (`cert_available`).
+- **i18n**: 6 new keys (`obd.cert_title`, `obd.cert_subtitle`,
   `obd.cert_export`, `obd.cert_newtab`, `obd.cert_none`,
-  `obd.cert_pdf_fallback`) in **allen 6 Sprachen** (Parität 1257 Keys je Datei).
+  `obd.cert_pdf_fallback`) in **all 6 languages** (parity of 1257 keys per file).
 
 ## v3.0.77 (2026-08-08)
 
-### Markenname aus dem Zertifikat entfernt (Markenschutz)
+### Remove a third-party trademark name from the certificate (trademark protection)
 
-Robert: „der Name AVILOO sollte aus markenschutzrechtlichen Gründen nicht in
-meiner App vorkommen." Der fremde Markenname wurde **restlos** aus der App
-entfernt — nicht nur aus dem sichtbaren PDF-Text, sondern auch aus allen
-Inline-Fallbacks, Kommentaren, Docstrings und dem Changelog. Die Methodik
-selbst (Coulomb-Zählung, SoH = nutzbar / nominal) bleibt unverändert; nur die
-Formulierung ist jetzt generisch.
+A third-party trademark name must not appear in the app for trademark-protection
+reasons. The foreign brand name was removed **completely** from the app — not
+just from the visible PDF text, but also from all inline fallbacks, comments,
+docstrings and the changelog. The methodology itself (coulomb counting,
+SoH = usable / nominal) is unchanged; only the wording is now generic.
 
-- **Sichtbarer Zertifikatstext (`cert.basis_line`, `cert.limits`)** in **allen
-  6 Sprachen** umformuliert: „AVILOO-Premium-Test" → „professioneller
-  Batterietest per Vollentladung"; „(z. B. AVILOO, TÜV)" → „(z. B. TÜV)".
-- **`services/battery_cert_service.py`** — Docstring, Grade-Kommentar und die
-  drei deutschen Inline-`default=`-Texte (`cert.basis_line`, `cert.limits`,
-  `cert.limits_with_obd`) neutralisiert.
-- **`app.py`** — Docstring der Zertifikats-Route entmarkt.
-- **`CHANGELOG.md`** — v3.0.73-Eintrag und der v3.0.75-Fachbegriff-Hinweis
-  entmarkt.
+- **Visible certificate text (`cert.basis_line`, `cert.limits`)** reworded in
+  **all 6 languages**: "premium full-discharge lab test" → "professional battery
+  test via full discharge"; the branded example in "(e.g. …, TÜV)" was dropped
+  down to "(e.g. TÜV)".
+- **`services/battery_cert_service.py`** — docstring, grade comment and the
+  three German inline `default=` texts (`cert.basis_line`, `cert.limits`,
+  `cert.limits_with_obd`) neutralised.
+- **`app.py`** — docstring of the certificate route de-branded.
+- **`CHANGELOG.md`** — the v3.0.73 entry and the v3.0.75 terminology note
+  de-branded.
 
 ## v3.0.76 (2026-08-07)
 
-### Alle 6 Sprachen auf volle Parität (Standing Order „alles übersetzen")
+### All 6 languages at full parity (standing order "translate everything")
 
-Robert: „alles übersetzen und das immer machen — standing order". Bisher
-wurden nur **de/en** auf voller Parität gehalten; **fr/es/it/nl** liefen als
-„best-effort" mit einem historischen Rückstand von je **293 Keys**, die per
-Deutsch-Fallback von `t()` überbrückt wurden. Das ist ab jetzt keine gültige
-Politik mehr: **alle 6 Sprachen werden vollständig übersetzt und auf Parität
-gehalten**.
+Translate everything, always — standing order. Until now only **de/en** were
+kept at full parity; **fr/es/it/nl** ran as "best-effort" with a historical
+backlog of **293 keys** each, bridged by the German fallback of `t()`. That is
+no longer a valid policy: **all 6 languages are fully translated and kept at
+parity**.
 
-**Was gemacht wurde:**
-- **293 fehlende Keys** in **fr, es, it, nl** vollständig übersetzt
-  (dash/edit/err/flash/input/maint/msg/raw/report/set/trips) — betrifft u.a.
-  den kompletten **Bericht**, den **CSV-Import-Assistenten** (Vorschau,
-  Modi, Warnungen), die **Fahrten-/Stopp-Bearbeitung**, die
-  **Ladeanbieter-Verwaltung**, **Fahrzeug-Rohdaten** und die Standort-Picker.
-- Zwei verwaiste Wizard-Keys (`wiz.step_1_of_2`, `wiz.step_2_of_2`) aus einem
-  früheren 2-Schritt-Assistenten entfernt (in de/en längst weg, nirgends
-  mehr referenziert).
-- **Ergebnis:** de, en, fr, es, it, nl liegen jetzt bei **je 1251 Keys** —
-  identische Key-Mengen, **null** fehlende Keys über alle Sprachen.
+**What was done:**
+- **293 missing keys** in **fr, es, it, nl** fully translated
+  (dash/edit/err/flash/input/maint/msg/raw/report/set/trips) — covering, among
+  others, the complete **report**, the **CSV import wizard** (preview, modes,
+  warnings), the **trip/stop editor**, the **charging-operator management**,
+  **vehicle raw data** and the location pickers.
+- Two orphaned wizard keys (`wiz.step_1_of_2`, `wiz.step_2_of_2`) from an
+  earlier 2-step wizard removed (long gone in de/en, no longer referenced
+  anywhere).
+- **Result:** de, en, fr, es, it, nl now sit at **1251 keys each** — identical
+  key sets, **zero** missing keys across all languages.
 
-**Nebenbefund + Fix (Platzhalter-Bug):** Beim Parity-Check fielen drei
-vorbestehende Platzhalter-Divergenzen in fr/es/it/nl auf:
-- `flash.vehicle_test_ok` enthielt fälschlich `{info}`, obwohl der Aufrufer
-  (`app.py:2595`) nur `name=` übergibt → `str.format()` warf `KeyError`, der
-  String wurde unformatiert mit sichtbarem `{info}` angezeigt. **Behoben.**
-- `flash.vehicle_sync_no_data` (fehlendes `{name}`) und
-  `flash.vehicle_sync_ok` (fehlendes `{summary}`) verloren still ihre
-  Werte → Platzhalter wieder aufgenommen.
+**Side finding + fix (placeholder bug):** the parity check surfaced three
+pre-existing placeholder divergences in fr/es/it/nl:
+- `flash.vehicle_test_ok` wrongly contained `{info}` even though the caller
+  (`app.py:2595`) only passes `name=` → `str.format()` raised `KeyError`, and
+  the string was shown unformatted with a visible `{info}`. **Fixed.**
+- `flash.vehicle_sync_no_data` (missing `{name}`) and `flash.vehicle_sync_ok`
+  (missing `{summary}`) silently lost their values → placeholders restored.
 
-**Politik-Update (gilt fortan):** Neue/geänderte user-facing Strings werden
-in **allen 6 Sprachen** ergänzt, nicht nur de/en. Inline-`default=` bleibt
-nur Notnagel, kein Ersatz für echte Keys.
+**Policy update (in force from now on):** new/changed user-facing strings are
+added in **all 6 languages**, not just de/en. Inline `default=` stays a
+last-resort stopgap, not a substitute for real keys.
 
 ## v3.0.75 (2026-08-07)
 
-### i18n-Nachzug für Zertifikat + OBD (Roberts Rückfrage)
+### i18n follow-up for the certificate + OBD
 
-Robert fragte, ob bei den letzten Änderungen (v3.0.73 Batteriezertifikat,
-v3.0.74 OBD/ELM327 + Netto/Brutto) an **i18n** gedacht wurde. Antwort: nur
-teilweise — der Nachzug ist jetzt vollständig.
+The question was whether the last changes (v3.0.73 battery certificate, v3.0.74
+OBD/ELM327 + net/gross) had accounted for **i18n**. Answer: only partly — the
+follow-up is now complete.
 
-**Was gefehlt hat:**
-- Die komplette **OBD-Seite** (`obd.html`) hatte alle Texte nur als
-  deutsche `default=`-Inline-Fallbacks — es gab **keine** `obd.*`-Keys in
-  einer einzigen Sprachdatei. Englische (und alle anderen) Nutzer sahen
-  Deutsch.
-- Im JavaScript der OBD-Seite waren die **Ergebnis-Kachel-Labels**
-  („Zell-Spreizung", „Zellen", „Temperatur", „12V-Batterie" …) sowie zwei
-  Status-/Log-Strings **hart auf Deutsch** verdrahtet, komplett an `t()`
-  vorbei.
-- **7 Keys** (`nav.obd`, `set.fleet_field_battery_gross`, …) waren in
-  `de.json`, fehlten aber in `en.json`.
+**What was missing:**
+- The entire **OBD page** (`obd.html`) had all its text only as German
+  `default=` inline fallbacks — there were **no** `obd.*` keys in a single
+  language file. English (and all other) users saw German.
+- In the OBD page's JavaScript the **result-tile labels** ("cell spread",
+  "cells", "temperature", "12V battery" …) plus two status/log strings were
+  **hard-wired in German**, bypassing `t()` entirely.
+- **7 keys** (`nav.obd`, `set.fleet_field_battery_gross`, …) were in `de.json`
+  but missing from `en.json`.
 
-**Was jetzt gemacht ist:**
-- Alle harten JS-Labels der OBD-Seite laufen über ein `t()`-gespeistes
-  `T.res`/`T.fields`-Objekt (neue Keys `obd.res_*`, `obd.profile_load_failed`,
-  `obd.log_error`).
-- **35 `obd.*`-Keys** (Seite + Ergebnis-Labels) in `de.json` **und**
-  `en.json` ergänzt; die 7 fehlenden `set.*`/`nav.obd`-Keys in `en.json`
-  nachgezogen → **de und en wieder bei voller Parität** (je 1251 Keys).
-- Alle **101 Keys der letzten Änderungen** (`cert.*`, `flash.cert_*`,
-  `obd.*`, neue `set.fleet_*`) mit sauberen Übersetzungen nach **es, fr, it,
-  nl** propagiert — inkl. korrekt erhaltener Platzhalter (`{n}`, `{name}`,
-  `{e:.1f}` …) und Fachbegriffe (SoH, BMS, kWh, CO₂, TÜV).
+**What is done now:**
+- All hard JS labels of the OBD page run through a `t()`-fed `T.res`/`T.fields`
+  object (new keys `obd.res_*`, `obd.profile_load_failed`, `obd.log_error`).
+- **35 `obd.*` keys** (page + result labels) added to `de.json` **and**
+  `en.json`; the 7 missing `set.*`/`nav.obd` keys backfilled in `en.json`
+  → **de and en back at full parity** (1251 keys each).
+- All **101 keys of the recent changes** (`cert.*`, `flash.cert_*`, `obd.*`,
+  new `set.fleet_*`) propagated with clean translations to **es, fr, it, nl** —
+  including correctly preserved placeholders (`{n}`, `{name}`, `{e:.1f}` …) and
+  technical terms (SoH, BMS, kWh, CO₂, TÜV).
 
-**Hinweis:** es/fr/it/nl haben einen **vorbestehenden** Rückstand von ~291
-Keys (nicht aus diesen Änderungen); dafür greift weiterhin der deutsche
-Fallback von `t()`. Die Backend-Ergänzungen (XPENG-Connector, Marken-Namen)
-brauchen kein i18n.
+**Note:** es/fr/it/nl have a **pre-existing** backlog of ~291 keys (not from
+these changes); the German fallback of `t()` still covers those. The backend
+additions (XPENG connector, brand names) need no i18n.
 
 ## v3.0.74 (2026-08-07)
 
-### Erstzulassung + Netto/Brutto-Kapazität, und OBD/ELM327-Auslesen im Browser
+### First registration + net/gross capacity, and OBD/ELM327 readout in the browser
 
-Drei zusammenhängende Ergänzungen rund um das Batteriezertifikat, alle aus
-Roberts Rückfragen: (1) man muss das **Alter / die Erstzulassung** eingeben
-können, (2) sein Kia hat **64 kWh netto / 67,3 kWh brutto** — muss das im
-Test/der Verarbeitung berücksichtigt werden?, und (3) er liest mit einem
-**ELM327-OBD-Dongle** (CarScanner) ohnehin alles von Zellspannung bis
-Temperatur aus — das soll direkt in der EV-Tracker-App im Browser gehen.
+Three related additions around the battery certificate: (1) one must be able to
+enter the **age / first registration**, (2) a Kia has **64 kWh net / 67.3 kWh
+gross** — does that need to be accounted for in the test/processing?, and (3) an
+**ELM327 OBD dongle** (CarScanner) already reads everything from cell voltage to
+temperature — that should be possible directly in the EV Tracker app in the
+browser.
 
-**Netto vs. brutto (die Antwort):** SoH wird *immer* auf die **nutzbare
-Netto-Kapazität** bezogen (64 kWh), nie auf brutto. Sowohl die Coulomb-
-Zählung als auch der BMS-Wert messen das nutzbare Fenster — bezöge man sie
-auf 67,3 kWh brutto, käme systematisch eine zu niedrige SoH heraus.
-`battery_kwh` bleibt also die Netto-Zahl (Grundlage für kWh, Kosten, CO₂,
-Verlust, SoH); brutto wird nur informativ mitgeführt und aufs Zertifikat
-gedruckt (Käufer erwarten beide Zahlen).
+**Net vs. gross (the answer):** SoH is *always* referenced to the **usable net
+capacity** (64 kWh), never to gross. Both the coulomb counting and the BMS value
+measure the usable window — referencing them to 67.3 kWh gross would
+systematically produce a too-low SoH. `battery_kwh` therefore stays the net
+number (basis for kWh, cost, CO₂, loss, SoH); gross is only carried
+informationally and printed on the certificate (buyers expect both numbers).
 
 - **`models/database.py`**
-  - `Vehicle.first_registered_at` (Erstzulassung) — die *Kalenderuhr*, auf
-    der die Batterie tatsächlich altert. Treibt Alter + Degradations-
-    Benchmark im Zertifikat. `acquired_at` bleibt der Besitzbeginn.
-  - `Vehicle.battery_kwh_gross` — optionale Bruttokapazität (Puffer-Info).
-  - **`ObdReading`** — neue Tabelle: ein Zell-Snapshot direkt aus dem BMS
-    (SoH-Register, Zellspannungen min/max/Ø + Spreizung in mV, Pack-
-    Spannung/-Strom, Temperaturen, 12V-Batterie, volle Zell-/Temp-Arrays
-    und die Roh-Frames zum späteren Re-Decodieren).
-- **`services/vehicle/obd_decode.py`** — neuer, reiner Decoder: ISO-TP-
-  Reassemblierung der ELM327-Frames + eine **datengetriebene PID-Tabelle**
-  pro Fahrzeug-Familie (`kia_hyundai_ext` für Kona/e-Niro/Soul auf Header
-  7E4, plus generischer `generic_ev`-Fallback über Standard-PID 015B).
-  Offsets folgen der Community-Map (EVNotify/SoulEV/CarScanner) und liegen
-  an *einer* klar kommentierten Stelle; die Roh-Frames werden gespeichert,
-  falls ein Offset für ein Modell korrigiert werden muss.
-- **`templates/obd.html` + `/obd`-Seite** — der Browser als Transport:
-  ELM327 per **Web Serial (USB)** oder **Web Bluetooth (BLE)** verbinden,
-  initialisieren, PIDs abfragen, Roh-Text an den Server posten. Live-
-  Fortschritt, Rohdaten-Log, Ergebnis-Karten (SoH, Zell-Spreizung mit
-  Ampel, Temperaturen, Pack, 12V). „So easy wie möglich": einstecken →
-  Knopf → Werte. (Chrome/Edge Desktop+Android; iOS kann kein Web
-  Serial/BLE.)
-- **`app.py`** — `GET /api/obd/profile/<id>` (Profil/Init/PID-Liste),
-  `POST /api/vehicles/<id>/obd/ingest` (decodiert + speichert, gibt Werte
-  zurück), `/obd`-Seite. Migration ergänzt die zwei Vehicle-Spalten;
-  `obd_readings` legt `create_all()` an.
-- **`services/battery_cert_service.py`** — Zertifikat nutzt jetzt die
-  Erstzulassung fürs **Batteriealter** (Fallback: Besitzbeginn), zeigt
-  **Netto/Brutto** getrennt, und bindet die **letzte OBD-Messung** ein: ein
-  neuer Abschnitt „Zelldaten (OBD)" mit Zell-Spreizung/Temperaturen (genau
-  das, was das reine Ladedaten-Zertifikat vorher explizit *nicht* konnte),
-  und die BMS-SoH per OBD zählt als eigene, priorisierte SoH-Quelle. Der
-  Limitationstext passt sich an, je nachdem ob Zelldaten vorliegen.
-- **`templates/settings.html`** — Formularfelder Erstzulassung + Akku
-  brutto (mit Netto/Brutto-Hinweisen), OBD-Button je Fahrzeugzeile, und der
-  open-ev-data-Lookup füllt brutto mit, wenn vorhanden.
-- **`services/vehicle/build_ev_specs.py` / `ev_specs_service.py`** — der
-  Spec-Extrakt trägt jetzt `gross_kwh` (wenn ≠ netto) mit.
-- **Tests** — `tests/test_obd_decode.py` (ISO-TP-Reassemblierung, signed/
-  unsigned-Extraktion, Kia-Profil-Roundtrip, generischer Fallback, Teil-
-  daten); `tests/test_battery_cert.py` erweitert um Erstzulassungs-Alter,
-  Netto/Brutto und OBD-gespeiste Zertifikate.
+  - `Vehicle.first_registered_at` (first registration) — the *calendar clock*
+    the battery actually ages on. Drives age + degradation benchmark on the
+    certificate. `acquired_at` stays the start of ownership.
+  - `Vehicle.battery_kwh_gross` — optional gross capacity (buffer info).
+  - **`ObdReading`** — new table: a cell snapshot straight from the BMS
+    (SoH register, cell voltages min/max/avg + spread in mV, pack
+    voltage/current, temperatures, 12V battery, full cell/temp arrays and the
+    raw frames for later re-decoding).
+- **`services/vehicle/obd_decode.py`** — new, pure decoder: ISO-TP reassembly of
+  the ELM327 frames + a **data-driven PID table** per vehicle family
+  (`kia_hyundai_ext` for Kona/e-Niro/Soul on header 7E4, plus a generic
+  `generic_ev` fallback over standard PID 015B). Offsets follow the community
+  map (EVNotify/SoulEV/CarScanner) and live in *one* clearly commented place;
+  the raw frames are stored in case an offset needs to be corrected for a model.
+- **`templates/obd.html` + `/obd` page** — the browser as transport: connect an
+  ELM327 via **Web Serial (USB)** or **Web Bluetooth (BLE)**, initialise, query
+  PIDs, post raw text to the server. Live progress, raw-data log, result cards
+  (SoH, cell spread with a traffic light, temperatures, pack, 12V). "As easy as
+  possible": plug in → button → values. (Chrome/Edge desktop + Android; iOS
+  cannot do Web Serial/BLE.)
+- **`app.py`** — `GET /api/obd/profile/<id>` (profile/init/PID list),
+  `POST /api/vehicles/<id>/obd/ingest` (decodes + stores, returns the values),
+  `/obd` page. The migration adds the two Vehicle columns; `obd_readings` is
+  created by `create_all()`.
+- **`services/battery_cert_service.py`** — the certificate now uses the first
+  registration for the **battery age** (fallback: start of ownership), shows
+  **net/gross** separately, and pulls in the **latest OBD reading**: a new "cell
+  data (OBD)" section with cell spread/temperatures (exactly what the
+  charge-data-only certificate explicitly *could not* do before), and the BMS
+  SoH via OBD counts as its own, prioritised SoH source. The limitations text
+  adapts depending on whether cell data is present.
+- **`templates/settings.html`** — form fields for first registration + gross
+  battery (with net/gross hints), an OBD button per vehicle row, and the
+  open-ev-data lookup also fills in gross when available.
+- **`services/vehicle/build_ev_specs.py` / `ev_specs_service.py`** — the spec
+  extract now carries `gross_kwh` (when ≠ net).
+- **Tests** — `tests/test_obd_decode.py` (ISO-TP reassembly, signed/unsigned
+  extraction, Kia profile round-trip, generic fallback, partial data);
+  `tests/test_battery_cert.py` extended with first-registration age, net/gross
+  and OBD-fed certificates.
 
 ## v3.0.73 (2026-08-07)
 
 ### Battery-health certificate (self-generated)
 
-When Robert sells or archives a vehicle he wanted a self-created battery
-certificate — like an independent professional battery test — that he can
-hand a buyer, runnable at any time. A professional full-discharge test
+When selling or archiving a vehicle, the goal was a self-created battery
+certificate — like an independent professional battery test — that can be
+handed to a buyer, runnable at any time. A professional full-discharge test
 measures usable capacity by integrating the energy delivered over a full
 100→10 % discharge and dividing by the pack's nominal capacity
 (`SoH = usable_now / nominal`); a quick/flash test just reads the BMS' own
@@ -705,7 +718,7 @@ Added a client-side `isInsideWindow` guard too: any stop whose timestamp would f
 
 ### /input resume banner: dismiss is now permanent per saved_id
 
-Robert reported the resume banner reappearing on ev-robert even after clicking Verwerfen. Root cause: server-side `active_session` is driven purely by URL params (`?saved_id=X&active=1`), and a stuck bookmark / browser-history entry kept reloading those params. The old `window.location.replace` reload also occasionally came back from iOS Safari's cache with the params re-attached.
+The resume banner was reported reappearing on ev-robert even after clicking Verwerfen. Root cause: server-side `active_session` is driven purely by URL params (`?saved_id=X&active=1`), and a stuck bookmark / browser-history entry kept reloading those params. The old `window.location.replace` reload also occasionally came back from iOS Safari's cache with the params re-attached.
 
 Reworked Verwerfen:
 

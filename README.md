@@ -1,6 +1,6 @@
 # EV Charge Tracker
 
-> **Self-hosted dashboard for tracking your electric vehicle charges** — costs, kWh, CO2, recuperation, charging losses, and live vehicle status. Multi-vehicle / fleet support, connects to 15 EV brands via API. Available in 6 languages.
+> **Self-hosted dashboard for tracking your electric vehicle charges** — costs, kWh, CO2, recuperation, charging losses, live vehicle status, a self-generated **battery-health certificate**, and in-browser **OBD/ELM327** cell readout. Multi-vehicle / fleet support, connects to 15 EV brands via API. Available in 6 languages.
 
 [![Latest Release](https://img.shields.io/github/v/release/robeertm/ev-charge-tracker)](https://github.com/robeertm/ev-charge-tracker/releases)
 [![License](https://img.shields.io/badge/license-MIT-blue)](LICENSE)
@@ -112,6 +112,14 @@ Built for EV owners who want **full control over their charging data** — runs 
 - **Cost & consumption per 100km** — net of GHG quota payouts
 - **THG quota reminder** — banner Jan 1 - Mar 31 if no quota is logged for the previous year
 
+### Battery health certificate & OBD readout
+- **Self-generated battery-health certificate** — a signed-style PDF you can hand a buyer when you sell or archive a car, runnable on demand at any time. Instead of a lab discharge it reconstructs the same measurement from your logged charges: every session with a wide-enough SoC window is a partial capacity sample (`net_kWh / (SoC_window/100)` extrapolated to a full pack), and the **median over many sessions** cancels the noise. Only windows ≥ 25 % SoC count and per-session outliers (outside 40–115 % of nominal) are rejected
+- **A–F grade + benchmark** — certified SoH (measured when ≥ 3 samples, otherwise the baseline-scaled BMS SoH), an age/mileage benchmark against the ~2.3 %/yr fleet mean, warranty-floor headroom (70 %), charging-stress factors (DC share, equivalent full cycles, deepest discharge, avg window) and an honest data-basis/limitations note. Sparse cars still get a certificate that marks SoH "not determinable"
+- **SoH is always net-referenced** — State of Health is computed against the **usable net capacity**, never gross; net (`battery_kwh`) drives kWh/cost/CO₂/loss/SoH, while gross is carried informationally and printed on the certificate (buyers expect both numbers)
+- **In-browser OBD/ELM327 read** (`/obd`) — connect a cheap ELM327 dongle straight from the browser via **Web Serial (USB)** or **Web Bluetooth (BLE)**, no app or terminal: plug in → button → values. Reads BMS SoH, per-cell voltages (min/max/avg + spread in mV with a traffic-light), pack voltage/current, temperatures and the 12 V battery. Raw frames are stored so a PID offset can be re-decoded later. (Chrome/Edge on desktop + Android; iOS can't do Web Serial/BLE)
+- **OBD feeds the certificate** — the latest OBD reading adds a "cell data" section (cell spread + temperatures, exactly what a charge-only certificate can't show) and its BMS SoH counts as a prioritised SoH source
+- **Certificate inline on the OBD page** — the real PDF is embedded live under the OBD readout (not an HTML rebuild, so preview and export never drift), with a grade badge and an "export as PDF" button
+
 ### Integrations
 - **15 vehicle brands** via API (see table below) — auto-fetch SoC, odometer, charging status
 - **Brand feature matrix** in Settings — 10-item green/yellow/red grid per brand (SoC, GPS, 12V, SoH, recuperation, 30-day consumption, doors, climate, tires, live status). No more "wait, why isn't my car showing X" surprises.
@@ -119,6 +127,7 @@ Built for EV owners who want **full control over their charging data** — runs 
 - **Open-Meteo** — daily mean temperatures for the range calculator and weather correlation, with DB cache (no key, no rate limits)
 - **Nominatim reverse geocoding** — for street addresses on parking events and charge locations, with permanent DB cache and ToS-compliant rate limiter
 - **CSV import with live preview** — upload your Google Sheet or exported CSV in Settings, get a dry-run preview showing detected delimiter, column mapping (per-column dropdown to correct misdetections), per-row action badges (`new` / `update` / `duplicate` / `empty` / `error`), and an error list with line numbers. Only when you hit "Import" does the data actually land in the DB. Automatic dedup by (date, hour, kWh) with 0.1 kWh tolerance
+- **OBD/ELM327 via the browser** — Web Serial / Web Bluetooth transport with a data-driven PID table per vehicle family (`kia_hyundai_ext` on header 7E4 for Kona/e-Niro/Soul, plus a generic `generic_ev` fallback on standard PID 015B). ISO-TP frame reassembly, raw frames persisted for re-decoding
 - **PV charging support** — third charge type with auto-calculated CO2 from PV system specs
 - **Operator price directory** — Settings has an editable table of charging operators (19 built-ins + your customs) with per-operator `€/kWh`. Stored as JSON in `AppConfig` and consulted by the charge-entry form to auto-fill the price
 
@@ -157,7 +166,7 @@ Built for EV owners who want **full control over their charging data** — runs 
 
 ### UX
 - **Dark/Light mode** — toggle in navbar, synced across all tabs via localStorage
-- **6 languages** — German, English, French, Spanish, Italian, Dutch (~800 translated strings per locale)
+- **6 languages** — German, English, French, Spanish, Italian, Dutch, all kept at **full parity** (every user-facing string translated in all six, not just de/en)
 
 ---
 
@@ -243,7 +252,9 @@ Configure in Settings > Vehicle:
 
 | Setting | Default | Description |
 |---------|---------|-------------|
-| Battery capacity | 64 kWh | Battery size for cycle & loss calculation |
+| First registration (Erstzulassung) | -- | Calendar date the battery actually ages on — drives age + degradation benchmark on the certificate |
+| Battery capacity (net) | 64 kWh | Usable net size — basis for cycle, loss, cost, CO2 and SoH |
+| Battery capacity (gross) | -- | Optional gross/buffer size — informational, printed on the certificate |
 | Max AC power | -- | Max AC charging power |
 | Battery production CO2 | 100 kg/kWh | For break-even calculation (MY2021) |
 | ICE CO2 WTW | 164 g/km | Well-to-wheel comparison (DE average) |
@@ -272,7 +283,7 @@ Switchable from Settings > Language:
 - Italiano
 - Nederlands
 
-~800 translated strings per language. Falls back to German if a key is missing. New languages can be added by dropping a `<lang>.json` file into `translations/`.
+1257 translated strings per language, kept at full parity across all six (standing order — every user-facing string is translated in all languages, not just German/English). German is the source and remains the fallback if a key is ever missing. New languages can be added by dropping a `<lang>.json` file into `translations/`.
 
 ---
 
