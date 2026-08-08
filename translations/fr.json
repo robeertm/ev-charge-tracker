@@ -1299,5 +1299,12 @@
   "obd.scan_alive": "• {label} est présent mais refuse cette requête (mauvais DID/session).",
   "obd.scan_recommend": "Recommandation : sélectionnez le profil « {label} » et relancez la lecture.",
   "obd.scan_locked": "Rien ne répond — le port OBD est probablement verrouillé d'usine (passerelle). Les données de batterie ne sont alors pas lisibles via le connecteur OBD.",
-  "obd.scan_no_bms": "Les calculateurs standard répondent, mais aucune adresse de batterie connue. Le véhicule utilise probablement une adresse BMS encore non documentée."
+  "obd.scan_no_bms": "Les calculateurs standard répondent, mais aucune adresse de batterie connue. Le véhicule utilise probablement une adresse BMS encore non documentée.",
+  "obd.cells_title": "Tensions des cellules (écart à la moyenne)",
+  "obd.cell": "Cellule",
+  "obd.cells_worst": "max. ±{mv} mV",
+  "cert.cellchart_mean": "Moyenne {v} V",
+  "cert.cellchart_title": "Tensions par cellule ({n} cellules)",
+  "cert.cellchart_xlabel": "Cellule",
+  "cert.cellchart_dev_title": "Écart à la moyenne (max +/-{mv} mV / +/-{pct} %)"
 }

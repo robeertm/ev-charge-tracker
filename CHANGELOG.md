@@ -1,5 +1,40 @@
 # Changelog
 
+## v3.0.88 (2026-08-08)
+
+### Fix: correct Kia/Hyundai battery decode + per-cell certificate chart
+
+A live read from a real Kia Niro EV (awake, ready-to-drive) exposed two decode
+bugs that made the result "look decoded but wrong" — SoH 3481.9 %, a 5.100 V
+cell, most pack values missing:
+
+* **Stray frame clobbered the main PID.** The `220101` reply arrived with a
+  queued DTC single-frame (`7EC 03 59 02 …`) printed *ahead* of the real
+  `62 01 01 …` answer. ISO-TP reassembly took that first single-frame as the
+  whole message and threw the rest away, so SoC, pack voltage/current, pack
+  temperatures, the 12 V reading and the cumulative counters all came back
+  empty ("much more data should be read"). Reassembly now takes the request
+  PID and skips any frame whose service echo isn't the one it asked for, so the
+  real answer is reassembled regardless of what the adapter queued in front.
+
+* **Every Kia/Hyundai field was one byte off.** The real reply carries an extra
+  status byte after `62 01 01`, so the community offset table sat one byte too
+  low across the board. Corrected and cross-checked field by field against the
+  capture: SoC 66 %, pack 376.0 V, 12 V 14.8 V, cells 3.82–3.84 V, temps
+  28–29 °C, SoH 94.7 %, display SoC 68 %. The cell block now reads
+  max/max-no/min/min-no exactly, and cell voltages start at the byte that holds
+  the real 3.82 V run instead of the trailing `0xFF` that decoded as a bogus
+  5.10 V cell. A regression test pins the whole capture.
+
+### Add: per-cell voltage chart
+
+The battery certificate now renders one bar per cell with its voltage and its
+deviation from the pack mean (in mV and %), colour-coded so a weak or runaway
+cell stands out — the "each individual cell" view. The OBD page shows the same
+strip inline right after a read, and the certificate preview now refreshes with
+the freshly read cells instead of the stale page-load state. New strings added
+in all six languages.
+
 ## v3.0.87 (2026-08-08)
 
 ### Change: no battery certificate without an actual state-of-health

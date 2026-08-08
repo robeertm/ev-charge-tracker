@@ -161,24 +161,26 @@
           </span>
           {% endif %}
         </h6>
-        {% if cert_available %}
-        <div class="d-flex gap-2">
+        <div class="d-flex gap-2 {% if not cert_available %}d-none{% endif %}" id="obdCertActions">
           <a href="/vehicles/{{ active.id }}/certificate.pdf?inline=1" target="_blank"
-             rel="noopener" class="btn btn-sm btn-outline-secondary">
+             rel="noopener" class="btn btn-sm btn-outline-secondary" id="obdCertNewtab">
             <i class="bi bi-box-arrow-up-right"></i>
             {{ t('obd.cert_newtab', default='In neuem Tab öffnen') }}
           </a>
           <a href="/vehicles/{{ active.id }}/certificate.pdf"
-             class="btn btn-sm btn-primary">
+             class="btn btn-sm btn-primary" id="obdCertExport">
             <i class="bi bi-download"></i>
             {{ t('obd.cert_export', default='Als PDF exportieren') }}
           </a>
         </div>
-        {% endif %}
       </div>
       <p class="small text-muted mb-2">
         {{ t('obd.cert_subtitle', default='Vorschau des Zertifikats – so wie es als PDF aussieht. Die zuletzt ausgelesene Messung fließt automatisch ein.') }}
       </p>
+      <!-- Preview area. JS swaps in a fresh (cache-busted) PDF object right
+           after a read so the just-read cell data & charts appear without a
+           full page reload. -->
+      <div id="obdCertPreview" data-vid="{{ active.id }}">
       {% if cert_available %}
       <div class="ratio" style="--bs-aspect-ratio: 130%; min-height: 42rem;">
         <object data="/vehicles/{{ active.id }}/certificate.pdf?inline=1#zoom=page-width"
@@ -197,6 +199,7 @@
         {{ t('obd.cert_none', default='Kein Batteriezustand (SoH) ermittelbar – daher noch kein Zertifikat. Dieses Fahrzeug meldet keinen SoH über die API und die Ladehistorie reicht nicht zur Messung. Lies die Batterie oben mit dem OBD-Dongle aus oder erfasse mehr (möglichst volle) Ladevorgänge – dann erscheint das Zertifikat hier.') }}
       </div>
       {% endif %}
+      </div>
     </div>
   </div>
   {% endif %}
@@ -236,6 +239,11 @@
       'temp': t('obd.res_temp', default='Temperatur'),
       'pack': t('obd.res_pack', default='Pack'),
       'aux': t('obd.res_aux', default='12V-Batterie'),
+    }|tojson }},
+    cell: {{ {
+      'title': t('obd.cells_title', default='Zellspannungen (Abweichung vom Mittel)'),
+      'cell': t('obd.cell', default='Zelle'),
+      'worst': t('obd.cells_worst', default='max. ±{mv} mV'),
     }|tojson }},
     dongle: {{ {
       'use_usb': t('obd.dongle_use_usb', default='Für diesen Adapter: per USB verbinden.'),
@@ -694,8 +702,33 @@
     progress(1);
     if (!res.ok) { connState('failed'); status(T.fields.failed + ': ' + (res.error || '')); return; }
     renderResult(res);
+    // The stored reading now feeds the certificate — refresh the inline
+    // preview (cache-busted) so the just-read cells & charts appear without
+    // a page reload. Only meaningful once an SoH exists.
+    if (res.soh_pct != null || res.cell_count != null) refreshCert();
     connState('done');
     status(T.fields.done);
+  }
+
+  // Rebuild the certificate preview with a fresh, cache-busted PDF and reveal
+  // the export buttons. Called after a successful read so "take into the
+  // certificate" actually shows the new data.
+  function refreshCert() {
+    const wrap = document.getElementById('obdCertPreview');
+    if (!wrap) return;
+    const vid = wrap.dataset.vid;
+    const bust = Date.now();
+    const inlineUrl = `/vehicles/${vid}/certificate.pdf?inline=1&_=${bust}`;
+    wrap.innerHTML = `<div class="ratio" style="--bs-aspect-ratio:130%;min-height:42rem;">
+        <object data="${inlineUrl}#zoom=page-width" type="application/pdf" class="w-100 h-100 border rounded">
+          <iframe src="${inlineUrl}" class="w-100 h-100 border rounded"></iframe>
+        </object></div>`;
+    const actions = document.getElementById('obdCertActions');
+    if (actions) actions.classList.remove('d-none');
+    const exp = document.getElementById('obdCertExport');
+    const nt = document.getElementById('obdCertNewtab');
+    if (exp) exp.href = `/vehicles/${vid}/certificate.pdf?_=${bust}`;
+    if (nt) nt.href = inlineUrl;
   }
 
   function card(label, value, sub, cls) {
@@ -727,7 +760,40 @@
     html += card(T.res.pack, fmt(r.pack_voltage_v, 1, ' V'),
                  r.pack_current_a != null ? `${fmt(r.pack_current_a,1,' A')}` : '');
     html += card(T.res.aux, fmt(r.aux_battery_v, 1, ' V'));
+    html += cellStrip(r);
     resultEl.innerHTML = html || `<div class="col-12 text-warning small">${T.fields.no_data}</div>`;
+  }
+
+  // ── Per-cell voltage strip ─────────────────────────────────────────
+  // One bar per cell, height mapped within [min,max], coloured by how far
+  // the cell deviates from the pack mean (green ≤10 mV, amber ≤25, red
+  // above). This is the "jede einzelne Zelle mit Spannung und Abweichung"
+  // quick view; the PDF certificate carries the full labelled chart.
+  function cellStrip(r) {
+    const cells = Array.isArray(r.cell_voltages) ? r.cell_voltages.filter(v => typeof v === 'number') : [];
+    if (cells.length < 2) return '';
+    const n = cells.length;
+    const mean = cells.reduce((a, b) => a + b, 0) / n;
+    const lo = Math.min(...cells), hi = Math.max(...cells);
+    const span = (hi - lo) || 1;
+    const col = d => Math.abs(d) <= 0.010 ? '#2e7d32' : (Math.abs(d) <= 0.025 ? '#f9a825' : '#c62828');
+    const bars = cells.map((v, i) => {
+      const dev = v - mean;
+      const devMv = (dev * 1000).toFixed(0);
+      const devPct = (dev / mean * 100).toFixed(2);
+      const h = 12 + Math.round((v - lo) / span * 78);   // 12–90 % height
+      const title = `${T.cell.cell} ${i + 1}: ${v.toFixed(3)} V (${devMv >= 0 ? '+' : ''}${devMv} mV / ${devPct >= 0 ? '+' : ''}${devPct} %)`;
+      return `<div title="${title}" style="flex:1 1 0;min-width:2px;height:${h}%;background:${col(dev)};border-radius:1px"></div>`;
+    }).join('');
+    const worst = Math.max(...cells.map(v => Math.abs(v - mean))) * 1000;
+    return `<div class="col-12 mt-1">
+      <div class="border rounded p-2">
+        <div class="d-flex justify-content-between small text-muted mb-1">
+          <span>${T.cell.title}</span>
+          <span>${lo.toFixed(3)}–${hi.toFixed(3)} V · Ø ${mean.toFixed(3)} V · ${T.cell.worst.replace('{mv}', worst.toFixed(0))}</span>
+        </div>
+        <div style="display:flex;align-items:flex-end;gap:1px;height:5rem">${bars}</div>
+      </div></div>`;
   }
 
   {% if last %}

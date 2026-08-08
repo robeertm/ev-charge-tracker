@@ -21,13 +21,11 @@ Two layers:
    the car-specific numbers stay easy to verify against a CarScanner readout
    and tweak if a model differs.
 
-⚠️  The Kia/Hyundai offsets below follow the widely-shared community
-"Hyundai Kona EV / Kia e-Niro 64 kWh" extended-PID map (EVNotify / SoulEV /
-CarScanner). They are the best-documented values but were not verified
-against this specific car — every raw response is stored in
-``ObdReading.raw_json`` so a capture can always be re-decoded if an offset
-needs adjusting. Robert reads the very same PIDs in CarScanner, so a quick
-side-by-side confirms them.
+✅  The Kia/Hyundai offsets below were VERIFIED on 2026-08-08 against a live
+read from a real Kia Niro EV (awake, ready-to-drive), correcting a
+systematic 1-byte shift the original community map had. Every raw response
+is still stored in ``ObdReading.raw_json`` so any capture can be re-decoded
+if a future model differs. See the field table for the per-field cross-check.
 """
 from __future__ import annotations
 
@@ -48,7 +46,28 @@ def _is_hex(tok: str) -> bool:
         return False
 
 
-def reassemble(raw: str):
+def _expected_prefix(expect):
+    """The ISO echo prefix a positive response to request ``expect`` must
+    begin with: the service byte + 0x40, then the echoed request bytes.
+
+    ``expect`` is the request PID hex string (e.g. ``'220101'`` → the reply
+    starts ``62 01 01``; ``'015B'`` → ``41 5B``). Used to reject stray frames
+    the adapter may print before the real answer (see :func:`reassemble`).
+    Returns ``None`` when no expectation is given or the string can't parse.
+    """
+    if not expect:
+        return None
+    s = str(expect).strip().replace(' ', '')
+    try:
+        req = [int(s[i:i + 2], 16) for i in range(0, len(s), 2)]
+    except ValueError:
+        return None
+    if not req:
+        return None
+    return [(req[0] + 0x40) & 0xFF] + req[1:]
+
+
+def reassemble(raw: str, expect=None):
     """Reassemble the ISO-TP payload from one ELM327 query's raw text.
 
     Returns a ``list[int]`` of the response bytes (including the service
@@ -60,6 +79,14 @@ def reassemble(raw: str):
     the order the adapter printed them (the ELM327 emits consecutive frames
     in sequence), and the payload is truncated to the length the first frame
     declared.
+
+    ``expect`` (the request PID, e.g. ``'220101'``) makes reassembly robust
+    against a *stray* frame the adapter sometimes prints before the real
+    reply — e.g. a queued ``7EC 03 59 02 …`` DTC single-frame arriving ahead
+    of the ``62 01 01 …`` battery answer. A frame is only accepted as the
+    start of the message when its data begins with the ISO echo prefix for
+    the request we sent (``59…`` ≠ ``62 01 01`` → skipped, keep looking).
+    Without ``expect`` the first SF/FF is taken as-is (legacy behaviour).
     """
     if not raw:
         return None
@@ -68,6 +95,7 @@ def reassemble(raw: str):
         if err in upper:
             return None
 
+    prefix = _expected_prefix(expect)
     payload: list[int] = []
     total_len = None
     started = False
@@ -98,15 +126,23 @@ def reassemble(raw: str):
         pci_hi = by[0] >> 4
         if pci_hi == 0:            # Single Frame: 0L <L data bytes>
             length = by[0] & 0x0F
-            payload = by[1:1 + length]
+            data = by[1:1 + length]
+            # Skip a stray SF whose service echo isn't the one we asked for
+            # (e.g. a queued 59 02 DTC frame ahead of our 62 01 01 answer).
+            if prefix and data[:len(prefix)] != prefix:
+                continue
+            payload = data
             total_len = length
             started = True
             break                  # SF is the whole message
         elif pci_hi == 1:          # First Frame: 1L LL <6 data bytes>
             if len(by) < 2:
                 continue
+            data = by[2:]
+            if prefix and data[:len(prefix)] != prefix:
+                continue           # stray multi-frame — keep looking
             total_len = ((by[0] & 0x0F) << 8) | by[1]
-            payload = by[2:]
+            payload = data
             started = True
         elif pci_hi == 2:          # Consecutive Frame: 2N <7 data bytes>
             if not started:
@@ -192,30 +228,45 @@ PROFILES = {
         'pids': ['220101', '220102', '220103', '220104', '220105', '220106'],
         # Scalars. Offsets are 0-based into the reassembled response, whose
         # first three bytes are the echo 62 01 0X.
+        #
+        # ✅ VERIFIED 2026-08-08 against a live read from Robert's own Kia Niro
+        # EV (awake, ready-to-drive). Every scalar sat exactly 1 byte too low
+        # in the original community table — the real 220101 reply carries an
+        # extra status byte (0xFF) right after `62 01 01`, so each documented
+        # field lands one byte later than the naive "3-byte echo + Bn" count.
+        # The +1 offsets below decode that capture to physically sane values:
+        # SoC 66 %, pack 376.0 V, aux 14.8 V, cells 3.82-3.84 V, temps 28-29 C,
+        # SoH 94.7 %, display SoC 68 % — cross-checked field by field. The
+        # cell max/min block reads as max_v / max_no / min_v / min_no exactly.
         'fields': {
-            'soc_bms_pct':     {'pid': '220101', 'byte': 6,  'len': 1, 'scale': 0.5},
-            'pack_current_a':  {'pid': '220101', 'byte': 12, 'len': 2, 'signed': True, 'scale': 0.1},
-            'pack_voltage_v':  {'pid': '220101', 'byte': 14, 'len': 2, 'scale': 0.1},
-            'temp_max_c':      {'pid': '220101', 'byte': 16, 'len': 1, 'signed': True},
-            'temp_min_c':      {'pid': '220101', 'byte': 17, 'len': 1, 'signed': True},
-            'cell_max_v':      {'pid': '220101', 'byte': 25, 'len': 1, 'scale': 0.02},
-            'cell_min_v':      {'pid': '220101', 'byte': 27, 'len': 1, 'scale': 0.02},
-            'aux_battery_v':   {'pid': '220101', 'byte': 31, 'len': 1, 'scale': 0.1},
-            'cumulative_charge_ah':    {'pid': '220101', 'byte': 40, 'len': 4, 'scale': 0.1},
-            'cumulative_discharge_ah': {'pid': '220101', 'byte': 44, 'len': 4, 'scale': 0.1},
-            # SoH + display SoC live in 220105.
-            'soh_pct':         {'pid': '220105', 'byte': 27, 'len': 2, 'scale': 0.1},
-            'soc_display_pct': {'pid': '220105', 'byte': 33, 'len': 1, 'scale': 0.5},
+            'soc_bms_pct':     {'pid': '220101', 'byte': 7,  'len': 1, 'scale': 0.5},
+            'pack_current_a':  {'pid': '220101', 'byte': 13, 'len': 2, 'signed': True, 'scale': 0.1},
+            'pack_voltage_v':  {'pid': '220101', 'byte': 15, 'len': 2, 'scale': 0.1},
+            'temp_max_c':      {'pid': '220101', 'byte': 17, 'len': 1, 'signed': True},
+            'temp_min_c':      {'pid': '220101', 'byte': 18, 'len': 1, 'signed': True},
+            'cell_max_v':      {'pid': '220101', 'byte': 26, 'len': 1, 'scale': 0.02},
+            'cell_min_v':      {'pid': '220101', 'byte': 28, 'len': 1, 'scale': 0.02},
+            'aux_battery_v':   {'pid': '220101', 'byte': 32, 'len': 1, 'scale': 0.1},
+            'cumulative_charge_ah':    {'pid': '220101', 'byte': 41, 'len': 4, 'scale': 0.1},
+            'cumulative_discharge_ah': {'pid': '220101', 'byte': 45, 'len': 4, 'scale': 0.1},
+            # SoH + display SoC live in 220105 (same +1 shift).
+            'soh_pct':         {'pid': '220105', 'byte': 28, 'len': 2, 'scale': 0.1},
+            'soc_display_pct': {'pid': '220105', 'byte': 34, 'len': 1, 'scale': 0.5},
         },
-        # Module temperatures (byte offsets in 220101). Up to 5 on gen-1.
+        # Module temperatures (byte offsets in 220101). Up to 5 on gen-1. These
+        # already point at the real per-module run (0x1C = 28 C on the verified
+        # capture) — the dedicated temp_min/max scalars above are the +1-shifted
+        # authoritative extremes, so leave these where they read the run.
         'module_temps': {'pid': '220101', 'bytes': [18, 19, 20, 21, 22], 'signed': True},
-        # Cell voltages: 32 cells per PID, each 1 byte × 0.02 V, starting at
-        # byte 6. 220102/03/04 cover cells 1-96; a 98s pack has 2 more in
-        # 220105 but those two are optional and we don't rely on them.
+        # Cell voltages: 32 cells per PID, each 1 byte × 0.02 V. The 220102/03/04
+        # replies carry a 4-byte prefix (62 01 0X + one status byte) so the cells
+        # start at byte 7 — byte 6 would read the trailing 0xFF as a bogus 5.10 V
+        # cell (verified: byte 7 gives the real 0xBF = 3.82 V run). 96 cells over
+        # the three PIDs; a 98s pack has 2 more in 220105 we don't rely on.
         'cells': [
-            {'pid': '220102', 'byte': 6, 'count': 32, 'scale': 0.02},
-            {'pid': '220103', 'byte': 6, 'count': 32, 'scale': 0.02},
-            {'pid': '220104', 'byte': 6, 'count': 32, 'scale': 0.02},
+            {'pid': '220102', 'byte': 7, 'count': 32, 'scale': 0.02},
+            {'pid': '220103', 'byte': 7, 'count': 32, 'scale': 0.02},
+            {'pid': '220104', 'byte': 7, 'count': 32, 'scale': 0.02},
         ],
     },
     # Generic OBD-II fallback: standard PID 01 5B = Hybrid/EV battery pack
@@ -491,10 +542,12 @@ def decode(profile_key: str, frames: dict):
     if prof is None:
         return {'error': f'unknown profile {profile_key}'}
 
-    # Reassemble every PID once.
+    # Reassemble every PID once. Pass the PID so a stray frame (a queued DTC
+    # single-frame the adapter prints ahead of the real answer) is skipped
+    # instead of clobbering the whole reply.
     resp = {}
     for pid, raw in (frames or {}).items():
-        resp[pid.upper()] = reassemble(raw)
+        resp[pid.upper()] = reassemble(raw, pid)
 
     out = {'profile': profile_key}
 

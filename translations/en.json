@@ -1299,5 +1299,12 @@
   "obd.scan_alive": "• {label} is present but rejects this query (wrong DID/session).",
   "obd.scan_recommend": "Recommendation: select the \"{label}\" profile and read again.",
   "obd.scan_locked": "Nothing responds at all — the OBD port is probably locked from the factory (gateway). Battery data can't be read via the OBD connector in that case.",
-  "obd.scan_no_bms": "Standard control units respond, but no known battery address. The vehicle probably uses an as-yet undocumented BMS address."
+  "obd.scan_no_bms": "Standard control units respond, but no known battery address. The vehicle probably uses an as-yet undocumented BMS address.",
+  "obd.cells_title": "Cell voltages (deviation from mean)",
+  "obd.cell": "Cell",
+  "obd.cells_worst": "max. ±{mv} mV",
+  "cert.cellchart_mean": "Mean {v} V",
+  "cert.cellchart_title": "Per-cell voltages ({n} cells)",
+  "cert.cellchart_xlabel": "Cell",
+  "cert.cellchart_dev_title": "Deviation from mean (max +/-{mv} mV / +/-{pct} %)"
 }

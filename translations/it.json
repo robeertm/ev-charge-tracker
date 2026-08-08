@@ -1299,5 +1299,12 @@
   "obd.scan_alive": "• {label} è presente ma rifiuta questa richiesta (DID/sessione errati).",
   "obd.scan_recommend": "Consiglio: seleziona il profilo «{label}» e leggi di nuovo.",
   "obd.scan_locked": "Non risponde nulla — probabilmente la porta OBD è bloccata di fabbrica (gateway). In tal caso i dati della batteria non sono leggibili tramite il connettore OBD.",
-  "obd.scan_no_bms": "Le centraline standard rispondono, ma nessun indirizzo batteria noto. Il veicolo usa probabilmente un indirizzo BMS non ancora documentato."
+  "obd.scan_no_bms": "Le centraline standard rispondono, ma nessun indirizzo batteria noto. Il veicolo usa probabilmente un indirizzo BMS non ancora documentato.",
+  "obd.cells_title": "Tensioni delle celle (scostamento dalla media)",
+  "obd.cell": "Cella",
+  "obd.cells_worst": "max. ±{mv} mV",
+  "cert.cellchart_mean": "Media {v} V",
+  "cert.cellchart_title": "Tensioni per cella ({n} celle)",
+  "cert.cellchart_xlabel": "Cella",
+  "cert.cellchart_dev_title": "Scostamento dalla media (max +/-{mv} mV / +/-{pct} %)"
 }

@@ -188,12 +188,20 @@ def _latest_obd(vehicle_id):
     charge-history certificate can't see: real BMS SoH, cell-voltage spread
     and pack temperatures read straight from the battery-management system.
     """
+    import json as _json
     q = ObdReading.query.order_by(ObdReading.timestamp.desc())
     if vehicle_id is not None:
         q = q.filter(ObdReading.vehicle_id == vehicle_id)
     row = q.first()
     if row is None:
         return None
+
+    def _arr(blob):
+        try:
+            return _json.loads(blob) if blob else None
+        except (ValueError, TypeError):
+            return None
+
     return {
         'timestamp': row.timestamp.isoformat() if row.timestamp else None,
         'soh_pct': row.soh_pct,
@@ -209,6 +217,10 @@ def _latest_obd(vehicle_id):
         'temp_min_c': row.temp_min_c,
         'temp_max_c': row.temp_max_c,
         'temp_avg_c': row.temp_avg_c,
+        # Full per-cell arrays — the certificate renders one bar per cell with
+        # its deviation from the pack mean.
+        'cell_voltages': _arr(row.cell_voltages_json),
+        'cell_temps': _arr(row.cell_temps_json),
     }
 
 
@@ -446,6 +458,78 @@ def _soh_trend_chart(history, nominal_kwh, tmp_dir):
     return path
 
 
+def _cell_voltage_chart(cell_voltages, tmp_dir):
+    """Render a per-cell voltage + deviation chart to a PNG, or None.
+
+    Two stacked panels sharing the cell axis:
+      * top    — one bar per cell = its absolute voltage, with the pack mean
+                 drawn as a dashed line (y-axis tightened around the spread so
+                 the small differences are actually visible);
+      * bottom — one bar per cell = its deviation from the mean in mV, colour
+                 coded (green ≤10 mV, amber ≤25 mV, red above) so a weak or
+                 runaway cell jumps out. The title also states the worst
+                 deviation in both mV and % of the mean.
+
+    This is the "jede einzelne Zelle mit Spannung und Abweichung" view — the
+    single best imbalance picture the OBD read can give.
+    """
+    cells = [c for c in (cell_voltages or []) if isinstance(c, (int, float))]
+    if len(cells) < 2:
+        return None
+    try:
+        import matplotlib
+        matplotlib.use('Agg')
+        import matplotlib.pyplot as plt
+    except ImportError:
+        return None
+
+    n = len(cells)
+    mean = sum(cells) / n
+    dev_mv = [(c - mean) * 1000.0 for c in cells]
+    worst_mv = max(abs(d) for d in dev_mv)
+    worst_pct = (worst_mv / 1000.0 / mean * 100.0) if mean else 0.0
+    x = list(range(1, n + 1))
+
+    def _col(d):
+        a = abs(d)
+        return '#2e7d32' if a <= 10 else ('#f9a825' if a <= 25 else '#c62828')
+    bar_cols = [_col(d) for d in dev_mv]
+
+    fig, (ax1, ax2) = plt.subplots(
+        2, 1, figsize=(7.2, 4.2), sharex=True,
+        gridspec_kw={'height_ratios': [1.15, 1]})
+
+    ax1.bar(x, cells, color=bar_cols, width=0.9)
+    lo, hi = min(cells), max(cells)
+    pad = max((hi - lo) * 0.25, 0.01)
+    ax1.set_ylim(lo - pad, hi + pad)
+    ax1.axhline(mean, color='#1565c0', linestyle='--', linewidth=1,
+                label=t('cert.cellchart_mean', default='Mittel {v} V',
+                        v=f'{mean:.3f}'))
+    ax1.set_ylabel('V')
+    ax1.set_title(t('cert.cellchart_title',
+                    default='Zellspannungen je Zelle ({n} Zellen)', n=n),
+                  fontweight='bold', fontsize=10)
+    ax1.grid(True, axis='y', alpha=0.3)
+    ax1.legend(fontsize=7, loc='lower right')
+
+    ax2.bar(x, dev_mv, color=bar_cols, width=0.9)
+    ax2.axhline(0, color='#666', linewidth=0.8)
+    ax2.set_ylabel('mV')
+    ax2.set_xlabel(t('cert.cellchart_xlabel', default='Zelle'))
+    ax2.set_title(t('cert.cellchart_dev_title',
+                    default='Abweichung vom Mittel (max +/-{mv} mV / +/-{pct} %)',
+                    mv=f'{worst_mv:.0f}', pct=f'{worst_pct:.2f}'),
+                  fontweight='bold', fontsize=9)
+    ax2.grid(True, axis='y', alpha=0.3)
+
+    path = os.path.join(tmp_dir, 'cert_cells.png')
+    fig.tight_layout()
+    fig.savefig(path, dpi=150, bbox_inches='tight', facecolor='white')
+    plt.close(fig)
+    return path
+
+
 try:
     from fpdf import FPDF
 
@@ -509,6 +593,8 @@ def generate_certificate(vehicle_id):
 
     tmp_dir = tempfile.mkdtemp()
     chart = _soh_trend_chart(data['history'], data['vehicle']['nominal_kwh'], tmp_dir)
+    cell_chart = _cell_voltage_chart(
+        (data.get('obd') or {}).get('cell_voltages'), tmp_dir)
 
     veh = data['vehicle']
     grade = data['grade']
@@ -673,6 +759,14 @@ def generate_certificate(vehicle_id):
             pdf.kv(t('cert.obd_pack', default='Packspannung / -strom'), pv)
         if obd.get('aux_battery_v') is not None:
             pdf.kv(t('cert.obd_aux', default='12V-Batterie'), f"{obd['aux_battery_v']:.1f} V")
+
+        # Per-cell voltage + deviation chart (one bar per cell).
+        if cell_chart:
+            if pdf.get_y() + 62 > pdf.h - 20:
+                pdf.add_page()
+            pdf.ln(1)
+            pdf.image(cell_chart, x=(pdf.w - 170) / 2, w=170)
+            pdf.ln(2)
 
     # ── Benchmark ────────────────────────────────────────────────────
     if data['expected_soh'] is not None:

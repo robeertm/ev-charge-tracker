@@ -1299,5 +1299,12 @@
   "obd.scan_alive": "• {label} está presente pero rechaza esta consulta (DID/sesión incorrecta).",
   "obd.scan_recommend": "Recomendación: selecciona el perfil «{label}» y vuelve a leer.",
   "obd.scan_locked": "No responde nada — probablemente el puerto OBD está bloqueado de fábrica (gateway). En ese caso los datos de la batería no se pueden leer por el conector OBD.",
-  "obd.scan_no_bms": "Las unidades de control estándar responden, pero ninguna dirección de batería conocida. El vehículo probablemente usa una dirección de BMS aún no documentada."
+  "obd.scan_no_bms": "Las unidades de control estándar responden, pero ninguna dirección de batería conocida. El vehículo probablemente usa una dirección de BMS aún no documentada.",
+  "obd.cells_title": "Tensiones de celda (desviación de la media)",
+  "obd.cell": "Celda",
+  "obd.cells_worst": "máx. ±{mv} mV",
+  "cert.cellchart_mean": "Media {v} V",
+  "cert.cellchart_title": "Tensiones por celda ({n} celdas)",
+  "cert.cellchart_xlabel": "Celda",
+  "cert.cellchart_dev_title": "Desviación de la media (máx +/-{mv} mV / +/-{pct} %)"
 }

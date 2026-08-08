@@ -1299,5 +1299,12 @@
   "obd.scan_alive": "• {label} is aanwezig maar weigert deze opvraging (verkeerde DID/sessie).",
   "obd.scan_recommend": "Aanbeveling: kies het profiel „{label}\" en lees opnieuw uit.",
   "obd.scan_locked": "Er reageert helemaal niets — de OBD-poort is waarschijnlijk af fabriek vergrendeld (gateway). Batterijgegevens zijn dan niet via de OBD-connector uit te lezen.",
-  "obd.scan_no_bms": "Standaard regeleenheden reageren, maar geen bekend batterijadres. Het voertuig gebruikt waarschijnlijk een nog niet gedocumenteerd BMS-adres."
+  "obd.scan_no_bms": "Standaard regeleenheden reageren, maar geen bekend batterijadres. Het voertuig gebruikt waarschijnlijk een nog niet gedocumenteerd BMS-adres.",
+  "obd.cells_title": "Celspanningen (afwijking van gemiddelde)",
+  "obd.cell": "Cel",
+  "obd.cells_worst": "max. ±{mv} mV",
+  "cert.cellchart_mean": "Gemiddelde {v} V",
+  "cert.cellchart_title": "Spanning per cel ({n} cellen)",
+  "cert.cellchart_xlabel": "Cel",
+  "cert.cellchart_dev_title": "Afwijking van gemiddelde (max +/-{mv} mV / +/-{pct} %)"
 }
