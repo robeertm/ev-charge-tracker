@@ -36,6 +36,25 @@
             {{ t('obd.connect_hint', default='ELM327 einstecken, verbinden, auslesen. Funktioniert in Chrome/Edge (Desktop & Android). USB ist am zuverlässigsten; Bluetooth braucht einen kompatiblen BLE-Dongle.') }}
           </p>
           <div class="mb-2">
+            <label class="form-label small mb-1">{{ t('obd.dongle', default='OBD-Adapter (Dongle)') }}</label>
+            <select class="form-select form-select-sm" id="obdDongle">
+              <option value="" data-transport="" data-baud="" data-supported="1"
+                      {% if not preferred_dongle %}selected{% endif %}>
+                {{ t('obd.dongle_none', default='— Adapter wählen (optional) —') }}
+              </option>
+              {% for d in dongles %}
+              <option value="{{ d.key }}"
+                      data-transport="{{ d.transport }}"
+                      data-baud="{{ d.baud if d.baud else '' }}"
+                      data-supported="{{ '1' if d.supported else '0' }}"
+                      {% if d.key == preferred_dongle %}selected{% endif %}>
+                {{ d.name }}{% if d.recommended %} · {{ t('obd.dongle_recommended', default='empfohlen') }}{% endif %}
+              </option>
+              {% endfor %}
+            </select>
+            <div class="form-text small" id="obdDongleHint"></div>
+          </div>
+          <div class="mb-2">
             <label class="form-label small mb-1">{{ t('obd.profile', default='Auslese-Profil') }}</label>
             <select class="form-select form-select-sm" id="obdProfile"></select>
           </div>
@@ -193,12 +212,23 @@
       'temp': t('obd.res_temp', default='Temperatur'),
       'pack': t('obd.res_pack', default='Pack'),
       'aux': t('obd.res_aux', default='12V-Batterie'),
+    }|tojson }},
+    dongle: {{ {
+      'use_usb': t('obd.dongle_use_usb', default='Für diesen Adapter: per USB verbinden.'),
+      'use_ble': t('obd.dongle_use_ble', default='Für diesen Adapter: per Bluetooth (LE) verbinden.'),
+      'use_both': t('obd.dongle_use_both', default='Dieser Adapter kann per USB oder Bluetooth (LE) verbinden.'),
+      'bt_classic': t('obd.dongle_bt_classic', default='Dieser Adapter nutzt klassisches Bluetooth — Browser können darauf nicht direkt zugreifen. Nimm einen USB- oder Bluetooth-LE-Adapter.'),
+      'wifi': t('obd.dongle_wifi', default='Dieser Adapter nutzt WLAN — Browser können darauf nicht direkt zugreifen. Nimm einen USB- oder Bluetooth-LE-Adapter.'),
+      'saved': t('obd.dongle_saved', default='Als bevorzugter Adapter gemerkt.'),
     }|tojson }}
   };
 
   const logEl = document.getElementById('obdLog');
   const statusEl = document.getElementById('obdStatus');
   const progEl = document.getElementById('obdProg');
+  const dongleSel = document.getElementById('obdDongle');
+  const dongleHint = document.getElementById('obdDongleHint');
+  const baudSel = document.getElementById('obdBaud');
   const profileSel = document.getElementById('obdProfile');
   const resultEl = document.getElementById('obdResult');
   const emptyEl = document.getElementById('obdResultEmpty');
@@ -215,9 +245,68 @@
   // Feature detection
   const hasSerial = 'serial' in navigator;
   const hasBle = 'bluetooth' in navigator;
-  if (!hasSerial) document.getElementById('btnSerial').disabled = true;
-  if (!hasBle) document.getElementById('btnBle').disabled = true;
+  const btnSerial = document.getElementById('btnSerial');
+  const btnBle = document.getElementById('btnBle');
+  if (!hasSerial) btnSerial.disabled = true;
+  if (!hasBle) btnBle.disabled = true;
   if (!hasSerial && !hasBle) document.getElementById('obdUnsupported').classList.remove('d-none');
+
+  // ── Preferred dongle ───────────────────────────────────────────────
+  // Selecting an adapter presets its USB baud rate, steers the user to the
+  // right connect button, and is remembered server-side so it is always
+  // pre-selected next time. Classic-Bluetooth / WiFi adapters are listed
+  // but flagged as unreachable from a browser (Web Serial + Web BLE only).
+  function applyDongle() {
+    const opt = dongleSel && dongleSel.selectedOptions[0];
+    if (!opt) return;
+    const transport = opt.dataset.transport;
+    const baud = opt.dataset.baud;
+    const supported = opt.dataset.supported === '1';
+    const wantUsb = transport === 'usb' || transport === 'usb_ble';
+    const wantBle = transport === 'ble' || transport === 'usb_ble';
+    const chosen = !!transport;   // neutral placeholder → no constraints
+    // Preset the USB baud rate the adapter is happiest at.
+    if (baud) {
+      if (![...baudSel.options].some(o => o.value === baud)) {
+        const o = document.createElement('option');
+        o.value = baud; o.textContent = baud; baudSel.appendChild(o);
+      }
+      baudSel.value = baud;
+    }
+    // Hint + which buttons make sense for this adapter.
+    let hint = '', cls = 'form-text small';
+    if (!chosen) {
+      hint = '';
+    } else if (!supported) {
+      hint = transport === 'wifi' ? T.dongle.wifi : T.dongle.bt_classic;
+      cls = 'form-text small text-danger';
+    } else if (transport === 'usb_ble') {
+      hint = T.dongle.use_both;
+    } else if (wantUsb) {
+      hint = T.dongle.use_usb;
+    } else if (wantBle) {
+      hint = T.dongle.use_ble;
+    }
+    dongleHint.className = cls;
+    dongleHint.textContent = hint;
+    // Enable a button only when the browser supports it AND (no adapter
+    // chosen, or the chosen adapter uses that transport and is reachable).
+    btnSerial.disabled = !(hasSerial && (!chosen || (supported && wantUsb)));
+    btnBle.disabled = !(hasBle && (!chosen || (supported && wantBle)));
+    baudSel.disabled = chosen && !wantUsb;
+  }
+
+  function persistDongle() {
+    fetch('/api/obd/dongle', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ key: dongleSel.value }),
+    }).then(() => { if (dongleSel.value) status(T.dongle.saved); }).catch(() => {});
+  }
+
+  if (dongleSel) {
+    dongleSel.addEventListener('change', () => { applyDongle(); persistDongle(); });
+    applyDongle();
+  }
 
   // ── Load available profiles ────────────────────────────────────────
   let PROFILE = null;
@@ -425,8 +514,8 @@
     try { await fn(); }
     catch (e) { log(T.fields.error + ': ' + (e && e.message || e)); status(T.fields.failed + ': ' + (e.message || e)); }
     finally {
-      if (hasSerial) document.getElementById('btnSerial').disabled = false;
-      if (hasBle) document.getElementById('btnBle').disabled = false;
+      // Re-enable per the chosen adapter's constraints (not blindly both).
+      applyDongle();
     }
   }
 

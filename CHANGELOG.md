@@ -1,5 +1,30 @@
 # Changelog
 
+## v3.0.80 (2026-08-08)
+
+### OBD adapter picker with a remembered preferred dongle
+
+The OBD page listed effectively a single generic adapter. It now offers a
+curated dropdown of adapters known to work for in-browser battery reads, and
+the chosen one is remembered and pre-selected on every future visit.
+
+- **Dongle catalog** (`services/vehicle/obd_decode.py`) — a data-driven list of
+  ~13 adapters: OBDLink SX/EX/CX, Vgate vLinker FD+/MC+ and iCar Pro BLE,
+  Veepeak OBDCheck BLE/BLE+, plus generic ELM327 USB/BLE entries. Each entry
+  carries its transport (`usb` / `ble`), the recommended USB baud rate, and a
+  `recommended` quality flag. Classic-Bluetooth (e.g. OBDLink MX+) and WiFi
+  adapters are listed but flagged `supported: false`, because a browser can
+  only reach Web Serial (USB) and Web Bluetooth (BLE) — never classic BR/EDR
+  or WiFi.
+- **Preferred-adapter selection** (`templates/obd.html`, `app.py`) — picking an
+  adapter presets the USB baud rate, steers the user to the correct connect
+  button (USB vs Bluetooth), greys out USB-only fields for BLE adapters, and
+  shows a clear warning for adapters a browser can't reach. The choice is
+  persisted server-side (`AppConfig` key `obd_preferred_dongle`, new
+  `POST /api/obd/dongle`) so it is always pre-selected afterwards.
+- **i18n** — nine new `obd.dongle*` keys translated across all six languages
+  (full parity, 1266 keys each).
+
 ## v3.0.79 (2026-08-08)
 
 ### English changelog + README refresh for the new features

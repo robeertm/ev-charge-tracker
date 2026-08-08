@@ -2467,7 +2467,8 @@ def register_routes(app):
         """Live OBD reader page. The browser talks to an ELM327 dongle over
         Web Serial / Web Bluetooth, reads the BMS cell PIDs and posts them
         back for decoding + storage. Vehicle is chosen from the fleet."""
-        from models.database import Vehicle, ObdReading
+        from models.database import Vehicle, ObdReading, AppConfig
+        from services.vehicle.obd_decode import dongle_catalog
         vehicles = Vehicle.query.order_by(Vehicle.is_archived.asc(),
                                           Vehicle.id.asc()).all()
         try:
@@ -2506,7 +2507,23 @@ def register_routes(app):
                                active=active,
                                last=last.to_dict() if last else None,
                                cert=cert, cert_available=cert_available,
+                               dongles=dongle_catalog(),
+                               preferred_dongle=AppConfig.get('obd_preferred_dongle', ''),
                                app_version=Config.APP_VERSION)
+
+    @app.route('/api/obd/dongle', methods=['POST'])
+    def api_obd_dongle():
+        """Persist the user's preferred OBD adapter so it's pre-selected on
+        every future visit. Body: {key: str}. An empty/unknown key clears
+        the preference (falls back to the recommended default)."""
+        from models.database import AppConfig
+        from services.vehicle.obd_decode import get_dongle
+        data = request.get_json(silent=True) or {}
+        key = (data.get('key') or '').strip()
+        if key and get_dongle(key) is None:
+            return jsonify({'ok': False, 'error': 'unknown dongle'}), 400
+        AppConfig.set('obd_preferred_dongle', key)
+        return jsonify({'ok': True, 'key': key})
 
     @app.route('/api/obd/profile/<int:vid>')
     def api_obd_profile(vid):

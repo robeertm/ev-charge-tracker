@@ -221,6 +221,55 @@ PROFILES = {
 }
 
 
+# ── Dongle catalog ───────────────────────────────────────────────────
+# Curated list of OBD-II / ELM327 adapters known to work for in-browser
+# battery reads. The app speaks raw ELM327 AT commands over Web Serial
+# (USB) or Web Bluetooth (BLE), so ANY genuine ELM327-compatible adapter
+# on one of those two transports works. The two transports the browser
+# CANNOT reach are classic Bluetooth (BR/EDR — e.g. OBDLink MX+) and WiFi
+# adapters; those are listed so the user understands why they don't show
+# up, with a clear hint to pick a USB or BLE model instead.
+#
+# ``transport`` drives the client UI:
+#   'usb'        → connect via USB (Web Serial); ``baud`` presets the rate
+#   'ble'        → connect via Bluetooth LE (Web Bluetooth)
+#   'usb_ble'    → dual-chip, either transport works
+#   'bt_classic' → classic Bluetooth, not reachable from a browser
+#   'wifi'       → WiFi, not reachable from a browser
+# ``recommended`` marks the quality picks (genuine chip, reliable frames).
+DONGLES = [
+    {'key': 'obdlink_sx',       'name': 'OBDLink SX (USB)',                    'transport': 'usb',        'baud': 115200, 'recommended': True},
+    {'key': 'obdlink_ex',       'name': 'OBDLink EX (USB)',                    'transport': 'usb',        'baud': 115200, 'recommended': True},
+    {'key': 'obdlink_cx',       'name': 'OBDLink CX (Bluetooth LE)',           'transport': 'ble',        'baud': None,   'recommended': True},
+    {'key': 'vgate_vlinker_fd', 'name': 'Vgate vLinker FD+ (Bluetooth LE)',    'transport': 'ble',        'baud': None,   'recommended': True},
+    {'key': 'vgate_vlinker_mc', 'name': 'Vgate vLinker MC+ (Bluetooth LE)',    'transport': 'ble',        'baud': None,   'recommended': True},
+    {'key': 'vgate_icar_pro',   'name': 'Vgate iCar Pro BLE 4.0',              'transport': 'ble',        'baud': None,   'recommended': True},
+    {'key': 'veepeak_ble_plus', 'name': 'Veepeak OBDCheck BLE+',               'transport': 'ble',        'baud': None,   'recommended': True},
+    {'key': 'veepeak_ble',      'name': 'Veepeak OBDCheck BLE',                'transport': 'ble',        'baud': None,   'recommended': False},
+    {'key': 'generic_usb',      'name': 'Generic ELM327 (USB)',               'transport': 'usb',        'baud': 38400,  'recommended': False},
+    {'key': 'generic_ble',      'name': 'Generic ELM327 (Bluetooth LE)',      'transport': 'ble',        'baud': None,   'recommended': False},
+    {'key': 'obdlink_mxplus',   'name': 'OBDLink MX+ (Bluetooth Classic)',    'transport': 'bt_classic', 'baud': None,   'recommended': False},
+    {'key': 'generic_bt',       'name': 'Generic ELM327 (Bluetooth Classic)', 'transport': 'bt_classic', 'baud': None,   'recommended': False},
+    {'key': 'generic_wifi',     'name': 'Generic ELM327 (WiFi)',              'transport': 'wifi',       'baud': None,   'recommended': False},
+]
+
+# Browser-usable transports (Web Serial / Web Bluetooth).
+_BROWSER_TRANSPORTS = ('usb', 'ble', 'usb_ble')
+
+
+def dongle_catalog():
+    """Return the dongle catalog with a derived ``supported`` flag (True
+    when the browser can reach the adapter's transport)."""
+    return [dict(d, supported=d['transport'] in _BROWSER_TRANSPORTS)
+            for d in DONGLES]
+
+
+def get_dongle(key: str | None):
+    if not key:
+        return None
+    return next((d for d in DONGLES if d['key'] == key), None)
+
+
 def profile_for_brand(brand: str | None):
     """Map a vehicle brand to the best decode profile key."""
     b = (brand or '').strip().lower()
