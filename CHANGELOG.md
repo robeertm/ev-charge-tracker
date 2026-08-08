@@ -1,5 +1,39 @@
 # Changelog
 
+## v3.0.84 (2026-08-08)
+
+### Fix: XPENG battery read returned only "NO DATA" + new ECU scan
+
+The OBD reader connected to the dongle fine and the ELM327 answered every AT
+command, but each battery query came back `NO DATA`. The cause was the profile:
+XPENG was falling back to the Kia/Hyundai map, which addresses the BMS at header
+`7E4` with PIDs `2201xx`. XPENG does not answer there — its BMS lives on header
+`704` (response `784`) and uses UDS data identifiers of the form `2211xx`. Every
+request therefore hit an address no control unit replies on.
+
+- **New XPENG decode profile** (`services/vehicle/obd_decode.py`) — request
+  header `704`, UDS service 22 identifiers `221101/03/05/06/07/08/09` and
+  `22110A` for pack voltage/current, cell min/max voltage, min/max temperature,
+  SoC and SoH. The init sequence pins ISO-TP flow control to the `704` header
+  (`ATFCSH`/`ATFCSM1`) and filters replies to `784` (`ATCRA`), so multi-frame
+  identifiers come back reliably instead of silently timing out. XPENG vehicles
+  now auto-select this profile. The byte offsets follow the only public XPENG
+  reverse-engineering (G6) and are labelled experimental/unverified — as with
+  every profile, the raw frames are stored so a capture can be re-decoded once
+  cross-checked against a reference read.
+- **ECU scan** — a new "No data? ECU scan" button diagnoses a car that answers
+  nothing. It auto-detects the CAN protocol, enumerates which control units are
+  alive on the bus (functional `0100`), then probes the known EV battery
+  addresses and reports which one responds — telling apart "704 answered, use
+  the XPENG profile" from "the OBD port is gateway-locked, battery data isn't
+  reachable." When a normal read comes back all-`NO DATA`, the reader now points
+  straight at the scan instead of saving an empty reading. If the scan finds a
+  match it offers a one-click "apply recommended profile & read".
+- **Decode engine** — field specs gained an `offset` term (`raw * scale +
+  offset`) for encodings like the XPENG pack current (`raw * 0.5 - 1600`).
+- Full translations for the new strings across all six languages; new unit tests
+  for the XPENG layout, the `offset` term and the scan classifier/interpreter.
+
 ## v3.0.83 (2026-08-08)
 
 ### Fix: Bluetooth-LE dongles that connect but report "0 services"

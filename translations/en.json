@@ -1284,5 +1284,20 @@
   "set.fleet_field_battery_hint": "Usable (net) capacity — basis for kWh, cost, CO₂ and SoH.",
   "set.fleet_field_first_registered": "First registration",
   "set.fleet_field_first_registered_hint": "Battery age (calendar clock for the certificate).",
-  "set.fleet_obd": "Read battery via OBD/ELM327"
+  "set.fleet_obd": "Read battery via OBD/ELM327",
+  "obd.btn_scan": "No data? ECU scan (finds the right address)",
+  "obd.scan_title": "ECU scan – result",
+  "obd.scan_running": "ECU scan running — looking for responding control units…",
+  "obd.scan_probe": "Checking address {h}…",
+  "obd.scan_done": "ECU scan finished.",
+  "obd.scan_apply": "Apply recommended profile & read",
+  "obd.scan_hint_nodata": "No usable data — run the ECU scan to find the right address.",
+  "obd.scan_protocol": "Detected protocol: {p}",
+  "obd.scan_ecus": "Responding control units: {list}",
+  "obd.scan_no_ecus": "No control unit answered the standard query.",
+  "obd.scan_hit": "✓ {label} responds with data.",
+  "obd.scan_alive": "• {label} is present but rejects this query (wrong DID/session).",
+  "obd.scan_recommend": "Recommendation: select the \"{label}\" profile and read again.",
+  "obd.scan_locked": "Nothing responds at all — the OBD port is probably locked from the factory (gateway). Battery data can't be read via the OBD connector in that case.",
+  "obd.scan_no_bms": "Standard control units respond, but no known battery address. The vehicle probably uses an as-yet undocumented BMS address."
 }

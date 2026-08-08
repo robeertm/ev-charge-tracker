@@ -146,13 +146,15 @@ def _field(resp, spec):
     """Extract one scalar field per its spec dict.
 
     Spec keys: ``byte`` (offset), ``len`` (bytes, default 1),
-    ``signed`` (bool), ``scale`` (multiplier, default 1).
+    ``signed`` (bool), ``scale`` (multiplier, default 1),
+    ``offset`` (added after scaling, default 0 — for encodings like
+    ``raw * 0.5 - 1600``).
     """
     length = spec.get('len', 1)
     raw = _s(resp, spec['byte'], length) if spec.get('signed') else _u(resp, spec['byte'], length)
     if raw is None:
         return None
-    return raw * spec.get('scale', 1.0)
+    return raw * spec.get('scale', 1.0) + spec.get('offset', 0.0)
 
 
 # ── Profiles ─────────────────────────────────────────────────────────
@@ -165,6 +167,19 @@ def _init_lines():
     """Shared ELM327 setup: echo/linefeed off, spaces + headers ON, CAN
     11-bit/500k, raw frames (we reassemble ISO-TP ourselves)."""
     return ['ATZ', 'ATE0', 'ATL0', 'ATS1', 'ATH1', 'ATSP6', 'ATAT1', 'ATCAF0']
+
+
+def _init_lines_xpeng():
+    """Like :func:`_init_lines`, but pins the ISO-TP flow control to the
+    XPENG BMS request header (704) and filters replies to its response id
+    (784). XPENG answers on 704/784 — NOT the Kia-style 7E4/7EC — and its
+    multi-frame reads only come back reliably when the flow-control frame
+    the ELM327 sends carries the 704 header (ATFCSH) with a user-defined
+    flow-control mode (ATFCSM1). Without this, changing ATSH to 704 leaves
+    the auto flow control pointing at the wrong id and multi-frame DIDs
+    silently return NO DATA. Source: XPCarData + meatpiHQ/wican-fw #517."""
+    return ['ATZ', 'ATE0', 'ATL0', 'ATS1', 'ATH1', 'ATSP6', 'ATAT1',
+            'ATCAF0', 'ATCRA784', 'ATFCSH704', 'ATFCSD300000', 'ATFCSM1']
 
 
 PROFILES = {
@@ -218,7 +233,118 @@ PROFILES = {
         'module_temps': None,
         'cells': [],
     },
+    # XPENG (G6 baseline) — BMS answers on request header 704 / response
+    # 784, UDS service 22 with 4-digit data identifiers of the form 2211xx.
+    # This is the only publicly reverse-engineered XPENG battery map
+    # (XPCarData + wican-fw #517). The G6 is documented; G3/P7/P5/G9 use the
+    # same OEM diagnostic stack and MAY share these ids, but their exact DIDs
+    # are not published — if 704 returns NO DATA on those models, run the
+    # in-app ECU scan (see scan_plan) to find the address that answers.
+    #
+    # ⚠️  These byte offsets/scalings are COMMUNITY-GUESSED and even disputed
+    # between sources — treat every decoded value as experimental. As with
+    # the Kia map, the raw frames are always stored (ObdReading.raw_json) so a
+    # capture can be re-decoded once verified against CarScanner. Byte offset
+    # = 3 (the 62 11 xx service echo) + the community "Bn" data-byte index.
+    'xpeng': {
+        'label': 'XPENG (G6 — experimentell, unbestätigt)',
+        'header': '704',
+        'init': _init_lines_xpeng(),
+        'pids': ['221101', '221103', '221105', '221106',
+                 '221107', '221108', '221109', '22110A'],
+        'fields': {
+            # Pack voltage 221101 B4:B5 / 10.
+            'pack_voltage_v': {'pid': '221101', 'byte': 7, 'len': 2, 'scale': 0.1},
+            # Pack current 221103 B4:B5 * 0.5 - 1600 (negative = charging).
+            'pack_current_a': {'pid': '221103', 'byte': 7, 'len': 2, 'scale': 0.5, 'offset': -1600.0},
+            # Cell voltage max/min 221105/221106 B0:B1 / 1000 (mV -> V).
+            'cell_max_v': {'pid': '221105', 'byte': 3, 'len': 2, 'scale': 0.001},
+            'cell_min_v': {'pid': '221106', 'byte': 3, 'len': 2, 'scale': 0.001},
+            # Temp max/min 221107/221108 B0 - 40.
+            'temp_max_c': {'pid': '221107', 'byte': 3, 'len': 1, 'offset': -40.0},
+            'temp_min_c': {'pid': '221108', 'byte': 3, 'len': 1, 'offset': -40.0},
+            # SoC (BMS) 221109 B0:B1 / 10.
+            'soc_bms_pct': {'pid': '221109', 'byte': 3, 'len': 2, 'scale': 0.1},
+            # SoH 22110A B4:B5 / 10.
+            'soh_pct': {'pid': '22110A', 'byte': 7, 'len': 2, 'scale': 0.1},
+        },
+        # Per-cell arrays and per-module temps use undocumented multi-frame
+        # DIDs (only in CarScanner's closed profile) — we don't guess them.
+        'module_temps': None,
+        'cells': [],
+    },
 }
+
+
+# ── ECU discovery scan ───────────────────────────────────────────────
+# When a normal read returns nothing but NO DATA, the header we addressed
+# has no ECU answering — wrong profile for the car, or an unknown model
+# whose BMS lives at a different id. Rather than leave the user staring at
+# six NO DATAs, the scan enumerates which ECUs are actually alive on the
+# bus (functional broadcast 0100 at 7DF) and probes the known EV-BMS header
+# pairs with a real UDS request, so we can tell "704 answered → use the
+# XPENG profile" from "nobody answers → the OBD port is gateway-locked".
+SCAN_CANDIDATES = [
+    {'key': 'xpeng', 'header': '704', 'resp': '784', 'probe': '221101',
+     'label': 'XPENG BMS (704/784)', 'profile': 'xpeng'},
+    {'key': 'kia_hyundai', 'header': '7E4', 'resp': '7EC', 'probe': '220101',
+     'label': 'Kia/Hyundai BMS (7E4/7EC)', 'profile': 'kia_hyundai_ext'},
+    {'key': 'bms_7e5', 'header': '7E5', 'resp': '7ED', 'probe': '220101',
+     'label': 'BMS (7E5/7ED)', 'profile': None},
+    {'key': 'bms_7e2', 'header': '7E2', 'resp': '7EA', 'probe': '220101',
+     'label': 'BMS (7E2/7EA)', 'profile': None},
+]
+
+
+def scan_plan():
+    """The step list the browser runs for an ECU scan. Auto-detects the CAN
+    protocol (ATSP0), reads it back (ATDPN), enumerates responders with a
+    functional 0100, then probes each candidate BMS header. The client stays
+    a dumb transport: it just runs these lines and ships the raw text back to
+    :func:`interpret_scan`."""
+    return {
+        'init': ['ATZ', 'ATE0', 'ATL0', 'ATS1', 'ATH1', 'ATSP0', 'ATAT1', 'ATCAF0'],
+        'protocol_cmd': 'ATDPN',
+        'enumerate': {'header': '7DF', 'cmd': '0100'},
+        'probes': [{'key': c['key'], 'header': c['header'], 'cmd': c['probe'],
+                    'label': c['label']} for c in SCAN_CANDIDATES],
+    }
+
+
+def _scan_headers(raw):
+    """Distinct CAN arbitration ids (responder headers) seen in raw ELM327
+    text — the 3- or 8-char leading hex token on each data line."""
+    if not raw:
+        return []
+    found = []
+    for line in raw.splitlines():
+        line = line.strip().upper().replace('\t', ' ').replace('>', ' ').strip()
+        toks = [tk for tk in line.split(' ') if tk]
+        if len(toks) > 1 and _is_hex(toks[0]) and len(toks[0]) in (3, 8):
+            if toks[0] not in found:
+                found.append(toks[0])
+    return found
+
+
+def _classify_probe(raw):
+    """Classify a candidate-header probe response:
+    'ok'       — a positive UDS/OBD reply (0x62/0x50/0x41): the profile fits.
+    'rejected' — a 0x7F negative reply: the ECU IS there but declined this
+                 request (right address, wrong DID/session) — still a find.
+    'nodata'   — nothing answered at that header.
+    """
+    payload = reassemble(raw)
+    if payload:
+        if payload[0] in (0x62, 0x50, 0x41):
+            return 'ok'
+        if payload[0] == 0x7F:
+            return 'rejected'
+    # reassemble() returns None on NO DATA/errors; a stray 7F that failed
+    # ISO-TP reassembly still counts as "ECU alive".
+    if raw and '7F' in raw.upper() and not any(
+            e in raw.upper() for e in ('NO DATA', 'UNABLE', 'CAN ERROR')):
+        return 'rejected'
+    return 'nodata'
 
 
 # ── Dongle catalog ───────────────────────────────────────────────────
@@ -275,7 +401,72 @@ def profile_for_brand(brand: str | None):
     b = (brand or '').strip().lower()
     if b in ('kia', 'hyundai', 'genesis'):
         return 'kia_hyundai_ext'
+    if b == 'xpeng':
+        return 'xpeng'
     return 'generic_ev'
+
+
+def interpret_scan(results: dict):
+    """Turn the raw text an ECU scan collected into a human report.
+
+    ``results`` = ``{'protocol': raw, 'enumerate': raw, 'probes': {key: raw}}``.
+    Returns ``{'lines': [str], 'ecus': [str], 'recommended_profile': key|None,
+    'ok': bool}`` — ``lines`` are localised for the current request language.
+    """
+    from services.i18n import t
+
+    proto_raw = (results or {}).get('protocol') or ''
+    ecus = _scan_headers((results or {}).get('enumerate') or '')
+    probes = (results or {}).get('probes') or {}
+
+    lines = []
+    # Detected CAN protocol. ATDPN prints the protocol number (e.g. "6"), with
+    # a leading "A" when it was auto-detected via ATSP0 (e.g. "A6") — strip it.
+    hexchars = ''.join(ch for ch in proto_raw.upper() if ch in '0123456789ABCDEF')
+    pnum = hexchars.lstrip('A')[:1] if hexchars else ''
+    proto_names = {
+        '6': 'ISO 15765-4 CAN 11-bit 500k', '7': 'ISO 15765-4 CAN 29-bit 500k',
+        '8': 'ISO 15765-4 CAN 11-bit 250k', '9': 'ISO 15765-4 CAN 29-bit 250k',
+    }
+    if pnum:
+        lines.append(t('obd.scan_protocol', default='Erkanntes Protokoll: {p}',
+                       p=proto_names.get(pnum, 'ATSP' + pnum)))
+    if ecus:
+        lines.append(t('obd.scan_ecus', default='Antwortende Steuergeräte: {list}',
+                       list=', '.join(ecus)))
+    else:
+        lines.append(t('obd.scan_no_ecus',
+                       default='Kein Steuergerät hat auf die Standard-Abfrage geantwortet.'))
+
+    recommended = None
+    for c in SCAN_CANDIDATES:
+        cls = _classify_probe(probes.get(c['key']))
+        if cls == 'ok':
+            lines.append(t('obd.scan_hit', default='✓ {label} antwortet mit Daten.',
+                           label=c['label']))
+            if recommended is None and c['profile']:
+                recommended = c['profile']
+        elif cls == 'rejected':
+            lines.append(t('obd.scan_alive',
+                           default='• {label} ist vorhanden, lehnt aber diese Abfrage ab (falsche DID/Sitzung).',
+                           label=c['label']))
+            if recommended is None and c['profile']:
+                recommended = c['profile']
+
+    if recommended:
+        prof = PROFILES.get(recommended)
+        lines.append(t('obd.scan_recommend',
+                       default='Empfehlung: Profil „{label}" wählen und erneut auslesen.',
+                       label=prof['label'] if prof else recommended))
+    elif not ecus:
+        lines.append(t('obd.scan_locked',
+                       default='Es antwortet gar nichts — vermutlich ist der OBD-Port ab Werk gesperrt (Gateway). Batteriedaten sind dann über den OBD-Stecker nicht auslesbar.'))
+    else:
+        lines.append(t('obd.scan_no_bms',
+                       default='Standard-Steuergeräte antworten, aber keine bekannte Batterie-Adresse. Das Fahrzeug nutzt vermutlich eine noch undokumentierte BMS-Adresse.'))
+
+    return {'lines': lines, 'ecus': ecus,
+            'recommended_profile': recommended, 'ok': bool(recommended)}
 
 
 def get_profile(key: str):

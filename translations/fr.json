@@ -1284,5 +1284,20 @@
   "obd.res_pack": "Pack",
   "obd.res_aux": "Batterie 12V",
   "obd.profile_load_failed": "Impossible de charger le profil.",
-  "obd.log_error": "ERREUR"
+  "obd.log_error": "ERREUR",
+  "obd.btn_scan": "Pas de données ? Scan ECU (trouve la bonne adresse)",
+  "obd.scan_title": "Scan ECU – résultat",
+  "obd.scan_running": "Scan ECU en cours — recherche des calculateurs qui répondent…",
+  "obd.scan_probe": "Vérification de l'adresse {h}…",
+  "obd.scan_done": "Scan ECU terminé.",
+  "obd.scan_apply": "Appliquer le profil recommandé et lire",
+  "obd.scan_hint_nodata": "Aucune donnée exploitable — lancez le scan ECU pour trouver la bonne adresse.",
+  "obd.scan_protocol": "Protocole détecté : {p}",
+  "obd.scan_ecus": "Calculateurs qui répondent : {list}",
+  "obd.scan_no_ecus": "Aucun calculateur n'a répondu à la requête standard.",
+  "obd.scan_hit": "✓ {label} répond avec des données.",
+  "obd.scan_alive": "• {label} est présent mais refuse cette requête (mauvais DID/session).",
+  "obd.scan_recommend": "Recommandation : sélectionnez le profil « {label} » et relancez la lecture.",
+  "obd.scan_locked": "Rien ne répond — le port OBD est probablement verrouillé d'usine (passerelle). Les données de batterie ne sont alors pas lisibles via le connecteur OBD.",
+  "obd.scan_no_bms": "Les calculateurs standard répondent, mais aucune adresse de batterie connue. Le véhicule utilise probablement une adresse BMS encore non documentée."
 }

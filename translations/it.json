@@ -1284,5 +1284,20 @@
   "obd.res_pack": "Pack",
   "obd.res_aux": "Batteria 12V",
   "obd.profile_load_failed": "Impossibile caricare il profilo.",
-  "obd.log_error": "ERRORE"
+  "obd.log_error": "ERRORE",
+  "obd.btn_scan": "Nessun dato? Scansione ECU (trova l'indirizzo giusto)",
+  "obd.scan_title": "Scansione ECU – risultato",
+  "obd.scan_running": "Scansione ECU in corso — ricerca delle centraline che rispondono…",
+  "obd.scan_probe": "Verifica indirizzo {h}…",
+  "obd.scan_done": "Scansione ECU completata.",
+  "obd.scan_apply": "Applica profilo consigliato e leggi",
+  "obd.scan_hint_nodata": "Nessun dato utilizzabile — avvia la scansione ECU per trovare l'indirizzo giusto.",
+  "obd.scan_protocol": "Protocollo rilevato: {p}",
+  "obd.scan_ecus": "Centraline che rispondono: {list}",
+  "obd.scan_no_ecus": "Nessuna centralina ha risposto alla richiesta standard.",
+  "obd.scan_hit": "✓ {label} risponde con dati.",
+  "obd.scan_alive": "• {label} è presente ma rifiuta questa richiesta (DID/sessione errati).",
+  "obd.scan_recommend": "Consiglio: seleziona il profilo «{label}» e leggi di nuovo.",
+  "obd.scan_locked": "Non risponde nulla — probabilmente la porta OBD è bloccata di fabbrica (gateway). In tal caso i dati della batteria non sono leggibili tramite il connettore OBD.",
+  "obd.scan_no_bms": "Le centraline standard rispondono, ma nessun indirizzo batteria noto. Il veicolo usa probabilmente un indirizzo BMS non ancora documentato."
 }

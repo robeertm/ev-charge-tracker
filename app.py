@@ -2549,6 +2549,20 @@ def register_routes(app):
             'available': [{'key': k, 'label': p['label']} for k, p in PROFILES.items()],
         })
 
+    @app.route('/api/obd/scan', methods=['GET', 'POST'])
+    def api_obd_scan():
+        """ECU discovery scan. GET returns the step list the browser should
+        run (protocol auto-detect + functional enumerate + candidate BMS
+        probes); POST interprets the raw text it collected into a localised
+        report and, where possible, recommends a decode profile. Runs when a
+        normal read returned only NO DATA so the user learns which ECU (if
+        any) actually answers instead of guessing profiles."""
+        from services.vehicle.obd_decode import scan_plan, interpret_scan
+        if request.method == 'GET':
+            return jsonify(scan_plan())
+        data = request.get_json(silent=True) or {}
+        return jsonify(interpret_scan(data))
+
     @app.route('/api/vehicles/<int:vid>/obd/ingest', methods=['POST'])
     def api_obd_ingest(vid):
         """Decode raw ELM327 frames from the browser, store an ObdReading

@@ -80,6 +80,9 @@
             <button class="btn btn-outline-primary" id="btnBle">
               <i class="bi bi-bluetooth"></i> {{ t('obd.btn_ble', default='Per Bluetooth verbinden & auslesen') }}
             </button>
+            <button class="btn btn-outline-secondary btn-sm" id="btnScan">
+              <i class="bi bi-search"></i> {{ t('obd.btn_scan', default='Keine Daten? ECU-Scan (findet die richtige Adresse)') }}
+            </button>
           </div>
           <div class="text-end mt-1 d-none" id="obdPickOtherWrap">
             <a href="#" class="small text-muted" id="obdPickOther">{{ t('obd.pick_other', default='Anderes Gerät wählen') }}</a>
@@ -103,6 +106,13 @@
               <div class="progress-bar" id="obdProg" style="width:0%"></div>
             </div>
             <div class="small text-muted mt-1" id="obdStatus">{{ t('obd.idle', default='Bereit.') }}</div>
+            <div class="alert alert-info small mt-2 d-none" id="obdScanReport">
+              <div class="fw-semibold mb-1">
+                <i class="bi bi-search"></i> {{ t('obd.scan_title', default='ECU-Scan – Ergebnis') }}
+              </div>
+              <div id="obdScanBody"></div>
+              <button class="btn btn-sm btn-primary mt-2 d-none" id="obdScanApply"></button>
+            </div>
           </div>
           <details class="mt-2">
             <summary class="small text-muted">{{ t('obd.rawlog', default='Rohdaten-Protokoll') }}</summary>
@@ -257,6 +267,13 @@
       'channel_ok': t('obd.step_channel_ok', default='Lesekanal gefunden — Adapter ist bereit.'),
       'port_open': t('obd.step_port_open', default='USB-Port geöffnet ({baud} Baud).'),
       'pairing_wait': t('obd.pairing_wait', default='Erstmaliges Koppeln kann ein paar Sekunden dauern — solange blinkt die blaue LED noch.'),
+    }|tojson }},
+    scan: {{ {
+      'running': t('obd.scan_running', default='ECU-Scan läuft — suche antwortende Steuergeräte…'),
+      'probe': t('obd.scan_probe', default='Prüfe Adresse {h}…'),
+      'done': t('obd.scan_done', default='ECU-Scan abgeschlossen.'),
+      'apply': t('obd.scan_apply', default='Empfohlenes Profil übernehmen & auslesen'),
+      'hint_nodata': t('obd.scan_hint_nodata', default='Keine auswertbaren Daten — starte den ECU-Scan, um die passende Adresse zu finden.'),
     }|tojson }}
   };
 
@@ -629,6 +646,20 @@
       progress((i + 1) / (pids.length + 1));
       frames[pids[i]] = await cmd(tr, pids[i], 4000);
     }
+    // If every PID came back NO DATA, the header we addressed has no ECU
+    // answering — wrong profile for this car. Point the user at the scan
+    // instead of silently saving an empty reading.
+    const gotData = Object.values(frames).some(raw =>
+      raw && !/NO DATA|UNABLE|CAN ERROR|BUS INIT|STOPPED|ERROR|\?/i.test(raw)
+          && /[0-9A-Fa-f]{2}\s+[0-9A-Fa-f]{2}/.test(raw));
+    if (!gotData) {
+      connState('failed');
+      status(T.scan.hint_nodata);
+      scanBody.innerHTML = `<div>${T.scan.hint_nodata}</div>`;
+      scanApply.classList.add('d-none');
+      scanReport.classList.remove('d-none');
+      return;
+    }
     status(T.fields.saving);
     progress(0.98);
     const odo = document.getElementById('obdOdo').value;
@@ -714,7 +745,9 @@
     return T.step.dev_unknown;
   }
 
-  document.getElementById('btnSerial').addEventListener('click', () => withGuard(async () => {
+  // Connect over USB and run one task (a normal read or an ECU scan) on the
+  // opened transport. The task decides what to do with the ELM327.
+  async function serialCore(taskFn) {
     status(T.fields.connecting);
     const port = await chooseSerialPort();
     setDevice(serialName(port));
@@ -722,9 +755,12 @@
     const tr = makeSerialTransport(port, parseInt(document.getElementById('obdBaud').value, 10));
     tr._kind = 'elm327-usb';
     await tr.open();
-    try { await runSequence(tr); }
+    try { await taskFn(tr); }
     finally { await tr.close(); refreshPickOther(); }
-  }));
+  }
+
+  document.getElementById('btnSerial').addEventListener('click',
+    () => withGuard(() => serialCore(runSequence)));
 
   // Connect over BLE, and self-heal the "0 services" case: a device handed
   // back by getDevices() keeps the service allow-list it was first granted
@@ -732,7 +768,7 @@
   // an already-remembered dongle can still come up serviceless. When that
   // happens, re-run the chooser ONCE so a fresh requestDevice re-grants it
   // with the current, wider optionalServices list — after that it sticks.
-  async function bleConnectAndRun(allowRegrant) {
+  async function bleCore(allowRegrant, taskFn) {
     const device = await chooseBleDevice();
     setDevice(device.name || T.step.dev_unknown);
     if (usedRemembered) status(T.dongle.remembered);
@@ -745,19 +781,86 @@
         try { await tr.close(); } catch (_) {}
         status(T.dongle.regrant); log(T.dongle.regrant);
         forcePicker = true;                // force a fresh requestDevice
-        return await bleConnectAndRun(false);
+        return await bleCore(false, taskFn);
       }
       throw e;
     }
-    try { await runSequence(tr); }
+    try { await taskFn(tr); }
     finally { await tr.close(); refreshPickOther(); }
   }
 
   document.getElementById('btnBle').addEventListener('click', () => withGuard(async () => {
     connState('pairing');
     status(T.step.pairing_wait);
-    await bleConnectAndRun(true);
+    await bleCore(true, runSequence);
   }));
+
+  // ── ECU scan ───────────────────────────────────────────────────────
+  // Runs the server-provided scan plan on the adapter and shows which ECUs
+  // answer, so a NO-DATA car can be diagnosed instead of guessing profiles.
+  const scanReport = document.getElementById('obdScanReport');
+  const scanBody = document.getElementById('obdScanBody');
+  const scanApply = document.getElementById('obdScanApply');
+
+  async function runScan(tr) {
+    scanReport.classList.add('d-none');
+    status(T.scan.running); connState('reading');
+    const plan = await fetch('/api/obd/scan').then(r => r.json());
+    for (const line of plan.init) {
+      await cmd(tr, line, line.toUpperCase() === 'ATZ' ? 4000 : 2500);
+    }
+    const results = { probes: {} };
+    // Enumerate first: with ATSP0 the ELM only settles on a protocol after a
+    // real request, so ATDPN is only meaningful once 0100 has been sent.
+    await cmd(tr, 'ATSH' + plan.enumerate.header, 1500);
+    results.enumerate = await cmd(tr, plan.enumerate.cmd, 4000);
+    results.protocol = await cmd(tr, plan.protocol_cmd, 2500);
+    for (let i = 0; i < plan.probes.length; i++) {
+      const p = plan.probes[i];
+      status(T.scan.probe.replace('{h}', p.header));
+      progress((i + 1) / (plan.probes.length + 1));
+      await cmd(tr, 'ATSH' + p.header, 1500);
+      results.probes[p.key] = await cmd(tr, p.cmd, 3000);
+    }
+    progress(1);
+    const rep = await fetch('/api/obd/scan', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(results),
+    }).then(r => r.json());
+    renderScan(rep);
+    status(T.scan.done); connState('done');
+  }
+
+  function renderScan(rep) {
+    scanBody.innerHTML = (rep.lines || [])
+      .map(l => `<div>${l.replace(/</g, '&lt;')}</div>`).join('');
+    scanReport.classList.remove('d-none');
+    if (rep.recommended_profile) {
+      scanApply.textContent = T.scan.apply;
+      scanApply.classList.remove('d-none');
+      scanApply.onclick = () => {
+        profileSel.value = rep.recommended_profile;
+        scanReport.classList.add('d-none');
+        document.getElementById('btnBle').click();
+      };
+    } else {
+      scanApply.classList.add('d-none');
+    }
+  }
+
+  // Pick the transport for the scan the same way a normal read would: honour
+  // an explicitly selected USB adapter, otherwise prefer BLE when available.
+  function connectScan() {
+    const opt = dongleSel.options[dongleSel.selectedIndex];
+    const tp = opt ? (opt.dataset.transport || '') : '';
+    const useSerial = tp === 'usb' || (!hasBle && hasSerial);
+    if (useSerial) return serialCore(runScan);
+    connState('pairing'); status(T.step.pairing_wait);
+    return bleCore(true, runScan);
+  }
+
+  document.getElementById('btnScan').addEventListener('click',
+    () => withGuard(connectScan));
 })();
 </script>
 {% endblock %}

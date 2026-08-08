@@ -1284,5 +1284,20 @@
   "obd.res_pack": "Pack",
   "obd.res_aux": "12V-Batterie",
   "obd.profile_load_failed": "Profil konnte nicht geladen werden.",
-  "obd.log_error": "FEHLER"
+  "obd.log_error": "FEHLER",
+  "obd.btn_scan": "Keine Daten? ECU-Scan (findet die richtige Adresse)",
+  "obd.scan_title": "ECU-Scan – Ergebnis",
+  "obd.scan_running": "ECU-Scan läuft — suche antwortende Steuergeräte…",
+  "obd.scan_probe": "Prüfe Adresse {h}…",
+  "obd.scan_done": "ECU-Scan abgeschlossen.",
+  "obd.scan_apply": "Empfohlenes Profil übernehmen & auslesen",
+  "obd.scan_hint_nodata": "Keine auswertbaren Daten — starte den ECU-Scan, um die passende Adresse zu finden.",
+  "obd.scan_protocol": "Erkanntes Protokoll: {p}",
+  "obd.scan_ecus": "Antwortende Steuergeräte: {list}",
+  "obd.scan_no_ecus": "Kein Steuergerät hat auf die Standard-Abfrage geantwortet.",
+  "obd.scan_hit": "✓ {label} antwortet mit Daten.",
+  "obd.scan_alive": "• {label} ist vorhanden, lehnt aber diese Abfrage ab (falsche DID/Sitzung).",
+  "obd.scan_recommend": "Empfehlung: Profil „{label}\" wählen und erneut auslesen.",
+  "obd.scan_locked": "Es antwortet gar nichts — vermutlich ist der OBD-Port ab Werk gesperrt (Gateway). Batteriedaten sind dann über den OBD-Stecker nicht auslesbar.",
+  "obd.scan_no_bms": "Standard-Steuergeräte antworten, aber keine bekannte Batterie-Adresse. Das Fahrzeug nutzt vermutlich eine noch undokumentierte BMS-Adresse."
 }

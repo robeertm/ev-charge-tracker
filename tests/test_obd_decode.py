@@ -146,7 +146,62 @@ def main():
 
     check('unknown profile -> error', 'error' in od.decode('nope', {'x': '1'}))
     check('brand mapping kia', od.profile_for_brand('Kia') == 'kia_hyundai_ext')
+    check('brand mapping xpeng', od.profile_for_brand('XPENG') == 'xpeng')
     check('brand mapping unknown', od.profile_for_brand('Tesla') == 'generic_ev')
+
+    # ── field offset support (raw * scale + offset) ────────────────────
+    # 0x0DAC = 3500 -> 3500*0.5 - 1600 = 150.0
+    off = od._field([0x62, 0x11, 0x03, 0, 0, 0, 0, 0x0D, 0xAC],
+                    {'byte': 7, 'len': 2, 'scale': 0.5, 'offset': -1600.0})
+    check('field offset applied', abs(off - 150.0) < 0.01)
+
+    # ── XPENG (G6) profile round-trips its documented byte layout ──────
+    def _xp(did, data):
+        # 62 11 <xx> echo (3 bytes) + data, rendered as one ELM SF/MF line.
+        return _frame_lines([0x62, 0x11, int(did[-2:], 16)] + data, can_id='784')
+    xframes = {
+        # pack V: B4:B5 = 0x0E10 (3600) * 0.1 = 360.0
+        '221101': _xp('221101', [0, 0, 0, 0, 0x0E, 0x10]),
+        # current: B4:B5 = 0x0C80 (3200) * 0.5 - 1600 = 0.0
+        '221103': _xp('221103', [0, 0, 0, 0, 0x0C, 0x80]),
+        # cell max/min: B0:B1 /1000 -> 4.100 / 3.950
+        '221105': _xp('221105', [0x10, 0x04]),   # 0x1004 = 4100
+        '221106': _xp('221106', [0x0F, 0x6E]),   # 0x0F6E = 3950
+        # temp max/min: B0 - 40 -> 32 / 12
+        '221107': _xp('221107', [72]),
+        '221108': _xp('221108', [52]),
+        # SoC: B0:B1 /10 -> 78.0
+        '221109': _xp('221109', [0x03, 0x0C]),   # 0x030C = 780
+        # SoH: B4:B5 /10 -> 96.0
+        '22110A': _xp('22110A', [0, 0, 0, 0, 0x03, 0xC0]),  # 0x03C0 = 960
+    }
+    x = od.decode('xpeng', xframes)
+    check('xpeng pack V 360.0', abs(x['pack_voltage_v'] - 360.0) < 0.01)
+    check('xpeng current 0.0', abs(x['pack_current_a'] - 0.0) < 0.01)
+    check('xpeng cell max 4.10', abs(x['cell_max_v'] - 4.10) < 0.001)
+    check('xpeng cell min 3.95', abs(x['cell_min_v'] - 3.95) < 0.001)
+    check('xpeng cell delta 150 mV', abs(x['cell_delta_mv'] - 150.0) < 0.1)
+    check('xpeng temp max 32', x['temp_max_c'] == 32)
+    check('xpeng temp min 12', x['temp_min_c'] == 12)
+    check('xpeng soc 78.0', abs(x['soc_bms_pct'] - 78.0) < 0.01)
+    check('xpeng soh 96.0', abs(x['soh_pct'] - 96.0) < 0.01)
+
+    # ── ECU scan classification + interpretation ───────────────────────
+    check('probe ok (62)', od._classify_probe('784 06 62 11 01 0E 10 00 >') == 'ok')
+    check('probe rejected (7F)', od._classify_probe('7EC 03 7F 22 31 >') == 'rejected')
+    check('probe nodata', od._classify_probe('NO DATA\r>') == 'nodata')
+    check('scan headers', od._scan_headers('7E8 06 41 00 ...\r7EC 06 41 00 ...\r>')
+          == ['7E8', '7EC'])
+    plan = od.scan_plan()
+    check('scan plan has probes', len(plan['probes']) == len(od.SCAN_CANDIDATES))
+    rep = od.interpret_scan({
+        'protocol': '6', 'enumerate': '7E8 06 41 00 00 00 00 00 >',
+        'probes': {'xpeng': '784 06 62 11 01 0E 10 00 >'},
+    })
+    check('scan recommends xpeng', rep['recommended_profile'] == 'xpeng')
+    check('scan ok flag', rep['ok'] is True)
+    rep2 = od.interpret_scan({'protocol': '', 'enumerate': 'NO DATA', 'probes': {}})
+    check('scan no ecus -> not ok', rep2['ok'] is False)
 
     print('\n%d check(s) failed' % fails if fails else '\nAll checks passed')
     return 1 if fails else 0

@@ -1284,5 +1284,20 @@
   "obd.res_pack": "Pack",
   "obd.res_aux": "12V-accu",
   "obd.profile_load_failed": "Profiel kon niet worden geladen.",
-  "obd.log_error": "FOUT"
+  "obd.log_error": "FOUT",
+  "obd.btn_scan": "Geen data? ECU-scan (vindt het juiste adres)",
+  "obd.scan_title": "ECU-scan – resultaat",
+  "obd.scan_running": "ECU-scan bezig — zoeken naar reagerende regeleenheden…",
+  "obd.scan_probe": "Adres {h} controleren…",
+  "obd.scan_done": "ECU-scan voltooid.",
+  "obd.scan_apply": "Aanbevolen profiel toepassen en uitlezen",
+  "obd.scan_hint_nodata": "Geen bruikbare data — start de ECU-scan om het juiste adres te vinden.",
+  "obd.scan_protocol": "Gedetecteerd protocol: {p}",
+  "obd.scan_ecus": "Reagerende regeleenheden: {list}",
+  "obd.scan_no_ecus": "Geen enkele regeleenheid antwoordde op de standaardopvraging.",
+  "obd.scan_hit": "✓ {label} antwoordt met data.",
+  "obd.scan_alive": "• {label} is aanwezig maar weigert deze opvraging (verkeerde DID/sessie).",
+  "obd.scan_recommend": "Aanbeveling: kies het profiel „{label}\" en lees opnieuw uit.",
+  "obd.scan_locked": "Er reageert helemaal niets — de OBD-poort is waarschijnlijk af fabriek vergrendeld (gateway). Batterijgegevens zijn dan niet via de OBD-connector uit te lezen.",
+  "obd.scan_no_bms": "Standaard regeleenheden reageren, maar geen bekend batterijadres. Het voertuig gebruikt waarschijnlijk een nog niet gedocumenteerd BMS-adres."
 }

@@ -1284,5 +1284,20 @@
   "obd.res_pack": "Pack",
   "obd.res_aux": "Batería de 12V",
   "obd.profile_load_failed": "No se pudo cargar el perfil.",
-  "obd.log_error": "ERROR"
+  "obd.log_error": "ERROR",
+  "obd.btn_scan": "¿Sin datos? Escaneo de ECU (encuentra la dirección correcta)",
+  "obd.scan_title": "Escaneo de ECU – resultado",
+  "obd.scan_running": "Escaneo de ECU en curso — buscando unidades de control que respondan…",
+  "obd.scan_probe": "Comprobando dirección {h}…",
+  "obd.scan_done": "Escaneo de ECU finalizado.",
+  "obd.scan_apply": "Aplicar perfil recomendado y leer",
+  "obd.scan_hint_nodata": "Sin datos utilizables — ejecuta el escaneo de ECU para encontrar la dirección correcta.",
+  "obd.scan_protocol": "Protocolo detectado: {p}",
+  "obd.scan_ecus": "Unidades de control que responden: {list}",
+  "obd.scan_no_ecus": "Ninguna unidad de control respondió a la consulta estándar.",
+  "obd.scan_hit": "✓ {label} responde con datos.",
+  "obd.scan_alive": "• {label} está presente pero rechaza esta consulta (DID/sesión incorrecta).",
+  "obd.scan_recommend": "Recomendación: selecciona el perfil «{label}» y vuelve a leer.",
+  "obd.scan_locked": "No responde nada — probablemente el puerto OBD está bloqueado de fábrica (gateway). En ese caso los datos de la batería no se pueden leer por el conector OBD.",
+  "obd.scan_no_bms": "Las unidades de control estándar responden, pero ninguna dirección de batería conocida. El vehículo probablemente usa una dirección de BMS aún no documentada."
 }
