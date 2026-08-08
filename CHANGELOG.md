@@ -1,5 +1,42 @@
 # Changelog
 
+## v3.0.91 (2026-08-08)
+
+### Add: eight more EV battery OBD decode profiles
+
+The OBD reader previously knew three battery maps (Kia/Hyundai, XPENG and the
+generic SoH-only fallback). It now ships documented community maps for a wide
+range of other electric cars, each transcribed from an open reference
+implementation and carrying its source in a code comment:
+
+* **Jaguar I-Pace** — BECM on 7E4/7EC, UDS service 22 (source: OpenVehicles/OVMS).
+  Full SoC, SoH, pack voltage/current, min/max cell voltage and pack temps.
+* **MG / SAIC** — ZS EV and MG5 on 781/789, plus a separate **MG4/MULAN** map
+  on 7E5/7ED (sources: community Torque PID lists, OBDb, the MGEVs project).
+* **BYD** — Atto 3 and Dolphin on 7E7/7EF (sources: OVMS, WiCAN, community PID
+  list). Note: these use little-endian scalars, now supported by the decoder.
+* **Nissan Leaf / e-NV200** — LBC on 79B/7BB using KWP service 21 group reads;
+  full 96-cell voltage array and pack thermistors (source: OVMS, CanZE-style
+  decoders). SoC/health scalars use the 2018+ layout.
+* **Renault Zoe** — both the Ph1 (79B/7BB, service 21) and ZE50/Ph2 (29-bit
+  extended addressing, service 22) battery controllers (source: CanZE).
+* **VW MEB platform** — ID.3/4/5, Škoda Enyaq, Cupra Born, Audi Q4 e-tron on
+  29-bit addressing, service 22 (sources: the VW-MEB UDS PID lists, evDash).
+
+To support these the decode engine gained: little-endian field byte order, the
+`(raw − k) × scale` encoding convention, multi-byte and per-cell-offset cell
+arrays, KWP service 0x21 group reads, and 29-bit extended CAN addressing. The
+ECU discovery scan now also probes the new 11-bit BMS addresses (MG, BYD, Leaf,
+Jaguar) and recommends the matching profile. Every brand still maps to its best
+default profile automatically, and any alternative stays selectable in the UI.
+
+As with the existing maps, these byte offsets are community-sourced and not
+bench-verified on the developer's own car, so every raw frame is stored and can
+be re-decoded if a value looks wrong. Tesla is intentionally not included: it
+exposes no standard UDS battery PIDs — its pack data is only reachable by
+passively sniffing the raw vehicle CAN bus with a model-specific harness, which
+a browser-driven ELM327 cannot do.
+
 ## v3.0.90 (2026-08-08)
 
 ### Change: reconcile the certificate SoH from both independent signals

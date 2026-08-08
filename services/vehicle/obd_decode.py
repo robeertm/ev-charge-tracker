@@ -26,6 +26,27 @@ read from a real Kia Niro EV (awake, ready-to-drive), correcting a
 systematic 1-byte shift the original community map had. Every raw response
 is still stored in ``ObdReading.raw_json`` so any capture can be re-decoded
 if a future model differs. See the field table for the per-field cross-check.
+
+Beyond Kia/Hyundai and XPENG, the table also ships community-sourced maps for
+Jaguar I-Pace, MG/SAIC (ZS EV, MG5) + MG4/MULAN, BYD (Atto 3, Dolphin),
+Nissan Leaf/e-NV200, Renault Zoe (Ph1 + ZE50), and the VW MEB platform
+(ID.3/4/5, Enyaq, Cupra Born, Q4 e-tron). Each carries its documented source
+in a comment and a confidence caveat in its label. These offsets are NOT
+bench-verified on Robert's own car (he drives the Kia) — they are transcribed
+from open reference implementations (OpenVehicles/OVMS, CanZE, evDash, OBDb,
+the meatpiHQ/WiCAN profiles and community Torque/CarScanner PID lists). As
+with every profile the raw frames are stored, so a capture can be re-decoded
+if a value looks off. Tesla is deliberately absent: it exposes no standard
+UDS battery PIDs — its pack data is only reachable by passively sniffing the
+raw vehicle CAN bus with a model-specific harness, which a browser-driven
+ELM327 transport cannot do.
+
+Encoding notes shared across the newer maps: fields support little-endian
+byte order (``le`` — BYD) and the ``(raw - k) * scale`` convention (expressed
+as ``scale`` + ``offset = -k*scale``); cell arrays support multi-byte cells
+(``len``) and a per-cell ``offset`` (e.g. ``raw/1000 + 1`` V). Service 0x21
+(KWP group reads — Leaf, Zoe Ph1) and 29-bit extended addressing (VW MEB, Zoe
+ZE50) are handled via dedicated init helpers.
 """
 from __future__ import annotations
 
@@ -157,19 +178,25 @@ def reassemble(raw: str, expect=None):
     return payload
 
 
-def _u(resp, start, length):
-    """Unsigned big-endian integer from ``resp[start:start+length]``."""
+def _u(resp, start, length, le=False):
+    """Unsigned integer from ``resp[start:start+length]``.
+
+    Big-endian by default; ``le=True`` reads the bytes little-endian (some
+    OEMs, e.g. BYD, encode their multi-byte scalars low-byte-first)."""
     if start < 0 or start + length > len(resp):
         return None
+    chunk = resp[start:start + length]
+    if le:
+        chunk = chunk[::-1]
     val = 0
-    for b in resp[start:start + length]:
+    for b in chunk:
         val = (val << 8) | b
     return val
 
 
-def _s(resp, start, length):
-    """Signed (two's-complement) big-endian integer."""
-    val = _u(resp, start, length)
+def _s(resp, start, length, le=False):
+    """Signed (two's-complement) integer (big- or little-endian)."""
+    val = _u(resp, start, length, le)
     if val is None:
         return None
     bits = length * 8
@@ -182,12 +209,14 @@ def _field(resp, spec):
     """Extract one scalar field per its spec dict.
 
     Spec keys: ``byte`` (offset), ``len`` (bytes, default 1),
-    ``signed`` (bool), ``scale`` (multiplier, default 1),
-    ``offset`` (added after scaling, default 0 — for encodings like
-    ``raw * 0.5 - 1600``).
+    ``signed`` (bool), ``le`` (little-endian byte order, default big),
+    ``scale`` (multiplier, default 1), ``offset`` (added after scaling,
+    default 0 — encodes ``raw * scale + offset``, which also covers the
+    ``(raw - k) * scale`` convention CanZE/OVMS use via ``offset = -k*scale``).
     """
     length = spec.get('len', 1)
-    raw = _s(resp, spec['byte'], length) if spec.get('signed') else _u(resp, spec['byte'], length)
+    le = spec.get('le', False)
+    raw = _s(resp, spec['byte'], length, le) if spec.get('signed') else _u(resp, spec['byte'], length, le)
     if raw is None:
         return None
     return raw * spec.get('scale', 1.0) + spec.get('offset', 0.0)
@@ -216,6 +245,31 @@ def _init_lines_xpeng():
     silently return NO DATA. Source: XPCarData + meatpiHQ/wican-fw #517."""
     return ['ATZ', 'ATE0', 'ATL0', 'ATS1', 'ATH1', 'ATSP6', 'ATAT1',
             'ATCAF0', 'ATCRA784', 'ATFCSH704', 'ATFCSD300000', 'ATFCSM1']
+
+
+def _init_flowctrl(req, resp):
+    """11-bit CAN init that pins the ISO-TP flow control to a BMS on a
+    non-default header (``req``) and filters replies to ``resp``. Needed by
+    any ECU whose battery DIDs come back multi-frame — without a user
+    flow-control frame carrying the request header, the ELM327's auto flow
+    control points at the wrong id and the read silently returns NO DATA.
+    The client appends ``ATSH<req>`` after these lines (see obd.html)."""
+    return ['ATZ', 'ATE0', 'ATL0', 'ATS1', 'ATH1', 'ATSP6', 'ATAT1',
+            'ATCAF0', 'ATCRA' + resp, 'ATFCSH' + req, 'ATFCSD300000', 'ATFCSM1']
+
+
+def _init_29bit(req, resp):
+    """29-bit extended-address CAN init (ISO 15765-4, 29-bit, 500k → ATSP7).
+    Used by the VW MEB platform (17FC007B/17FE007B) and the Renault Zoe ZE50
+    LBC (18DADBF1/18DAF1DB), whose BMS is addressed with a full 4-byte CAN id
+    rather than the 11-bit 7Ex range. ``req``/``resp`` are the 8-hex ids; the
+    client appends ``ATSH<req>`` afterwards. NOTE: setting a 29-bit header via
+    a single ATSH<8hex> works on the STN/OBDLink and most v1.5 clones the app
+    recommends; a strict genuine ELM327 that only takes a 3-byte ATSH would
+    need ATCP for the priority byte — such adapters simply return NO DATA here
+    and the ECU-scan hint kicks in, and the raw frames are stored regardless."""
+    return ['ATZ', 'ATE0', 'ATL0', 'ATS1', 'ATH1', 'ATSP7', 'ATAT1',
+            'ATCAF0', 'ATCRA' + resp, 'ATFCSH' + req, 'ATFCSD300000', 'ATFCSM1']
 
 
 PROFILES = {
@@ -324,6 +378,202 @@ PROFILES = {
         'module_temps': None,
         'cells': [],
     },
+    # ── Jaguar I-Pace (EV400) — BECM on 7E4/7EC, UDS service 22 ─────────
+    # Source: OpenVehicles/OVMS Jaguar I-Pace driver (ipace_poll_becm.cpp),
+    # cross-checked against the community Torque/CarScanner PID list. Every
+    # scale below is copied from OVMS' own decode. The BECM exposes only
+    # aggregate (min/max/avg) cell + temperature data — there is NO documented
+    # per-cell array DID, so ``cells`` stays empty (min/max fill the delta).
+    # Byte offsets = 3 (the 62 49 xx service echo) + OVMS' data index.
+    'jaguar_ipace': {
+        'label': 'Jaguar I-Pace (BECM 7E4)',
+        'header': '7E4',
+        'init': _init_flowctrl('7E4', '7EC'),
+        'pids': ['224910', '224918', '22490F', '22490C',
+                 '224903', '224904', '224905', '224906', '224907'],
+        'fields': {
+            'soc_bms_pct':    {'pid': '224910', 'byte': 3, 'len': 2, 'scale': 0.01},
+            'soh_pct':        {'pid': '224918', 'byte': 3, 'len': 1, 'scale': 0.5},
+            'pack_voltage_v': {'pid': '22490F', 'byte': 3, 'len': 2, 'scale': 0.01},
+            # (raw - 0x8000) / 40  →  raw*0.025 - 819.2
+            'pack_current_a': {'pid': '22490C', 'byte': 3, 'len': 2, 'scale': 0.025, 'offset': -819.2},
+            'cell_max_v':     {'pid': '224903', 'byte': 3, 'len': 2, 'scale': 0.001},
+            'cell_min_v':     {'pid': '224904', 'byte': 3, 'len': 2, 'scale': 0.001},
+            'temp_max_c':     {'pid': '224905', 'byte': 3, 'len': 1, 'scale': 0.5, 'offset': -40.0},
+            'temp_min_c':     {'pid': '224906', 'byte': 3, 'len': 1, 'scale': 0.5, 'offset': -40.0},
+        },
+        'module_temps': None,
+        'cells': [],
+    },
+    # ── MG / SAIC (ZS EV, MG5) — BMS on 781/789, UDS service 22 ─────────
+    # Source: bugcoder76 Torque extended-PID CSVs + the MGEVs reverse-
+    # engineering sheet + OBDb/MG-MG4 signalset. DIDs B0xx. The MG4/MULAN
+    # answers the SAME DIDs on a different header — see ``mg_mulan``.
+    # Byte offsets = 3 (62 B0 xx echo) + the CSV "A" data index.
+    'mg_saic': {
+        'label': 'MG / SAIC (ZS EV, MG5 — BMS 781)',
+        'header': '781',
+        'init': _init_flowctrl('781', '789'),
+        'pids': ['22B046', '22B061', '22B042', '22B043',
+                 '22B058', '22B059', '22B056'],
+        'fields': {
+            'soc_bms_pct':    {'pid': '22B046', 'byte': 3, 'len': 2, 'scale': 0.1},
+            'soh_pct':        {'pid': '22B061', 'byte': 3, 'len': 2, 'scale': 0.01},
+            'pack_voltage_v': {'pid': '22B042', 'byte': 3, 'len': 2, 'scale': 0.25},
+            # raw*0.025 - 1000 (unsigned raw, sign falls out of the offset)
+            'pack_current_a': {'pid': '22B043', 'byte': 3, 'len': 2, 'scale': 0.025, 'offset': -1000.0},
+            'cell_max_v':     {'pid': '22B058', 'byte': 3, 'len': 2, 'scale': 0.001},
+            'cell_min_v':     {'pid': '22B059', 'byte': 3, 'len': 2, 'scale': 0.001},
+            'temp_max_c':     {'pid': '22B056', 'byte': 3, 'len': 1, 'scale': 0.5, 'offset': -40.0},
+        },
+        'module_temps': None,
+        'cells': [],
+    },
+    # ── MG4 / MULAN (MSP platform) — same SAIC DIDs on 7E5/7ED ──────────
+    # Source: OBDb/MG-MG4 signalset (req 7DF broadcast / resp 7ED; a directed
+    # 7E5 also answers) + MGEVs MG4 threads. The MG4 also exposes a 24-module
+    # cell map (B001…B115, two cells + two temps per DID) — not modelled here
+    # because it isn't a contiguous cell array; min/max come from the pack DIDs.
+    'mg_mulan': {
+        'label': 'MG4 / MULAN (BMS 7E5)',
+        'header': '7E5',
+        'init': _init_flowctrl('7E5', '7ED'),
+        'pids': ['22B046', '22B061', '22B042', '22B043', '22B056'],
+        'fields': {
+            'soc_bms_pct':    {'pid': '22B046', 'byte': 3, 'len': 2, 'scale': 0.1},
+            'soh_pct':        {'pid': '22B061', 'byte': 3, 'len': 2, 'scale': 0.01},
+            'pack_voltage_v': {'pid': '22B042', 'byte': 3, 'len': 2, 'scale': 0.25},
+            'pack_current_a': {'pid': '22B043', 'byte': 3, 'len': 2, 'scale': 0.025, 'offset': -1000.0},
+            'temp_max_c':     {'pid': '22B056', 'byte': 3, 'len': 1, 'scale': 0.5, 'offset': -40.0},
+        },
+        'module_temps': None,
+        'cells': [],
+    },
+    # ── BYD Atto 3 / Dolphin (Blade LFP) — BMS on 7E7/7EF, service 22 ───
+    # Source: OpenVehicles/OVMS BYD Atto3 driver + meatpiHQ/wican-fw atto3.json
+    # + loryanstrant/BYD-PID-list. IMPORTANT: BYD encodes its multi-byte
+    # scalars LITTLE-ENDIAN (``le``). SoH is not exposed on any documented
+    # generic DID (LFP pack; needs a factory tool) → left None. Byte offset
+    # 3 = first data byte after the 62 xx xx echo (CarScanner "B4").
+    'byd_atto': {
+        'label': 'BYD (Atto 3, Dolphin — BMS 7E7)',
+        'header': '7E7',
+        'init': _init_flowctrl('7E7', '7EF'),
+        'pids': ['221FFC', '220008', '220009', '220031', '22002F', '220032'],
+        'fields': {
+            'soc_bms_pct':    {'pid': '221FFC', 'byte': 3, 'len': 2, 'le': True, 'scale': 0.01},
+            'pack_voltage_v': {'pid': '220008', 'byte': 3, 'len': 2, 'le': True, 'scale': 1.0},
+            # (raw - 5000) / 10  →  raw*0.1 - 500
+            'pack_current_a': {'pid': '220009', 'byte': 3, 'len': 2, 'le': True, 'scale': 0.1, 'offset': -500.0},
+            'temp_max_c':     {'pid': '220031', 'byte': 3, 'len': 1, 'scale': 1.0, 'offset': -40.0},
+            'temp_min_c':     {'pid': '22002F', 'byte': 3, 'len': 1, 'scale': 1.0, 'offset': -40.0},
+        },
+        'module_temps': None,
+        'cells': [],
+    },
+    # ── Nissan Leaf / e-NV200 — LBC on 79B/7BB, KWP service 21 ──────────
+    # Source: OpenVehicles/OVMS Nissan Leaf driver + dalathegreat DBC +
+    # MyNissanLeaf decoding thread. The LBC answers manufacturer service 0x21
+    # (group reads), NOT the Hyundai-style 0x22. The reassembled reply starts
+    # `61 0X` (2-byte echo), so byte offset = 2 + OVMS' data-start index.
+    #   • 2102 carries all 96 cell voltages as 2-byte big-endian millivolts.
+    #   • 2104 carries the pack thermistors (direct °C bytes).
+    #   • SoC/Hx offsets below are the ZE1 (2018+, 40/62 kWh) layout — the
+    #     older ZE0/AZE0 packs place them differently, so those scalars are
+    #     experimental on pre-2018 cars (cells/temps stay valid). Pack CURRENT
+    #     is only on the passive 0x1DB broadcast, not a group read → omitted.
+    'nissan_leaf': {
+        'label': 'Nissan Leaf / e-NV200 (LBC 79B — Zellen+Temp, SoC exp.)',
+        'header': '79B',
+        'init': _init_flowctrl('79B', '7BB'),
+        'pids': ['2101', '2102', '2104'],
+        'fields': {
+            # SoC (ZE1): raw/10000 → *0.0001, unit already %.
+            'soc_bms_pct': {'pid': '2101', 'byte': 33, 'len': 3, 'scale': 0.0001},
+            # Hx capacity health (ZE1): raw/102.4.
+            'soh_pct':     {'pid': '2101', 'byte': 30, 'len': 2, 'scale': 1.0 / 102.4},
+        },
+        # Four direct-°C thermistor bytes in 2104 (offsets 2,5,8,11 from data
+        # start → +2 for the 61 04 echo).
+        'module_temps': {'pid': '2104', 'bytes': [4, 7, 10, 13], 'signed': True},
+        # 96 cells, 2-byte big-endian mV, from data start (byte 2 after echo).
+        'cells': [
+            {'pid': '2102', 'byte': 2, 'count': 96, 'len': 2, 'scale': 0.001},
+        ],
+    },
+    # ── Renault Zoe ZE50 (Ph2, R110/R135) — LBC on 18DADBF1/18DAF1DB ────
+    # 29-bit extended addressing, UDS service 22, DIDs 90xx. Source: CanZE
+    # (fesch/CanZE) ZOE_Ph2 LBC field DB + ljames28 Ph2 LBC notes. CanZE's
+    # convention is physical = (raw - offset) * resolution, mapped here to
+    # raw*scale + (-offset*scale). Response starts `62 90 xx` → byte 3 = data.
+    'renault_zoe_ph2': {
+        'label': 'Renault Zoe ZE50 / R135 (LBC 18DADBF1)',
+        'header': '18DADBF1',
+        'init': _init_29bit('18DADBF1', '18DAF1DB'),
+        'pids': ['229001', '229003', '229005', '22900D',
+                 '229007', '229009', '229013', '229014'],
+        'fields': {
+            'soc_bms_pct':    {'pid': '229001', 'byte': 3, 'len': 2, 'scale': 0.01, 'offset': -3.0},
+            'soh_pct':        {'pid': '229003', 'byte': 3, 'len': 2, 'scale': 0.01},
+            'pack_voltage_v': {'pid': '229005', 'byte': 3, 'len': 2, 'scale': 0.1},
+            # (raw - 48000) * 0.025
+            'pack_current_a': {'pid': '22900D', 'byte': 3, 'len': 4, 'scale': 0.025, 'offset': -1200.0},
+            'cell_max_v':     {'pid': '229007', 'byte': 3, 'len': 2, 'scale': 0.000976563},
+            'cell_min_v':     {'pid': '229009', 'byte': 3, 'len': 2, 'scale': 0.000976563},
+            'temp_min_c':     {'pid': '229013', 'byte': 3, 'len': 2, 'scale': 0.0625, 'offset': -40.0},
+            'temp_max_c':     {'pid': '229014', 'byte': 3, 'len': 2, 'scale': 0.0625, 'offset': -40.0},
+        },
+        'module_temps': None,
+        'cells': [],
+    },
+    # ── Renault Zoe Ph1 (Q210/R240/Q90/R110) — LBC on 79B/7BB, svc 21 ───
+    # Source: CanZE ZOE (Ph1) LBC field DB. 11-bit, KWP service 21 groups.
+    # CanZE bit positions are byte-aligned; byte offset counts from the `61`
+    # response byte (offset 0), so these are used as-is (no +2 shift — CanZE
+    # already indexes the echo). Per-cell array 2141 is community-MEDIUM.
+    'renault_zoe_ph1': {
+        'label': 'Renault Zoe Ph1 / Kangoo ZE (LBC 79B)',
+        'header': '79B',
+        'init': _init_flowctrl('79B', '7BB'),
+        'pids': ['2101', '2103', '2104', '2142', '2161', '2141'],
+        'fields': {
+            'soc_bms_pct':    {'pid': '2103', 'byte': 24, 'len': 2, 'scale': 0.01},
+            'soh_pct':        {'pid': '2161', 'byte': 9,  'len': 1, 'scale': 0.5},
+            'pack_voltage_v': {'pid': '2142', 'byte': 72, 'len': 2, 'scale': 0.01},
+            # (raw - 5000) * 0.1
+            'pack_current_a': {'pid': '2101', 'byte': 2,  'len': 2, 'scale': 0.1, 'offset': -500.0},
+            'aux_battery_v':  {'pid': '2101', 'byte': 28, 'len': 2, 'scale': 0.01},
+            'temp_max_c':     {'pid': '2104', 'byte': 75, 'len': 1, 'scale': 1.0, 'offset': -40.0},
+        },
+        'module_temps': None,
+        'cells': [
+            {'pid': '2141', 'byte': 2, 'count': 96, 'len': 2, 'scale': 0.001},
+        ],
+    },
+    # ── VW Group MEB — ID.3/4/5, Enyaq, Cupra Born, Q4 e-tron ───────────
+    # BMS on 29-bit 17FC007B/17FE007B, UDS service 22. Source: spot2000 &
+    # raimuucka VW-MEB UDS CSVs + nickn17/evDash CarVWID3.cpp. There is NO
+    # direct SoH % DID (the "max energy content" DID 2AB2 on header 710 has an
+    # undocumented formula) → SoH left None. Per-cell voltages are one DID per
+    # cell (1E40…1EAB, 108 reads) — not polled; pack min/max via 1E33/1E34.
+    # Response starts `62 xx xx` → byte 3 = first data byte.
+    'vw_meb': {
+        'label': 'VW MEB (ID.3/4/5, Enyaq, Born, Q4 — BMS 17FC007B)',
+        'header': '17FC007B',
+        'init': _init_29bit('17FC007B', '17FE007B'),
+        'pids': ['22028C', '221E3B', '221E3D', '222A0B', '221E33', '221E34'],
+        'fields': {
+            'soc_bms_pct':    {'pid': '22028C', 'byte': 3, 'len': 1, 'scale': 0.4},
+            'pack_voltage_v': {'pid': '221E3B', 'byte': 3, 'len': 2, 'scale': 0.25},
+            # (raw - 150000) / 100
+            'pack_current_a': {'pid': '221E3D', 'byte': 3, 'len': 4, 'scale': 0.01, 'offset': -1500.0},
+            'temp_max_c':     {'pid': '222A0B', 'byte': 3, 'len': 1, 'scale': 0.5, 'offset': -40.0},
+            'cell_max_v':     {'pid': '221E33', 'byte': 3, 'len': 2, 'scale': 1.0 / 4096.0},
+            'cell_min_v':     {'pid': '221E34', 'byte': 3, 'len': 2, 'scale': 1.0 / 4096.0},
+        },
+        'module_temps': None,
+        'cells': [],
+    },
 }
 
 
@@ -335,13 +585,25 @@ PROFILES = {
 # bus (functional broadcast 0100 at 7DF) and probes the known EV-BMS header
 # pairs with a real UDS request, so we can tell "704 answered → use the
 # XPENG profile" from "nobody answers → the OBD port is gateway-locked".
+# Only 11-bit candidates are probed here: the scan auto-detects the protocol
+# with ATSP0 and a plain ATSH<3-hex> works under any detected 11-bit CAN mode.
+# The 29-bit BMS profiles (VW MEB, Zoe ZE50) need ATSP7 + an 8-hex header, so
+# they aren't auto-probed — the user selects them from the profile list.
 SCAN_CANDIDATES = [
     {'key': 'xpeng', 'header': '704', 'resp': '784', 'probe': '221101',
      'label': 'XPENG BMS (704/784)', 'profile': 'xpeng'},
     {'key': 'kia_hyundai', 'header': '7E4', 'resp': '7EC', 'probe': '220101',
      'label': 'Kia/Hyundai BMS (7E4/7EC)', 'profile': 'kia_hyundai_ext'},
-    {'key': 'bms_7e5', 'header': '7E5', 'resp': '7ED', 'probe': '220101',
-     'label': 'BMS (7E5/7ED)', 'profile': None},
+    {'key': 'jaguar_ipace', 'header': '7E4', 'resp': '7EC', 'probe': '224910',
+     'label': 'Jaguar I-Pace BECM (7E4/7EC)', 'profile': 'jaguar_ipace'},
+    {'key': 'mg_saic', 'header': '781', 'resp': '789', 'probe': '22B046',
+     'label': 'MG/SAIC BMS (781/789)', 'profile': 'mg_saic'},
+    {'key': 'byd_atto', 'header': '7E7', 'resp': '7EF', 'probe': '220005',
+     'label': 'BYD BMS (7E7/7EF)', 'profile': 'byd_atto'},
+    {'key': 'nissan_leaf', 'header': '79B', 'resp': '7BB', 'probe': '2101',
+     'label': 'Nissan Leaf LBC (79B/7BB)', 'profile': 'nissan_leaf'},
+    {'key': 'mg_mulan', 'header': '7E5', 'resp': '7ED', 'probe': '22B046',
+     'label': 'MG4/MULAN BMS (7E5/7ED)', 'profile': 'mg_mulan'},
     {'key': 'bms_7e2', 'header': '7E2', 'resp': '7EA', 'probe': '220101',
      'label': 'BMS (7E2/7EA)', 'profile': None},
 ]
@@ -386,7 +648,9 @@ def _classify_probe(raw):
     """
     payload = reassemble(raw)
     if payload:
-        if payload[0] in (0x62, 0x50, 0x41):
+        # 0x62 = UDS svc 22, 0x61 = KWP svc 21 (Leaf/Zoe Ph1), 0x50 = session,
+        # 0x41 = OBD mode 01 — all positive replies that mean "ECU is here".
+        if payload[0] in (0x62, 0x61, 0x50, 0x41):
             return 'ok'
         if payload[0] == 0x7F:
             return 'rejected'
@@ -448,12 +712,26 @@ def get_dongle(key: str | None):
 
 
 def profile_for_brand(brand: str | None):
-    """Map a vehicle brand to the best decode profile key."""
+    """Map a vehicle brand to the best decode profile key. Where a brand ships
+    several BMS generations (e.g. Renault Ph1/Ph2, MG SAIC/MULAN) the most
+    common current platform is chosen; the others stay selectable in the UI."""
     b = (brand or '').strip().lower()
     if b in ('kia', 'hyundai', 'genesis'):
         return 'kia_hyundai_ext'
     if b == 'xpeng':
         return 'xpeng'
+    if b in ('nissan',):
+        return 'nissan_leaf'
+    if b in ('renault', 'dacia'):
+        return 'renault_zoe_ph2'
+    if b in ('vw', 'volkswagen', 'skoda', 'škoda', 'cupra', 'seat', 'audi'):
+        return 'vw_meb'
+    if b == 'jaguar':
+        return 'jaguar_ipace'
+    if b == 'mg':
+        return 'mg_saic'
+    if b == 'byd':
+        return 'byd_atto'
     return 'generic_ev'
 
 
@@ -555,17 +833,24 @@ def decode(profile_key: str, frames: dict):
         r = resp.get(spec['pid'].upper())
         out[name] = round(_field(r, spec), 3) if (r and _field(r, spec) is not None) else None
 
-    # Cell voltages
+    # Cell voltages. Each cell spec says which PID carries the array, the
+    # start byte, the cell count, the bytes-per-cell (``len``, default 1 —
+    # Kia packs one 0.02 V step per byte; Leaf/Zoe/VW use 2-byte big-endian
+    # millivolts), the ``scale`` and an optional per-cell ``offset`` (some
+    # OEMs encode ``raw/1000 + 1`` V) and ``le`` byte order.
     cells = []
     for cspec in prof.get('cells', []):
         r = resp.get(cspec['pid'].upper())
         if not r:
             continue
+        clen = cspec.get('len', 1)
+        cle = cspec.get('le', False)
+        coff = cspec.get('offset', 0.0)
         for i in range(cspec['count']):
-            v = _u(r, cspec['byte'] + i, 1)
+            v = _u(r, cspec['byte'] + i * clen, clen, cle)
             if v is None:
                 break
-            cells.append(round(v * cspec['scale'], 3))
+            cells.append(round(v * cspec['scale'] + coff, 3))
     if cells:
         cmin, cmax, cavg = _summ(cells)
         out['cell_count'] = len(cells)

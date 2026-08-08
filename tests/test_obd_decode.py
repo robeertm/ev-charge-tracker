@@ -274,6 +274,118 @@ def main():
     check('real cum charge 20993.6', abs(rd['cumulative_charge_ah'] - 20993.6) < 0.1)
     check('real cum discharge 20028.8', abs(rd['cumulative_discharge_ah'] - 20028.8) < 0.1)
 
+    # ── little-endian + (raw-k)*scale + multi-byte/offset cells ─────────
+    check('unsigned 2-byte LE', od._u([0x10, 0x27], 0, 2, le=True) == 0x2710)
+    check('signed 2-byte LE', od._s([0x6A, 0xFF], 0, 2, le=True) == -150)
+    # field with LE + offset: 0x2710 (10000) * 0.1 - 500 = 500.0
+    le = od._field([0x62, 0x00, 0x09, 0x10, 0x27],
+                   {'byte': 3, 'len': 2, 'le': True, 'scale': 0.1, 'offset': -500.0})
+    check('LE field with offset', abs(le - 500.0) < 0.01)
+
+    # ── Jaguar I-Pace: each DID is its own single-frame reply ──────────
+    def _did(pid, data, can_id='7EC'):
+        # 62 <hi> <lo> echo (3 bytes) + data.
+        return _frame_lines([0x62, int(pid[2:4], 16), int(pid[4:6], 16)] + data, can_id=can_id)
+    jag = od.decode('jaguar_ipace', {
+        '224910': _did('224910', [0x1F, 0x40]),          # 8000/100 = 80.0 %
+        '224918': _did('224918', [0xBE]),                # 190/2 = 95.0 %
+        '22490F': _did('22490F', [0x92, 0x1C]),          # 37404/100 = 374.04 V
+        '22490C': _did('22490C', [0x80, 0x64]),          # (32868-32768)/40 = 2.5 A
+        '224903': _did('224903', [0x0F, 0xA0]),          # 4000/1000 = 4.000 V
+        '224904': _did('224904', [0x0F, 0x96]),          # 3990/1000 = 3.990 V
+        '224905': _did('224905', [0x8C]),                # 140/2-40 = 30.0
+        '224906': _did('224906', [0x88]),                # 136/2-40 = 28.0
+    })
+    check('jaguar soc 80.0', abs(jag['soc_bms_pct'] - 80.0) < 0.01)
+    check('jaguar soh 95.0', abs(jag['soh_pct'] - 95.0) < 0.01)
+    check('jaguar pack V 374.04', abs(jag['pack_voltage_v'] - 374.04) < 0.01)
+    check('jaguar pack A 2.5', abs(jag['pack_current_a'] - 2.5) < 0.01)
+    check('jaguar cell delta 10mV', abs(jag['cell_delta_mv'] - 10.0) < 0.1)
+    check('jaguar temp 28/30', jag['temp_min_c'] == 28 and jag['temp_max_c'] == 30)
+
+    # ── MG/SAIC ─────────────────────────────────────────────────────────
+    mg = od.decode('mg_saic', {
+        '22B046': _did('22B046', [0x02, 0xF2], '789'),   # 754/10 = 75.4 %
+        '22B061': _did('22B061', [0x25, 0x0F], '789'),   # 9487/100 = 94.87 %
+        '22B042': _did('22B042', [0x05, 0xDC], '789'),   # 1500*0.25 = 375.0 V
+        '22B043': _did('22B043', [0x9C, 0x84], '789'),   # 40068*0.025-1000 = 1.7 A
+        '22B058': _did('22B058', [0x0F, 0xA0], '789'),   # 4.000 V
+        '22B059': _did('22B059', [0x0F, 0x96], '789'),   # 3.990 V
+        '22B056': _did('22B056', [0x9C], '789'),         # 156*0.5-40 = 38.0
+    })
+    check('mg soc 75.4', abs(mg['soc_bms_pct'] - 75.4) < 0.01)
+    check('mg soh 94.87', abs(mg['soh_pct'] - 94.87) < 0.01)
+    check('mg pack V 375.0', abs(mg['pack_voltage_v'] - 375.0) < 0.01)
+    check('mg pack A 1.7', abs(mg['pack_current_a'] - 1.7) < 0.01)
+    check('mg cell delta 10mV', abs(mg['cell_delta_mv'] - 10.0) < 0.1)
+
+    # ── BYD (little-endian) ─────────────────────────────────────────────
+    byd = od.decode('byd_atto', {
+        '221FFC': _did('221FFC', [0xBC, 0x22], '7EF'),   # LE 0x22BC=8892/100 = 88.92 %
+        '220008': _did('220008', [0xC8, 0x01], '7EF'),   # LE 0x01C8 = 456 V
+        '220009': _did('220009', [0x88, 0x13], '7EF'),   # LE 0x1388=5000 → (5000-5000)/10 = 0.0 A
+        '220031': _did('220031', [0x50], '7EF'),         # 80-40 = 40
+        '22002F': _did('22002F', [0x46], '7EF'),         # 70-40 = 30
+    })
+    check('byd soc 88.92 (LE)', abs(byd['soc_bms_pct'] - 88.92) < 0.01)
+    check('byd pack V 456 (LE)', abs(byd['pack_voltage_v'] - 456.0) < 0.01)
+    check('byd pack A 0.0', abs(byd['pack_current_a'] - 0.0) < 0.01)
+    check('byd temp 30/40', byd['temp_min_c'] == 30 and byd['temp_max_c'] == 40)
+
+    # ── Nissan Leaf: service 21, 2-byte BE cells, thermistor bytes ─────
+    def _grp(group, data, can_id='7BB'):
+        return _frame_lines([0x61, group] + data, can_id=can_id)
+    leaf_cells = []
+    for i in range(96):
+        mv = 3900 + (i % 3)          # 3.900-3.902 V
+        leaf_cells += [mv >> 8, mv & 0xFF]
+    g2104 = [0] * 20
+    g2104[2], g2104[5], g2104[8], g2104[11] = 18, 19, 20, 21   # direct °C bytes
+    leaf = od.decode('nissan_leaf', {
+        '2102': _grp(0x02, leaf_cells),
+        '2104': _grp(0x04, [x & 0xFF for x in g2104]),
+    })
+    check('leaf 96 cells', leaf['cell_count'] == 96)
+    check('leaf cell min 3.900', abs(leaf['cell_min_v'] - 3.900) < 0.001)
+    check('leaf cell max 3.902', abs(leaf['cell_max_v'] - 3.902) < 0.001)
+    check('leaf temps from 2104', leaf['temp_min_c'] == 18 and leaf['temp_max_c'] == 21)
+
+    # ── Renault Zoe Ph2 (29-bit UDS 22) ─────────────────────────────────
+    zoe = od.decode('renault_zoe_ph2', {
+        '229001': _did('229001', [0x1F, 0x9E], '18DAF1DB'),  # 8094*.01-3 = 77.94 %
+        '229003': _did('229003', [0x25, 0x0F], '18DAF1DB'),  # 9487*.01 = 94.87 %
+        '229005': _did('229005', [0x0E, 0xA6], '18DAF1DB'),  # 3750*.1 = 375.0 V
+    })
+    check('zoe ph2 soc 77.94', abs(zoe['soc_bms_pct'] - 77.94) < 0.02)
+    check('zoe ph2 soh 94.87', abs(zoe['soh_pct'] - 94.87) < 0.01)
+    check('zoe ph2 pack V 375.0', abs(zoe['pack_voltage_v'] - 375.0) < 0.01)
+
+    # ── VW MEB (29-bit UDS 22) ──────────────────────────────────────────
+    vw = od.decode('vw_meb', {
+        '22028C': _did('22028C', [0xC8], '17FE007B'),        # 200*0.4 = 80.0 %
+        '221E3B': _did('221E3B', [0x05, 0xDC], '17FE007B'),  # 1500/4 = 375.0 V
+        '221E3D': _did('221E3D', [0x00, 0x02, 0x4A, 0xF8], '17FE007B'),  # (150008-150000)/100=...
+    })
+    check('vw soc 80.0', abs(vw['soc_bms_pct'] - 80.0) < 0.01)
+    check('vw pack V 375.0', abs(vw['pack_voltage_v'] - 375.0) < 0.01)
+
+    # ── new brand mappings ──────────────────────────────────────────────
+    check('brand nissan', od.profile_for_brand('Nissan') == 'nissan_leaf')
+    check('brand renault', od.profile_for_brand('Renault') == 'renault_zoe_ph2')
+    check('brand skoda', od.profile_for_brand('Škoda') == 'vw_meb')
+    check('brand jaguar', od.profile_for_brand('Jaguar') == 'jaguar_ipace')
+    check('brand mg', od.profile_for_brand('MG') == 'mg_saic')
+    check('brand byd', od.profile_for_brand('BYD') == 'byd_atto')
+
+    # every profile is structurally valid + its scan candidates resolve
+    for k, p in od.PROFILES.items():
+        check(f'profile {k} has label/header/init/pids',
+              bool(p.get('label') and p.get('header') and p.get('init') and 'pids' in p))
+    for c in od.SCAN_CANDIDATES:
+        if c['profile'] is not None:
+            check(f'scan candidate {c["key"]} profile exists',
+                  c['profile'] in od.PROFILES)
+
     print('\n%d check(s) failed' % fails if fails else '\nAll checks passed')
     return 1 if fails else 0
 
