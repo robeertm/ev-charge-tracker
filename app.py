@@ -25,6 +25,7 @@ from models.database import (
 )
 from config import Config, DATA_DIR
 from services.i18n import t
+from services.co2_backfill import missing_co2_filter as _missing_co2_filter
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -85,6 +86,17 @@ def create_app(config_class=Config):
         # the full charging window, not just the start-hour snapshot.
         if 'charge_end_hour' not in columns:
             db.session.execute(text('ALTER TABLE charges ADD COLUMN charge_end_hour INTEGER'))
+            db.session.commit()
+        # v3.0.92: co2_attempts — bounds ENTSO-E backfill retries per
+        # charge. Prior versions poisoned a row to co2_g_per_kwh=0 after
+        # a single failed lookup ("mark as attempted"), which (a) froze a
+        # physically-impossible 0 g/kWh onto grid charges and (b) meant
+        # the row was never re-fetched once ENTSO-E published its data a
+        # day or two later — leaving whole days without CO2. The backfill
+        # now treats NULL *and* 0 as "missing" and retries up to
+        # CO2_MAX_ATTEMPTS times across boots instead.
+        if 'co2_attempts' not in columns:
+            db.session.execute(text('ALTER TABLE charges ADD COLUMN co2_attempts INTEGER DEFAULT 0'))
             db.session.commit()
 
         # Migrate: add extended history columns to vehicle_syncs
@@ -3612,7 +3624,7 @@ def register_routes(app):
                                work_label=AppConfig.get('work_label', 'Work'),
                                thg_quotas=_thg_quotas_for_picker(),
                                total_charges=Charge.query.count(),
-                               co2_missing=Charge.query.filter(Charge.co2_g_per_kwh.is_(None), Charge.charge_type != 'PV').count(),
+                               co2_missing=Charge.query.filter(_missing_co2_filter(Charge)).count(),
                                auth_enabled=(AppConfig.get('auth_enabled', 'false') == 'true'),
                                auth_username=AppConfig.get('auth_username', ''),
                                hide_ssl_card=hide_ssl_card,
@@ -3857,6 +3869,7 @@ def register_routes(app):
                 # with the proper grid intensity for the charge's date/hour.
                 c.co2_g_per_kwh = None
                 c.co2_kg = None
+                c.co2_attempts = 0  # give the fresh lookup full retries
             c.calculate_fields(battery_kwh)
             updated += 1
         db.session.commit()

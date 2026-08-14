@@ -129,6 +129,11 @@ class Charge(db.Model):
     loss_pct = db.Column(db.Float)
     co2_g_per_kwh = db.Column(db.Integer)
     co2_kg = db.Column(db.Float)
+    # v3.0.92: how many times the ENTSO-E backfill has failed to find
+    # grid data for this charge's date/time. Bounds retries so genuinely
+    # unavailable dates stop being polled, while recent charges (ENTSO-E
+    # publishes with a delay) get re-tried across boots until filled.
+    co2_attempts = db.Column(db.Integer, default=0)
     notes = db.Column(db.Text)
     location_lat = db.Column(db.Float)
     location_lon = db.Column(db.Float)

@@ -1,5 +1,31 @@
 # Changelog
 
+## v3.0.92 (2026-08-14)
+
+### Fix: days with no CO2 on charges now self-heal from the charge time
+
+Some charges were showing no CO2 intensity at all. The cause was the ENTSO-E
+backfill's "mark as attempted" behaviour: after a single failed lookup it wrote
+`co2_g_per_kwh = 0` onto the charge. That was wrong twice over:
+
+* A grid charge is never actually 0 g/kWh — even a near-100% renewable hour
+  carries some fossil generation — so the value was physically impossible and
+  quietly under-counted the total CO2 in reports and stats.
+* A charge created before ENTSO-E had published its data (the grid figures
+  arrive with a delay of a day or two) got frozen at that fake 0 and was
+  **never re-fetched**, so the whole day stayed without a real value.
+
+The backfill now treats a charge as "missing CO2" when its value is `NULL`
+**or** `0`, so previously-poisoned rows heal themselves on the next run. Instead
+of poisoning, a failed lookup increments a new `co2_attempts` counter and the
+charge is retried on later runs until the data appears, up to a bounded number
+of attempts so a genuinely unavailable date is eventually left alone.
+
+Every lookup keys off the charge's own date and charging time, with an
+escalating fallback so a missing bucket for the exact hour still yields a
+sensible value from the same day's grid mix: time-weighted charging window →
+the charging start-hour snapshot → the daily average.
+
 ## v3.0.91 (2026-08-08)
 
 ### Add: eight more EV battery OBD decode profiles
