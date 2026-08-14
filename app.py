@@ -252,6 +252,27 @@ def create_app(config_class=Config):
             except Exception as _e:
                 logger.warning(f"Could not auto-start CO2 backfill: {_e}")
 
+        # ── v3.0.92 CO2 self-heal on every boot ──────────────────────
+        # The v3.0.65 cleanup above fires only once (guarded by its
+        # AppConfig flag), so simply *deploying* a new version never
+        # re-kicks the backfill — which is exactly why days kept showing
+        # up without CO2 after an update. Meanwhile new charges keep
+        # arriving, ENTSO-E publishes its grid mix a day or two late,
+        # and the legacy poison-0 marker left whole days at
+        # co2_g_per_kwh = 0. So kick the self-healing backfill on every
+        # boot. It's a cheap no-op when nothing is missing (returns
+        # False immediately), respects the co2_attempts cap so a
+        # genuinely unfillable date is eventually dropped instead of
+        # re-polled forever, and — thanks to the synchronous running
+        # flag in start_backfill — won't double-spawn if the v3.0.65
+        # cleanup above just kicked it.
+        try:
+            from services.co2_backfill import start_backfill as _sbk_heal
+            if _sbk_heal(app):
+                logger.info("v3.0.92 CO2 self-heal: backfill kicked on boot")
+        except Exception as _e:
+            logger.warning(f"CO2 self-heal boot kick failed: {_e}")
+
         if AppConfig.get('regen_scale_fix_v1', '') != 'done':
             db.session.execute(text(
                 'UPDATE vehicle_syncs SET total_regenerated_kwh = total_regenerated_kwh / 10.0 '

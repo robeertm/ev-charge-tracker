@@ -154,11 +154,43 @@ def test_retry_ceiling():
     check(hit['n'] == 0, "row at CO2_MAX_ATTEMPTS is not polled again")
 
 
+def test_start_backfill_no_double_spawn():
+    """start_backfill claims the running flag synchronously, so a second
+    call in the same tick (boot self-heal firing right after the v3.0.65
+    cleanup already kicked) is a no-op instead of a duplicate thread."""
+    print("test_start_backfill_no_double_spawn")
+    app = make_app()
+    add_charge(app, charge_type='AC', charge_hour=9, kwh_loaded=20, co2_g_per_kwh=0)
+
+    orig_thread = bf.threading.Thread
+    spawned = {'n': 0}
+
+    class _NoRunThread:
+        def __init__(self, *a, **k):
+            spawned['n'] += 1  # count the spawn but never run the target
+
+        def start(self):
+            pass
+
+    bf._backfill_running = False
+    bf.threading.Thread = _NoRunThread
+    try:
+        first = bf.start_backfill(app)
+        second = bf.start_backfill(app)  # same tick, thread target hasn't run
+    finally:
+        bf.threading.Thread = orig_thread
+        bf._backfill_running = False
+    check(first is True, "first start_backfill kicks")
+    check(second is False, "second start_backfill in same tick is a no-op")
+    check(spawned['n'] == 1, "only one thread spawned")
+
+
 if __name__ == '__main__':
     test_missing_filter()
     test_lookup_fallback()
     test_backfill_heals_and_bounds()
     test_retry_ceiling()
+    test_start_backfill_no_double_spawn()
     if _failures:
         print(f"\n{len(_failures)} FAILED")
         sys.exit(1)

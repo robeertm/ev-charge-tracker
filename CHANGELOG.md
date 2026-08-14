@@ -1,5 +1,21 @@
 # Changelog
 
+## v3.0.93 (2026-08-14)
+
+### Fix: the CO2 self-heal now actually runs after an update
+
+The previous release taught the backfill to heal charges that were left without
+CO2, but nothing triggered it on a normal update. The backfill only started
+from a one-time historical cleanup (which runs once and never again), a CSV
+import, or the manual button in settings — so simply deploying the new version
+left the missing days untouched.
+
+The backfill is now kicked automatically on every boot. It is a cheap no-op
+when nothing is missing, respects the bounded attempt counter so a genuinely
+unavailable date is not re-polled forever, and will not spawn a duplicate
+worker if the historical cleanup started one in the same tick — the running
+flag is now claimed synchronously before the thread is spawned.
+
 ## v3.0.92 (2026-08-14)
 
 ### Fix: days with no CO2 on charges now self-heal from the charge time

@@ -180,6 +180,13 @@ def start_backfill(app):
         return False
 
     logger.info(f"Starting CO2 backfill for {missing} entries")
+    # Claim the slot synchronously *before* spawning the thread. The
+    # thread target sets this again at its top, but there's a window
+    # between start() and the target actually running; without this a
+    # second start_backfill() call in the same tick (e.g. the boot
+    # self-heal firing right after the v3.0.65 cleanup already kicked)
+    # would spawn a duplicate thread and double-commit.
+    _backfill_running = True
     _backfill_thread = threading.Thread(target=backfill_co2, args=(app,), daemon=True)
     _backfill_thread.start()
     return True
