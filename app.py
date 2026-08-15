@@ -1645,12 +1645,18 @@ def register_routes(app):
 
     @app.route('/setup', methods=['GET'])
     def setup_wizard():
-        from services.setup_service import is_setup_pending, get_luks_device, load_state
+        from services.setup_service import (
+            is_setup_pending, get_luks_device, load_state, luks_in_use,
+        )
         if not is_setup_pending():
             return redirect(url_for('dashboard'))
+        # LUKS is optional now — only encrypted installs get the passphrase
+        # step. Plain installs jump straight to the web-login step.
+        has_luks = luks_in_use()
         return render_template(
             'setup.html',
-            luks_device=get_luks_device() or '(unknown)',
+            luks_in_use=has_luks,
+            luks_device=(get_luks_device() or '(unknown)') if has_luks else '',
             setup_state=load_state(),
             app_version=Config.APP_VERSION,
         )
@@ -1737,6 +1743,7 @@ def register_routes(app):
         """
         from services.setup_service import (
             is_setup_pending, mark_step_done, load_state, complete_setup,
+            luks_in_use,
         )
         from models.database import Vehicle
         if not is_setup_pending():
@@ -1803,9 +1810,12 @@ def register_routes(app):
                 AppConfig.set('car_model', first.name)
 
         mark_step_done('vehicles_done')
-        # All three steps done → exit the wizard.
+        # All required steps done → exit the wizard. The LUKS step only
+        # exists on encrypted installs; on plain installs it is implicitly
+        # satisfied, so we don't gate completion on luks_done there.
         state = load_state()
-        if (state.get('luks_done') and state.get('weblogin_done')
+        luks_ok = state.get('luks_done') or not luks_in_use()
+        if (luks_ok and state.get('weblogin_done')
                 and state.get('vehicles_done')):
             complete_setup()
         return jsonify({'ok': True, 'count': len(cleaned), 'redirect': '/'})
@@ -3578,6 +3588,16 @@ def register_routes(app):
         except (ValueError, TypeError):
             pass
 
+        # LUKS is optional now — only surface the LUKS "change passphrase"
+        # and "auto-unlock" cards (and their nav entries) when the data
+        # volume actually sits on an encrypted mapping.
+        def _luks_in_use_safe():
+            try:
+                from services.setup_service import luks_in_use
+                return luks_in_use()
+            except Exception:
+                return False
+
         # v2.29: pre-fill the legacy "API" section from the picker-active
         # Vehicle row so the form is always editing THAT car's creds.
         # Falls back to AppConfig for backward-compat with single-car
@@ -3649,6 +3669,7 @@ def register_routes(app):
                                auth_enabled=(AppConfig.get('auth_enabled', 'false') == 'true'),
                                auth_username=AppConfig.get('auth_username', ''),
                                hide_ssl_card=hide_ssl_card,
+                               luks_in_use=_luks_in_use_safe(),
                                custom_operators_text=_get_custom_operators_text(),
                                operators_builtin=get_default_operators(),
                                operators_custom=_get_custom_operators(),

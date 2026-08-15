@@ -2,14 +2,17 @@
 
 When the app is provisioned on a fresh VM (via /usr/local/bin/ev-provision),
 the provisioning script drops a marker file at `SETUP_MARKER` to tell the app
-that the end user still needs to go through the two-step first-run wizard:
+that the end user still needs to go through the first-run wizard:
 
     1. Change the temporary LUKS passphrase to something only the end user
        knows. The admin's ev-provision temp passphrase becomes invalid.
+       This step is shown ONLY on encrypted installs (see ``luks_in_use()``);
+       LUKS is no longer required, so plain installs skip straight to step 2.
     2. Create a Web-UI login (username + password). This is mandatory; the
        wizard cannot complete without it, and the new credentials are wired
        straight into `services/auth_service.set_credentials()`, which enables
        the auth guard for every subsequent request.
+    3. Register at least one vehicle so the fleet has a real entry.
 
 Progress across steps is tracked in a small JSON state file next to the
 marker, so a mid-wizard reload doesn't reset the user to the first step.
@@ -93,6 +96,23 @@ def get_luks_device() -> Optional[str]:
     except Exception as e:
         logger.warning(f"get_luks_device via sysfs failed: {e}")
     return None
+
+
+def luks_in_use() -> bool:
+    """True only when the data volume actually sits on a LUKS mapping.
+
+    This is the single signal that decides whether the LUKS-specific parts of
+    the app show up at all: the "change passphrase" wizard step and the two
+    LUKS settings cards. LUKS is no longer a requirement — new installs run
+    on a plain (unencrypted) `/srv/ev-data/app/data` directory and never see
+    any LUKS UI, while the existing encrypted reference installs keep every
+    LUKS feature because `/dev/mapper/evdata` is present there.
+
+    Detection piggybacks on ``get_luks_device()``, which resolves the
+    ``evdata`` device mapper node via world-readable /sys. No LUKS mapping →
+    no device → not in use.
+    """
+    return get_luks_device() is not None
 
 
 def change_luks_passphrase(old_passphrase: str, new_passphrase: str) -> tuple[bool, str]:

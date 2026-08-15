@@ -1,5 +1,30 @@
 # Changelog
 
+## v3.0.94 (2026-08-15)
+
+### LUKS is now optional — new installs run unencrypted, existing ones keep it
+
+Full-disk encryption of the data volume is no longer a requirement. A fresh
+install keeps its SQLite database under the plain `data/` directory and never
+sees anything LUKS-related; an install that already sits on an encrypted
+`/dev/mapper/evdata` mapping keeps every LUKS feature exactly as before.
+
+The app decides this from a single signal — whether the `evdata` device
+mapper node actually exists (`setup_service.luks_in_use()`). Nothing is
+configured or toggled by hand.
+
+What changes on an unencrypted install:
+
+* **First-run wizard** skips the "change the LUKS passphrase" step entirely.
+  The welcome screen no longer lists it, the progress bar drops its pill, the
+  device footer is hidden, and the wizard goes straight to creating the web
+  login. Completion no longer waits on a passphrase change that can't happen.
+* **Settings** hides the "LUKS passphrase" and "LUKS auto-unlock" cards and
+  their sidebar entries.
+
+Encrypted installs are unaffected: the passphrase step, the auto-unlock
+controls, and the change-passphrase card all show up as they always have.
+
 ## v3.0.93 (2026-08-14)
 
 ### Fix: the CO2 self-heal now actually runs after an update

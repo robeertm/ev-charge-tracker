@@ -148,7 +148,8 @@ Built for EV owners who want **full control over their charging data** — runs 
 
 ### First-run Setup Wizard (VM deployments)
 - **Browser-based wizard** that appears on first access to a freshly provisioned VM (triggered by a `/srv/ev-data/.setup_pending` marker)
-- **Two steps**: LUKS passphrase change (`sudo cryptsetup luksChangeKey` under the hood) and SSH login password change (`sudo chpasswd`)
+- **Web login + at least one vehicle** — the two mandatory steps; the web credentials replace the old SSH-password step and gate every subsequent request
+- **LUKS passphrase change is optional** — shown only when the data volume actually sits on an encrypted `/dev/mapper/evdata` mapping (`sudo cryptsetup luksChangeKey` under the hood). New, unencrypted installs skip it entirely; existing encrypted installs keep it
 - **Resume-safe**: progress is tracked in a state file so a mid-wizard reload doesn't reset the user
 - **Result**: an end user can take ownership of a VM without touching a terminal — no SSH, no `cryptsetup`, no manpages
 

@@ -49,8 +49,10 @@
     ('database',  'bi-database',    t('set.db_title')),
     ('ssl',       'bi-shield-lock', t('set.ssl_title')),
     ('auth',      'bi-shield-lock', t('set.auth_title')),
+] + ([
     ('luks',      'bi-key',         t('set.luks_title')),
     ('autounlock', 'bi-unlock',     t('set.autounlock_title')),
+] if luks_in_use else []) + [
     ('notify',    'bi-bell',        t('set.notify_title')),
     ('sysupd',    'bi-arrow-up-circle', t('set.sysupd_title')),
     ('backup',    'bi-archive',     t('set.backup_title')),
@@ -1707,7 +1709,8 @@
             </div>
         </div>
 
-        <!-- LUKS Passphrase ändern (v3.0.4) -->
+        {% if luks_in_use %}
+        <!-- LUKS Passphrase ändern (v3.0.4) — only on encrypted installs -->
         <div class="card mb-4 settings-card" id="sec-luks">
             <div class="card-header bg-white fw-bold">
                 <i class="bi bi-key"></i> {{ t('set.luks_title') }}
@@ -1895,6 +1898,7 @@
                 </script>
             </div>
         </div>
+        {% endif %}
 
         <!-- Benachrichtigungen (ntfy.sh Reboot-Alerts) -->
         <div class="card mb-4 settings-card" id="sec-notify">

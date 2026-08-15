@@ -52,7 +52,7 @@
             <div class="card-body p-4">
 
                 <div class="progress-pills">
-                    <div class="pill" id="pill-luks"></div>
+                    {% if luks_in_use %}<div class="pill" id="pill-luks"></div>{% endif %}
                     <div class="pill" id="pill-weblogin"></div>
                     <div class="pill" id="pill-vehicles"></div>
                 </div>
@@ -65,7 +65,7 @@
                     <h4 class="text-center mb-3">{{ t('wiz.welcome') }}</h4>
                     <p>{{ t('wiz.welcome_desc') }}</p>
                     <ol>
-                        <li>{{ t('wiz.welcome_step1_luks') }}</li>
+                        {% if luks_in_use %}<li>{{ t('wiz.welcome_step1_luks') }}</li>{% endif %}
                         <li>{{ t('wiz.welcome_step2_weblogin') }}</li>
                     </ol>
                     <div class="alert alert-info small mb-3">
@@ -73,7 +73,7 @@
                         {{ t('wiz.welcome_info') }}
                     </div>
                     <div class="d-grid">
-                        <button class="btn btn-primary btn-lg" onclick="showStep('luks')">
+                        <button class="btn btn-primary btn-lg" onclick="showStep(WIZ_LUKS ? 'luks' : 'weblogin')">
                             {{ t('wiz.welcome_start') }} <i class="bi bi-arrow-right"></i>
                         </button>
                     </div>
@@ -249,14 +249,19 @@
                 </div>
 
             </div>
+            {% if luks_in_use %}
             <div class="card-footer text-center text-muted small py-2">
                 {{ t('wiz.luks_device_label') }}: <code>{{ luks_device }}</code>
             </div>
+            {% endif %}
         </div>
     </div>
 
     <script>
         const SETUP_STATE = {{ setup_state | tojson }};
+        // LUKS is optional: plain installs have no passphrase step, so the
+        // wizard skips straight from welcome to the web-login step.
+        const WIZ_LUKS = {{ luks_in_use | tojson }};
         const T = {
             errMismatch:     {{ t('wiz.err_mismatch') | tojson }},
             errPwMismatch:   {{ t('wiz.err_pw_mismatch') | tojson }},
@@ -281,8 +286,11 @@
             const pLuks = document.getElementById('pill-luks');
             const pWL   = document.getElementById('pill-weblogin');
             const pVeh  = document.getElementById('pill-vehicles');
-            pLuks.className = 'pill ' + (SETUP_STATE.luks_done ? 'done' : 'active');
-            pWL.className   = 'pill ' + (SETUP_STATE.weblogin_done ? 'done' : (SETUP_STATE.luks_done ? 'active' : ''));
+            // On plain installs the LUKS step is implicitly satisfied, so the
+            // web-login pill is the first "active" one out of the gate.
+            const luksReady = !WIZ_LUKS || SETUP_STATE.luks_done;
+            if (pLuks) pLuks.className = 'pill ' + (SETUP_STATE.luks_done ? 'done' : 'active');
+            pWL.className   = 'pill ' + (SETUP_STATE.weblogin_done ? 'done' : (luksReady ? 'active' : ''));
             pVeh.className  = 'pill ' + (SETUP_STATE.vehicles_done ? 'done' : (SETUP_STATE.weblogin_done ? 'active' : ''));
         }
 
@@ -295,7 +303,9 @@
 
         function startWizard() {
             updateProgressPills();
-            if (!SETUP_STATE.luks_done) {
+            const luksPending = WIZ_LUKS && !SETUP_STATE.luks_done;
+            if (luksPending || (!SETUP_STATE.weblogin_done && !SETUP_STATE.vehicles_done)) {
+                // Fresh wizard (encrypted or plain) starts on the welcome screen.
                 showStep('welcome');
             } else if (!SETUP_STATE.weblogin_done) {
                 showStep('weblogin');
