@@ -1,0 +1,444 @@
+{# ── "Auto einrichten" — guided wizard ─────────────────────────────────
+   One place to add a car end-to-end: brand → vehicle → connect → sync →
+   done. Reuses existing endpoints (/vehicles/save?ajax=1,
+   /api/vehicle/brand-install, /api/vehicle/token/*, /vehicles/<id>/test).
+   Included from settings.html; shares its Jinja context. #}
+<div class="modal fade" id="carWizardModal" tabindex="-1" aria-hidden="true">
+  <div class="modal-dialog modal-dialog-centered modal-lg modal-dialog-scrollable">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title"><i class="bi bi-car-front-fill me-2"></i>{{ t('wiz.title') }}</h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+      </div>
+
+      {# Stepper #}
+      <div class="px-3 pt-3">
+        <div class="d-flex justify-content-between align-items-center cw-steps" style="gap:.25rem">
+          <div class="cw-step flex-fill text-center" data-step="1"><span class="cw-dot">1</span><div class="small cw-label">{{ t('wiz.step_brand') }}</div></div>
+          <div class="cw-step flex-fill text-center" data-step="2"><span class="cw-dot">2</span><div class="small cw-label">{{ t('wiz.step_vehicle') }}</div></div>
+          <div class="cw-step flex-fill text-center" data-step="3"><span class="cw-dot">3</span><div class="small cw-label">{{ t('wiz.step_connect') }}</div></div>
+          <div class="cw-step flex-fill text-center" data-step="4"><span class="cw-dot">4</span><div class="small cw-label">{{ t('wiz.step_sync') }}</div></div>
+          <div class="cw-step flex-fill text-center" data-step="5"><span class="cw-dot">5</span><div class="small cw-label">{{ t('wiz.step_done') }}</div></div>
+        </div>
+      </div>
+
+      <div class="modal-body">
+        <form id="cwForm" onsubmit="return false;">
+          <input type="hidden" name="ajax" value="1">
+          <input type="hidden" name="vehicle_id" id="cw_vehicle_id" value="">
+          <input type="hidden" name="api_brand" id="cw_api_brand" value="">
+          <input type="hidden" name="battery_kwh" id="cw_battery_kwh" value="">
+          <input type="hidden" name="max_ac_kw" id="cw_max_ac_kw" value="">
+          <input type="hidden" name="recuperation_kwh_per_km" id="cw_recup" value="">
+
+          {# ── Step 1: brand ── #}
+          <div class="cw-pane" data-pane="1">
+            <p class="text-muted small">{{ t('wiz.brand_help') }}</p>
+            <div class="row g-2" id="cwBrandGrid"></div>
+            <div id="cwBrandInstall" class="alert alert-warning small mt-3" style="display:none">
+              <span id="cwBrandInstallText"></span>
+              <button type="button" class="btn btn-sm btn-warning ms-2" id="cwBrandInstallBtn"></button>
+              <span id="cwBrandInstallStatus" class="ms-2"></span>
+            </div>
+          </div>
+
+          {# ── Step 2: vehicle basics ── #}
+          <div class="cw-pane" data-pane="2" style="display:none">
+            <div class="row g-3">
+              <div class="col-12 col-sm-8">
+                <label class="form-label small">{{ t('wiz.name_label') }} <span class="text-danger">*</span></label>
+                <input type="text" class="form-control" name="name" id="cw_name" maxlength="64"
+                       placeholder="{{ t('wiz.name_ph') }}" required>
+              </div>
+              <div class="col-6 col-sm-4">
+                <label class="form-label small">{{ t('wiz.color_label') }}</label>
+                <input type="color" class="form-control form-control-color w-100" name="color" id="cw_color" value="#0d6efd">
+              </div>
+              <div class="col-12 col-sm-8">
+                <label class="form-label small">{{ t('wiz.model_label') }}</label>
+                <input type="text" class="form-control" name="model" id="cw_model" list="cw_spec_list"
+                       autocomplete="off" placeholder="{{ t('wiz.model_ph') }}">
+                <datalist id="cw_spec_list"></datalist>
+                <div class="form-text" id="cw_spec_hint"></div>
+              </div>
+              <div class="col-6 col-sm-4">
+                <label class="form-label small">{{ t('wiz.battery_label') }}</label>
+                <input type="number" step="0.1" class="form-control" id="cw_battery_visible" placeholder="kWh">
+              </div>
+            </div>
+          </div>
+
+          {# ── Step 3: connect ── #}
+          <div class="cw-pane" data-pane="3" style="display:none">
+            {# Kia/Hyundai: token flow — one button, embedded browser #}
+            <div id="cwConnectToken" style="display:none">
+              <p class="small text-muted mb-2">{{ t('wiz.token_intro') }}</p>
+              <div class="mb-2">
+                <label class="form-label small">{{ t('wiz.account_email') }}</label>
+                <input type="email" class="form-control" id="cw_username_token" autocomplete="off" placeholder="name@example.com">
+              </div>
+              <details class="mb-2">
+                <summary class="small text-muted" style="cursor:pointer">{{ t('wiz.advanced') }}</summary>
+                <div class="row g-2 mt-1">
+                  <div class="col-6"><label class="form-label small">{{ t('wiz.pin_label') }}</label>
+                    <input type="text" class="form-control form-control-sm" id="cw_pin_token" maxlength="20"></div>
+                  <div class="col-6"><label class="form-label small">{{ t('wiz.region_label') }}</label>
+                    <input type="text" class="form-control form-control-sm" id="cw_region_token" value="EU" maxlength="6"></div>
+                </div>
+              </details>
+              <button type="button" class="btn btn-warning w-100" id="cwFetchToken">
+                <i class="bi bi-box-arrow-in-right"></i> {{ t('wiz.token_login_btn') }}
+              </button>
+              <div class="small mt-2" id="cwTokenStatus"></div>
+              <div id="cwBrowserWrap" class="mt-2" style="display:none">
+                <div class="alert alert-info py-2 px-3 mb-2 small">
+                  <i class="bi bi-window"></i> {{ t('wiz.browser_hint') }}
+                </div>
+                <a href="#" target="evnovnc" rel="noopener" id="cwOpenNovnc"
+                   class="btn btn-primary btn-lg w-100 mb-2">
+                  <i class="bi bi-box-arrow-up-right"></i> {{ t('wiz.open_login_window') }}
+                </a>
+                <button type="button" class="btn btn-outline-secondary btn-sm w-100" id="cwCancelToken">{{ t('wiz.cancel') }}</button>
+              </div>
+              <details class="mt-2">
+                <summary class="small text-muted" style="cursor:pointer">{{ t('wiz.token_manual_title') }}</summary>
+                <div class="mt-2 small">
+                  <div class="mb-1">{{ t('wiz.token_manual_step1') }} <a href="#" id="cwStep1Link" target="_blank" rel="noopener" class="text-break"></a></div>
+                  <div class="d-flex gap-2">
+                    <input type="text" class="form-control form-control-sm" id="cwPasteUrl" placeholder="...?code=...">
+                    <button type="button" class="btn btn-outline-success btn-sm" id="cwPasteBtn"><i class="bi bi-clipboard-check"></i></button>
+                  </div>
+                  <div id="cwPasteStatus" class="small mt-1"></div>
+                </div>
+              </details>
+            </div>
+            {# Other brands: username/password #}
+            <div id="cwConnectCreds" style="display:none">
+              <p class="text-muted small">{{ t('wiz.creds_help') }}</p>
+              <div class="row g-2">
+                <div class="col-12 col-sm-6">
+                  <label class="form-label small">{{ t('wiz.account_email') }}</label>
+                  <input type="text" class="form-control form-control-sm" name="api_username" id="cw_username_creds" autocomplete="off">
+                </div>
+                <div class="col-12 col-sm-6">
+                  <label class="form-label small">{{ t('wiz.password_label') }}</label>
+                  <input type="password" class="form-control form-control-sm" name="api_password" id="cw_password_creds" autocomplete="new-password">
+                </div>
+                <div class="col-6 col-sm-4">
+                  <label class="form-label small">{{ t('wiz.pin_label') }}</label>
+                  <input type="text" class="form-control form-control-sm" name="api_pin" id="cw_pin_creds" maxlength="20">
+                </div>
+                <div class="col-6 col-sm-4">
+                  <label class="form-label small">{{ t('wiz.region_label') }}</label>
+                  <input type="text" class="form-control form-control-sm" name="api_region" id="cw_region_creds" value="EU" maxlength="6">
+                </div>
+                <div class="col-12 col-sm-4">
+                  <label class="form-label small">{{ t('wiz.vin_label') }}</label>
+                  <input type="text" class="form-control form-control-sm" name="api_vin" id="cw_vin_creds" maxlength="40">
+                </div>
+              </div>
+            </div>
+          </div>
+
+          {# ── Step 4: sync ── #}
+          <div class="cw-pane" data-pane="4" style="display:none">
+            <div class="form-check form-switch mb-2">
+              <input class="form-check-input" type="checkbox" value="1" name="auto_sync" id="cw_auto_sync" checked>
+              <label class="form-check-label" for="cw_auto_sync">{{ t('wiz.autosync_label') }}</label>
+            </div>
+            <p class="text-muted small">{{ t('wiz.autosync_help') }}</p>
+          </div>
+
+          {# ── Step 5: done ── #}
+          <div class="cw-pane" data-pane="5" style="display:none">
+            <div class="text-center py-3">
+              <div id="cwTestSpinner"><span class="spinner-border text-primary"></span><div class="mt-2 small text-muted">{{ t('wiz.testing') }}</div></div>
+              <div id="cwTestResult" style="display:none"></div>
+            </div>
+          </div>
+        </form>
+      </div>
+
+      <div class="modal-footer">
+        <button type="button" class="btn btn-outline-secondary" id="cwBack" style="display:none">{{ t('wiz.back') }}</button>
+        <button type="button" class="btn btn-primary" id="cwNext" disabled>{{ t('wiz.next') }}</button>
+        <button type="button" class="btn btn-success" id="cwFinish" style="display:none" data-bs-dismiss="modal">{{ t('wiz.finish') }}</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<style>
+.cw-steps .cw-dot{display:inline-flex;width:28px;height:28px;border-radius:50%;align-items:center;justify-content:center;
+  background:var(--bs-secondary-bg);color:var(--bs-secondary-color);font-weight:600;font-size:.85rem;border:2px solid transparent}
+.cw-step.active .cw-dot{background:var(--bs-primary);color:#fff}
+.cw-step.done .cw-dot{background:var(--bs-success);color:#fff}
+.cw-step .cw-label{color:var(--bs-secondary-color);font-size:.72rem}
+.cw-step.active .cw-label{color:var(--bs-primary);font-weight:600}
+.cw-brand-tile{cursor:pointer;border:2px solid var(--bs-border-color);border-radius:.6rem;padding:.75rem .5rem;text-align:center;
+  transition:all .12s;height:100%}
+.cw-brand-tile:hover{border-color:var(--bs-primary);background:var(--bs-primary-bg-subtle)}
+.cw-brand-tile.selected{border-color:var(--bs-primary);background:var(--bs-primary-bg-subtle);box-shadow:0 0 0 .15rem var(--bs-primary-border-subtle)}
+.cw-brand-tile .cw-brand-name{font-weight:600;font-size:.9rem}
+.cw-brand-tile.not-installed{opacity:.6}
+</style>
+
+<script>
+(function(){
+  const modalEl = document.getElementById('carWizardModal');
+  if(!modalEl) return;
+  const T = window.T || {};
+  const INSTALLED = {{ installed_brand_keys|tojson if installed_brand_keys is defined else '[]'|safe }};
+  const NOVNC_URL = {{ novnc_url|tojson if novnc_url is defined else '""'|safe }};
+  const NO_CAR    = {{ no_car_configured|tojson if no_car_configured is defined else 'false'|safe }};
+  // An already-added-but-not-signed-in Kia/Hyundai car waiting to connect
+  // (id/brand/name/username), or null. Drives the jump straight to sign-in.
+  const WIZ_CONNECT = {{ wiz_connect|tojson if wiz_connect is defined else 'null'|safe }};
+
+  // Brand catalog: api_brand value, install pkg key, label, whether it needs the token flow.
+  const BRANDS = [
+    {key:'hyundai', pkg:'hyundai-kia', label:'Hyundai', token:true},
+    {key:'kia',     pkg:'hyundai-kia', label:'Kia',     token:true},
+    {key:'vw',      pkg:'skoda',       label:'Škoda',   token:false},
+    {key:'vw',      pkg:'vw',          label:'VW',      token:false},
+    {key:'vw',      pkg:'seatcupra',   label:'Seat / Cupra', token:false},
+    {key:'tesla',   pkg:'tesla',       label:'Tesla',   token:false},
+    {key:'renault', pkg:'renault',     label:'Renault / Dacia', token:false},
+    {key:'polestar',pkg:'polestar',    label:'Polestar',token:false},
+    {key:'mg',      pkg:'mg',          label:'MG',      token:false},
+    {key:'smart',   pkg:'smart',       label:'Smart #1/#3', token:false},
+    {key:'porsche', pkg:'porsche',     label:'Porsche', token:false},
+  ];
+
+  let step = 1, sel = null, savedId = null, pollTimer = null;
+
+  const q = id => document.getElementById(id);
+  const form = q('cwForm');
+  const nextBtn = q('cwNext'), backBtn = q('cwBack'), finishBtn = q('cwFinish');
+
+  function renderBrands(){
+    const grid = q('cwBrandGrid'); grid.innerHTML='';
+    BRANDS.forEach((b,i)=>{
+      const installed = INSTALLED.indexOf(b.key) !== -1;
+      const col = document.createElement('div');
+      col.className='col-4 col-sm-3';
+      col.innerHTML = `<div class="cw-brand-tile ${installed?'':'not-installed'}" data-i="${i}">
+        <div class="cw-brand-name">${b.label}</div>
+        <div class="small text-muted">${installed?'<i class="bi bi-check-circle-fill text-success"></i>':T.wiz_needs_install||'Paket nötig'}</div>
+      </div>`;
+      col.querySelector('.cw-brand-tile').addEventListener('click',()=>selectBrand(i));
+      grid.appendChild(col);
+    });
+  }
+
+  function selectBrand(i){
+    sel = BRANDS[i];
+    document.querySelectorAll('.cw-brand-tile').forEach(t=>t.classList.toggle('selected', +t.dataset.i===i));
+    q('cw_api_brand').value = sel.key;
+    const installed = INSTALLED.indexOf(sel.key) !== -1;
+    const box = q('cwBrandInstall');
+    if(!installed){
+      box.style.display='';
+      q('cwBrandInstallText').textContent = (T.wiz_install_hint||'Für diese Marke muss einmalig ein Paket installiert werden (App startet dabei neu).');
+      const btn = q('cwBrandInstallBtn'); btn.textContent = (T.wiz_install_btn||'Installieren'); btn.disabled=false;
+      q('cwBrandInstallStatus').textContent='';
+      btn.onclick = ()=>installBrand(sel.pkg, btn);
+      nextBtn.disabled = true;
+    } else {
+      box.style.display='none';
+      nextBtn.disabled = false;
+    }
+  }
+
+  async function installBrand(pkg, btn){
+    btn.disabled=true; q('cwBrandInstallStatus').innerHTML='<span class="spinner-border spinner-border-sm"></span>';
+    try{
+      const r = await fetch('/api/vehicle/brand-install',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({package:pkg})});
+      const d = await r.json();
+      if(d.success){ q('cwBrandInstallStatus').innerHTML = '<span class="text-success">'+(T.wiz_install_restart||'Installiert — App startet neu, bitte gleich erneut öffnen.')+'</span>'; }
+      else { q('cwBrandInstallStatus').innerHTML='<span class="text-danger">'+(d.error||'Fehler')+'</span>'; btn.disabled=false; }
+    }catch(e){ q('cwBrandInstallStatus').innerHTML='<span class="text-danger">'+e.message+'</span>'; btn.disabled=false; }
+  }
+
+  // Model spec autofill (open-ev-data, same source as the classic form).
+  // Type ≥2 chars → search → datalist of labels; pick one → fill kWh/AC.
+  let cwByLabel = {}, cwSpecTimer = null;
+  function cwLabelFor(r){
+    let s = (r.make||'')+' '+(r.model||''); if(r.variant) s += ' · '+r.variant;
+    const bits=[]; if(r.net_kwh) bits.push(r.net_kwh+' kWh'); if(r.ac_kw) bits.push('AC '+r.ac_kw+' kW');
+    return bits.length ? s+' — '+bits.join(', ') : s;
+  }
+  async function cwRefreshSpecs(){
+    const term = q('cw_model').value.trim();
+    if(term.length<2){ q('cw_spec_list').innerHTML=''; return; }
+    let rows=[];
+    try{ const r=await fetch('/api/vehicles/spec_search?q='+encodeURIComponent(term)); rows=(await r.json()).results||[]; }catch(e){ return; }
+    cwByLabel={}; const dl=q('cw_spec_list'); dl.innerHTML='';
+    rows.forEach(row=>{ const label=cwLabelFor(row); cwByLabel[label]=row; const o=document.createElement('option'); o.value=label; dl.appendChild(o); });
+  }
+  function cwApplySpec(){
+    const row=cwByLabel[q('cw_model').value]; if(!row) return;
+    if(row.net_kwh!=null){ q('cw_battery_kwh').value=row.net_kwh; q('cw_battery_visible').value=row.net_kwh; }
+    if(row.ac_kw!=null){ q('cw_max_ac_kw').value=row.ac_kw; }
+    // clean the model field down to the plain model name
+    if(row.model){ q('cw_model').value=row.model; }
+    q('cw_spec_hint').textContent=(T.wiz_spec_applied||'Fahrzeugdaten übernommen')+(row.net_kwh?(': '+row.net_kwh+' kWh'):'');
+  }
+  q('cw_model').addEventListener('input', ()=>{ clearTimeout(cwSpecTimer); cwSpecTimer=setTimeout(cwRefreshSpecs,200); cwApplySpec(); });
+  q('cw_model').addEventListener('change', cwApplySpec);
+  q('cw_battery_visible').addEventListener('input', ()=>{ q('cw_battery_kwh').value=q('cw_battery_visible').value; });
+
+  function showStep(n){
+    step=n;
+    document.querySelectorAll('.cw-pane').forEach(p=>p.style.display = (+p.dataset.pane===n)?'':'none');
+    document.querySelectorAll('.cw-step').forEach(s=>{
+      const sn=+s.dataset.step; s.classList.toggle('active', sn===n); s.classList.toggle('done', sn<n);
+    });
+    backBtn.style.display = n>1 ? '' : 'none';
+    nextBtn.style.display = n<5 ? '' : 'none';
+    finishBtn.style.display = n===5 ? '' : 'none';
+    if(n===1){ nextBtn.disabled = !(sel && INSTALLED.indexOf(sel.key)!==-1); }
+    else if(n===2){ const on=()=>{nextBtn.disabled=!q('cw_name').value.trim();}; q('cw_name').oninput=on; on(); }
+    else { nextBtn.disabled=false; }
+    // step 3 layout depends on brand
+    if(n===3){
+      const isToken = sel && sel.token;
+      q('cwConnectToken').style.display = isToken?'':'none';
+      q('cwConnectCreds').style.display = isToken?'none':'';
+    }
+  }
+
+  // Save the vehicle (create/update) so later steps have an id
+  async function saveVehicle(){
+    const fd = new FormData(form);
+    // Both connect panes share field names (api_username/pin/region…). Collapse
+    // them to a single clean value from the brand's active pane, read directly
+    // from the inputs so hidden-pane values (step 4+) are preserved, not wiped.
+    ['api_username','api_password','api_pin','api_region','api_vin'].forEach(k=>fd.delete(k));
+    const g = id => (q(id) ? (q(id).value||'') : '');
+    if(sel && sel.token){
+      fd.set('api_username', g('cw_username_token'));
+      fd.set('api_pin', g('cw_pin_token'));
+      fd.set('api_region', g('cw_region_token') || 'EU');
+      // api_password (the token) is written server-side by token/status; leaving
+      // it blank on update keeps the stored token.
+    } else if(sel){
+      fd.set('api_username', g('cw_username_creds'));
+      if(g('cw_password_creds')) fd.set('api_password', g('cw_password_creds'));
+      fd.set('api_pin', g('cw_pin_creds'));
+      fd.set('api_region', g('cw_region_creds') || 'EU');
+      fd.set('api_vin', g('cw_vin_creds'));
+    }
+    const r = await fetch('/vehicles/save',{method:'POST', body:fd});
+    const d = await r.json();
+    if(d.ok){ savedId = d.vehicle_id; q('cw_vehicle_id').value = savedId; return true; }
+    alert(d.error||'Fehler'); return false;
+  }
+
+  nextBtn.addEventListener('click', async ()=>{
+    if(step===2){ if(!await saveVehicle()) return; }
+    if(step===4){ if(!await saveVehicle()) return; runTest(); }
+    if(step<5) showStep(step+1);
+  });
+  backBtn.addEventListener('click', ()=>{ if(step>1) showStep(step-1); });
+
+  // ── Token fetch (Kia/Hyundai) — one button, embedded browser, auto-advance ──
+  function resetTokenBtn(){ const b=q('cwFetchToken'); if(b){ b.disabled=false; b.innerHTML='<i class="bi bi-box-arrow-in-right"></i> '+(T.wiz_token_login_btn||'Anmelden & verbinden'); } }
+  function stopPoll(){ if(pollTimer){clearInterval(pollTimer);pollTimer=null;} resetTokenBtn(); }
+  q('cwFetchToken').addEventListener('click', async ()=>{
+    if(!q('cw_username_token').value.trim()){ q('cwTokenStatus').innerHTML='<span class="text-danger">'+(T.wiz_email_required||'Bitte zuerst die E-Mail eingeben.')+'</span>'; return; }
+    if(!await saveVehicle()) return;
+    // Wire the login window (full-page noVNC in a new tab) and reveal it.
+    const loginUrl = NOVNC_URL ? (NOVNC_URL + (NOVNC_URL.indexOf('?')>=0?'&':'?') + 'autoconnect=true&resize=scale&reconnect=true') : '';
+    if(loginUrl){ q('cwOpenNovnc').href = loginUrl; }
+    q('cwBrowserWrap').style.display='';
+    const b=q('cwFetchToken'); b.disabled=true; b.innerHTML='<span class="spinner-border spinner-border-sm"></span> '+(T.wiz_login_prompt||'Warte auf Login…');
+    q('cwTokenStatus').innerHTML='<span class="text-primary"><span class="spinner-border spinner-border-sm me-1"></span>'+(T.wiz_login_prompt||'Melde dich im geöffneten Fenster an (inkl. reCAPTCHA)…')+'</span>';
+    try{
+      const r=await fetch('/api/vehicle/token/start',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({brand:sel.key, vehicle_id:savedId})});
+      const d=await r.json();
+      if(d.success){
+        // The click is a user gesture, so this window.open is not popup-blocked.
+        // If the browser blocks it anyway, the big "Login-Fenster öffnen" link is right there.
+        if(loginUrl){ try{ window.open(loginUrl,'evnovnc'); }catch(e){} }
+        pollTimer=setInterval(pollToken,2000);
+      }
+      else { q('cwTokenStatus').innerHTML='<span class="text-danger">'+(d.error||'')+'</span>'; resetTokenBtn(); }
+    }catch(e){ q('cwTokenStatus').innerHTML='<span class="text-danger">'+e.message+'</span>'; resetTokenBtn(); }
+  });
+  function pollToken(){
+    fetch('/api/vehicle/token/status?vehicle_id='+savedId).then(r=>r.json()).then(d=>{
+      if(d.token){ stopPoll(); q('cwBrowserWrap').style.display='none';
+        q('cwTokenStatus').innerHTML='<span class="text-success fw-bold"><i class="bi bi-check-circle"></i> '+(T.api_token_saved||'Verbunden!')+'</span>';
+        nextBtn.disabled=false; showStep(4); }
+      else if(d.error){ q('cwTokenStatus').innerHTML='<span class="text-danger">'+d.error+'</span>'; stopPoll(); }
+      else if(d.running){ q('cwTokenStatus').innerHTML='<span class="text-primary"><span class="spinner-border spinner-border-sm me-1"></span>'+(d.status||'')+'</span>'; }
+    }).catch(()=>{});
+  }
+  q('cwCancelToken').addEventListener('click', async ()=>{ await fetch('/api/vehicle/token/cancel',{method:'POST'}); q('cwBrowserWrap').style.display='none'; q('cwTokenStatus').textContent=''; stopPoll(); });
+  // manual paste
+  q('cwPasteBtn').addEventListener('click', async ()=>{
+    const url=q('cwPasteUrl').value.trim(); if(!url) return;
+    q('cwPasteStatus').innerHTML='<span class="spinner-border spinner-border-sm"></span>';
+    try{
+      const r=await fetch('/api/vehicle/token/manual',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({brand:sel.key,url:url,vehicle_id:savedId})});
+      const d=await r.json();
+      q('cwPasteStatus').innerHTML = d.success?'<span class="text-success">'+(d.message||'OK')+'</span>':'<span class="text-danger">'+(d.error||'')+'</span>';
+    }catch(e){ q('cwPasteStatus').innerHTML='<span class="text-danger">'+e.message+'</span>'; }
+  });
+  // populate manual step1 link on demand
+  document.querySelector('#carWizardModal')?.addEventListener('click', async (e)=>{
+    if(e.target.closest('details') && sel && sel.token){
+      const r=await fetch('/api/vehicle/token/manual/step_urls?brand='+encodeURIComponent(sel.key));
+      if(r.ok){ const d=await r.json(); if(q('cwStep1Link') && d.step1_login_url){ q('cwStep1Link').href=d.step1_login_url; q('cwStep1Link').textContent=d.step1_login_url; } }
+    }
+  });
+
+  // ── Step 5 test ──
+  async function runTest(){
+    q('cwTestSpinner').style.display=''; q('cwTestResult').style.display='none';
+    const fd=new FormData(); fd.append('ajax','1');
+    try{
+      const r=await fetch('/vehicles/'+savedId+'/test',{method:'POST',body:fd});
+      const d=await r.json();
+      q('cwTestSpinner').style.display='none';
+      const res=q('cwTestResult'); res.style.display='';
+      res.innerHTML = d.ok
+        ? '<div class="text-success"><i class="bi bi-check-circle-fill fs-1"></i><div class="mt-2 fw-bold">'+(d.message||T.wiz_test_ok||'Verbindung OK!')+'</div></div>'
+        : '<div class="text-warning"><i class="bi bi-exclamation-triangle-fill fs-1"></i><div class="mt-2">'+(d.error||'')+'</div><div class="small text-muted mt-1">'+(T.wiz_test_fail_hint||'Das Auto ist trotzdem angelegt — du kannst die Zugangsdaten später korrigieren.')+'</div></div>';
+    }catch(e){ q('cwTestSpinner').style.display='none'; q('cwTestResult').style.display=''; q('cwTestResult').innerHTML='<span class="text-danger">'+e.message+'</span>'; }
+  }
+
+  finishBtn.addEventListener('click', ()=>{ location.reload(); });
+
+  // reset on open
+  modalEl.addEventListener('show.bs.modal', ()=>{
+    step=1; sel=null; savedId=null;
+    form.reset(); q('cw_vehicle_id').value=''; q('cw_api_brand').value='';
+    renderBrands(); showStep(1);
+  });
+
+  // Jump straight to the sign-in step for an already-added car that was
+  // never connected. Runs AFTER show() (the show.bs.modal reset has already
+  // put us back on step 1), so it wins.
+  function enterConnectMode(wc){
+    const idx = BRANDS.findIndex(b => b.key === wc.brand);
+    if(idx < 0) return;
+    sel = BRANDS[idx];
+    q('cw_api_brand').value = sel.key;
+    savedId = wc.id;
+    q('cw_vehicle_id').value = savedId;
+    if(q('cw_name')) q('cw_name').value = wc.name || '';
+    if(wc.username && q('cw_username_token')) q('cw_username_token').value = wc.username;
+    showStep(3);
+  }
+
+  // First run / not-yet-connected car → open the wizard automatically.
+  if(NO_CAR && window.bootstrap && window.bootstrap.Modal){
+    try{
+      bootstrap.Modal.getOrCreateInstance(modalEl).show();
+      if(WIZ_CONNECT){ enterConnectMode(WIZ_CONNECT); }
+    }catch(e){}
+  }
+})();
+</script>

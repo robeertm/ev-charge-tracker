@@ -94,6 +94,14 @@ _fetch_state = {
 }
 
 
+class _Cancelled(Exception):
+    """Raised inside the login-wait predicate when the fetch was cancelled,
+    so the worker breaks out of WebDriverWait immediately and tears its own
+    browser down (the finally: driver.quit()), instead of polling for the
+    full 5-min timeout. We never touch the driver from another thread —
+    Selenium sessions are not thread-safe."""
+
+
 def get_state():
     return dict(_fetch_state)
 
@@ -135,6 +143,14 @@ def _do_fetch(brand_key):
         from selenium.webdriver.support import expected_conditions as EC
 
         options = webdriver.ChromeOptions()
+        # 'eager' returns from driver.get() at DOMContentLoaded instead of
+        # blocking on the full load — the Kia/Hyundai login page keeps
+        # reCAPTCHA/tracker connections open for a long time under the default
+        # 'normal' strategy, which parks the worker inside driver.get() so it
+        # never reaches the login-wait loop (cancel/timeout can't fire, and a
+        # cancelled browser lingers). The wait loop polls current_url anyway,
+        # so it doesn't need the page fully settled.
+        options.page_load_strategy = 'eager'
         options.add_argument(f"user-agent={cfg['user_agent']}")
         options.add_argument('--window-size=420,750')
         options.add_argument('--no-sandbox')
@@ -150,10 +166,21 @@ def _do_fetch(brand_key):
         _fetch_state['status'] = 'Browser wird gestartet...'
         # Selenium 4.11+ auto-downloads the matching chromedriver via Selenium Manager
         driver = webdriver.Chrome(options=options)
+        # Backstop so a wedged navigation can't block driver.get() forever
+        # even under 'eager'; the wait loop below polls current_url regardless.
+        try:
+            driver.set_page_load_timeout(45)
+        except Exception:
+            pass
 
         try:
             _fetch_state['status'] = 'Bitte im Browser einloggen (reCAPTCHA lösen)...'
-            driver.get(login_url)
+            try:
+                driver.get(login_url)
+            except Exception:
+                # Timed out or navigation still in flight — the page is up in
+                # the browser for the user; proceed to poll for the redirect.
+                pass
 
             import time
 
@@ -174,6 +201,8 @@ def _do_fetch(brand_key):
             login_redirect_host = cfg['login_redirect'].split('://', 1)[1].split('/', 1)[0]
 
             def _login_landed(drv):
+                if not _fetch_state['running']:
+                    raise _Cancelled()
                 url = drv.current_url or ''
                 if final_host in url and 'code=' in url:
                     return 'final'
@@ -190,6 +219,9 @@ def _do_fetch(brand_key):
             wait = WebDriverWait(driver, 300)  # 5 min max for user + reCAPTCHA
             try:
                 landing = wait.until(_login_landed)
+            except _Cancelled:
+                _fetch_state.update(running=False, status='Abgebrochen')
+                return
             except Exception as wait_exc:
                 last_url = driver.current_url if driver else '(browser down)'
                 raise RuntimeError(
@@ -205,7 +237,10 @@ def _do_fetch(brand_key):
             current_url = driver.current_url or ''
             if landing != 'final':
                 _fetch_state['status'] = 'Login erkannt, hole Auth-Code...'
-                driver.get(redirect_url)
+                try:
+                    driver.get(redirect_url)
+                except Exception:
+                    pass  # 'eager'/timeout — the poll below reads current_url
                 for _ in range(15):
                     current_url = driver.current_url or ''
                     if 'code=' in current_url and final_host in current_url:
@@ -272,6 +307,13 @@ def _do_fetch(brand_key):
                 pass
 
     except Exception as e:
+        # If the fetch was cancelled, cancel_fetch() already flipped running
+        # False and killed the browser at the OS level — the exception here is
+        # just the worker's in-flight Selenium call erroring out. Report it as
+        # a clean cancel, not a scary error.
+        if not _fetch_state['running']:
+            _fetch_state.update(status='Abgebrochen', error=None)
+            return
         import traceback
         tb = traceback.format_exc()
         logger.error(f"token_fetch failed:\n{tb}")
@@ -390,4 +432,21 @@ def exchange_manual_url(brand_key: str, url: str) -> tuple[bool, str, str | None
 
 
 def cancel_fetch():
+    # Flip the flag first (the worker's wait predicate honours it if it gets
+    # to re-poll). But the worker is often parked inside a blocking Selenium
+    # command (current_url on a still-loading login page), where the predicate
+    # never runs again — so we also kill the browser at the OS level. That is
+    # thread-safe (plain SIGKILL, no Selenium API from this thread), and it
+    # unblocks the worker's in-flight command, which then unwinds through its
+    # finally. Only one fetch browser exists per container, so a name-scoped
+    # pkill is safe.
     _fetch_state['running'] = False
+    try:
+        import subprocess
+        # 'chrom' matches chromium + chromedriver + crashpad helpers; the
+        # display stack (Xvfb/x11vnc/websockify) contains no 'chrom', so it
+        # is left running.
+        subprocess.run(['pkill', '-9', '-f', 'chrom'],
+                       capture_output=True, timeout=10)
+    except Exception:
+        pass

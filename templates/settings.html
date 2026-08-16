@@ -174,9 +174,14 @@
                 </div>
                 {% endif %}
 
-                <button type="button" class="btn btn-primary btn-sm" id="btnNewVehicle" data-bs-toggle="collapse" data-bs-target="#vehicleForm">
-                    <i class="bi bi-plus-lg"></i> {{ t('set.fleet_add') }}
-                </button>
+                <div class="d-flex gap-2 flex-wrap align-items-center">
+                    <button type="button" class="btn btn-primary" data-bs-toggle="modal" data-bs-target="#carWizardModal">
+                        <i class="bi bi-magic"></i> {{ t('wiz.open_btn') }}
+                    </button>
+                    <button type="button" class="btn btn-outline-secondary btn-sm" id="btnNewVehicle" data-bs-toggle="collapse" data-bs-target="#vehicleForm">
+                        <i class="bi bi-sliders"></i> {{ t('wiz.advanced_btn') }}
+                    </button>
+                </div>
 
                 <div class="collapse mt-3" id="vehicleForm">
                     <form method="POST" action="/vehicles/save" class="border rounded p-3">
@@ -641,6 +646,10 @@
                                 <button type="button" class="btn btn-warning btn-sm" id="btnFetchToken">
                                     <i class="bi bi-key"></i> {{ t('set.api_fetch_token') }}
                                 </button>
+                                <a href="#" target="evnovnc" rel="noopener" id="tokenOpenNovnc"
+                                   class="btn btn-primary btn-sm" style="display:none">
+                                    <i class="bi bi-box-arrow-up-right"></i> {{ t('wiz.open_login_window') }}
+                                </a>
                                 <button type="button" class="btn btn-outline-secondary btn-sm" id="btnCancelToken" style="display:none">
                                     <i class="bi bi-x-lg"></i> {{ t('set.api_cancel') }}
                                 </button>
@@ -913,10 +922,13 @@
                 (function() {
                     const btnFetch = document.getElementById('btnFetchToken');
                     const btnCancel = document.getElementById('btnCancelToken');
+                    const btnOpenNovnc = document.getElementById('tokenOpenNovnc');
                     const statusEl = document.getElementById('tokenFetchStatus');
                     if (!btnFetch) return;
                     const ACTIVE_BRAND = {{ ((api_target_vehicle.api_brand or '')|lower)|tojson if api_target_vehicle else "''"|safe }};
                     const ACTIVE_VID   = {{ api_target_vehicle.id|tojson if api_target_vehicle else 'null'|safe }};
+                    const NOVNC_URL    = {{ novnc_url|tojson if novnc_url is defined else '""'|safe }};
+                    const NOVNC_LOGIN  = NOVNC_URL ? (NOVNC_URL + (NOVNC_URL.indexOf('?')>=0?'&':'?') + 'autoconnect=true&resize=scale&reconnect=true') : '';
                     let pollInterval = null;
 
                     function stopPolling() {
@@ -924,6 +936,7 @@
                         btnFetch.disabled = false;
                         btnFetch.innerHTML = '<i class="bi bi-key"></i> ' + T.api_fetch_token;
                         btnCancel.style.display = 'none';
+                        if (btnOpenNovnc) btnOpenNovnc.style.display = 'none';
                     }
 
                     function pollStatus() {
@@ -946,6 +959,8 @@
                         btnFetch.disabled = true;
                         btnFetch.innerHTML = '<span class="spinner-border spinner-border-sm"></span> ' + T.api_starting;
                         btnCancel.style.display = '';
+                        // Wire + reveal the login-window button (full-page noVNC, new tab)
+                        if (btnOpenNovnc && NOVNC_LOGIN) { btnOpenNovnc.href = NOVNC_LOGIN; btnOpenNovnc.style.display = ''; }
                         statusEl.textContent = '';
                         try {
                             const r = await fetch('/api/vehicle/token/start', {
@@ -954,6 +969,9 @@
                             });
                             const d = await r.json();
                             if (d.success) {
+                                // The click is a user gesture → window.open is not popup-blocked.
+                                // If it is blocked anyway, the "open login window" button is right there.
+                                if (NOVNC_LOGIN) { try { window.open(NOVNC_LOGIN, 'evnovnc'); } catch(e) {} }
                                 pollInterval = setInterval(pollStatus, 2000);
                             } else {
                                 statusEl.innerHTML = '<span class="text-danger">' + d.error + '</span>';
@@ -3481,4 +3499,6 @@
     console.log('[notify] handlers attached');
 })();
 </script>
+
+{% include '_car_wizard.html' %}
 {% endblock %}

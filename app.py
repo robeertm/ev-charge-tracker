@@ -8,7 +8,7 @@ import sys
 import logging
 from datetime import datetime, date, timedelta
 from pathlib import Path
-from flask import Flask, render_template, request, redirect, url_for, flash, jsonify, send_file
+from flask import Flask, render_template, request, redirect, url_for, flash, jsonify, send_file, session
 
 # Make stdout/stderr tolerant of Unicode (Windows cmd with legacy code pages
 # would otherwise UnicodeEncodeError on our startup banner and emoji-heavy
@@ -2381,7 +2381,10 @@ def register_routes(app):
         else:
             v = Vehicle()
         v.name = (request.form.get('name', '') or '').strip()[:64]
+        _ajax = request.form.get('ajax') == '1'
         if not v.name:
+            if _ajax:
+                return jsonify({'ok': False, 'error': t('flash.vehicle_name_required')}), 400
             flash(t('flash.vehicle_name_required'), 'danger')
             return redirect('/settings#sec-fleet')
         v.brand = (request.form.get('brand', '') or '').strip() or None
@@ -2455,6 +2458,9 @@ def register_routes(app):
             _mirror('vehicle_api_pin', v.api_pin or '')
             _mirror('vehicle_api_region', v.api_region or '')
             _mirror('vehicle_api_vin', v.api_vin or '')
+        if _ajax:
+            return jsonify({'ok': True, 'vehicle_id': v.id, 'name': v.name,
+                            'api_brand': v.api_brand or ''})
         flash(t('flash.vehicle_saved'), 'success')
         return redirect('/settings#sec-fleet')
 
@@ -2704,7 +2710,10 @@ def register_routes(app):
         their setup right from the Fahrzeuge table."""
         from models.database import Vehicle
         v = Vehicle.query.get_or_404(vid)
+        _ajax = request.form.get('ajax') == '1'
         if not (v.api_brand and v.api_username):
+            if _ajax:
+                return jsonify({'ok': False, 'error': t('flash.vehicle_test_no_creds')}), 400
             flash(t('flash.vehicle_test_no_creds'), 'warning')
             return redirect('/settings#sec-fleet')
         try:
@@ -2718,8 +2727,12 @@ def register_routes(app):
             }
             connector = get_connector(v.api_brand.lower(), creds)
             connector._ensure_auth()
+            if _ajax:
+                return jsonify({'ok': True, 'message': t('flash.vehicle_test_ok', name=v.name)})
             flash(t('flash.vehicle_test_ok', name=v.name), 'success')
         except Exception as e:
+            if _ajax:
+                return jsonify({'ok': False, 'error': t('flash.vehicle_test_failed', name=v.name, error=str(e))}), 200
             flash(t('flash.vehicle_test_failed', name=v.name, error=str(e)), 'danger')
         return redirect('/settings#sec-fleet')
 
@@ -2803,6 +2816,19 @@ def register_routes(app):
     # ── DASHBOARD ──────────────────────────────────────────────
     @app.route('/')
     def dashboard():
+        # First run / not-yet-connected: if no car is actually CONNECTED
+        # (brand set AND a token/password stored), send the user to the guided
+        # "Auto einrichten" wizard. Fires even when a car was added but never
+        # signed in — that half-set-up car is exactly what needs the wizard.
+        # Once per session so it isn't annoying after they navigate back.
+        from models.database import Vehicle as _WizV
+        if not session.get('cw_shown'):
+            _branded = _WizV.query.filter(_WizV.api_brand.isnot(None),
+                                          _WizV.is_archived.is_(False)).all()
+            _connected = any((v.api_password or '').strip() for v in _branded)
+            if not _connected:
+                session['cw_shown'] = True
+                return redirect('/settings')
         from services.stats_service import (
             get_summary_stats, get_chart_data, get_ac_dc_stats,
             get_yearly_stats, get_vehicle_history,
@@ -3616,9 +3642,32 @@ def register_routes(app):
                 return getattr(_picker_v, attr)
             return AppConfig.get(key, default) or default
 
+        from models.database import Vehicle as _NoCarV
+        # "Configured" now means actually CONNECTED (brand + stored
+        # token/password), not merely added. A car that exists but was never
+        # signed in still counts as "no car configured", so the wizard opens
+        # to finish it. When exactly such a Kia/Hyundai car is waiting, hand
+        # the wizard its id/brand so it can jump straight to the sign-in step.
+        _branded_active = (_NoCarV.query.filter_by(is_archived=False)
+                           .filter(_NoCarV.api_brand.isnot(None)).all())
+        def _v_connected(v):
+            return bool((v.api_password or '').strip())
+        _no_car_configured = not any(_v_connected(v) for v in _branded_active)
+        _wiz_connect = None
+        if _no_car_configured:
+            _unconn_kh = [v for v in _branded_active
+                          if not _v_connected(v)
+                          and (v.api_brand or '').lower() in ('kia', 'hyundai')]
+            if _unconn_kh:
+                _wv = _unconn_kh[0]
+                _wiz_connect = {'id': _wv.id, 'brand': (_wv.api_brand or '').lower(),
+                                'name': _wv.name, 'username': _wv.api_username or ''}
         return render_template('settings.html',
                                entsoe_key=AppConfig.get('entsoe_api_key', ''),
                                ocm_key=AppConfig.get('ocm_api_key', ''),
+                               novnc_url=os.environ.get('NOVNC_URL', ''),
+                               no_car_configured=_no_car_configured,
+                               wiz_connect=_wiz_connect,
                                car_model_val=AppConfig.get('car_model', Config.CAR_MODEL),
                                vehicle_brands=vehicle_brands,
                                installed_brand_keys=installed_brand_keys,
@@ -3757,8 +3806,15 @@ def register_routes(app):
         """Interactive report page. The old /report always generated a
         PDF directly; that flow now lives at /report/export.pdf so the
         user can pick a range in the UI first."""
-        has_any_data = bool(Charge.query.first()) or bool(db.session.query(
-            db.func.count(db.text('1'))).select_from(db.text('vehicle_trips')).scalar())
+        has_any_data = bool(Charge.query.first())
+        if not has_any_data:
+            # No charges yet — the page is still useful if GPS trips exist.
+            # Guard the raw-table probe: table may be missing on a fresh DB.
+            try:
+                has_any_data = bool(db.session.execute(
+                    db.text('SELECT COUNT(*) FROM vehicle_trips')).scalar())
+            except Exception:
+                has_any_data = False
         return render_template('report.html',
                                has_any_data=has_any_data,
                                car_model=AppConfig.get('car_model', Config.CAR_MODEL))

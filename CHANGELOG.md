@@ -1,5 +1,47 @@
 # Changelog
 
+## v3.0.100 (2026-08-16)
+
+### Signing in a Kia/Hyundai car is finally simple
+
+The guided sign-in used to squeeze the login browser into a small embedded
+frame inside the setup dialog — which on many setups showed nothing at all,
+leaving you stuck on "please sign in" with no browser in sight. It now opens
+the login browser as a full, real page in a **new tab**, with a large,
+always-visible **"Open login window"** button as a guaranteed fallback if the
+tab is blocked. Sign in there; the app keeps waiting and moves on by itself the
+moment the connection succeeds.
+
+### Connecting a car you already added is no longer a dead end
+
+Two gaps made an *added-but-not-signed-in* car impossible to finish. The setup
+wizard only appeared on a completely empty install, so once a car existed —
+even one that was never connected — it never came back to help. And the
+sign-in control on the Settings page started the login but never actually
+opened a browser. Now the wizard reappears whenever no car is **connected**
+yet and jumps straight to the sign-in step for the car that is waiting, and the
+Settings sign-in opens the very same login window. Either path gets you signed
+in.
+
+### Cancelling the sign-in now closes the browser reliably
+
+Cancelling the guided sign-in (or closing the dialog) left the login browser
+running until its five-minute wait timed out — and a quick retry could stack a
+second one on top. Cancel now force-closes the login browser right away. Under
+the hood the sign-in page loads with an "eager" strategy plus a load timeout so
+it no longer parks itself waiting for the page's trackers/reCAPTCHA to settle,
+and cancel closes the browser at the process level rather than relying on the
+busy automation session to notice.
+
+### Fix: the Report page crashed before your first charge
+
+Opening **Report** on a brand-new install — one that had recorded GPS trips
+but no completed charge yet — returned an *Internal Server Error*. The page's
+"is there any data to show?" check used an invalid query for the trips table,
+which raised as soon as it ran (it only ran when no charges existed yet). The
+check is now a plain, guarded count, so the Report page loads from the very
+first day regardless of whether charges or only trips are present.
+
 ## v3.0.94 (2026-08-15)
 
 ### LUKS is now optional — new installs run unencrypted, existing ones keep it
