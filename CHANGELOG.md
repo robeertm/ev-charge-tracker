@@ -1,5 +1,15 @@
 # Changelog
 
+## v3.0.101 (2026-08-17)
+
+### Clearer message when the provider temporarily blocks sign-in
+
+Kia/Hyundai's login can reject a sign-in as an "abusing request" after several
+attempts from the same connection in a short time. Instead of a raw technical
+error, the setup now recognises that page and explains what happened and what
+to do — wait a bit and try once more, or use the manual paste option (which
+runs the login in your own browser).
+
 ## v3.0.100 (2026-08-16)
 
 ### Signing in a Kia/Hyundai car is finally simple
@@ -32,14 +42,6 @@ the hood the sign-in page loads with an "eager" strategy plus a load timeout so
 it no longer parks itself waiting for the page's trackers/reCAPTCHA to settle,
 and cancel closes the browser at the process level rather than relying on the
 busy automation session to notice.
-
-### Clearer message when the provider temporarily blocks sign-in
-
-Kia/Hyundai's login can reject a sign-in as an "abusing request" after several
-attempts from the same connection in a short time. Instead of a raw technical
-error, the setup now recognises that page and explains what happened and what
-to do — wait a bit and try once more, or use the manual paste option (which
-runs the login in your own browser).
 
 ### Fix: the Report page crashed before your first charge
 
