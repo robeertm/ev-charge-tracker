@@ -106,6 +106,28 @@ def get_state():
     return dict(_fetch_state)
 
 
+def _detect_idp_block(url):
+    """If the browser landed on the provider's IdP error page — most notably
+    Hyundai/Kia's anti-abuse block ("...classified as an abusing request and
+    blocked...") that kicks in after several login attempts from the same
+    connection in a short window — return a friendly, actionable message.
+    Otherwise return None. The block is temporary and IP/behaviour based, so
+    the advice is: wait, then retry ONCE, or use the manual paste path (which
+    runs the login in the user's own browser)."""
+    u = (url or '').lower()
+    if 'abusing' in u or ('/error' in u and ('status=400' in u or 'error=' in u)):
+        return (
+            'Der Anbieter (Hyundai/Kia) hat die Anmeldung vorübergehend '
+            'blockiert — das passiert nach mehreren Login-Versuchen von '
+            'derselben Internet-Verbindung in kurzer Zeit. Bitte 1–2 Stunden '
+            'warten und dann NUR EINMAL erneut anmelden (mehrere Versuche '
+            'kurz hintereinander verlängern die Sperre). Alternativ den '
+            'manuellen Weg unten benutzen — er läuft über deinen eigenen '
+            'Browser statt über den Server.'
+        )
+    return None
+
+
 def _do_fetch(brand_key):
     global _fetch_state
     _fetch_state = {'running': True, 'status': 'Starte...', 'token': None, 'error': None}
@@ -224,6 +246,9 @@ def _do_fetch(brand_key):
                 return
             except Exception as wait_exc:
                 last_url = driver.current_url if driver else '(browser down)'
+                blocked = _detect_idp_block(last_url)
+                if blocked:
+                    raise RuntimeError(blocked)
                 raise RuntimeError(
                     f'Timeout beim Warten auf Login-Redirect. '
                     f'Letzte URL: {last_url[:300]}. '
@@ -245,11 +270,15 @@ def _do_fetch(brand_key):
                     current_url = driver.current_url or ''
                     if 'code=' in current_url and final_host in current_url:
                         break
+                    _blocked = _detect_idp_block(current_url)
+                    if _blocked:
+                        raise RuntimeError(_blocked)   # abuse page → stop early
                     time.sleep(1)
                 else:
                     raise RuntimeError(
-                        f'Kein Redirect zur CCSP-URL nach Login. '
-                        f'Letzte URL: {current_url[:300]}'
+                        _detect_idp_block(current_url)
+                        or (f'Kein Redirect zur CCSP-URL nach Login. '
+                            f'Letzte URL: {current_url[:300]}')
                     )
             else:
                 _fetch_state['status'] = 'Auto-Chain erkannt, extrahiere Code...'
