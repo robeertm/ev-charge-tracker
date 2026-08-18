@@ -1,5 +1,35 @@
 # Changelog
 
+## v3.0.104 (2026-08-18)
+
+### Kia/Hyundai sign-in: trim invisible whitespace + name the real causes
+
+A field report of "the credentials are definitely correct but sign-in keeps
+failing" prompted a full re-trace of the EU headless sign-in path. Two concrete
+culprits came out of it — both fixed here.
+
+- **Whitespace in the stored credentials.** The account e-mail was already
+  trimmed on save, but the password was not. A single leading/trailing space
+  (mobile autofill and copy-paste love to add one) makes the manufacturer's
+  identity provider reject the sign-in — and the rejection is byte-for-byte
+  identical to a genuinely wrong password, so it's invisible to the user. The
+  password is now trimmed both on save and at sign-in time, so already-stored
+  credentials are fixed without re-entering anything.
+
+- **Honest, actionable failure message.** Verified live against the Kia EU and
+  Hyundai EU identity providers: they return the *exact same* "back to the login
+  page, no error detail" response for every credential-level rejection — wrong
+  password, unknown account, an account that only signs in via *Sign in with
+  Apple/Google* (which has no usable password), or an account not yet migrated to
+  the current app. The library's terse "check username and password" can't tell
+  these apart. The app now replaces it with a step-by-step German checklist that
+  calls out each of these causes — including the social-login trap, which looks
+  exactly like a wrong password but never is. Consent-required and one-time-code
+  (OTP) rejections now get their own tailored guidance too.
+
+This is a diagnosis-and-messaging release: it does not change *what* counts as a
+valid credential, only how cleanly the app handles and explains a rejection.
+
 ## v3.0.103 (2026-08-18)
 
 ### Clearer Kia/Hyundai sign-in failures — and no more self-inflicted lockouts

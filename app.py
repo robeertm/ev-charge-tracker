@@ -347,7 +347,7 @@ def create_app(config_class=Config):
                 recuperation_kwh_per_km=_f('recuperation_kwh_per_km', '0.086'),
                 api_brand=(AppConfig.get('vehicle_api_brand', '') or '').strip() or None,
                 api_username=(AppConfig.get('vehicle_api_username', '') or '').strip() or None,
-                api_password=(AppConfig.get('vehicle_api_password', '') or '') or None,
+                api_password=(AppConfig.get('vehicle_api_password', '') or '').strip() or None,
                 api_pin=(AppConfig.get('vehicle_api_pin', '') or '').strip() or None,
                 api_region=(AppConfig.get('vehicle_api_region', '') or '').strip() or None,
                 api_vin=(AppConfig.get('vehicle_api_vin', '') or '').strip() or None,
@@ -2401,7 +2401,9 @@ def register_routes(app):
         v.api_username = (request.form.get('api_username', '') or '').strip() or None
         # Password: keep existing when blank (so editing other fields
         # doesn't clear it). New entry with empty password = None.
-        new_pw = request.form.get('api_password', '')
+        # Trim surrounding whitespace: an autofill/copy-paste space makes the
+        # Kia/Hyundai IdP reject the login exactly like a wrong password.
+        new_pw = (request.form.get('api_password', '') or '').strip()
         if new_pw:
             v.api_password = new_pw
         elif not vid:

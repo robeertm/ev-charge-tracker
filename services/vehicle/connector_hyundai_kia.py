@@ -158,6 +158,59 @@ def _is_auth_rejection(err: Exception) -> bool:
     msg = str(err).lower()
     return any(marker in msg for marker in _AUTH_REJECT_MARKERS)
 
+
+def _friendly_auth_message(err: Exception) -> str:
+    """Translate an opaque SDK sign-in failure into an actionable German hint,
+    or return '' when the error is *not* a credential-level rejection (so the
+    caller can still retry transient token/network blips).
+
+    Why this matters: the Kia/Hyundai IdP returns the **exact same** bare
+    "redirect back to /authorize (no code, no error_description)" for *every*
+    credential-level reject — wrong password, unknown account, un-migrated
+    account, social-login-only account. Verified live against Kia EU and
+    Hyundai EU with a throwaway non-existent user: the response is byte-for-byte
+    the signature a real user sees. So the SDK's terse "returned to login page.
+    Check username and password." is technically right but sends the user
+    chasing a password that may well be 'correct' in the app yet unusable here
+    (e.g. the account signs in via Apple/Google and has no real password, or an
+    invisible autofill space slipped into the field). We spell those out."""
+    msg = str(err).lower()
+    if 'consent' in msg or '/web/v1/user/authorization' in msg:
+        return (
+            "Kia/Hyundai verlangt eine einmalige Zustimmung (AGB/Consent), "
+            "bevor die App sich anmelden darf. Bitte melde dich EINMAL über den "
+            "Browser-Login (Server) unten im Assistenten an und bestätige die "
+            "Zustimmung — danach klappt die direkte Anmeldung."
+        )
+    if 'otp' in msg:
+        return (
+            "Dein Kia/Hyundai-Konto verlangt einen Einmalcode (OTP/2-Faktor). "
+            "Die direkte Anmeldung kann keinen OTP abfragen. Bitte 2-Faktor im "
+            "Hersteller-Konto vorübergehend deaktivieren oder den Browser-Login "
+            "(Server) unten nutzen."
+        )
+    if any(m in msg for m in (
+        'login page', 'username and password', 'authentication failed',
+        'invalid credentials', 'unauthorized',
+    )):
+        return (
+            "Kia/Hyundai hat die Anmeldung abgelehnt — das ist KEIN Bann und "
+            "kein Server-Fehler: der Login-Server gibt bei jeder Ablehnung "
+            "dieselbe Antwort. Bitte der Reihe nach prüfen:\n"
+            "1. Passwort exakt wie in der Kia-Connect-/Bluelink-App "
+            "(Groß-/Kleinschreibung, KEIN Leerzeichen am Anfang/Ende).\n"
+            "2. Meldest du dich in der App per „Mit Apple anmelden“ "
+            "oder „Mit Google anmelden“ an? Dann hat dein Konto KEIN "
+            "eigenes Passwort — setze in der App/auf der Hersteller-Website "
+            "zuerst ein echtes Passwort und nutze dieses hier.\n"
+            "3. Richtige Marke gewählt (Kia vs. Hyundai) und Region = EU?\n"
+            "4. E-Mail exakt richtig (kein Tippfehler, keine Groß-/Klein-Falle)?\n"
+            "5. Neues/altes Konto: Ist es bereits in die aktuelle "
+            "Kia-Connect-/Bluelink-App migriert? Wenn du dich dort nicht "
+            "einloggen kannst, geht es hier auch nicht."
+        )
+    return ''
+
 from .base import VehicleConnector, VehicleStatus
 from .registry import register
 
@@ -256,9 +309,25 @@ class _HyundaiKiaBase(VehicleConnector):
         super().__init__(credentials)
         self._vehicle = None
 
+    def _username(self) -> str:
+        # Trim stray surrounding whitespace. The Kia/Hyundai IdP rejects a
+        # username with a leading/trailing space (mobile autofill loves to
+        # append one) and the reject is indistinguishable from a wrong password
+        # — so a single invisible space sends the user chasing 'correct'
+        # credentials for hours.
+        return str(self.credentials.get('username') or '').strip()
+
+    def _password(self) -> str:
+        # Same defensive trim for the password. The provider's own signup form
+        # trims, so a stored password with surrounding whitespace is virtually
+        # always a copy-paste/autofill artifact — and it fails with the exact
+        # same "returned to login page" reject as a genuine typo. Legacy 48-char
+        # refresh_tokens contain no spaces, so trimming never harms them.
+        return str(self.credentials.get('password') or '').strip()
+
     @property
     def _cache_key(self):
-        return f"{self.BRAND_ID}:{self.credentials.get('username', '')}"
+        return f"{self.BRAND_ID}:{self._username()}"
 
     def _get_manager(self) -> 'VehicleManager':
         key = self._cache_key
@@ -267,7 +336,7 @@ class _HyundaiKiaBase(VehicleConnector):
         # built it — e.g. the user just entered/updated the account password in
         # the setup wizard. Without this, a retry after a password fix would
         # keep re-using the old (wrong) password baked into the cached manager.
-        if mgr is not None and getattr(mgr, 'password', None) != self.credentials['password']:
+        if mgr is not None and getattr(mgr, 'password', None) != self._password():
             _managers.pop(key, None)
             mgr = None
         if mgr is None:
@@ -277,8 +346,8 @@ class _HyundaiKiaBase(VehicleConnector):
             mgr = _managers[key] = VehicleManager(
                 region=region,
                 brand=self.BRAND_ID,
-                username=self.credentials['username'],
-                password=self.credentials['password'],
+                username=self._username(),
+                password=self._password(),
                 pin=self.credentials.get('pin', ''),
             )
         return mgr
@@ -290,7 +359,7 @@ class _HyundaiKiaBase(VehicleConnector):
         WAF-blocked browser authorize and the provider returns a misleading
         "check username and password" — sending the user chasing a password
         that is actually correct."""
-        cred = self.credentials.get('password', '')
+        cred = self._password()
         if _looks_like_refresh_token(cred):
             return  # legacy token path works on every SDK — nothing to check
         ver = _installed_sdk_version()
@@ -316,10 +385,11 @@ class _HyundaiKiaBase(VehicleConnector):
             # A credential rejection won't fix itself on retry — and every extra
             # login attempt nudges the account toward a provider captcha/lockout.
             # Fail fast on those; only retry once for transient token/network blips.
-            if _is_auth_rejection(e):
+            friendly = _friendly_auth_message(e)
+            if friendly:
                 logger.warning(f"Kia/Hyundai sign-in rejected (no retry): {e}")
                 _managers.pop(self._cache_key, None)
-                raise
+                raise RuntimeError(friendly) from e
             logger.warning(f"Token refresh failed, retrying once: {e}")
             _managers.pop(self._cache_key, None)
             mgr = self._get_manager()
