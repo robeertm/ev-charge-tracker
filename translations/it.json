@@ -228,6 +228,7 @@
   "err.current_password_wrong": "Password attuale errata.",
   "err.db_file_not_found": "File del database non trovato.",
   "err.import_failed": "Importazione non riuscita: {error}",
+  "err.kia_hyundai_no_credential": "Nessuna credenziale salvata. Salva la password o il token in Impostazioni → «API veicolo».",
   "err.kia_hyundai_only": "Disponibile solo per Kia/Hyundai.",
   "err.luks_helper_missing": "Helper di sblocco automatico non installato. Necessario aggiornamento a v3.0.3 o successiva.",
   "err.new_password_mismatch": "La nuova password e la conferma non coincidono.",

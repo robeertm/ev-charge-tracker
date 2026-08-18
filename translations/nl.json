@@ -228,6 +228,7 @@
   "err.current_password_wrong": "Huidig wachtwoord onjuist.",
   "err.db_file_not_found": "Databasebestand niet gevonden.",
   "err.import_failed": "Import mislukt: {error}",
+  "err.kia_hyundai_no_credential": "Geen inloggegevens opgeslagen. Sla je wachtwoord of token op onder Instellingen → \"Voertuig-API\".",
   "err.kia_hyundai_only": "Alleen beschikbaar voor Kia/Hyundai.",
   "err.luks_helper_missing": "Auto-ontgrendel-helper niet geïnstalleerd. Update naar v3.0.3 of nieuwer vereist.",
   "err.new_password_mismatch": "Nieuw wachtwoord en bevestiging komen niet overeen.",

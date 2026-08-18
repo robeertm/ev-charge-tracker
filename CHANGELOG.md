@@ -1,5 +1,38 @@
 # Changelog
 
+## v3.0.110 (2026-08-18)
+
+### "Ungültiger Token" gone from a working Kia/Hyundai password login
+
+With the connection finally up and the background sync reporting **Sync OK**,
+the dashboard still refused a manual live refresh with:
+
+> `Ungültiger Token. Bitte unter Einstellungen → Token holen.`
+
+A green "Sync OK" chip next to an "invalid token" banner on the same card — the
+two could not both be true, and they weren't.
+
+Root cause: the `/api/vehicle/status` endpoint carried a leftover credential
+format guard from the token-only era. For Kia/Hyundai it insisted the stored
+credential match `^[A-Z0-9]{48}$` — the shape of the old 48-char refresh token.
+Since the headless CCI password sign-in landed (SDK ≥4.26.3 on the Python 3.12
+container image), the stored credential is normally a **plain account
+password**, which never matches that pattern. So every manual/live status call
+was rejected up front, even though the background sync — which goes straight
+through the connector and never saw that guard — authenticated and pulled data
+just fine.
+
+- **Format guessing removed.** The endpoint no longer tries to tell a password
+  from a token by its shape. It only checks that *some* credential is stored and
+  then lets the connector authenticate. The connector already auto-detects
+  password-vs-token and raises real, actionable errors
+  (`_check_sdk_supports_credential`, auth-rejection handling), so any genuine
+  credential problem still surfaces — with an accurate message, not a guess.
+- **Honest empty-credential message.** When nothing is stored, the endpoint now
+  returns a clear "no credentials stored — save your password or token" hint
+  (`err.kia_hyundai_no_credential`) instead of the misleading token wording.
+  Added in all six languages.
+
 ## v3.0.109 (2026-08-18)
 
 ### Daily trip reconcile no longer crashes on a UNIQUE-constraint clash

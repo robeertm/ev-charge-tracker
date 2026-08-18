@@ -228,6 +228,7 @@
   "err.current_password_wrong": "Current password is wrong.",
   "err.db_file_not_found": "Database file not found.",
   "err.import_failed": "Import failed: {error}",
+  "err.kia_hyundai_no_credential": "No credentials stored. Please save your password or token under Settings → \"Vehicle API\".",
   "err.kia_hyundai_only": "Only available for Kia/Hyundai.",
   "err.luks_helper_missing": "Auto-unlock helper not installed. Update to v3.0.3 or newer required.",
   "err.new_password_mismatch": "New password and confirmation don't match.",

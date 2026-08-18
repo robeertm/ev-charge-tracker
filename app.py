@@ -4435,12 +4435,20 @@ def register_routes(app):
         force = request.args.get('force', '0') == '1'
         confirm_low_12v = request.args.get('confirm_low_12v', '0') == '1'
 
-        # Validate token format for Kia/Hyundai
+        # v3.0.110: Kia/Hyundai no longer uses ONLY the 48-char refresh token.
+        # Since the headless CCI password sign-in (SDK >=4.26.3, Python >=3.12,
+        # shipped in the v3.0.108 container) the stored credential is normally a
+        # plain account password — which never matches the old ^[A-Z0-9]{48}$
+        # token shape. The former format guard therefore rejected a perfectly
+        # working password login with "Ungültiger Token", even while the
+        # background sync (which goes straight through the connector) reported
+        # "Sync OK" — the exact contradiction on ev-rainer's dashboard. We drop
+        # the format guessing entirely: only require *some* credential and let
+        # the connector auto-detect password-vs-token and raise real, actionable
+        # errors (see connector_hyundai_kia._check_sdk_supports_credential).
         if brand in ('kia', 'hyundai'):
-            import re as _re
-            token = AppConfig.get('vehicle_api_password', '')
-            if not _re.match(r'^[A-Z0-9]{48}$', token):
-                return jsonify({'error': 'Ungültiger Token. Bitte unter Einstellungen → Token holen.'}), 400
+            if not (AppConfig.get('vehicle_api_password', '') or '').strip():
+                return jsonify({'error': t('err.kia_hyundai_no_credential')}), 400
 
         # v3.0.12: 12 V lockout — block manual force-refresh when the
         # last reading is below threshold, unless the caller has

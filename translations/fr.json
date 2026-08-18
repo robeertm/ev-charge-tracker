@@ -228,6 +228,7 @@
   "err.current_password_wrong": "Mot de passe actuel incorrect.",
   "err.db_file_not_found": "Fichier de base de données introuvable.",
   "err.import_failed": "Échec de l'import : {error}",
+  "err.kia_hyundai_no_credential": "Aucun identifiant enregistré. Veuillez enregistrer votre mot de passe ou jeton dans Paramètres → « API véhicule ».",
   "err.kia_hyundai_only": "Disponible uniquement pour Kia/Hyundai.",
   "err.luks_helper_missing": "Helper de déverrouillage auto non installé. Mise à jour vers v3.0.3 ou plus requise.",
   "err.new_password_mismatch": "Le nouveau mot de passe et la confirmation ne correspondent pas.",
