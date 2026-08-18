@@ -1,5 +1,32 @@
 # Changelog
 
+## v3.0.107 (2026-08-18)
+
+### Kia/Hyundai on Python 3.11: stop pointing at an impossible SDK update
+
+The v3.0.105/106 "update Kia/Hyundai package" button assumed the connector could
+always be upgraded to the version with the direct password sign-in
+(`hyundai-kia-connect-api` ≥ 4.26.3). On a Python 3.11 box that is false: every
+release from 4.23.1 onward declares `Requires-Python >=3.12`, so the newest
+*installable* SDK is 4.23.0 — which predates the password sign-in entirely.
+Raspberry Pi OS bookworm ships Python 3.11, so on those boxes the update button
+just produced a wall of `Ignored the following versions...` / `No matching
+distribution found`. The credentials were never the problem; the box's Python is
+simply too old for that login path.
+
+- **Honest guard message.** When the stored credential is a password, the SDK is
+  too old, *and* Python is < 3.12, the sync error now says the update cannot fix
+  it on this Python and points to the manual browser token login instead of an
+  impossible package upgrade.
+- **No doomed pip run.** The install endpoint refuses the Kia/Hyundai upgrade up
+  front on Python < 3.12 with an actionable message, rather than letting pip fail
+  with an unreadable version wall.
+- **Settings page adapts.** On Python < 3.12 the "update package" button is
+  replaced by a note explaining the login must use the manual browser token flow
+  (store the token instead of the password). On Python ≥ 3.12 the update button
+  is unchanged.
+- New translation keys in all six languages.
+
 ## v3.0.106 (2026-08-18)
 
 ### Kia/Hyundai package update: show the real failure and make the upgrade actually succeed

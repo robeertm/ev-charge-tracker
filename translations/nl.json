@@ -583,6 +583,8 @@
   "set.api_kia_update_title": "Kia/Hyundai-aanmelding verouderd",
   "set.api_kia_update_hint": "De geïnstalleerde fabrikant-aanmelding (hyundai-kia-connect-api {version}) is te oud voor directe wachtwoordaanmelding — minimaal 4.26.3 vereist. Werk nu bij en meld daarna opnieuw aan.",
   "set.api_kia_update_btn": "Kia/Hyundai-pakket bijwerken",
+  "set.api_kia_python_old_title": "Kia/Hyundai-login hier niet bij te werken",
+  "set.api_kia_python_old_hint": "De geïnstalleerde login (hyundai-kia-connect-api {version}) is te oud voor de directe aanmelding met wachtwoord — maar nieuwere versies vereisen Python ≥3.12, dat deze box niet heeft. Een pakketupdate kan dit niet verhelpen. Gebruik hieronder in de assistent de handmatige browser-token-login en sla het verkregen token op in plaats van het wachtwoord.",
   "set.api_install_restart": "App start opnieuw op om het nieuwe pakket te laden …",
   "set.api_installed": "Geïnstalleerd",
   "set.api_installing": "Installeren...",

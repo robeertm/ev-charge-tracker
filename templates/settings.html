@@ -618,7 +618,19 @@
                     {% if 'mg' not in installed_brand_keys %}{% set _ = missing_packages.append(('mg', 'MG (SAIC)')) %}{% endif %}
                     {% if 'smart' not in installed_brand_keys %}{% set _ = missing_packages.append(('smart', 'Smart #1/#3')) %}{% endif %}
                     {% if 'porsche' not in installed_brand_keys %}{% set _ = missing_packages.append(('porsche', 'Porsche')) %}{% endif %}
-                    {% if hyundai_kia_sdk_outdated %}
+                    {% if hyundai_kia_sdk_outdated and hyundai_kia_python_too_old %}
+                    {# Connector too old AND Python <3.12 — the CCI-capable SDK
+                       can never be installed here, so DON'T offer the update
+                       button (it would just fail with "No matching distribution
+                       found"). Point the user to the manual browser token flow. #}
+                    <div class="mb-3">
+                        <div class="alert alert-warning py-2 mb-2 small">
+                            <strong><i class="bi bi-exclamation-triangle"></i>
+                            {{ t('set.api_kia_python_old_title') }}</strong><br>
+                            {{ t('set.api_kia_python_old_hint', version=hyundai_kia_sdk_version) }}
+                        </div>
+                    </div>
+                    {% elif hyundai_kia_sdk_outdated %}
                     {# Kia/Hyundai connector is installed but too old for the
                        headless CCI password sign-in. It won't appear under
                        "missing packages", so offer an explicit update here. #}
@@ -648,7 +660,10 @@
                             </button>
                             {% endfor %}
                         </div>
-                        {% if not hyundai_kia_sdk_outdated %}<div id="installStatus" class="small"></div>{% endif %}
+                        {# Only the update-button block (outdated AND python new enough)
+                           renders its own #installStatus; render ours otherwise so
+                           the other brands' install buttons still have a status sink. #}
+                        {% if not (hyundai_kia_sdk_outdated and not hyundai_kia_python_too_old) %}<div id="installStatus" class="small"></div>{% endif %}
                     </div>
                     {% endif %}
 

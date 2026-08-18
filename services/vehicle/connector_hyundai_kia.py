@@ -15,6 +15,7 @@ password parameter.
 """
 import concurrent.futures
 import logging
+import sys
 from datetime import datetime, date as _date
 
 # BlueLink/UVO force_refresh wakes the car's AVN over cellular and waits
@@ -119,6 +120,23 @@ except ImportError:
 # provider bounces back with "returned to login page" — a misleading error that
 # looks like a wrong password. We guard against that and tell the user to update.
 _MIN_CCI_VERSION = (4, 26, 3)
+
+# ...but every hyundai_kia_connect_api release from 4.23.1 onward declares
+# Requires-Python >=3.12 (upstream dropped the 3.11 wheels). So on a Python 3.11
+# box — Raspberry Pi OS bookworm ships 3.11 — the newest *installable* SDK is
+# 4.23.0, which predates the CCI sign-in entirely. No amount of "update the
+# package" can help there: `pip install 'hyundai-kia-connect-api>=4.26.5'` just
+# fails with "No matching distribution found" (ev-rainer's box). Such installs
+# MUST use the manual browser token flow (store a refresh_token, not a password).
+# We detect this so the guard/UI stop pointing at an impossible upgrade.
+_CCI_MIN_PYTHON = (3, 12)
+
+
+def _python_supports_cci() -> bool:
+    """True if this interpreter is new enough to install an SDK with the
+    headless CCI password sign-in. On Python <3.12 the password login is
+    permanently unavailable (see _CCI_MIN_PYTHON)."""
+    return sys.version_info[:2] >= _CCI_MIN_PYTHON
 
 # Substrings the provider/SDK returns when it *rejected the credentials* (as
 # opposed to a transient network/token blip). Retrying these is pointless and
@@ -364,6 +382,20 @@ class _HyundaiKiaBase(VehicleConnector):
             return  # legacy token path works on every SDK — nothing to check
         ver = _installed_sdk_version()
         if ver and _version_tuple(ver) < _MIN_CCI_VERSION:
+            if not _python_supports_cci():
+                # The upgrade the old message points at can NEVER succeed on
+                # this box — every SDK with the CCI login needs Python >=3.12.
+                # Telling the user to "update the package" sends them into the
+                # exact "No matching distribution found" wall ev-rainer hit.
+                py = f"{sys.version_info.major}.{sys.version_info.minor}"
+                raise RuntimeError(
+                    f"Die direkte Passwort-Anmeldung braucht hyundai-kia-connect-api "
+                    f"≥4.26.3, aber alle Versionen ab 4.23.1 verlangen Python ≥3.12 — "
+                    f"diese Box läuft auf Python {py} (installiert: {ver}). Ein "
+                    f"Paket-Update kann das NICHT beheben. Bitte stattdessen unten im "
+                    f"Assistenten den manuellen Browser-Token-Login nutzen und den "
+                    f"erhaltenen Token statt des Passworts speichern."
+                )
             raise RuntimeError(
                 f"Der installierte Hersteller-Login (hyundai-kia-connect-api "
                 f"{ver}) ist zu alt für die direkte Passwort-Anmeldung — "

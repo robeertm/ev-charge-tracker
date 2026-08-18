@@ -583,6 +583,8 @@
   "set.api_kia_update_title": "Kia/Hyundai-Login veraltet",
   "set.api_kia_update_hint": "Der installierte Hersteller-Login (hyundai-kia-connect-api {version}) ist zu alt für die direkte Passwort-Anmeldung — mindestens 4.26.3 nötig. Jetzt aktualisieren und danach neu anmelden.",
   "set.api_kia_update_btn": "Kia/Hyundai-Paket aktualisieren",
+  "set.api_kia_python_old_title": "Kia/Hyundai-Login hier nicht aktualisierbar",
+  "set.api_kia_python_old_hint": "Der installierte Login (hyundai-kia-connect-api {version}) ist zu alt für die direkte Passwort-Anmeldung — neuere Versionen brauchen aber Python ≥3.12, das diese Box nicht hat. Ein Paket-Update kann das nicht beheben. Bitte unten im Assistenten den manuellen Browser-Token-Login nutzen und den erhaltenen Token statt des Passworts speichern.",
   "set.api_install_restart": "App startet neu, um neues Paket zu laden …",
   "set.api_installed": "Installiert",
   "set.api_installing": "Installiere...",

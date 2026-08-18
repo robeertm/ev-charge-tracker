@@ -3632,15 +3632,21 @@ def register_routes(app):
         # update-required flag so the settings page can offer the button.
         hyundai_kia_sdk_outdated = False
         hyundai_kia_sdk_version = ''
+        # On Python <3.12 the connector can never be upgraded to the CCI-capable
+        # SDK (>=4.23.1 all require 3.12), so the "update" button is a dead end —
+        # the template must offer the manual token flow instead of a doomed pip run.
+        hyundai_kia_python_too_old = False
         if 'kia' in installed_brand_keys or 'hyundai' in installed_brand_keys:
             try:
                 from services.vehicle.connector_hyundai_kia import (
                     _installed_sdk_version, _version_tuple, _MIN_CCI_VERSION,
+                    _python_supports_cci,
                 )
                 hyundai_kia_sdk_version = _installed_sdk_version()
                 if (hyundai_kia_sdk_version
                         and _version_tuple(hyundai_kia_sdk_version) < _MIN_CCI_VERSION):
                     hyundai_kia_sdk_outdated = True
+                    hyundai_kia_python_too_old = not _python_supports_cci()
             except Exception:
                 pass
 
@@ -3724,6 +3730,7 @@ def register_routes(app):
                                installed_brand_keys=installed_brand_keys,
                                hyundai_kia_sdk_outdated=hyundai_kia_sdk_outdated,
                                hyundai_kia_sdk_version=hyundai_kia_sdk_version,
+                               hyundai_kia_python_too_old=hyundai_kia_python_too_old,
                                api_target_vehicle=_picker_v,
                                vehicle_api_brand=_api_field('api_brand', 'vehicle_api_brand'),
                                vehicle_api_username=_api_field('api_username', 'vehicle_api_username'),
@@ -4166,6 +4173,26 @@ def register_routes(app):
         packages = PACKAGES.get(pkg_key)
         if not packages:
             return jsonify({'success': False, 'error': f'Unbekanntes Paket: {pkg_key}'}), 400
+
+        # Python <3.12 can never install an SDK with the CCI password login
+        # (every release >=4.23.1 requires Python >=3.12). Refuse the doomed
+        # upgrade up front with an actionable message instead of letting pip
+        # fail with a wall of "Ignored the following versions..." / "No matching
+        # distribution found" (ev-rainer's box).
+        if pkg_key == 'hyundai-kia' and upgrade:
+            try:
+                from services.vehicle.connector_hyundai_kia import _python_supports_cci
+                if not _python_supports_cci():
+                    return jsonify({'success': False, 'error': (
+                        f"Diese Box läuft auf Python {sys.version_info.major}."
+                        f"{sys.version_info.minor}. Die direkte Passwort-Anmeldung "
+                        f"braucht hyundai-kia-connect-api ≥4.26.3, aber alle neueren "
+                        f"Versionen verlangen Python ≥3.12 — ein Update ist hier "
+                        f"technisch nicht möglich. Bitte den manuellen Browser-"
+                        f"Token-Login nutzen (Token statt Passwort speichern)."
+                    )}), 400
+            except ImportError:
+                pass
 
         pip_args = ['install']
         if upgrade and pkg_key == 'hyundai-kia':

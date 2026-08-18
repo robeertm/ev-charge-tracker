@@ -583,6 +583,8 @@
   "set.api_kia_update_title": "Inicio de sesión Kia/Hyundai obsoleto",
   "set.api_kia_update_hint": "El inicio de sesión del fabricante instalado (hyundai-kia-connect-api {version}) es demasiado antiguo para el acceso directo con contraseña — se requiere al menos 4.26.3. Actualiza ahora y vuelve a iniciar sesión.",
   "set.api_kia_update_btn": "Actualizar paquete Kia/Hyundai",
+  "set.api_kia_python_old_title": "El inicio de sesión Kia/Hyundai no se puede actualizar aquí",
+  "set.api_kia_python_old_hint": "El inicio de sesión instalado (hyundai-kia-connect-api {version}) es demasiado antiguo para el acceso directo con contraseña, pero las versiones más nuevas requieren Python ≥3.12, del que este equipo carece. Una actualización del paquete no puede solucionarlo. Utiliza el inicio de sesión manual por token del navegador que aparece abajo en el asistente y guarda el token obtenido en lugar de la contraseña.",
   "set.api_install_restart": "La app se está reiniciando para cargar el paquete nuevo …",
   "set.api_installed": "Instalado",
   "set.api_installing": "Instalando...",

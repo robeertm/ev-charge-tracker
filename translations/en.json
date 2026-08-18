@@ -582,6 +582,8 @@
   "set.api_kia_update_title": "Kia/Hyundai sign-in outdated",
   "set.api_kia_update_hint": "The installed manufacturer sign-in (hyundai-kia-connect-api {version}) is too old for direct password login — at least 4.26.3 is required. Update now, then sign in again.",
   "set.api_kia_update_btn": "Update Kia/Hyundai package",
+  "set.api_kia_python_old_title": "Kia/Hyundai login can't be updated here",
+  "set.api_kia_python_old_hint": "The installed login (hyundai-kia-connect-api {version}) is too old for the direct password sign-in — but newer versions require Python ≥3.12, which this box doesn't have. A package update can't fix this. Please use the manual browser token login below in the wizard and store the resulting token instead of the password.",
   "set.api_install_restart": "App is restarting to load the new package …",
   "set.api_installed": "Installed",
   "set.api_installing": "Installing...",
