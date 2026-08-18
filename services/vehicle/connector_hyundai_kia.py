@@ -111,6 +111,53 @@ try:
 except ImportError:
     HAS_HYUNDAI_KIA = False
 
+# First hyundai_kia_connect_api release with the headless CCI password sign-in
+# (RSA-encrypted password against the OneApp client_id, bypasses the IdP WAF
+# that blocks the legacy browser authorize — upstream #1273). If the box has an
+# older SDK and the user stored a *password* (not a legacy refresh_token), the
+# old code path silently falls back to the blocked browser authorize and the
+# provider bounces back with "returned to login page" — a misleading error that
+# looks like a wrong password. We guard against that and tell the user to update.
+_MIN_CCI_VERSION = (4, 26, 3)
+
+# Substrings the provider/SDK returns when it *rejected the credentials* (as
+# opposed to a transient network/token blip). Retrying these is pointless and
+# risky: each extra login attempt pushes the account closer to a real captcha /
+# temporary lockout (the "browser closes with a short message" symptom).
+_AUTH_REJECT_MARKERS = (
+    'login page', 'username and password', 'authentication failed',
+    'invalid credentials', 'unauthorized', 'otp',
+)
+
+
+def _installed_sdk_version() -> str:
+    try:
+        from importlib.metadata import version
+        return version('hyundai_kia_connect_api')
+    except Exception:
+        return ''
+
+
+def _version_tuple(v: str) -> tuple:
+    parts = []
+    for chunk in (v or '').split('.')[:3]:
+        digits = ''.join(ch for ch in chunk if ch.isdigit())
+        parts.append(int(digits) if digits else 0)
+    return tuple(parts) or (0,)
+
+
+def _looks_like_refresh_token(cred: str) -> bool:
+    """Legacy refresh tokens are long opaque strings with no '@' or spaces.
+    A real account password is typically shorter and/or contains neither.
+    Used only to decide whether the SDK-version guard applies — the SDK does
+    its own robust auto-detection at login time."""
+    return bool(cred) and len(cred) >= 40 and '@' not in cred and ' ' not in cred
+
+
+def _is_auth_rejection(err: Exception) -> bool:
+    msg = str(err).lower()
+    return any(marker in msg for marker in _AUTH_REJECT_MARKERS)
+
 from .base import VehicleConnector, VehicleStatus
 from .registry import register
 
@@ -236,8 +283,28 @@ class _HyundaiKiaBase(VehicleConnector):
             )
         return mgr
 
+    def _check_sdk_supports_credential(self):
+        """Raise a clear, actionable error when the stored credential is a
+        plain account password but the installed SDK is too old to do the
+        headless CCI sign-in. Without this the old SDK silently tries the
+        WAF-blocked browser authorize and the provider returns a misleading
+        "check username and password" — sending the user chasing a password
+        that is actually correct."""
+        cred = self.credentials.get('password', '')
+        if _looks_like_refresh_token(cred):
+            return  # legacy token path works on every SDK — nothing to check
+        ver = _installed_sdk_version()
+        if ver and _version_tuple(ver) < _MIN_CCI_VERSION:
+            raise RuntimeError(
+                f"Der installierte Hersteller-Login (hyundai-kia-connect-api "
+                f"{ver}) ist zu alt für die direkte Passwort-Anmeldung — "
+                f"mindestens 4.26.3 nötig. Bitte in den Einstellungen unter "
+                f"\"Fahrzeug-API\" das Paket aktualisieren und neu anmelden."
+            )
+
     def _ensure_auth(self):
-        """Refresh the access token using the stored refresh_token."""
+        """Refresh the access token (headless CCI sign-in on first call)."""
+        self._check_sdk_supports_credential()
         mgr = self._get_manager()
         try:
             return _call_with_deadline(
@@ -246,8 +313,14 @@ class _HyundaiKiaBase(VehicleConnector):
         except TimeoutError:
             raise
         except Exception as e:
-            # If token refresh fails, clear cache and retry once
-            logger.warning(f"Token refresh failed, retrying: {e}")
+            # A credential rejection won't fix itself on retry — and every extra
+            # login attempt nudges the account toward a provider captcha/lockout.
+            # Fail fast on those; only retry once for transient token/network blips.
+            if _is_auth_rejection(e):
+                logger.warning(f"Kia/Hyundai sign-in rejected (no retry): {e}")
+                _managers.pop(self._cache_key, None)
+                raise
+            logger.warning(f"Token refresh failed, retrying once: {e}")
             _managers.pop(self._cache_key, None)
             mgr = self._get_manager()
             return _call_with_deadline(

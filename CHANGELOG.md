@@ -1,5 +1,35 @@
 # Changelog
 
+## v3.0.103 (2026-08-18)
+
+### Clearer Kia/Hyundai sign-in failures — and no more self-inflicted lockouts
+
+The headless password sign-in from v3.0.102 works, but when it failed it only
+showed the library's raw message ("Authentication failed — returned to login
+page. Check username and password."). That message hides two very different
+problems behind the same wording, so this release separates them:
+
+- **Outdated sign-in library.** The headless password sign-in needs
+  hyundai-kia-connect-api 4.26.3 or newer. If an older version is installed and
+  you enter an account password, the old library silently falls back to the
+  blocked browser flow and the provider bounces back with the same misleading
+  "check username and password" — even when the password is perfectly correct.
+  The app now detects the old library up front and tells you to update it in
+  **Settings → Vehicle API** instead of letting you chase a password that was
+  never wrong.
+
+- **No more retry-on-rejection.** When the provider *rejects* the credentials,
+  the app used to immediately retry the sign-in a second time. Every extra
+  attempt pushes the account closer to a real captcha or a short temporary
+  lockout — the exact "browser closes with a brief message" symptom. A genuine
+  rejection now fails fast with no retry; only transient network/token blips are
+  retried.
+
+If your password sign-in still fails after updating, the credentials really are
+being rejected by the provider — double-check the account e-mail and password in
+the manufacturer's own app, and make sure the account isn't in a cooldown from
+earlier repeated attempts.
+
 ## v3.0.102 (2026-08-18)
 
 ### Sign in to a Kia/Hyundai car with just your password again
