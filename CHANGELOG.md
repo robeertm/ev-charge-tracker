@@ -1,5 +1,30 @@
 # Changelog
 
+## v3.0.108 (2026-08-18)
+
+### Container image moves to Python 3.12 — a way out of the Kia/Hyundai dead end
+
+v3.0.105–107 established that the direct Kia/Hyundai password sign-in needs
+`hyundai-kia-connect-api` ≥ 4.26.3, and that every SDK release from 4.23.1 onward
+declares `Requires-Python >=3.12`. A native install on Raspberry Pi OS bookworm
+(Python 3.11) therefore can never install that SDK, and the app's runtime guard
+correctly routes those users to the manual browser token flow.
+
+The container image is the escape hatch: it bundles its own interpreter, so it
+does not have to inherit the host's Python 3.11.
+
+- **Base image bumped from `python:3.11-slim` to `python:3.12-slim`.** Inside the
+  container the runtime guard (`_python_supports_cci`, driven by
+  `sys.version_info`) now reports 3.12, so the guard lifts automatically and the
+  direct password sign-in becomes installable from the Fahrzeug-API page —
+  without any code change to the guard itself.
+- **No behaviour change for native installs.** Boxes running the app directly on
+  the host Python are unaffected; the honest 3.11 guard and manual token flow
+  from v3.0.107 stay exactly as they were.
+- Verified that all pinned dependencies (pandas 2.2.3, matplotlib, Flask,
+  SQLAlchemy, cryptography, …) ship cp312 manylinux aarch64 wheels, so the image
+  still builds on ARM/Raspberry Pi without source compilation.
+
 ## v3.0.107 (2026-08-18)
 
 ### Kia/Hyundai on Python 3.11: stop pointing at an impossible SDK update
