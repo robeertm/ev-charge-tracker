@@ -1,5 +1,52 @@
 # Changelog
 
+## v3.0.109 (2026-08-18)
+
+### Daily trip reconcile no longer crashes on a UNIQUE-constraint clash
+
+Now that a Kia/Hyundai connection is finally established, the background sync
+started pulling the server-side trip list — and the daily trip reconcile began
+failing with:
+
+> `Daily trip reconcile failed: … (sqlite3.IntegrityError) UNIQUE constraint
+> failed: vehicle_trips.start_time`
+
+Root cause: `vehicle_trips` carried a **global** `UNIQUE(start_time)`, but the
+trip-ingest code has always assumed uniqueness is **per vehicle** — it scopes
+its "does this trip already exist?" check by `vehicle_id`. When a trip's
+`start_time` collided with a row stored under a different `vehicle_id` (e.g. a
+legacy `vehicle_id = NULL` row from before the multi-vehicle migration), the
+existence check missed it, the INSERT hit the global constraint, and the whole
+reconcile transaction rolled back.
+
+- **Schema fixed to match intent.** The bare `UNIQUE(start_time)` is replaced by
+  a composite `UNIQUE(vehicle_id, start_time)`. Two cars in a fleet can now
+  legitimately start a trip in the same wall-clock second without one clobbering
+  the other.
+- **Migration for existing installs.** SQLite stores a column-level `UNIQUE` as
+  an internal auto-index that `DROP INDEX` cannot remove, so the migration
+  rebuilds `vehicle_trips` with the composite constraint and copies every row
+  across. The new constraint is strictly looser than the old one, so the copy
+  can never fail on existing data. It is guarded by an `AppConfig` flag and only
+  runs when the old bare-`start_time` unique is actually detected; a failed
+  rebuild is not marked done, so it retries on the next boot.
+
+### Dashboard always shows the car, even before the first charge
+
+Kia/Hyundai charges are auto-detected, so a freshly-connected car reports live
+data (SoC, odometer, sync health) long before any charge session exists. The
+dashboard, however, hid its **entire** body — the vehicle live-status card
+included — behind a single `{% if not stats %}` gate that is only satisfied once
+at least one charge has been recorded. A connected car with zero charges
+therefore showed only the "no data / add first charge" empty state.
+
+- The vehicle live-status card and the vehicle-history charts now render
+  regardless of whether any charge exists yet — they have always been driven by
+  live sync data, not charge data.
+- The charge-statistics section (KPI cards, cost charts, AC/DC and yearly
+  tables) keeps its empty state, but that empty state now replaces only the
+  stats block, not the car. The "Erste Ladung" / Einstellungen shortcuts stay.
+
 ## v3.0.108 (2026-08-18)
 
 ### Container image moves to Python 3.12 — a way out of the Kia/Hyundai dead end

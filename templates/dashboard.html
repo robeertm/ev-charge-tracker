@@ -55,15 +55,13 @@
         </div>
     </div>
 </div>
-{% if not stats %}
-<div class="text-center py-5">
-    <i class="bi bi-database-x display-1 text-muted"></i>
-    <h3 class="mt-3 text-muted">{{ t('dash.no_data') }}</h3>
-    <p class="text-muted">{{ t('dash.no_data_hint') }}</p>
-    <a href="/input" class="btn btn-primary btn-lg mt-2"><i class="bi bi-plus-circle"></i> {{ t('dash.first_charge') }}</a>
-    <a href="/settings" class="btn btn-outline-secondary btn-lg mt-2"><i class="bi bi-gear"></i> Einstellungen</a>
-</div>
-{% else %}
+{# v3.0.109: the vehicle live-status card and its history charts render
+   regardless of whether any charge exists yet. Kia/Hyundai charges are
+   auto-detected, so a freshly-connected car has live data (SoC, odometer,
+   sync) but zero charges — the old `{% if not stats %}` gate hid the whole
+   dashboard, car included, until the first charge landed. The empty-state
+   for the charge statistics now sits further down and only replaces the
+   KPI/stats section, not the car. #}
 
 <!-- Fahrzeug Live Status -->
 {% if vehicle_configured %}
@@ -788,6 +786,20 @@
 })();
 </script>
 {% endif %}
+
+{# Charge-statistics section. Everything below is charge-derived, so it
+   is gated on `stats`. With a connected car but no charges yet, the car
+   card + history above still render; here we show a compact empty state
+   instead of the KPI cards, charts and tables. #}
+{% if not stats %}
+<div class="text-center py-5">
+    <i class="bi bi-database-x display-1 text-muted"></i>
+    <h3 class="mt-3 text-muted">{{ t('dash.no_data') }}</h3>
+    <p class="text-muted">{{ t('dash.no_data_hint') }}</p>
+    <a href="/input" class="btn btn-primary btn-lg mt-2"><i class="bi bi-plus-circle"></i> {{ t('dash.first_charge') }}</a>
+    <a href="/settings" class="btn btn-outline-secondary btn-lg mt-2"><i class="bi bi-gear"></i> Einstellungen</a>
+</div>
+{% else %}
 
 <!-- Range / Highlights / Weather row -->
 <div class="row g-2 mb-3" id="extrasRow">

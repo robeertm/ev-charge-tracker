@@ -205,6 +205,88 @@ def create_app(config_class=Config):
         except Exception:
             pass  # fresh install — create_all() handles it
 
+        # ── v3.0.109: vehicle_trips uniqueness per vehicle ────────────
+        # Old schema had a bare UNIQUE(start_time). In a multi-vehicle
+        # fleet two cars can legitimately start a trip at the same second,
+        # and the ingest code scopes its dedup check by vehicle_id — so the
+        # second car's INSERT tripped the global constraint and rolled back
+        # the whole daily reconcile ("UNIQUE constraint failed:
+        # vehicle_trips.start_time"). SQLite stores a column-level UNIQUE as
+        # an internal auto-index that DROP INDEX can't touch, so we rebuild
+        # the table with the composite UNIQUE(vehicle_id, start_time). The
+        # new constraint is strictly looser than the old one, so existing
+        # rows always satisfy it — the copy can't fail on duplicates.
+        if AppConfig.get('vehicle_trips_uq_composite_v3_0_109', '') != 'done':
+            try:
+                vt_cols = {c['name'] for c in inspector.get_columns('vehicle_trips')}
+            except Exception:
+                vt_cols = set()  # fresh install — create_all built it correctly already
+            rebuild_ok = True
+            if vt_cols:
+                # Detect the old bare-start_time unique (constraint or auto-index).
+                needs_rebuild = False
+                try:
+                    for uc in inspector.get_unique_constraints('vehicle_trips'):
+                        if uc.get('column_names') == ['start_time']:
+                            needs_rebuild = True
+                    for ix in inspector.get_indexes('vehicle_trips'):
+                        if ix.get('unique') and ix.get('column_names') == ['start_time']:
+                            needs_rebuild = True
+                except Exception as _e:
+                    logger.warning(f"v3.0.109 vehicle_trips inspect failed: {_e}")
+                if needs_rebuild:
+                    try:
+                        db.session.execute(text('''
+                            CREATE TABLE vehicle_trips_new (
+                                id INTEGER NOT NULL PRIMARY KEY,
+                                vehicle_id INTEGER REFERENCES vehicles(id),
+                                trip_date DATE NOT NULL,
+                                start_time DATETIME NOT NULL,
+                                drive_minutes INTEGER,
+                                idle_minutes INTEGER,
+                                distance_km FLOAT,
+                                avg_speed_kmh FLOAT,
+                                max_speed_kmh INTEGER,
+                                regen_kwh_per_100km FLOAT,
+                                consumption_kwh_per_100km FLOAT,
+                                source VARCHAR(32),
+                                fetched_at DATETIME,
+                                CONSTRAINT uq_vehicle_trips_vehicle_start
+                                    UNIQUE (vehicle_id, start_time)
+                            )'''))
+                        db.session.execute(text('''
+                            INSERT INTO vehicle_trips_new
+                                (id, vehicle_id, trip_date, start_time, drive_minutes,
+                                 idle_minutes, distance_km, avg_speed_kmh, max_speed_kmh,
+                                 regen_kwh_per_100km, consumption_kwh_per_100km, source, fetched_at)
+                            SELECT id, vehicle_id, trip_date, start_time, drive_minutes,
+                                 idle_minutes, distance_km, avg_speed_kmh, max_speed_kmh,
+                                 regen_kwh_per_100km, consumption_kwh_per_100km, source, fetched_at
+                            FROM vehicle_trips'''))
+                        db.session.execute(text('DROP TABLE vehicle_trips'))
+                        db.session.execute(text(
+                            'ALTER TABLE vehicle_trips_new RENAME TO vehicle_trips'))
+                        # Recreate the non-unique lookup indexes.
+                        db.session.execute(text(
+                            'CREATE INDEX IF NOT EXISTS ix_vehicle_trips_vehicle_id '
+                            'ON vehicle_trips (vehicle_id)'))
+                        db.session.execute(text(
+                            'CREATE INDEX IF NOT EXISTS ix_vehicle_trips_trip_date '
+                            'ON vehicle_trips (trip_date)'))
+                        db.session.execute(text(
+                            'CREATE INDEX IF NOT EXISTS ix_vehicle_trips_start_time '
+                            'ON vehicle_trips (start_time)'))
+                        db.session.commit()
+                        logger.info(
+                            "v3.0.109: rebuilt vehicle_trips with composite "
+                            "UNIQUE(vehicle_id, start_time)")
+                    except Exception as _e:
+                        db.session.rollback()
+                        rebuild_ok = False
+                        logger.error(f"v3.0.109 vehicle_trips rebuild failed: {_e}")
+            if rebuild_ok:
+                AppConfig.set('vehicle_trips_uq_composite_v3_0_109', 'done')
+
         # Migrate: add Erstzulassung + gross battery capacity to vehicles
         # (v3.0.74). first_registered_at drives the certificate's calendar
         # age / degradation benchmark; battery_kwh_gross is the informational

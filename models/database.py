@@ -351,11 +351,20 @@ class VehicleTrip(db.Model):
     skipped at ingest time (should not happen in practice).
     """
     __tablename__ = 'vehicle_trips'
+    # v3.0.109: uniqueness is per vehicle, not global. Two cars in a
+    # fleet legitimately start a trip at the same wall-clock second, so a
+    # bare UNIQUE(start_time) wrongly rejected the second car's trip and
+    # rolled back the whole daily reconcile. The ingest code already
+    # scopes its existence check by vehicle_id; the constraint now matches.
+    __table_args__ = (
+        db.UniqueConstraint('vehicle_id', 'start_time',
+                            name='uq_vehicle_trips_vehicle_start'),
+    )
 
     id = db.Column(db.Integer, primary_key=True)
     vehicle_id = db.Column(db.Integer, db.ForeignKey('vehicles.id'), index=True)  # v2.29.0
     trip_date = db.Column(db.Date, index=True, nullable=False)
-    start_time = db.Column(db.DateTime, index=True, nullable=False, unique=True)
+    start_time = db.Column(db.DateTime, index=True, nullable=False)
     drive_minutes = db.Column(db.Integer)
     idle_minutes = db.Column(db.Integer)
     distance_km = db.Column(db.Float)
