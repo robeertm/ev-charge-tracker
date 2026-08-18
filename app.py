@@ -4092,7 +4092,10 @@ def register_routes(app):
         import sys
 
         PACKAGES = {
-            'hyundai-kia': ['hyundai-kia-connect-api', 'selenium', 'webdriver-manager'],
+            # >=4.26.5 for the headless CCI password sign-in (bypasses the IdP
+            # WAF that blocks the legacy browser authorize, upstream #1273).
+            # selenium/webdriver-manager stay for the browser-login *fallback*.
+            'hyundai-kia': ['hyundai-kia-connect-api>=4.26.5', 'selenium', 'webdriver-manager'],
             'vw': ['carconnectivity', 'carconnectivity-connector-volkswagen'],
             'skoda': ['carconnectivity', 'carconnectivity-connector-skoda'],
             'seatcupra': ['carconnectivity', 'carconnectivity-connector-seatcupra'],

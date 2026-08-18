@@ -70,12 +70,18 @@
 
           {# ── Step 3: connect ── #}
           <div class="cw-pane" data-pane="3" style="display:none">
-            {# Kia/Hyundai: token flow — one button, embedded browser #}
+            {# Kia/Hyundai: headless password sign-in (SDK CCI flow — no browser,
+               no reCAPTCHA). The legacy browser (noVNC) flow is kept as a
+               fallback below for the rare account-consent case. #}
             <div id="cwConnectToken" style="display:none">
               <p class="small text-muted mb-2">{{ t('wiz.token_intro') }}</p>
               <div class="mb-2">
                 <label class="form-label small">{{ t('wiz.account_email') }}</label>
                 <input type="email" class="form-control" id="cw_username_token" autocomplete="off" placeholder="name@example.com">
+              </div>
+              <div class="mb-2">
+                <label class="form-label small">{{ t('wiz.password_label') }}</label>
+                <input type="password" class="form-control" id="cw_password_token" autocomplete="new-password">
               </div>
               <details class="mb-2">
                 <summary class="small text-muted" style="cursor:pointer">{{ t('wiz.advanced') }}</summary>
@@ -86,29 +92,40 @@
                     <input type="text" class="form-control form-control-sm" id="cw_region_token" value="EU" maxlength="6"></div>
                 </div>
               </details>
-              <button type="button" class="btn btn-warning w-100" id="cwFetchToken">
+              <button type="button" class="btn btn-primary w-100" id="cwFetchToken">
                 <i class="bi bi-box-arrow-in-right"></i> {{ t('wiz.token_login_btn') }}
               </button>
               <div class="small mt-2" id="cwTokenStatus"></div>
-              <div id="cwBrowserWrap" class="mt-2" style="display:none">
-                <div class="alert alert-info py-2 px-3 mb-2 small">
-                  <i class="bi bi-window"></i> {{ t('wiz.browser_hint') }}
-                </div>
-                <a href="#" target="evnovnc" rel="noopener" id="cwOpenNovnc"
-                   class="btn btn-primary btn-lg w-100 mb-2">
-                  <i class="bi bi-box-arrow-up-right"></i> {{ t('wiz.open_login_window') }}
-                </a>
-                <button type="button" class="btn btn-outline-secondary btn-sm w-100" id="cwCancelToken">{{ t('wiz.cancel') }}</button>
-              </div>
-              <details class="mt-2">
-                <summary class="small text-muted" style="cursor:pointer">{{ t('wiz.token_manual_title') }}</summary>
-                <div class="mt-2 small">
-                  <div class="mb-1">{{ t('wiz.token_manual_step1') }} <a href="#" id="cwStep1Link" target="_blank" rel="noopener" class="text-break"></a></div>
-                  <div class="d-flex gap-2">
-                    <input type="text" class="form-control form-control-sm" id="cwPasteUrl" placeholder="...?code=...">
-                    <button type="button" class="btn btn-outline-success btn-sm" id="cwPasteBtn"><i class="bi bi-clipboard-check"></i></button>
+
+              {# ── Fallback: legacy browser sign-in (only if the direct login fails) ── #}
+              <details class="mt-3">
+                <summary class="small text-muted" style="cursor:pointer">{{ t('wiz.token_browser_fallback_title') }}</summary>
+                <div class="mt-2">
+                  <p class="small text-muted mb-2">{{ t('wiz.token_browser_fallback_help') }}</p>
+                  <button type="button" class="btn btn-outline-secondary btn-sm w-100" id="cwBrowserStart">
+                    <i class="bi bi-window"></i> {{ t('wiz.token_browser_fallback_btn') }}
+                  </button>
+                  <div id="cwBrowserWrap" class="mt-2" style="display:none">
+                    <div class="alert alert-info py-2 px-3 mb-2 small">
+                      <i class="bi bi-window"></i> {{ t('wiz.browser_hint') }}
+                    </div>
+                    <a href="#" target="evnovnc" rel="noopener" id="cwOpenNovnc"
+                       class="btn btn-primary btn-lg w-100 mb-2">
+                      <i class="bi bi-box-arrow-up-right"></i> {{ t('wiz.open_login_window') }}
+                    </a>
+                    <button type="button" class="btn btn-outline-secondary btn-sm w-100" id="cwCancelToken">{{ t('wiz.cancel') }}</button>
                   </div>
-                  <div id="cwPasteStatus" class="small mt-1"></div>
+                  <details class="mt-2">
+                    <summary class="small text-muted" style="cursor:pointer">{{ t('wiz.token_manual_title') }}</summary>
+                    <div class="mt-2 small">
+                      <div class="mb-1">{{ t('wiz.token_manual_step1') }} <a href="#" id="cwStep1Link" target="_blank" rel="noopener" class="text-break"></a></div>
+                      <div class="d-flex gap-2">
+                        <input type="text" class="form-control form-control-sm" id="cwPasteUrl" placeholder="...?code=...">
+                        <button type="button" class="btn btn-outline-success btn-sm" id="cwPasteBtn"><i class="bi bi-clipboard-check"></i></button>
+                      </div>
+                      <div id="cwPasteStatus" class="small mt-1"></div>
+                    </div>
+                  </details>
                 </div>
               </details>
             </div>
@@ -187,7 +204,17 @@
 (function(){
   const modalEl = document.getElementById('carWizardModal');
   if(!modalEl) return;
-  const T = window.T || {};
+  // Merge server-translated strings for the JS-driven status messages so they
+  // render in the user's language (not just the German inline fallback).
+  const T = Object.assign({}, window.T || {}, {
+    wiz_email_required:    {{ t('wiz.email_required')|tojson }},
+    wiz_password_required: {{ t('wiz.password_required')|tojson }},
+    wiz_signing_in:        {{ t('wiz.signing_in')|tojson }},
+    wiz_signin_fail_hint:  {{ t('wiz.signin_fail_hint')|tojson }},
+    wiz_login_prompt:      {{ t('wiz.login_prompt')|tojson }},
+    wiz_token_login_btn:   {{ t('wiz.token_login_btn')|tojson }},
+    wiz_connected:         {{ t('wiz.connected')|tojson }}
+  });
   const INSTALLED = {{ installed_brand_keys|tojson if installed_brand_keys is defined else '[]'|safe }};
   const NOVNC_URL = {{ novnc_url|tojson if novnc_url is defined else '""'|safe }};
   const NO_CAR    = {{ no_car_configured|tojson if no_car_configured is defined else 'false'|safe }};
@@ -320,8 +347,10 @@
       fd.set('api_username', g('cw_username_token'));
       fd.set('api_pin', g('cw_pin_token'));
       fd.set('api_region', g('cw_region_token') || 'EU');
-      // api_password (the token) is written server-side by token/status; leaving
-      // it blank on update keeps the stored token.
+      // api_password = the account password (SDK does a headless CCI sign-in).
+      // Leaving it blank on a re-save keeps the previously stored credential.
+      const pw = g('cw_password_token');
+      if(pw) fd.set('api_password', pw);
     } else if(sel){
       fd.set('api_username', g('cw_username_creds'));
       if(g('cw_password_creds')) fd.set('api_password', g('cw_password_creds'));
@@ -342,34 +371,61 @@
   });
   backBtn.addEventListener('click', ()=>{ if(step>1) showStep(step-1); });
 
-  // ── Token fetch (Kia/Hyundai) — one button, embedded browser, auto-advance ──
+  // ── Kia/Hyundai sign-in — headless password login (SDK CCI flow, no browser). ──
+  // The account password is stored and the connector logs in server-side. The old
+  // browser/reCAPTCHA flow stopped working once the provider's WAF started
+  // blocking the authorize step (#1273); it lives on only as the cwBrowserStart
+  // fallback for the rare account-consent case.
   function resetTokenBtn(){ const b=q('cwFetchToken'); if(b){ b.disabled=false; b.innerHTML='<i class="bi bi-box-arrow-in-right"></i> '+(T.wiz_token_login_btn||'Anmelden & verbinden'); } }
-  function stopPoll(){ if(pollTimer){clearInterval(pollTimer);pollTimer=null;} resetTokenBtn(); }
+  function stopPoll(){ if(pollTimer){clearInterval(pollTimer);pollTimer=null;} const fb=q('cwBrowserStart'); if(fb) fb.disabled=false; }
   q('cwFetchToken').addEventListener('click', async ()=>{
+    const email=q('cw_username_token').value.trim();
+    const pw=(q('cw_password_token')?q('cw_password_token').value:'');
+    if(!email){ q('cwTokenStatus').innerHTML='<span class="text-danger">'+(T.wiz_email_required||'Bitte zuerst die E-Mail eingeben.')+'</span>'; return; }
+    if(!pw){ q('cwTokenStatus').innerHTML='<span class="text-danger">'+(T.wiz_password_required||'Bitte das Passwort eingeben.')+'</span>'; return; }
+    if(!await saveVehicle()) return;
+    const b=q('cwFetchToken'); b.disabled=true; b.innerHTML='<span class="spinner-border spinner-border-sm"></span> '+(T.wiz_signing_in||'Melde an…');
+    q('cwTokenStatus').innerHTML='<span class="text-primary"><span class="spinner-border spinner-border-sm me-1"></span>'+(T.wiz_signing_in||'Melde beim Hersteller an…')+'</span>';
+    try{
+      const fd=new FormData(); fd.append('ajax','1');
+      const r=await fetch('/vehicles/'+savedId+'/test',{method:'POST',body:fd});
+      const d=await r.json();
+      if(d.ok){
+        q('cwTokenStatus').innerHTML='<span class="text-success fw-bold"><i class="bi bi-check-circle"></i> '+(T.wiz_connected||'Verbunden!')+'</span>';
+        resetTokenBtn(); nextBtn.disabled=false; showStep(4);
+      } else {
+        q('cwTokenStatus').innerHTML='<span class="text-danger">'+(d.error||'')+'</span><div class="small text-muted mt-1">'+(T.wiz_signin_fail_hint||'Prüfe E-Mail und Passwort. Klappt es nicht, nutze den Browser-Login weiter unten.')+'</div>';
+        resetTokenBtn();
+      }
+    }catch(e){ q('cwTokenStatus').innerHTML='<span class="text-danger">'+e.message+'</span>'; resetTokenBtn(); }
+  });
+
+  // Fallback: legacy browser (noVNC) sign-in. Only useful for the account-consent
+  // edge case; the WAF blocks it for everyone else (#1273), which the server
+  // reports back as a clear "use the direct password login" message.
+  const cwBrowserStartBtn = q('cwBrowserStart');
+  if(cwBrowserStartBtn){ cwBrowserStartBtn.addEventListener('click', async ()=>{
     if(!q('cw_username_token').value.trim()){ q('cwTokenStatus').innerHTML='<span class="text-danger">'+(T.wiz_email_required||'Bitte zuerst die E-Mail eingeben.')+'</span>'; return; }
     if(!await saveVehicle()) return;
-    // Wire the login window (full-page noVNC in a new tab) and reveal it.
     const loginUrl = NOVNC_URL ? (NOVNC_URL + (NOVNC_URL.indexOf('?')>=0?'&':'?') + 'autoconnect=true&resize=scale&reconnect=true') : '';
     if(loginUrl){ q('cwOpenNovnc').href = loginUrl; }
     q('cwBrowserWrap').style.display='';
-    const b=q('cwFetchToken'); b.disabled=true; b.innerHTML='<span class="spinner-border spinner-border-sm"></span> '+(T.wiz_login_prompt||'Warte auf Login…');
+    cwBrowserStartBtn.disabled=true;
     q('cwTokenStatus').innerHTML='<span class="text-primary"><span class="spinner-border spinner-border-sm me-1"></span>'+(T.wiz_login_prompt||'Melde dich im geöffneten Fenster an (inkl. reCAPTCHA)…')+'</span>';
     try{
       const r=await fetch('/api/vehicle/token/start',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({brand:sel.key, vehicle_id:savedId})});
       const d=await r.json();
       if(d.success){
-        // The click is a user gesture, so this window.open is not popup-blocked.
-        // If the browser blocks it anyway, the big "Login-Fenster öffnen" link is right there.
         if(loginUrl){ try{ window.open(loginUrl,'evnovnc'); }catch(e){} }
         pollTimer=setInterval(pollToken,2000);
       }
-      else { q('cwTokenStatus').innerHTML='<span class="text-danger">'+(d.error||'')+'</span>'; resetTokenBtn(); }
-    }catch(e){ q('cwTokenStatus').innerHTML='<span class="text-danger">'+e.message+'</span>'; resetTokenBtn(); }
-  });
+      else { q('cwTokenStatus').innerHTML='<span class="text-danger">'+(d.error||'')+'</span>'; cwBrowserStartBtn.disabled=false; }
+    }catch(e){ q('cwTokenStatus').innerHTML='<span class="text-danger">'+e.message+'</span>'; cwBrowserStartBtn.disabled=false; }
+  }); }
   function pollToken(){
     fetch('/api/vehicle/token/status?vehicle_id='+savedId).then(r=>r.json()).then(d=>{
       if(d.token){ stopPoll(); q('cwBrowserWrap').style.display='none';
-        q('cwTokenStatus').innerHTML='<span class="text-success fw-bold"><i class="bi bi-check-circle"></i> '+(T.api_token_saved||'Verbunden!')+'</span>';
+        q('cwTokenStatus').innerHTML='<span class="text-success fw-bold"><i class="bi bi-check-circle"></i> '+(T.wiz_connected||'Verbunden!')+'</span>';
         nextBtn.disabled=false; showStep(4); }
       else if(d.error){ q('cwTokenStatus').innerHTML='<span class="text-danger">'+d.error+'</span>'; stopPoll(); }
       else if(d.running){ q('cwTokenStatus').innerHTML='<span class="text-primary"><span class="spinner-border spinner-border-sm me-1"></span>'+(d.status||'')+'</span>'; }

@@ -107,23 +107,27 @@ def get_state():
 
 
 def _detect_idp_block(url):
-    """If the browser landed on the provider's IdP error page — most notably
-    Hyundai/Kia's anti-abuse block ("...classified as an abusing request and
-    blocked...") that kicks in after several login attempts from the same
-    connection in a short window — return a friendly, actionable message.
-    Otherwise return None. The block is temporary and IP/behaviour based, so
-    the advice is: wait, then retry ONCE, or use the manual paste path (which
-    runs the login in the user's own browser)."""
+    """If the browser landed on the provider's IdP error page — Hyundai/Kia's
+    "...classified as an abusing request and blocked..." page — return a
+    friendly, actionable message. Otherwise return None.
+
+    NOTE (2026-08, upstream #1273): this is NOT a temporary, per-connection
+    rate-limit. The IdP's WAF *permanently* rejects the browser ``authorize``
+    request whenever it carries the legacy service ``client_id`` — it 302s to
+    ``/error?status=400&...abusing request and blocked. client_id : <uuid>``
+    for *everyone*, from any IP, with no login even attempted (verified with a
+    cookieless curl). Waiting does nothing. The real fix is the headless CCI
+    password sign-in the SDK does directly — so the message points there, not
+    at "wait 1–2 hours"."""
     u = (url or '').lower()
     if 'abusing' in u or ('/error' in u and ('status=400' in u or 'error=' in u)):
         return (
-            'Der Anbieter (Hyundai/Kia) hat die Anmeldung vorübergehend '
-            'blockiert — das passiert nach mehreren Login-Versuchen von '
-            'derselben Internet-Verbindung in kurzer Zeit. Bitte 1–2 Stunden '
-            'warten und dann NUR EINMAL erneut anmelden (mehrere Versuche '
-            'kurz hintereinander verlängern die Sperre). Alternativ den '
-            'manuellen Weg unten benutzen — er läuft über deinen eigenen '
-            'Browser statt über den Server.'
+            'Der Browser-Login wird vom Anbieter (Hyundai/Kia) serverseitig '
+            'blockiert (die Login-Seite selbst, nicht dein Konto — Sperre '
+            'nach #1273). Warten hilft nicht, das ist dauerhaft. Nutze '
+            'stattdessen den direkten Login: E-Mail + Passwort deines '
+            'Hersteller-Kontos oben eingeben und auf „Anmelden & verbinden" '
+            'klicken — die App meldet sich dann ohne Browser an.'
         )
     return None
 

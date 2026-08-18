@@ -1,5 +1,39 @@
 # Changelog
 
+## v3.0.102 (2026-08-18)
+
+### Sign in to a Kia/Hyundai car with just your password again
+
+The browser sign-in for Kia/Hyundai has been dead for a while, and the app was
+mislabelling why. When you signed in and solved the reCAPTCHA, the browser would
+close after a second with a scary "the provider temporarily blocked you — wait
+1–2 hours" message. That message was wrong: the provider's login server now
+**permanently** rejects the browser authorize step whenever it carries the app's
+service client_id — it redirects to an "abusing request and blocked" page for
+**everyone, from any IP, before any login even happens** (verified with a
+cookie-less request). Waiting never helped, because it was never a rate limit.
+
+The connected-car library solved this upstream (issue #1273) with a **headless
+sign-in**: it logs in directly with your account e-mail and password
+(RSA-encrypted, using the OneApp client the provider does allow), with no browser
+and no reCAPTCHA. The setup now uses that path:
+
+- The Kia/Hyundai connect step now asks for your **account password** (your
+  normal Kia Connect / Bluelink password), not a browser-fetched token. Click
+  **"Sign in & connect"** and the app logs in on the server in one step.
+- A **48-character legacy refresh token still works** — existing installs keep
+  running untouched; the library auto-detects which one you stored.
+- The old browser (noVNC) sign-in is kept as a **fallback**, tucked away for the
+  rare case where an account needs a one-time consent click in a browser.
+- When the browser fallback does hit the block page, the message now tells the
+  truth — it's a permanent server-side block of the browser method, so use the
+  direct password sign-in instead of waiting.
+- Re-entering a corrected password now actually takes effect (a stale cached
+  login session is dropped when the stored credential changes).
+
+The guided-setup status messages for this step are now translated in all six
+languages instead of always showing German.
+
 ## v3.0.101 (2026-08-17)
 
 ### Clearer message when the provider temporarily blocks sign-in

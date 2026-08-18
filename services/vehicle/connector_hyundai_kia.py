@@ -131,21 +131,24 @@ _REGION_FIELD = {
                 {"value": "KR", "label": "Korea"}],
 }
 
-# Kia: refresh-token flow (password login blocked by reCAPTCHA since 2025)
+# Kia/Hyundai: since hyundai_kia_connect_api 4.26.3 the EU SDK does a headless
+# CCI password sign-in (OneApp client_id, RSA-encrypted password) that bypasses
+# the IdP WAF blocking the legacy browser authorize (#1273). The stored
+# credential is now the plain account password — the SDK logs in server-side,
+# no browser/reCAPTCHA/refresh-token dance. A legacy 48-char refresh_token still
+# works too (the SDK auto-detects the format), so existing installs keep running.
 KIA_CREDENTIAL_FIELDS = [
     {"key": "username", "label": "E-Mail (Kia Connect Account)", "type": "text"},
-    {"key": "password", "label": "Refresh-Token", "type": "password",
-     "help": "Kein Passwort! Token über Browser-Login holen (siehe Anleitung unten)."},
+    {"key": "password", "label": "Passwort (Kia Connect Account)", "type": "password",
+     "help": "Dein normales Kia-Connect-Passwort — die App meldet sich direkt an."},
     {"key": "pin", "label": "PIN (4-stellig aus Kia Connect App)", "type": "password"},
     _REGION_FIELD,
 ]
 
-# Hyundai: same refresh-token flow as Kia (different OAuth URLs under
-# the hood — see token_fetch.py BRAND_CONFIG['hyundai']).
 HYUNDAI_CREDENTIAL_FIELDS = [
     {"key": "username", "label": "E-Mail (Bluelink Account)", "type": "text"},
-    {"key": "password", "label": "Refresh-Token", "type": "password",
-     "help": "Kein Passwort! Token über Browser-Login holen (siehe Anleitung unten)."},
+    {"key": "password", "label": "Passwort (Bluelink Account)", "type": "password",
+     "help": "Dein normales Bluelink-Passwort — die App meldet sich direkt an."},
     {"key": "pin", "label": "PIN (4-stellig aus Bluelink App)", "type": "password"},
     _REGION_FIELD,
 ]
@@ -212,16 +215,26 @@ class _HyundaiKiaBase(VehicleConnector):
 
     def _get_manager(self) -> 'VehicleManager':
         key = self._cache_key
-        if key not in _managers:
+        mgr = _managers.get(key)
+        # Drop a stale cached manager if the stored credential changed since we
+        # built it — e.g. the user just entered/updated the account password in
+        # the setup wizard. Without this, a retry after a password fix would
+        # keep re-using the old (wrong) password baked into the cached manager.
+        if mgr is not None and getattr(mgr, 'password', None) != self.credentials['password']:
+            _managers.pop(key, None)
+            mgr = None
+        if mgr is None:
             region = REGIONS.get(self.credentials.get('region', 'EU'), 1)
-            _managers[key] = VehicleManager(
+            # ``password`` is the account password (headless CCI sign-in) or a
+            # legacy 48-char refresh_token — the SDK auto-detects which.
+            mgr = _managers[key] = VehicleManager(
                 region=region,
                 brand=self.BRAND_ID,
                 username=self.credentials['username'],
-                password=self.credentials['password'],  # This is the refresh_token
+                password=self.credentials['password'],
                 pin=self.credentials.get('pin', ''),
             )
-        return _managers[key]
+        return mgr
 
     def _ensure_auth(self):
         """Refresh the access token using the stored refresh_token."""
