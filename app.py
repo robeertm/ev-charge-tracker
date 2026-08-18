@@ -3595,6 +3595,27 @@ def register_routes(app):
             vehicle_brands = []
         installed_brand_keys = [b['key'] for b in vehicle_brands]
 
+        # Kia/Hyundai: the connector may be installed but too old for the
+        # headless CCI password sign-in (needs hyundai-kia-connect-api
+        # >=4.26.3, upstream #1273). In that case 'kia' IS in
+        # installed_brand_keys, so the "missing packages" install buttons
+        # never appear — yet the sync fails and the error tells the user to
+        # update the package under Fahrzeug-API. Surface an explicit
+        # update-required flag so the settings page can offer the button.
+        hyundai_kia_sdk_outdated = False
+        hyundai_kia_sdk_version = ''
+        if 'kia' in installed_brand_keys or 'hyundai' in installed_brand_keys:
+            try:
+                from services.vehicle.connector_hyundai_kia import (
+                    _installed_sdk_version, _version_tuple, _MIN_CCI_VERSION,
+                )
+                hyundai_kia_sdk_version = _installed_sdk_version()
+                if (hyundai_kia_sdk_version
+                        and _version_tuple(hyundai_kia_sdk_version) < _MIN_CCI_VERSION):
+                    hyundai_kia_sdk_outdated = True
+            except Exception:
+                pass
+
         # Last vehicle sync
         last_sync = VehicleSync.query.order_by(VehicleSync.timestamp.desc()).first()
 
@@ -3673,6 +3694,8 @@ def register_routes(app):
                                car_model_val=AppConfig.get('car_model', Config.CAR_MODEL),
                                vehicle_brands=vehicle_brands,
                                installed_brand_keys=installed_brand_keys,
+                               hyundai_kia_sdk_outdated=hyundai_kia_sdk_outdated,
+                               hyundai_kia_sdk_version=hyundai_kia_sdk_version,
                                api_target_vehicle=_picker_v,
                                vehicle_api_brand=_api_field('api_brand', 'vehicle_api_brand'),
                                vehicle_api_username=_api_field('api_username', 'vehicle_api_username'),

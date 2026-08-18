@@ -1,5 +1,30 @@
 # Changelog
 
+## v3.0.105 (2026-08-18)
+
+### Kia/Hyundai: offer the update button when the connector is installed but too old
+
+The previous releases correctly diagnosed the real root cause — an
+installed hyundai-kia-connect-api older than 4.26.3 cannot do the headless
+password sign-in and the manufacturer's WAF blocks the legacy browser flow —
+and the sync error now tells the user to update the package under
+"Fahrzeug-API". But following that instruction led to a dead end: the package
+install buttons on the settings page only appear for brands whose connector is
+*missing*. When an old Kia/Hyundai connector is already installed, its brand
+counts as present, so no button was ever shown. The error pointed at a button
+that did not exist.
+
+- **Update-required banner.** The settings page now checks the installed
+  hyundai-kia-connect-api version. When the connector is present but older than
+  4.26.3, it shows a dedicated warning with an "Update Kia/Hyundai package"
+  button — separate from the "missing packages" list. Clicking it reinstalls
+  the connector pinned to a version that supports the headless sign-in and
+  restarts the service, exactly like a fresh install. After the restart the
+  stored account password works and the sync succeeds.
+
+This closes the loop opened in v3.0.102–104: the diagnosis was right, but the
+one action it asked for was unreachable. Now it is one click.
+
 ## v3.0.104 (2026-08-18)
 
 ### Kia/Hyundai sign-in: trim invisible whitespace + name the real causes
