@@ -1,5 +1,35 @@
 # Changelog
 
+## v3.0.106 (2026-08-18)
+
+### Kia/Hyundai package update: show the real failure and make the upgrade actually succeed
+
+The update button added in v3.0.105 could fail with a useless message. When the
+pip run failed, the app surfaced only the *last* stderr line — which is almost
+always pip's cosmetic `[notice] To update, run: pip install --upgrade pip`
+banner, not the actual error. Users saw that notice in red and had no idea why
+the update did not go through. On top of that, the update path reinstalled
+`selenium` + `webdriver-manager` alongside the connector, dragging a large,
+conflict-prone dependency tree through the resolver and a slow download through
+the 120 s timeout — the most likely reason the upgrade never completed on a Pi
+over a phone tether.
+
+- **Honest error output.** A new helper extracts the meaningful failure line(s)
+  from the pip output — dropping `[notice]` and bare-warning lines and
+  preferring lines that actually name the problem (dependency conflict, no
+  matching distribution, network failure, …). The real cause is now shown
+  instead of the "upgrade pip" banner.
+- **Lean upgrade path.** The "update Kia/Hyundai package" button now upgrades
+  only `hyundai-kia-connect-api` (`--upgrade --upgrade-strategy only-if-needed`,
+  version ≥ 4.26.5) and no longer re-pulls the browser-fallback dependencies —
+  that fallback is WAF-blocked and unused, so there is nothing to reinstall.
+  This keeps the resolver narrow and the download small.
+- **Longer timeout.** The pip run may now take up to 4 minutes (was 2), enough
+  headroom for a fresh dependency build on a Pi over a slow link.
+- **Faithful button state.** A failed install now restores the button's original
+  appearance instead of always reverting to the blue "install" style, and the
+  error text is rendered as plain text (no HTML injection from raw pip output).
+
 ## v3.0.105 (2026-08-18)
 
 ### Kia/Hyundai: offer the update button when the connector is installed but too old

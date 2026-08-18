@@ -47,6 +47,34 @@ logging.getLogger('carconnectivity.connectors.seatcupra.mqtt').setLevel(logging.
 logging.getLogger('carconnectivity.connectors.audi.mqtt').setLevel(logging.CRITICAL)
 
 
+def _pip_error_summary(result) -> str:
+    """Pull the *meaningful* failure line out of a failed pip run.
+
+    pip prints a cosmetic ``[notice] To update, run: pip install --upgrade
+    pip`` as the very last stderr line on almost every invocation. The old
+    code did ``stderr.split('\\n')[-1]`` and so surfaced exactly that notice
+    to the user (ev-rainer's screenshot), hiding the real cause. Here we drop
+    the notice / bare-warning / blank lines from both streams and prefer the
+    lines that actually name the error (ERROR:, conflict, could not, no
+    matching distribution, …) so the operator sees *why* it failed.
+    """
+    lines = []
+    for stream in (result.stderr, result.stdout):
+        for ln in (stream or '').splitlines():
+            s = ln.strip()
+            if not s:
+                continue
+            low = s.lower()
+            if low.startswith('[notice]') or low.startswith('warning:'):
+                continue
+            lines.append(s)
+    signal = ('error', 'could not', 'conflict', 'no matching distribution',
+              'cannot install', 'requires', 'incompatible')
+    err_lines = [l for l in lines if any(k in l.lower() for k in signal)]
+    picked = (err_lines or lines)[-3:]
+    return ' — '.join(picked) if picked else 'pip install fehlgeschlagen'
+
+
 def create_app(config_class=Config):
     # ── Update safety net (must run BEFORE anything else) ─────────
     # If the previous boot was an update and we've already crashed N
@@ -4134,17 +4162,36 @@ def register_routes(app):
 
         data = request.get_json() or {}
         pkg_key = data.get('package', '')
+        upgrade = bool(data.get('upgrade'))
         packages = PACKAGES.get(pkg_key)
         if not packages:
             return jsonify({'success': False, 'error': f'Unbekanntes Paket: {pkg_key}'}), 400
 
+        pip_args = ['install']
+        if upgrade and pkg_key == 'hyundai-kia':
+            # Upgrade path for an already-installed-but-too-old connector
+            # (ev-rainer's 4.23.0). Bump ONLY the SDK itself: dragging
+            # selenium + webdriver-manager back through the resolver is the
+            # likeliest reason the plain install failed on a Pi (a big,
+            # conflict-prone dep tree + a slow 4G download that blows the
+            # timeout) — and the browser fallback those two power is dead
+            # anyway (WAF-blocked). --upgrade + --upgrade-strategy
+            # only-if-needed keeps unrelated pinned deps in place so the
+            # resolver stays narrow.
+            pip_args += ['--upgrade', '--upgrade-strategy', 'only-if-needed',
+                         'hyundai-kia-connect-api>=4.26.5']
+        else:
+            pip_args += packages
+
+        # A pip run that has to build/download a fresh dep tree on a Pi over
+        # a phone tether needs far more than 120 s; 4 min is a safer ceiling.
         try:
             result = subprocess.run(
-                [sys.executable, '-m', 'pip', 'install'] + packages,
-                capture_output=True, text=True, timeout=120,
+                [sys.executable, '-m', 'pip'] + pip_args,
+                capture_output=True, text=True, timeout=240,
             )
             if result.returncode != 0:
-                error = result.stderr.strip().split('\n')[-1] if result.stderr else 'pip install fehlgeschlagen'
+                error = _pip_error_summary(result)
                 return jsonify({'success': False, 'error': error}), 500
 
             # v3.0: schedule a clean systemd restart instead of reloading
