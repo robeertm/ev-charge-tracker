@@ -1,5 +1,78 @@
 # Changelog
 
+## v3.0.111 (2026-08-20)
+
+### "database is locked" no longer takes the whole dashboard down
+
+A dashboard load could fail on *every* endpoint at once, each with the same
+traceback:
+
+> `sqlalchemy.exc.OperationalError: (sqlite3.OperationalError) database is locked`
+> `[SQL: SELECT app_config."key", app_config.value FROM app_config WHERE app_config."key" = ?]`
+> `[parameters: ('auth_enabled',)]`
+
+`/api/weather/correlation`, `/api/highlights`, `/api/range` and
+`/api/update/last-rollback` all died within 30 ms of each other. The failing
+query is not from any of those handlers — it is the `auth_enabled` lookup in the
+`_auth_guard` before-request hook, which every single endpoint runs. One locked
+database therefore means one dead page, not one dead widget.
+
+Two separate defects combined to produce it.
+
+- **The database was never in WAL mode.** SQLite's default journal mode is
+  `delete` (a rollback journal), where a write transaction that outgrows the
+  page cache escalates to an exclusive lock on the *entire file* — every
+  concurrent reader is blocked and then fails outright once the busy timeout
+  expires. This app has four writer threads (request handlers, the vehicle sync
+  loop, the nightly maintenance loop, the geocode maintenance loop) sharing one
+  file on a Pi's SD card, so contention is normal operation, not an edge case.
+  The database now runs in **WAL mode**, where readers see the last committed
+  snapshot and are never blocked by a writer at all. The busy timeout also goes
+  from pysqlite's 5 s default to **30 s**, which covers the remaining
+  writer-versus-writer contention. Both are applied per connection in
+  `models.database.init_sqlite_pragmas()`, before the boot-time migrations run —
+  those are themselves a long series of writes and must not lock out the request
+  threads that start serving moments later. If WAL is unavailable (a few exotic
+  mounts don't provide the required shared memory) the app logs it and carries
+  on with the longer timeout, so the fallback is "slower", not "broken".
+
+- **The geocode backfill held a write transaction open across the network.**
+  `geocode_missing_events()` assigned `evt.address` inside its loop and committed
+  once at the end. That left a dirty row in the session while the *next*
+  `reverse()` call ran — and `reverse()` starts with a cache lookup, which
+  autoflushes the pending UPDATE and thereby opens a write transaction. That
+  transaction then stayed open through the geocoder's 1.1 s rate-limit sleep and
+  its 8 s HTTP timeout. Per event. The trips page dispatches this with
+  `limit=200`, so a single page load could hold the write lock for the better
+  part of half an hour. It now snapshots the pending rows to plain tuples and
+  commits after each individual event, so the session is clean whenever the
+  network call happens.
+
+Because the export path assumed WAL before WAL existed, the surrounding file
+handling has been brought in line:
+
+- `PRAGMA wal_checkpoint(TRUNCATE)` in `/api/backup/export` was a silent no-op
+  until now. It does something as of this release, which is what it was written
+  for: the downloaded `.db` contains the newest commits rather than everything
+  up to the last checkpoint.
+- The pre-import and pre-factory-reset safety copies now checkpoint first, so
+  the one file a user might have to fall back on is complete.
+- Replacing or deleting the database file now also removes the stale `-wal` /
+  `-shm` sidecars, which describe a database that no longer exists.
+- The Google-Sheets import's pre-replace backup checkpoints via a plain
+  `sqlite3` connection before copying.
+
+**Deliberately not changed:** `synchronous=NORMAL` (the usual companion to WAL)
+would speed writes up on SD storage but trades away durability of the last
+commits on a power cut — WAL alone already fixes the locking, and charge records
+are worth the fsync. `foreign_keys=ON` stays off too: constraints have never been
+enforced on this database, so switching enforcement on now would change
+delete/insert behaviour on historic rows. Neither belongs in a locking fix.
+
+New `tests/test_db_locking.py` covers both defects, including a control case
+that asserts the pre-fix conditions really do lock a reader out — so the test
+cannot start passing for the wrong reason.
+
 ## v3.0.110 (2026-08-18)
 
 ### "Ungültiger Token" gone from a working Kia/Hyundai password login

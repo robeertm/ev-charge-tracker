@@ -1354,27 +1354,55 @@ def geocode_missing_events(limit: int = 50) -> int:
     from services.geocode_service import reverse
     from models.database import AppConfig as _AppConfig
 
-    pending = (ParkingEvent.query
-               .filter(ParkingEvent.address.is_(None))
-               .filter(ParkingEvent.label != 'unknown')
-               .order_by(ParkingEvent.arrived_at.desc())
-               .limit(limit)
-               .all())
-    if not pending:
+    rows = (ParkingEvent.query
+            .filter(ParkingEvent.address.is_(None))
+            .filter(ParkingEvent.label != 'unknown')
+            .order_by(ParkingEvent.arrived_at.desc())
+            .limit(limit)
+            .all())
+    if not rows:
         return 0
 
+    # v3.0.111: snapshot to plain tuples and commit after every single
+    # event, so the session is CLEAN whenever ``reverse()`` runs.
+    #
+    # The previous version assigned ``evt.address`` inside the loop and
+    # committed once at the end. That left a dirty ORM object in the
+    # session across the next ``reverse()`` call — whose own cache
+    # lookup triggers an autoflush, which issues the pending UPDATE and
+    # thereby opens a write transaction. SQLAlchemy then held that
+    # transaction open through Nominatim's 1.1 s rate-limit sleep plus
+    # an 8 s HTTP timeout, per event — and the /trips page dispatches
+    # this with limit=200. So one page load could hold the write lock
+    # for the better part of half an hour, during which:
+    #   * every other writer thread is blocked outright (the open
+    #     transaction holds RESERVED), and
+    #   * once the accumulated dirty pages spill the page cache the
+    #     lock escalates to EXCLUSIVE and readers are locked out too,
+    #     failing with "database is locked" — including the
+    #     ``_auth_guard`` AppConfig read that every endpoint runs.
+    #
+    # WAL mode (see models.database.init_sqlite_pragmas) covers the
+    # reader half, but holding a write transaction open across network
+    # I/O is wrong on its own terms: it starves the other writer
+    # threads for the whole walk regardless of journal mode.
+    pending = [(e.id, e.lat, e.lon) for e in rows]
     lang = _AppConfig.get('app_language', 'de')
     filled = 0
-    for evt in pending:
+    for evt_id, lat, lon in pending:
         try:
-            addr = reverse(evt.lat, evt.lon, language=lang)
-            if addr:
-                evt.address = addr
-                filled += 1
+            addr = reverse(lat, lon, language=lang)
+            if not addr:
+                continue
+            evt = db.session.get(ParkingEvent, evt_id)
+            if evt is None:
+                continue  # deleted while we were out on the network
+            evt.address = addr
+            db.session.commit()
+            filled += 1
         except Exception:
+            db.session.rollback()
             continue
-    if filled:
-        db.session.commit()
     return filled
 
 

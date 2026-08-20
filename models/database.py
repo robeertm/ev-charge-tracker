@@ -1,7 +1,79 @@
+import logging
+
 from flask_sqlalchemy import SQLAlchemy
 from datetime import datetime, date
 
+logger = logging.getLogger(__name__)
+
 db = SQLAlchemy()
+
+
+def init_sqlite_pragmas(app, busy_timeout_ms: int = 30000) -> str:
+    """Put the SQLite file into WAL mode and give every connection a
+    generous busy timeout. Returns the journal mode actually in force.
+
+    v3.0.111. Why this matters: the default journal mode is ``delete``
+    (a rollback journal), where a write transaction that outgrows the
+    page cache escalates to an exclusive lock on the *whole database* —
+    every concurrent reader is then blocked and, once pysqlite's 5 s
+    default busy timeout expires, fails outright with
+    ``sqlite3.OperationalError: database is locked``. This app has
+    four writer threads (request handlers, the vehicle sync loop, the
+    nightly maintenance loop, the geocode maintenance loop) hitting one
+    file on a Pi's SD card, so that was a matter of when, not if: a
+    dashboard load would 500 on *every* endpoint at once because even
+    the ``_auth_guard`` before-request hook does an AppConfig read.
+
+    In WAL mode readers never block on a writer and a writer never
+    blocks readers — they see the last committed snapshot while the
+    write goes to the -wal sidecar. Writer-vs-writer contention remains,
+    which is what ``busy_timeout`` covers.
+
+    Deliberately NOT set here:
+      * ``synchronous=NORMAL`` — it's the common companion to WAL and
+        would speed writes up on SD storage, but it trades away
+        durability of the last commits on a power cut. WAL alone already
+        fixes the lock problem; charge records are worth the fsync.
+      * ``foreign_keys=ON`` — SQLite has always ignored FK constraints
+        here, so turning enforcement on now would change delete/insert
+        behaviour on historic rows. Out of scope for a locking fix.
+
+    WAL needs shared memory next to the DB file, which a few exotic
+    mounts (some network filesystems) don't provide. If the pragma
+    doesn't take we log it and carry on — the busy timeout still
+    applies, so the failure mode is "slow" rather than "broken".
+    """
+    from sqlalchemy import event, text
+
+    uri = app.config.get('SQLALCHEMY_DATABASE_URI', '')
+    if not uri.startswith('sqlite'):
+        return ''
+
+    engine = db.engine
+
+    @event.listens_for(engine, 'connect')
+    def _apply_pragmas(dbapi_conn, _connection_record):  # noqa: ANN001
+        cur = dbapi_conn.cursor()
+        try:
+            cur.execute(f'PRAGMA busy_timeout = {int(busy_timeout_ms)}')
+            cur.execute('PRAGMA journal_mode = WAL')
+        finally:
+            cur.close()
+
+    # Force one connection through the listener now so the file-level
+    # journal mode is switched at boot (it is persistent, but a fresh
+    # DB file starts in delete mode) and so we can report it.
+    mode = (db.session.execute(text('PRAGMA journal_mode')).scalar() or '').lower()
+    db.session.commit()
+    if mode == 'wal':
+        logger.info(f'SQLite: WAL mode active, busy_timeout={busy_timeout_ms} ms')
+    else:
+        logger.warning(
+            f'SQLite: WAL mode unavailable (journal_mode={mode!r}) — falling back '
+            f'to busy_timeout={busy_timeout_ms} ms only. Concurrent reads may '
+            f'block while a background sync writes.'
+        )
+    return mode
 
 
 class Vehicle(db.Model):

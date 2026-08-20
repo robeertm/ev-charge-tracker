@@ -99,6 +99,17 @@ def create_app(config_class=Config):
     app.permanent_session_lifetime = _td(days=30)
 
     with app.app_context():
+        # v3.0.111: WAL + busy timeout BEFORE create_all() — the
+        # migration block below is itself a long series of writes, and
+        # it must not lock out the request threads that start serving
+        # moments later.
+        try:
+            from config import SQLITE_BUSY_TIMEOUT_MS
+            from models.database import init_sqlite_pragmas
+            init_sqlite_pragmas(app, busy_timeout_ms=SQLITE_BUSY_TIMEOUT_MS)
+        except Exception as _e:
+            logger.warning(f'SQLite pragma setup failed (continuing): {_e}')
+
         db.create_all()
         # Migrate: add charge_hour column if missing
         from sqlalchemy import inspect, text
@@ -2229,6 +2240,35 @@ def register_routes(app):
         return jsonify({'ok': True, 'message': t('msg.password_changed')})
 
     # ── BACKUP & RESTORE (DB export / import) ────────────────
+    def _checkpoint_wal() -> None:
+        """Fold the -wal sidecar back into the main DB file.
+
+        v3.0.111: since the database runs in WAL mode, the newest
+        commits sit in ``ev_tracker.db-wal`` until a checkpoint. Any code
+        path that copies or ships the bare ``.db`` file must checkpoint
+        first or it hands out a stale snapshot. Best-effort: a failure
+        here must never break the surrounding operation.
+        """
+        from sqlalchemy import text as _text
+        try:
+            db.session.execute(_text('PRAGMA wal_checkpoint(TRUNCATE)'))
+            db.session.commit()
+        except Exception as _e:
+            logger.warning(f'WAL checkpoint failed (continuing): {_e}')
+
+    def _drop_wal_sidecars(db_path) -> None:
+        """Remove ``-wal`` / ``-shm`` next to a DB file that was just
+        replaced or deleted. They belong to the old database and are
+        meaningless — at best ignored, at worst confusing — beside a new
+        one."""
+        for suffix in ('-wal', '-shm'):
+            sidecar = Path(str(db_path) + suffix)
+            try:
+                if sidecar.exists():
+                    sidecar.unlink()
+            except Exception as _e:
+                logger.warning(f'Could not remove {sidecar.name}: {_e}')
+
     # Exports and imports the SQLite DB at data/ev_tracker.db. Contains
     # everything: charges, syncs, settings, auth credentials, THG quotas,
     # maintenance entries, cached data — the full app state in one file.
@@ -2237,17 +2277,13 @@ def register_routes(app):
     @app.route('/api/backup/export', methods=['GET'])
     def api_backup_export():
         from datetime import datetime as _dt
-        from sqlalchemy import text as _text
         db_path = Path(DATA_DIR) / 'ev_tracker.db'
         if not db_path.is_file():
             return jsonify({'error': t('err.db_file_not_found')}), 404
         # Force SQLite to flush any pending writes so the export file is
-        # consistent. checkpoint is cheap for an idle DB.
-        try:
-            db.session.execute(_text('PRAGMA wal_checkpoint(TRUNCATE)'))
-            db.session.commit()
-        except Exception:
-            pass
+        # consistent. Checkpoint is cheap for an idle DB. Before v3.0.111
+        # this was a silent no-op — the database wasn't in WAL mode yet.
+        _checkpoint_wal()
         ts = _dt.now().strftime('%Y%m%d-%H%M%S')
         return send_file(
             str(db_path),
@@ -2312,6 +2348,11 @@ def register_routes(app):
             backup_dir = Path(DATA_DIR) / 'backups'
             backup_dir.mkdir(parents=True, exist_ok=True)
             if db_path.is_file():
+                # v3.0.111: under WAL the newest commits live in the -wal
+                # sidecar, so fold them into the main file first — else the
+                # safety copy silently loses whatever was written since the
+                # last checkpoint.
+                _checkpoint_wal()
                 backup_name = f'ev_tracker-pre-import-{_dt.now().strftime("%Y%m%d-%H%M%S")}.db'
                 shutil.copy2(db_path, backup_dir / backup_name)
 
@@ -2326,6 +2367,10 @@ def register_routes(app):
 
             shutil.copy2(tmp.name, db_path)
             os.unlink(tmp.name)
+            # v3.0.111: the uploaded file replaces the inode, so any -wal
+            # / -shm left over from the old database now describes a
+            # database that no longer exists. Drop them.
+            _drop_wal_sidecars(db_path)
 
             # Schedule a systemd restart a few hundred ms into the future
             # so the HTTP response has time to flush.
@@ -4747,6 +4792,13 @@ def register_routes(app):
         notify_path = Path(DATA_DIR) / 'notify.json'
         safety_backup = None
         try:
+            # v3.0.111: fold the WAL in before disposing, so the safety
+            # backup below is a complete database. Closing the last
+            # connection normally checkpoints on its own, but the
+            # background sync threads may still hold one — don't rely on
+            # it for the one copy the user might need.
+            _checkpoint_wal()
+
             # Dispose SQLAlchemy before touching the file — open fds keep
             # the old inode alive on POSIX, so the restarted process
             # would come up on the stale DB without this.
@@ -4766,6 +4818,7 @@ def register_routes(app):
                 safety_backup = backup_dir / f'ev_tracker-pre-factory-reset-{ts}.db'
                 shutil.copy2(db_path, safety_backup)
                 db_path.unlink()
+                _drop_wal_sidecars(db_path)
             if notify_path.is_file():
                 notify_path.unlink()
         except Exception as e:

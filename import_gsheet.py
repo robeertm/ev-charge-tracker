@@ -309,6 +309,19 @@ def _backup_db_before_replace():
             return None
         backup_dir = os.path.join(DATA_DIR, 'backups')
         os.makedirs(backup_dir, exist_ok=True)
+        # v3.0.111: the DB runs in WAL mode, so the newest commits may
+        # still be in ev_tracker.db-wal. Checkpoint before copying or the
+        # backup is a stale snapshot. Best-effort — never block the
+        # backup itself on this.
+        try:
+            import sqlite3 as _sqlite3
+            _conn = _sqlite3.connect(src, timeout=30.0)
+            try:
+                _conn.execute('PRAGMA wal_checkpoint(TRUNCATE)')
+            finally:
+                _conn.close()
+        except Exception as _e:
+            print(f'Warnung: WAL-Checkpoint vor Backup fehlgeschlagen: {_e}')
         stamp = datetime.now().strftime('%Y%m%d_%H%M%S')
         dst = os.path.join(backup_dir, f'pre_import_{stamp}.db')
         shutil.copy2(src, dst)
