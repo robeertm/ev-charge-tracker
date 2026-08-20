@@ -3150,6 +3150,19 @@ def register_routes(app):
                         return redirect(url_for('input_charge'))
                 charge.calculate_fields(_bk, _eff)
 
+                # v3.0.112: persist the charge NOW, before the ENTSO-E CO2
+                # lookup below does its multi-second network round-trip.
+                # Doing that lookup with a dirty charge row still in the
+                # session would autoflush the pending INSERT/UPDATE (the
+                # api_key SELECT triggers it) and hold that write
+                # transaction open across the network call — the exact
+                # "database is locked" pattern removed from geocode in
+                # v3.0.111. Commit the row first, then enrich it with CO2
+                # on a clean session (each branch commits its own update).
+                if not is_update:
+                    db.session.add(charge)
+                db.session.commit()
+
                 # v3.0.64: CO2 lookup. PV uses the lifecycle estimate.
                 # AC/DC: when end-hour is set we average across the full
                 # charging window (more accurate over multi-hour charges
@@ -3162,8 +3175,11 @@ def register_routes(app):
                     if charge.charge_type == 'PV':
                         charge.co2_g_per_kwh = _get_pv_co2()
                         charge.calculate_fields(_bk, _eff)
+                        db.session.commit()
                         flash(t('flash.pv_co2_set', value=charge.co2_g_per_kwh), 'info')
                     else:
+                        # Read the API key BEFORE mutating charge so nothing
+                        # is dirty in the session while we call ENTSO-E.
                         api_key = AppConfig.get('entsoe_api_key', Config.ENTSOE_API_KEY)
                         co2 = None
                         if api_key:
@@ -3188,14 +3204,13 @@ def register_routes(app):
                             else:
                                 co2 = get_co2_intensity(api_key, base_dt, hour=charge.charge_hour)
                         if co2:
+                            # Mutation happens only AFTER the network call
+                            # returns, so no write lock spans the I/O.
                             charge.co2_g_per_kwh = co2
                             charge.calculate_fields(_bk, _eff)
+                            db.session.commit()
                             hour_label = f" ({charge.charge_hour}:00 Uhr)" if charge.charge_hour is not None else ""
                             flash(t('flash.co2_fetched', value=co2, hour=hour_label), 'info')
-
-                if not is_update:
-                    db.session.add(charge)
-                db.session.commit()
                 cost_str = f'€{charge.total_cost:.2f}' if charge.total_cost is not None else '€—'
                 flash(t('flash.charge_saved', date=charge.date.strftime("%d.%m.%Y"), kwh=charge.kwh_loaded or 0, cost=cost_str), 'success')
                 return redirect(url_for('input_charge'))

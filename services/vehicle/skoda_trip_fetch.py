@@ -245,7 +245,24 @@ def fetch_skoda_trips(days: int = 30,
                         # in practice but keep the audit trail.
                         existing.source = 'myskoda'
                     out['updated'] += 1
-    db.session.commit()
+    # v3.0.112: same concurrent check-then-insert race as the Kia/Hyundai
+    # backfill — a post-move reconcile can overlap the nightly one for the
+    # same (vehicle_id, day) and both add the same trip, so the commit can
+    # raise IntegrityError on UNIQUE(vehicle_id, start_time). Both threads
+    # process identical data, so a rollback loses nothing; and it keeps the
+    # session clean for the caller's remaining vehicles.
+    from sqlalchemy.exc import IntegrityError
+    try:
+        db.session.commit()
+    except IntegrityError:
+        db.session.rollback()
+        logger.info(
+            "skoda trip fetch: concurrent backfill won the "
+            "UNIQUE(vehicle_id, start_time) race — batch rolled back."
+        )
+        out['added'] = 0
+        out['updated'] = 0
+        return out
     logger.info(
         f"skoda trip fetch: {out['daily_trips']} days, {out['trips_seen']} trips, "
         f"+{out['added']} new / ~{out['updated']} updated"

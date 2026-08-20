@@ -420,6 +420,14 @@ def _do_sync(app):
                     results.append(r)
             except Exception as e:
                 logger.error(f"Vehicle sync [{v.name}] error: {e}")
+                # v3.0.112: shared session across the fleet loop — clear any
+                # half-applied write so the next vehicle doesn't inherit a
+                # PendingRollbackError from this one's failure.
+                try:
+                    from models.database import db
+                    db.session.rollback()
+                except Exception:
+                    pass
         return results
 
 
@@ -605,6 +613,17 @@ def _maybe_daily_trip_reconcile(app) -> None:
                         logger.info(f"Daily trip reconcile [{v.name}/{brand}] done")
                 except Exception as e:
                     logger.warning(f"Daily trip reconcile [{v.name}] failed: {e}")
+                    # v3.0.112: this loop shares one app_context/session
+                    # across all vehicles. If a per-vehicle failure left a
+                    # half-applied write in the session, the NEXT vehicle's
+                    # first query would raise PendingRollbackError and take
+                    # the rest of the fleet down with it. Reset the session
+                    # so each vehicle starts clean.
+                    try:
+                        from models.database import db
+                        db.session.rollback()
+                    except Exception:
+                        pass
     except Exception as e:
         logger.warning(f"Daily trip reconcile failed: {e}")
 

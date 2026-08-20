@@ -31,7 +31,7 @@ sys.path.insert(0, ROOT)
 
 from flask import Flask  # noqa: E402
 from models.database import (  # noqa: E402
-    db, AppConfig, GeocodeCache, ParkingEvent, init_sqlite_pragmas,
+    db, AppConfig, GeocodeCache, ParkingEvent, VehicleTrip, init_sqlite_pragmas,
 )
 
 _failures = []
@@ -190,6 +190,57 @@ def test_wal_reader_survives_open_writer():
           f"control: without WAL the same reader is locked out ({without})")
 
 
+def test_trip_unique_collision_is_recoverable():
+    """v3.0.112: two backfill threads can both pass the check-then-insert
+    guard for the same (vehicle_id, start_time) and both add the row, so
+    the loser's commit raises IntegrityError on the per-vehicle UNIQUE.
+    The trip backfills catch that and roll back; the fleet loop then
+    rolls back too. This asserts the invariant both fixes depend on: a
+    UNIQUE collision leaves the session usable, so the *next* write (the
+    next vehicle in the loop) still succeeds instead of inheriting a
+    PendingRollbackError."""
+    print("test_trip_unique_collision_is_recoverable")
+    from sqlalchemy.exc import IntegrityError, PendingRollbackError
+
+    with tempfile.TemporaryDirectory() as tmp:
+        app, _ = make_app(tmp, 'trip', pragmas=True)
+        with app.app_context():
+            start = datetime(2026, 8, 20, 8, 30)
+            db.session.add(VehicleTrip(
+                vehicle_id=1, trip_date=start.date(), start_time=start,
+                source='sdk_day_trip_info'))
+            db.session.commit()
+
+            # The colliding "loser" insert: same (vehicle_id, start_time).
+            db.session.add(VehicleTrip(
+                vehicle_id=1, trip_date=start.date(), start_time=start,
+                source='sdk_day_trip_info'))
+            raised = False
+            try:
+                db.session.commit()
+            except IntegrityError:
+                raised = True
+                db.session.rollback()
+            check(raised, "duplicate (vehicle_id, start_time) raises IntegrityError")
+
+            # After rollback, the session must be immediately usable — this
+            # is the next vehicle in the fleet loop writing its own trip.
+            try:
+                db.session.add(VehicleTrip(
+                    vehicle_id=2, trip_date=start.date(), start_time=start,
+                    source='sdk_day_trip_info'))
+                db.session.commit()
+                next_ok = True
+            except PendingRollbackError:
+                next_ok = False
+            check(next_ok, "session usable after rollback (next vehicle writes)")
+
+            # A different car sharing the same start_time is legitimate and
+            # must coexist — confirms the constraint is per-vehicle.
+            n = VehicleTrip.query.filter_by(start_time=start).count()
+            check(n == 2, f"two cars share one start_time (got {n})")
+
+
 def test_init_sqlite_pragmas_reports_wal():
     print("test_init_sqlite_pragmas_reports_wal")
     from sqlalchemy import text
@@ -214,6 +265,7 @@ def test_pragmas_skipped_for_non_sqlite():
 if __name__ == '__main__':
     test_geocode_holds_no_write_lock()
     test_wal_reader_survives_open_writer()
+    test_trip_unique_collision_is_recoverable()
     test_init_sqlite_pragmas_reports_wal()
     test_pragmas_skipped_for_non_sqlite()
     if _failures:

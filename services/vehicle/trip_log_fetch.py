@@ -206,7 +206,30 @@ def fetch_day_trip_info(target_date: date, vehicle_id=None) -> dict:
                 existing.fetched_at = datetime.now()
                 out['updated'] += 1
 
-    db.session.commit()
+    # v3.0.112: the check-then-insert above is not atomic. The same
+    # (vehicle_id, day) backfill is reachable concurrently — a motion
+    # post-move reconcile can overlap the 03:00 nightly one (and the
+    # watchdog may spin up a second sync loop), so two threads can both
+    # pass the existence check for the same trip and both add it. The
+    # second commit then raises IntegrityError on the per-vehicle
+    # UNIQUE(vehicle_id, start_time). Both threads are walking the SAME
+    # day for the SAME car, so whatever we roll back the other thread
+    # already wrote (or will) — no data is lost. Catch, roll back, and
+    # move on; crucially the rollback keeps the session usable so the
+    # caller's remaining vehicles don't inherit a PendingRollbackError.
+    from sqlalchemy.exc import IntegrityError
+    try:
+        db.session.commit()
+    except IntegrityError:
+        db.session.rollback()
+        logger.info(
+            f"Trip-info {target_date.isoformat()}: concurrent backfill won "
+            f"the UNIQUE(vehicle_id, start_time) race — rolled this batch "
+            f"back, the other writer already has these rows."
+        )
+        out['added'] = 0
+        out['updated'] = 0
+        return out
     logger.info(
         f"Trip-info {target_date.isoformat()}: {out['total_sdk_trips']} trips "
         f"from server, +{out['added']} new / ~{out['updated']} updated"

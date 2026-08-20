@@ -1,5 +1,41 @@
 # Changelog
 
+## v3.0.112 (2026-08-20)
+
+### Two more "database is locked" traps, plus a trip-backfill race
+
+v3.0.111 put the database into WAL mode and took the geocode backfill off the
+write-lock path. A follow-up audit turned up the same anti-pattern in one more
+place and a related concurrency bug in the trip backfill.
+
+- **Saving a charge held a write transaction open across the ENTSO-E lookup.**
+  The charge-save handler mutated the `Charge` row, then — while that row was
+  still dirty in the session — read the ENTSO-E API key. That read autoflushed
+  the pending `INSERT`/`UPDATE`, opening a write transaction that then stayed
+  open for the entire ENTSO-E CO₂ query (a multi-second network round-trip),
+  serialising every other writer behind it and risking a `database is locked`
+  for concurrent background threads. Very common on auto-detected charges, whose
+  `co2_g_per_kwh` starts NULL. The row is now committed **before** the network
+  lookup, and the CO₂ value is written in a second commit afterward — the row is
+  never dirty while the network call is in flight.
+
+- **Concurrent trip backfills could collide on the per-vehicle UNIQUE key.**
+  The Kia/Hyundai and Skoda trip backfills check "does this trip exist?" and
+  then insert, without an atomic guard. The same `(vehicle_id, day)` backfill is
+  reachable from two threads at once (a motion-triggered post-move reconcile
+  overlapping the nightly one, or a watchdog-spawned second sync loop), so both
+  could pass the check and both insert the same trip — the second commit then
+  raising `IntegrityError` on `UNIQUE(vehicle_id, start_time)`. Both threads walk
+  identical data, so the loser now rolls its batch back cleanly and returns
+  instead of crashing; nothing is lost.
+
+- **A failed vehicle no longer takes down the rest of the fleet.** The daily
+  reconcile and the main sync loop both iterate the fleet inside one shared
+  session. A per-vehicle failure that left a half-applied write in the session
+  would make the *next* vehicle's first query raise `PendingRollbackError`. Both
+  loops now roll the session back after a per-vehicle error, so each car starts
+  clean.
+
 ## v3.0.111 (2026-08-20)
 
 ### "database is locked" no longer takes the whole dashboard down
