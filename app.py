@@ -1697,7 +1697,14 @@ def _detect_auto_charge_from_soc_rise(end_sync):
         net = (new_to - new_from) / 100.0 * bk
         merge_target.soc_from = new_from
         merge_target.soc_to = new_to
-        merge_target.kwh_loaded = round(net / eff if (eff and eff > 0) else net, 2)
+        # v3.0.113: honour the target's charge type. DC bypasses the
+        # onboard charger, so gross == net there; dividing by the AC
+        # efficiency baked a fictitious ~12 % loss into every DC charge
+        # this merge touched. Mirrors _gross_for() in the primary detector.
+        merge_target.kwh_loaded = (
+            round(net, 2) if merge_target.charge_type == 'DC'
+            else round(net / eff if (eff and eff > 0) else net, 2)
+        )
         merge_target.loss_kwh = None
         merge_target.odometer = end_sync.odometer_km
         merge_target.created_at = end_sync.timestamp
@@ -3378,6 +3385,11 @@ def register_routes(app):
 
         if request.method == 'POST':
             try:
+                # v3.0.113: remember the row's state before the form is
+                # applied, so a charge-type switch can invalidate a loss
+                # that was derived for the old type (see below).
+                _prev_type = charge.charge_type
+                _prev_loss = charge.loss_kwh
                 charge.date = datetime.strptime(request.form['date'], '%Y-%m-%d').date()
                 charge.charge_hour = _int(request.form.get('charge_hour'))
                 charge.charge_end_hour = _int(request.form.get('charge_end_hour'))
@@ -3399,6 +3411,14 @@ def register_routes(app):
                 charge.operator = request.form.get('operator', '').strip() or None
                 charge.start_fee_eur = _float(request.form.get('start_fee_eur'))
                 charge.blocking_fee_eur = _float(request.form.get('blocking_fee_eur'))
+                # v3.0.113: switching AC/PV <-> DC invalidates a loss that
+                # was derived for the old type. Only re-derive when the user
+                # did NOT edit the loss field themselves — a hand-entered
+                # meter reading always wins.
+                if (_prev_type != charge.charge_type
+                        and charge.loss_kwh == _prev_loss):
+                    charge.loss_kwh = None
+                    charge.loss_pct = None
                 # v3.0.18: editing+saving an auto-detected charge confirms
                 # it — clear the red needs_review flag.
                 charge.needs_review = False
@@ -4162,6 +4182,12 @@ def register_routes(app):
             if old == new_type:
                 continue
             c.charge_type = new_type
+            # v3.0.113: the stored loss was derived for the OLD type —
+            # AC/PV carry the onboard-charger loss, DC does not. Clear it
+            # so calculate_fields() re-derives it for the new type. The
+            # user's metered kwh_loaded is deliberately left untouched.
+            c.loss_kwh = None
+            c.loss_pct = None
             if new_type == 'PV':
                 c.co2_g_per_kwh = pv_co2
             elif old == 'PV':

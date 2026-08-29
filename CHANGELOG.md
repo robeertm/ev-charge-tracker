@@ -1,5 +1,29 @@
 # Changelog
 
+## v3.0.113 (2026-08-29)
+
+### DC charges no longer inherit the AC charging loss
+
+`kwh_loaded` is stored gross — the energy drawn from the wall — while the SoC
+delta gives the net energy that actually reached the battery; the difference is
+the recorded loss. AC and PV charges pass through the onboard charger and carry
+that conversion loss, DC charges do not: they feed the pack directly. The
+primary detector already made that distinction in `_gross_for()`, but three
+other paths did not, so a DC charge could end up carrying a fictitious ~12 %
+onboard-charger loss for the rest of its life.
+
+- **Merging a SoC rise into an existing DC charge recomputed it as AC.** The
+  merge branch of the SoC-rise fallback divided the net energy by the AC
+  efficiency regardless of the target row's `charge_type`, silently inflating
+  every DC charge it extended. It now mirrors `_gross_for()`.
+- **Changing a charge's type left the old loss in place.** Both the bulk
+  type-change endpoint and the single-charge edit form wrote the new
+  `charge_type` but kept the `loss_kwh` that had been derived for the previous
+  one — so an auto-detected AC charge re-typed to DC kept its ~12 % loss
+  forever. The loss is now cleared on a type change and re-derived by
+  `calculate_fields()`. A metered `kwh_loaded` is never recomputed, and in the
+  edit form a loss value the user typed in themselves always wins.
+
 ## v3.0.112 (2026-08-20)
 
 ### Two more "database is locked" traps, plus a trip-backfill race
