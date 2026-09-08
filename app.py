@@ -369,9 +369,30 @@ def create_app(config_class=Config):
             # ~2 s per charge under ENTSO-E's rate limit.
             try:
                 from services.co2_backfill import start_backfill as _sbk
-                _sbk(app)
+                _sbk(app, force=True)
             except Exception as _e:
                 logger.warning(f"Could not auto-start CO2 backfill: {_e}")
+
+        # ── v3.0.114 one-off: unfreeze charges the retry cap wrote off ──
+        # Until now nothing re-ran the backfill between restarts, so a
+        # charge could burn all CO2_MAX_ATTEMPTS lookups during the few
+        # runs it did see — typically while ENTSO-E had not published
+        # its day yet — and was then skipped forever, silently. Now that
+        # every vehicle sync kicks the backfill (and a charge from today
+        # no longer costs an attempt), give those rows their budget back
+        # exactly once. The self-heal below picks them straight up.
+        if AppConfig.get('co2_v3_0_114_attempt_reset', '') != 'done':
+            try:
+                from services.co2_backfill import reset_attempts_for_missing
+                unfrozen = reset_attempts_for_missing(app)
+                AppConfig.set('co2_v3_0_114_attempt_reset', 'done')
+                if unfrozen:
+                    logger.info(
+                        f"v3.0.114: gave {unfrozen} charge(s) their CO2 "
+                        f"retry budget back"
+                    )
+            except Exception as _e:
+                logger.warning(f"v3.0.114 CO2 attempt reset failed: {_e}")
 
         # ── v3.0.92 CO2 self-heal on every boot ──────────────────────
         # The v3.0.65 cleanup above fires only once (guarded by its
@@ -389,7 +410,7 @@ def create_app(config_class=Config):
         # cleanup above just kicked it.
         try:
             from services.co2_backfill import start_backfill as _sbk_heal
-            if _sbk_heal(app):
+            if _sbk_heal(app, force=True):
                 logger.info("v3.0.92 CO2 self-heal: backfill kicked on boot")
         except Exception as _e:
             logger.warning(f"CO2 self-heal boot kick failed: {_e}")
@@ -3716,7 +3737,7 @@ def register_routes(app):
                             flash(' '.join(parts), 'success')
                             # Auto-start CO2 backfill
                             from services.co2_backfill import start_backfill
-                            if start_backfill(app):
+                            if start_backfill(app, force=True):
                                 flash(t('flash.co2_backfill_started'), 'info')
                     except Exception as e:
                         flash(t('flash.import_error', error=e), 'danger')
@@ -3725,7 +3746,7 @@ def register_routes(app):
 
             elif action == 'backfill_co2':
                 from services.co2_backfill import start_backfill
-                if start_backfill(app):
+                if start_backfill(app, force=True):
                     flash(t('flash.co2_loading'), 'info')
                 else:
                     flash(t('flash.backfill_running'), 'warning')
@@ -4204,7 +4225,7 @@ def register_routes(app):
         if updated:
             try:
                 from services.co2_backfill import start_backfill
-                start_backfill(app)
+                start_backfill(app, force=True)
             except Exception:
                 pass
 

@@ -1,5 +1,42 @@
 # Changelog
 
+## v3.0.114 (2026-09-08)
+
+### CO2 stayed empty after a charge until the app was restarted
+
+A freshly detected charge is deliberately stored without CO2 when ENTSO-E has
+not published the grid mix for that hour yet — that is the honest answer, and
+the backfill thread is supposed to fill the real number in later. It never got
+the chance: the backfill only ever started at boot, from the settings button,
+or when a charge type change cleared a value. A charge that arrived after the
+last restart therefore kept its empty CO2 for as long as the app kept running.
+
+Three changes close that gap.
+
+- **Every vehicle sync now kicks the backfill.** It is a no-op when nothing is
+  missing, terminates on its own, and is rate limited to one run per 30 minutes
+  so a burst of manual refreshes cannot spin it up repeatedly. With the default
+  four-hour sync interval a charge gets a fresh attempt several times a day,
+  which is exactly the timescale on which ENTSO-E catches up.
+- **A charge from today no longer costs a retry.** The retry cap exists to stop
+  polling a date the grid operator will never have. Missing data for the day
+  that is still running is not that case — it is the normal state of affairs.
+  Counting it would have spent the whole budget within hours now that the
+  backfill runs far more often, and the charge would have been written off
+  before the data ever appeared. From the next day on, attempts count as before.
+- **Charges the cap had already written off get their budget back, once.** A
+  one-off boot step resets the attempt counter on grid charges that are still
+  without CO2, so entries frozen by the old behaviour are picked up by the
+  self-heal that runs on the same boot. PV charges and charges that already have
+  a value are left untouched.
+
+Nothing about how the number itself is derived has changed: the window query,
+the start-hour fallback and the daily average are as before, and a value is
+still never invented from a neighbouring charge.
+
+Four new tests in `tests/test_co2_backfill.py` cover the rate limit, the
+today-costs-no-attempt rule, the one-off reset and the sync kick.
+
 ## v3.0.113 (2026-08-29)
 
 ### DC charges no longer inherit the AC charging loss

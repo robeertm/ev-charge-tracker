@@ -185,12 +185,122 @@ def test_start_backfill_no_double_spawn():
     check(spawned['n'] == 1, "only one thread spawned")
 
 
+def test_today_costs_no_attempt():
+    """v3.0.114: ENTSO-E publishes late, so a charge from TODAY without
+    data is not a failed lookup. Counting it would spend the whole retry
+    budget within hours now that every sync kicks the backfill."""
+    print("test_today_costs_no_attempt")
+    from datetime import timedelta
+    heute = date.today()
+    gestern = heute - timedelta(days=1)
+    app = make_app()
+    id_today = add_charge(app, charge_type='AC', charge_hour=10, kwh_loaded=10,
+                          co2_g_per_kwh=None, date=heute)
+    id_yesterday = add_charge(app, charge_type='AC', charge_hour=10, kwh_loaded=10,
+                              co2_g_per_kwh=None, date=gestern)
+
+    orig_w, orig_h = entsoe.get_co2_intensity_window, entsoe.get_co2_intensity
+    entsoe.get_co2_intensity_window = lambda *a, **k: None
+    entsoe.get_co2_intensity = lambda *a, **k: None
+    try:
+        bf.backfill_co2(app)
+        with app.app_context():
+            t = db.session.get(Charge, id_today)
+            y = db.session.get(Charge, id_yesterday)
+            check((t.co2_attempts or 0) == 0, "today's charge costs no attempt")
+            check(t.co2_g_per_kwh is None, "today's charge stays NULL, not poisoned")
+            check((y.co2_attempts or 0) == 1, "yesterday's charge does count")
+    finally:
+        entsoe.get_co2_intensity_window = orig_w
+        entsoe.get_co2_intensity = orig_h
+
+
+def test_kick_is_rate_limited():
+    """The per-sync kick must not burn the retry budget when someone
+    hammers "sync now" — but the deliberate kicks ignore the limit."""
+    print("test_kick_is_rate_limited")
+    app = make_app()
+    add_charge(app, charge_type='AC', kwh_loaded=10, co2_g_per_kwh=None)
+
+    spawned = {'n': 0}
+
+    class _NoRunThread:
+        def __init__(self, *a, **k):
+            spawned['n'] += 1
+
+        def start(self):
+            bf._backfill_running = False      # thread target never runs
+
+    orig_thread = bf.threading.Thread
+    bf.threading.Thread = _NoRunThread
+    bf._backfill_running = False
+    bf._last_kick_ts = 0.0
+    try:
+        first = bf.start_backfill(app)                 # unforced, first ever
+        second = bf.start_backfill(app)                # unforced, too soon
+        forced = bf.start_backfill(app, force=True)    # deliberate kick
+        wide = bf.start_backfill(app, min_interval_s=0)
+    finally:
+        bf.threading.Thread = orig_thread
+        bf._backfill_running = False
+        bf._last_kick_ts = 0.0
+    check(first is True, "first unforced kick runs")
+    check(second is False, "second unforced kick is rate limited")
+    check(forced is True, "force=True ignores the rate limit")
+    check(wide is True, "an explicit interval of 0 always runs")
+    check(spawned['n'] == 3, "exactly the three allowed kicks spawned")
+
+
+def test_reset_attempts_for_missing():
+    """v3.0.114 one-off: rows written off by the cap get their budget back."""
+    print("test_reset_attempts_for_missing")
+    app = make_app()
+    id_stuck = add_charge(app, charge_type='AC', kwh_loaded=10, co2_g_per_kwh=None)
+    id_done = add_charge(app, charge_type='AC', kwh_loaded=10, co2_g_per_kwh=380)
+    id_pv = add_charge(app, charge_type='PV', kwh_loaded=10, co2_g_per_kwh=None)
+    with app.app_context():
+        for cid in (id_stuck, id_done, id_pv):
+            c = db.session.get(Charge, cid)
+            c.co2_attempts = bf.CO2_MAX_ATTEMPTS
+        db.session.commit()
+
+    n = bf.reset_attempts_for_missing(app)
+    with app.app_context():
+        stuck = db.session.get(Charge, id_stuck)
+        done = db.session.get(Charge, id_done)
+        pv = db.session.get(Charge, id_pv)
+        check(n == 1, "exactly the one missing grid charge was unfrozen")
+        check(stuck.co2_attempts == 0, "written-off grid charge may retry again")
+        check(done.co2_attempts == bf.CO2_MAX_ATTEMPTS,
+              "a charge that already has CO2 is left alone")
+        check(pv.co2_attempts == bf.CO2_MAX_ATTEMPTS,
+              "PV never asks ENTSO-E, so it is left alone")
+    check(bf.reset_attempts_for_missing(app) == 0, "a second run finds nothing")
+
+
+def test_every_sync_kicks_the_backfill():
+    """The gap this release closes: nothing retried between restarts."""
+    print("test_every_sync_kicks_the_backfill")
+    src = os.path.join(ROOT, 'services', 'vehicle', 'sync_service.py')
+    with open(src, encoding='utf-8') as fh:
+        text = fh.read()
+    head = text.split('def _do_sync(')[0]          # inside _sync_one_vehicle
+    check('from services.co2_backfill import start_backfill' in head,
+          "the per-vehicle sync imports the backfill")
+    check('start_backfill(app)' in head,
+          "and kicks it (unforced, so it stays rate limited)")
+
+
 if __name__ == '__main__':
     test_missing_filter()
     test_lookup_fallback()
     test_backfill_heals_and_bounds()
     test_retry_ceiling()
     test_start_backfill_no_double_spawn()
+    test_today_costs_no_attempt()
+    test_kick_is_rate_limited()
+    test_reset_attempts_for_missing()
+    test_every_sync_kicks_the_backfill()
     if _failures:
         print(f"\n{len(_failures)} FAILED")
         sys.exit(1)

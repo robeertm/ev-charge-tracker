@@ -391,6 +391,20 @@ def _sync_one_vehicle(app, vehicle):
         vehicle_id=vehicle.id,
     )
     log_sync_result(status, mode_label=f'{vehicle.name}/{mode_label}', source='bg-loop')
+
+    # v3.0.114: a charge detected by the sync above usually has no CO2
+    # yet — ENTSO-E publishes the current hour late, so the detector
+    # honestly leaves it NULL and relies on the backfill. That backfill
+    # only ever ran at boot or on a button, so a charge made after the
+    # last restart kept its empty CO2 until someone restarted the app.
+    # Kick it here instead: it is rate limited, a no-op when nothing is
+    # missing, and terminates on its own.
+    try:
+        from services.co2_backfill import start_backfill
+        start_backfill(app)
+    except Exception as e:
+        logger.warning(f"CO2 backfill kick after sync failed: {e}")
+
     return sync
 
 

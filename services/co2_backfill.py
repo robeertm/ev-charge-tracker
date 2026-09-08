@@ -21,6 +21,10 @@ logger = logging.getLogger(__name__)
 
 _backfill_thread = None
 _backfill_running = False
+# Wall-clock of the last kick, so the per-sync kick (v3.0.114) cannot
+# spin up a run on every manual refresh. Boot and the explicit buttons
+# pass force=True and ignore it.
+_last_kick_ts = 0.0
 
 RETRY_INTERVAL = 60  # seconds between retries after rate limit
 BATCH_DELAY = 2  # seconds between successful API calls
@@ -31,6 +35,8 @@ BATCH_DELAY = 2  # seconds between successful API calls
 # (once per backfill run, i.e. per boot / manual trigger) to catch the
 # publish delay.
 CO2_MAX_ATTEMPTS = 12
+# Minimum wall-clock distance between two unforced kicks.
+MIN_KICK_INTERVAL_S = 1800
 
 
 def missing_co2_filter(Charge):
@@ -51,6 +57,29 @@ def get_missing_count(app):
     with app.app_context():
         from models.database import Charge
         return Charge.query.filter(missing_co2_filter(Charge)).count()
+
+
+def reset_attempts_for_missing(app):
+    """Give every still-missing grid charge its retry budget back.
+
+    The attempts cap exists to stop polling a date ENTSO-E will never
+    have. It was never meant to write off a charge that simply arrived
+    while the backfill had no way of running again (before v3.0.114 the
+    thread only started at boot or on a button). Returns how many rows
+    were unfrozen.
+    """
+    with app.app_context():
+        from models.database import db, Charge
+        stuck = (Charge.query
+                 .filter(missing_co2_filter(Charge))
+                 .filter(Charge.co2_attempts.isnot(None))
+                 .filter(Charge.co2_attempts > 0)
+                 .all())
+        for c in stuck:
+            c.co2_attempts = 0
+        if stuck:
+            db.session.commit()
+        return len(stuck)
 
 
 def _lookup_co2(api_key, charge):
@@ -143,13 +172,26 @@ def backfill_co2(app):
                     # charges retry on the next run once ENTSO-E catches
                     # up; a date that never fills is dropped after
                     # CO2_MAX_ATTEMPTS.
-                    charge.co2_attempts = (charge.co2_attempts or 0) + 1
-                    db.session.commit()
+                    # v3.0.114: a charge from TODAY is not a failed
+                    # lookup — ENTSO-E has simply not published that part
+                    # of the day yet. Counting it would spend the whole
+                    # retry budget within hours now that every vehicle
+                    # sync kicks this thread, and the charge would be
+                    # written off before the data ever appeared. Skip it
+                    # for this run without a strike; tomorrow it counts.
+                    if charge.date < datetime.now().date():
+                        charge.co2_attempts = (charge.co2_attempts or 0) + 1
+                        db.session.commit()
+                        logger.warning(
+                            f"CO2 backfill: no data for {charge.date} "
+                            f"(attempt {charge.co2_attempts}/{CO2_MAX_ATTEMPTS})"
+                        )
+                    else:
+                        logger.info(
+                            f"CO2 backfill: {charge.date} not published yet — "
+                            f"retrying after the next sync"
+                        )
                     skip_ids.add(charge.id)
-                    logger.warning(
-                        f"CO2 backfill: no data for {charge.date} "
-                        f"(attempt {charge.co2_attempts}/{CO2_MAX_ATTEMPTS})"
-                    )
                     time.sleep(BATCH_DELAY)
 
             except Exception as e:
@@ -167,13 +209,25 @@ def backfill_co2(app):
     logger.info("CO2 backfill thread finished")
 
 
-def start_backfill(app):
-    """Start backfill in a background thread if not already running."""
-    global _backfill_thread, _backfill_running
+def start_backfill(app, force=False, min_interval_s=MIN_KICK_INTERVAL_S):
+    """Start backfill in a background thread if not already running.
+
+    ``force=True`` is for the deliberate kicks — boot, the settings
+    button, a charge type change. Everything else (the per-sync kick
+    added in v3.0.114) is rate limited to one run per
+    ``min_interval_s``, so a user hammering "sync now" cannot burn the
+    per-charge retry budget.
+    """
+    global _backfill_thread, _backfill_running, _last_kick_ts
 
     if _backfill_running:
         logger.info("CO2 backfill already running")
         return False
+
+    if not force:
+        since = time.time() - _last_kick_ts
+        if _last_kick_ts and since < min_interval_s:
+            return False
 
     missing = get_missing_count(app)
     if missing == 0:
@@ -187,6 +241,7 @@ def start_backfill(app):
     # self-heal firing right after the v3.0.65 cleanup already kicked)
     # would spawn a duplicate thread and double-commit.
     _backfill_running = True
+    _last_kick_ts = time.time()
     _backfill_thread = threading.Thread(target=backfill_co2, args=(app,), daemon=True)
     _backfill_thread.start()
     return True
