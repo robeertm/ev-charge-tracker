@@ -5,6 +5,28 @@ from typing import Optional
 
 logger = logging.getLogger(__name__)
 
+# v3.0.115: "ENTSO-E has no data for that date" and "ENTSO-E could not be
+# reached at all" both used to leave this module as a bare None, so the
+# backfill counted a platform outage as a failed lookup and wrote charges
+# off after CO2_MAX_ATTEMPTS. This flag lets a caller tell the two apart.
+# It is a hint, not a contract: last writer wins, which is all the
+# backfill needs to decide whether an attempt was the charge's fault.
+_last_call_failed = False
+
+
+def _mark_call(failed: bool) -> None:
+    global _last_call_failed
+    _last_call_failed = bool(failed)
+
+
+def last_call_failed() -> bool:
+    """True when the most recent query failed for transport reasons.
+
+    A plain "no data for this period" answer is NOT a failure — that is
+    ENTSO-E replying honestly, and the caller may count it.
+    """
+    return _last_call_failed
+
 # CO2 emission factors (g/kWh) by fuel type
 CO2_FACTORS = {
     'Biomass': 230,
@@ -81,14 +103,18 @@ def get_co2_intensity(api_key: str, target_date: datetime, hour: int = None, cou
             intensity = int(round(total_co2 / total_gen))
             label = f"{target_date.date()} {hour}:00" if hour is not None else f"{target_date.date()}"
             logger.info(f"CO2 intensity for {label}: {intensity} g/kWh")
+            _mark_call(False)
             return intensity
 
+        _mark_call(False)      # ENTSO-E answered, it just had nothing
         return None
 
     except ImportError:
+        _mark_call(True)
         logger.error("entsoe-py not installed. Run: pip install entsoe-py")
         return None
     except Exception as e:
+        _mark_call(True)
         logger.error(f"ENTSO-E API error: {e}")
         return None
 
@@ -186,6 +212,7 @@ def get_co2_intensity_window(api_key: str, start_dt: datetime, end_dt: datetime,
             logger.warning(
                 f"No ENTSO-E buckets covered window {start_dt}..{end_dt}"
             )
+            _mark_call(False)  # ENTSO-E answered, it just had nothing
             return None
         intensity = int(round(total_co2_weighted / total_weight_s))
         logger.info(
@@ -193,12 +220,15 @@ def get_co2_intensity_window(api_key: str, start_dt: datetime, end_dt: datetime,
             f"..{end_dt.isoformat(timespec='minutes')}: "
             f"{intensity} g/kWh (time-weighted)"
         )
+        _mark_call(False)
         return intensity
 
     except ImportError:
+        _mark_call(True)
         logger.error("entsoe-py not installed. Run: pip install entsoe-py")
         return None
     except Exception as e:
+        _mark_call(True)
         logger.error(f"ENTSO-E window query error: {e}")
         return None
 

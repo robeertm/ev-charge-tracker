@@ -1,5 +1,33 @@
 # Changelog
 
+## v3.0.115 (2026-09-08)
+
+### An ENTSO-E outage no longer writes charges off
+
+The Transparency Platform has been answering the documented REST endpoint
+`https://web-api.tp.entsoe.eu/api` with a bare HTTP 404 since the end of August
+2026 — the address every client of the platform uses, this one included. That is
+a platform-side change, not a local fault, and while it lasts no CO2 value can
+be looked up anywhere.
+
+What made it worse than a pause: the service reported "could not reach ENTSO-E"
+and "ENTSO-E has no data for that date" the same way, as a bare `None`. The
+backfill counted the outage as a failed lookup, so every charge burned its retry
+budget within a day or two and was then skipped for good. The whole period would
+have stayed without CO2 even after the platform came back — silently.
+
+The two cases are now told apart. A transport or import failure marks the
+service as unreachable; the backfill sees that, stops the run without counting
+an attempt, and picks up again at the next sync. An answered-but-empty lookup
+still counts, so the retry ceiling keeps doing its job for a date the platform
+genuinely does not have.
+
+Nothing needs to be clicked when the platform returns: the next vehicle sync
+kicks the backfill and the missing days fill themselves in.
+
+Three new tests in `tests/test_co2_backfill.py` cover the outage, the honest
+empty answer and the marking itself.
+
 ## v3.0.114 (2026-09-08)
 
 ### CO2 stayed empty after a charge until the app was restarted

@@ -172,6 +172,21 @@ def backfill_co2(app):
                     # charges retry on the next run once ENTSO-E catches
                     # up; a date that never fills is dropped after
                     # CO2_MAX_ATTEMPTS.
+                    # v3.0.115: tell an outage apart from an honest
+                    # "no data". While the platform is unreachable every
+                    # lookup returns None, so a multi-day outage used to
+                    # spend every charge's retry budget and write the
+                    # whole period off — the charges would stay empty
+                    # even after the platform came back. Stop the run
+                    # instead; the next sync picks it up again.
+                    from services import entsoe_service as _entsoe
+                    if _entsoe.last_call_failed():
+                        logger.warning(
+                            "CO2 backfill: ENTSO-E unreachable — stopping "
+                            "this run, no attempt counted"
+                        )
+                        break
+
                     # v3.0.114: a charge from TODAY is not a failed
                     # lookup — ENTSO-E has simply not published that part
                     # of the day yet. Counting it would spend the whole

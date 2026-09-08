@@ -291,6 +291,90 @@ def test_every_sync_kicks_the_backfill():
           "and kicks it (unforced, so it stays rate limited)")
 
 
+def test_outage_costs_no_attempt():
+    """v3.0.115: while ENTSO-E is unreachable every lookup returns None.
+    Counting that as a failed lookup spent the whole retry budget during
+    the platform outage that began on 2026-08-31, so the charges of the
+    whole period would have stayed empty even after it came back."""
+    print("test_outage_costs_no_attempt")
+    from datetime import timedelta
+    gestern = date.today() - timedelta(days=1)
+    app = make_app()
+    id_a = add_charge(app, charge_type='AC', charge_hour=8, kwh_loaded=10,
+                      co2_g_per_kwh=None, date=gestern)
+    id_b = add_charge(app, charge_type='AC', charge_hour=9, kwh_loaded=10,
+                      co2_g_per_kwh=None, date=gestern - timedelta(days=1))
+
+    orig_w, orig_h = entsoe.get_co2_intensity_window, entsoe.get_co2_intensity
+
+    def down_window(*a, **k):
+        entsoe._mark_call(True)          # wie der echte Dienst im Ausfall
+        return None
+
+    def down_hour(*a, **k):
+        entsoe._mark_call(True)
+        return None
+
+    entsoe.get_co2_intensity_window = down_window
+    entsoe.get_co2_intensity = down_hour
+    try:
+        bf.backfill_co2(app)             # muss abbrechen, nicht durchlaufen
+        with app.app_context():
+            a = db.session.get(Charge, id_a)
+            b = db.session.get(Charge, id_b)
+            check((a.co2_attempts or 0) == 0, "outage costs the first charge no attempt")
+            check((b.co2_attempts or 0) == 0, "and the run stops before the next one")
+            check(a.co2_g_per_kwh is None and b.co2_g_per_kwh is None,
+                  "nothing was poisoned during the outage")
+    finally:
+        entsoe.get_co2_intensity_window = orig_w
+        entsoe.get_co2_intensity = orig_h
+        entsoe._mark_call(False)
+
+
+def test_an_honest_no_data_still_counts():
+    """The outage guard must not disarm the retry ceiling: when ENTSO-E
+    answers and simply has nothing, that is still an attempt."""
+    print("test_an_honest_no_data_still_counts")
+    from datetime import timedelta
+    app = make_app()
+    id_x = add_charge(app, charge_type='AC', charge_hour=8, kwh_loaded=10,
+                      co2_g_per_kwh=None, date=date.today() - timedelta(days=3))
+
+    orig_w, orig_h = entsoe.get_co2_intensity_window, entsoe.get_co2_intensity
+
+    def answered_empty(*a, **k):
+        entsoe._mark_call(False)         # erreicht, nur ohne Daten
+        return None
+
+    entsoe.get_co2_intensity_window = answered_empty
+    entsoe.get_co2_intensity = answered_empty
+    try:
+        bf.backfill_co2(app)
+        with app.app_context():
+            x = db.session.get(Charge, id_x)
+            check((x.co2_attempts or 0) == 1, "an answered-but-empty lookup counts")
+    finally:
+        entsoe.get_co2_intensity_window = orig_w
+        entsoe.get_co2_intensity = orig_h
+        entsoe._mark_call(False)
+
+
+def test_the_service_marks_its_own_failures():
+    """The flag is set by the service itself, not by the caller."""
+    print("test_the_service_marks_its_own_failures")
+    from datetime import datetime as _dt
+    entsoe._mark_call(False)
+    # entsoe-py is not installed in the test environment, so the import
+    # inside the service fails — the ImportError path must mark it too,
+    # because a missing library is not "no data" either.
+    entsoe.get_co2_intensity('no-key', _dt(2026, 3, 1), hour=8)
+    check(entsoe.last_call_failed() is True,
+          "a transport/import failure is marked")
+    entsoe._mark_call(False)
+    check(entsoe.last_call_failed() is False, "and can be cleared again")
+
+
 if __name__ == '__main__':
     test_missing_filter()
     test_lookup_fallback()
@@ -301,6 +385,9 @@ if __name__ == '__main__':
     test_kick_is_rate_limited()
     test_reset_attempts_for_missing()
     test_every_sync_kicks_the_backfill()
+    test_outage_costs_no_attempt()
+    test_an_honest_no_data_still_counts()
+    test_the_service_marks_its_own_failures()
     if _failures:
         print(f"\n{len(_failures)} FAILED")
         sys.exit(1)
