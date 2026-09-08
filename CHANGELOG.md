@@ -1,5 +1,19 @@
 # Changelog
 
+## v3.0.117 (2026-09-08)
+
+### "Missing CO2" no longer counts charges that show a number
+
+Making the backfill keep estimated charges on its list had a side effect on the
+counter next to it: a charge carrying a fallback estimate was reported as
+missing while the history showed a value for it. Two different questions were
+being answered by one number.
+
+They are separate now. What the status endpoint calls `missing` is what a user
+would call missing — grid charges with no number at all. The new `pending`
+counts everything that still owes a real value, estimates included, and that is
+what the backfill runs on.
+
 ## v3.0.116 (2026-09-08)
 
 ### A grid outage no longer leaves the CO2 column empty

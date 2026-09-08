@@ -4250,10 +4250,12 @@ def register_routes(app):
 
     @app.route('/api/co2/backfill/status')
     def api_backfill_status():
-        from services.co2_backfill import is_running, get_missing_count
+        from services.co2_backfill import (is_running, get_missing_count,
+                                              get_pending_count)
         return jsonify({
             'running': is_running(),
-            'missing': get_missing_count(app),
+            'missing': get_missing_count(app),     # no number at all
+            'pending': get_pending_count(app),     # incl. rows on an estimate
         })
 
     @app.route('/api/vehicle/token/start', methods=['POST'])

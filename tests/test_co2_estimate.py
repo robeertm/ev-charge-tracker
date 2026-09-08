@@ -156,8 +156,10 @@ def test_an_estimate_stays_on_the_backfills_list():
         c = db.session.get(Charge, id_e)
         c.co2_estimated = True
         db.session.commit()
-    check(bf.get_missing_count(app) == 1,
-          "a charge carrying an estimate still counts as owing a real value")
+    check(bf.get_pending_count(app) == 1,
+          "a charge carrying an estimate still owes its real value")
+    check(bf.get_missing_count(app) == 0,
+          "but the user is not told a number is missing when one is shown")
 
 
 def test_the_real_value_replaces_the_estimate():

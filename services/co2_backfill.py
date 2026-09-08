@@ -57,8 +57,30 @@ def missing_co2_filter(Charge):
     )
 
 
+def empty_co2_filter(Charge):
+    """Grid charges with NO number at all — what a user calls "missing"."""
+    return and_(
+        or_(Charge.co2_g_per_kwh.is_(None), Charge.co2_g_per_kwh == 0),
+        Charge.charge_type != 'PV',
+    )
+
+
 def get_missing_count(app):
-    """Count grid charges without CO2 data (NULL or poisoned 0)."""
+    """Count grid charges the user sees as empty.
+
+    v3.0.116: a charge carrying a fallback estimate shows a number, so it
+    is deliberately NOT counted here — reporting it as "missing" next to a
+    visible value would be confusing. The backfill uses
+    ``get_pending_count`` instead, which does include those rows because
+    they still owe their real value.
+    """
+    with app.app_context():
+        from models.database import Charge
+        return Charge.query.filter(empty_co2_filter(Charge)).count()
+
+
+def get_pending_count(app):
+    """Count grid charges still owed a real value (empty OR estimated)."""
     with app.app_context():
         from models.database import Charge
         return Charge.query.filter(missing_co2_filter(Charge)).count()
@@ -269,7 +291,7 @@ def start_backfill(app, force=False, min_interval_s=MIN_KICK_INTERVAL_S):
         if _last_kick_ts and since < min_interval_s:
             return False
 
-    missing = get_missing_count(app)
+    missing = get_pending_count(app)
     if missing == 0:
         return False
 
