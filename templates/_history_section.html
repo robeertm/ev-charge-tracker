@@ -129,7 +129,7 @@
                     {% if c.odometer %}{% set _ = _mobile_bits.append('{:,.0f} km'.format(c.odometer).replace(',', '.')) %}{% endif %}
                     {% if c.soc_from is not none %}{% set _ = _mobile_bits.append(c.soc_from|string + '→' + c.soc_to|string + '%') %}{% endif %}
                     {% if c.loss_pct is not none %}{% set _ = _mobile_bits.append('%.1f%% %s'|format(c.loss_pct, t('hist.loss'))) %}{% endif %}
-                    {% if c.co2_kg is not none %}{% set _ = _mobile_bits.append('%.1f kg CO₂'|format(c.co2_kg)) %}{% endif %}
+                    {% if c.co2_kg is not none %}{% set _ = _mobile_bits.append('%s%.1f kg CO₂'|format('≈ ' if c.co2_estimated else '', c.co2_kg)) %}{% endif %}
                     {% if _mobile_bits %}
                     <div class="small text-muted d-md-none">{{ _mobile_bits|join(' · ') }}</div>
                     {% endif %}
@@ -151,7 +151,7 @@
                     {% if c.loss_pct is not none %}{{ "%.1f"|format(c.loss_pct) }}%{% else %}—{% endif %}
                 </td>
                 <td class="text-end d-none d-md-table-cell">
-                    {% if c.co2_kg is not none %}{{ "%.1f"|format(c.co2_kg) }} kg{% else %}—{% endif %}
+                    {% if c.co2_kg is not none %}{% if c.co2_estimated %}<span class="text-muted" title="{{ t('hist.co2_estimated') }}">≈ {{ "%.1f"|format(c.co2_kg) }} kg</span>{% else %}{{ "%.1f"|format(c.co2_kg) }} kg{% endif %}{% else %}—{% endif %}
                 </td>
             </tr>
             {% endfor %}

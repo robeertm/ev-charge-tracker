@@ -326,6 +326,7 @@
   "hist.filter": "Filteren",
   "hist.km": "km",
   "hist.kwh": "kWh",
+  "hist.co2_estimated": "Geschat op basis van je eigen historie — de echte netwaarde wordt aangevuld zodra het platform weer antwoordt",
   "hist.loss": "Verliezen",
   "hist.needs_review": "Controleren",
   "hist.needs_review_hint": "Automatisch gedetecteerde laadbeurt — tik om te bewerken/bevestigen",

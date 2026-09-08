@@ -137,6 +137,13 @@ def create_app(config_class=Config):
         if 'co2_attempts' not in columns:
             db.session.execute(text('ALTER TABLE charges ADD COLUMN co2_attempts INTEGER DEFAULT 0'))
             db.session.commit()
+        # v3.0.116: co2_estimated — marks a value that came from the
+        # fallback estimate instead of the grid platform, so the UI can
+        # say so and the backfill knows the row still wants the real
+        # number.
+        if 'co2_estimated' not in columns:
+            db.session.execute(text('ALTER TABLE charges ADD COLUMN co2_estimated BOOLEAN DEFAULT 0'))
+            db.session.commit()
 
         # Migrate: add extended history columns to vehicle_syncs
         sync_columns = [c['name'] for c in inspector.get_columns('vehicle_syncs')]
@@ -352,6 +359,7 @@ def create_app(config_class=Config):
                     pv_charges = Charge.query.filter_by(charge_type='PV').all()
                     for pc in pv_charges:
                         pc.co2_g_per_kwh = pv_co2
+                        pc.co2_estimated = False
                         if pc.kwh_loaded:
                             pc.co2_kg = round(pc.kwh_loaded * pv_co2 / 1000, 2)
                     pv_count = len(pv_charges)
@@ -1504,6 +1512,7 @@ def _detect_auto_charge(end_sync):
             merge_target.eur_per_kwh = merge_target.eur_per_kwh or eur
         if co2 is not None:
             merge_target.co2_g_per_kwh = co2
+            merge_target.co2_estimated = False
         merge_target.calculate_fields(bk, eff)
         db.session.commit()
         logger.info(
@@ -1738,6 +1747,7 @@ def _detect_auto_charge_from_soc_rise(end_sync):
             merge_target.eur_per_kwh = eur
         if co2 is not None:
             merge_target.co2_g_per_kwh = co2
+            merge_target.co2_estimated = False
         merge_target.calculate_fields(bk, eff)
         db.session.commit()
         logger.info(
@@ -3142,6 +3152,7 @@ def register_routes(app):
                 charge.soc_to = _int(request.form.get('soc_to'))
                 charge.loss_kwh = _float(request.form.get('loss_kwh'))
                 charge.co2_g_per_kwh = _int(request.form.get('co2_g_per_kwh'))
+                charge.co2_estimated = False    # typed in by hand
                 charge.notes = request.form.get('notes', '').strip() or None
                 charge.location_lat = _float(request.form.get('location_lat'))
                 charge.location_lon = _float(request.form.get('location_lon'))
@@ -3202,6 +3213,7 @@ def register_routes(app):
                 if charge.co2_g_per_kwh is None:
                     if charge.charge_type == 'PV':
                         charge.co2_g_per_kwh = _get_pv_co2()
+                        charge.co2_estimated = False
                         charge.calculate_fields(_bk, _eff)
                         db.session.commit()
                         flash(t('flash.pv_co2_set', value=charge.co2_g_per_kwh), 'info')
@@ -3235,6 +3247,7 @@ def register_routes(app):
                             # Mutation happens only AFTER the network call
                             # returns, so no write lock spans the I/O.
                             charge.co2_g_per_kwh = co2
+                            charge.co2_estimated = False
                             charge.calculate_fields(_bk, _eff)
                             db.session.commit()
                             hour_label = f" ({charge.charge_hour}:00 Uhr)" if charge.charge_hour is not None else ""
@@ -3422,6 +3435,7 @@ def register_routes(app):
                 charge.soc_to = _int(request.form.get('soc_to'))
                 charge.loss_kwh = _float(request.form.get('loss_kwh'))
                 charge.co2_g_per_kwh = _int(request.form.get('co2_g_per_kwh'))
+                charge.co2_estimated = False    # typed in by hand
                 charge.notes = request.form.get('notes', '').strip() or None
                 # Location + operator — previously missing from the edit
                 # route, so users couldn't correct a Ladeort typo after
@@ -3648,6 +3662,7 @@ def register_routes(app):
                 for c in pv_charges:
                     c.eur_per_kwh = new_price
                     c.co2_g_per_kwh = new_co2
+                    c.co2_estimated = False
                     c.calculate_fields(bk)
                 if pv_charges:
                     db.session.commit()
@@ -4211,12 +4226,14 @@ def register_routes(app):
             c.loss_pct = None
             if new_type == 'PV':
                 c.co2_g_per_kwh = pv_co2
+                c.co2_estimated = False
             elif old == 'PV':
                 # Leaving PV → clear CO2 so the ENTSO-E backfill re-populates
                 # with the proper grid intensity for the charge's date/hour.
                 c.co2_g_per_kwh = None
                 c.co2_kg = None
                 c.co2_attempts = 0  # give the fresh lookup full retries
+                c.co2_estimated = False
             c.calculate_fields(battery_kwh)
             updated += 1
         db.session.commit()

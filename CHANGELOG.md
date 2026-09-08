@@ -1,5 +1,38 @@
 # Changelog
 
+## v3.0.116 (2026-09-08)
+
+### A grid outage no longer leaves the CO2 column empty
+
+While the grid platform is unreachable there is nothing to look up, so every
+charge made during the outage stayed blank. The energy side of the house solves
+this by filling the gap with an estimate that carries its own label, so the real
+value overwrites it on the next successful fetch. Charges now do the same.
+
+The baseline is this install's **own** history: the median of the real values
+already recorded, bucketed by the hour the charging started, over the last 120
+days. Night charges are therefore estimated from night values, not from a daily
+average that would flatten the difference. An hour with fewer than three real
+values falls back to the overall median.
+
+Two limits are deliberate:
+
+- **Nothing is invented.** With fewer than five real values in the history there
+  is no estimate at all and the field stays empty — that is the honest answer.
+  A hard-coded constant is exactly the ghost value that was removed in v3.0.64.
+- **Estimates never feed themselves.** Only real values enter the baseline, so a
+  long outage cannot drift the estimate away from reality.
+
+Every estimated value is stored with a marker and shown as `≈ 1.2 kg` in the
+history, with the explanation on hover in all six languages. The backfill keeps
+those rows on its list, replaces them the moment the platform answers again, and
+clears the marker. Typing a value in by hand, or switching a charge to PV, also
+clears it.
+
+New: `services/co2_estimate.py`, the `co2_estimated` column with its migration,
+and `tests/test_co2_estimate.py` with nine test groups covering the baseline, the
+hour buckets, the filling, the replacement and the outage end to end.
+
 ## v3.0.115 (2026-09-08)
 
 ### An ENTSO-E outage no longer writes charges off

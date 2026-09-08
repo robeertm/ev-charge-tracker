@@ -326,6 +326,7 @@
   "hist.filter": "Filter",
   "hist.km": "km",
   "hist.kwh": "kWh",
+  "hist.co2_estimated": "Estimated from your own history — the real grid value is filled in as soon as the platform answers again",
   "hist.loss": "Losses",
   "hist.needs_review": "Review",
   "hist.needs_review_hint": "Auto-detected charge — tap to edit/confirm",

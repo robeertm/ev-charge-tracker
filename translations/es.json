@@ -326,6 +326,7 @@
   "hist.filter": "Filtrar",
   "hist.km": "km",
   "hist.kwh": "kWh",
+  "hist.co2_estimated": "Estimado a partir de tu propio historial — el valor real de la red se añadirá en cuanto la plataforma vuelva a responder",
   "hist.loss": "Pérdidas",
   "hist.needs_review": "Revisar",
   "hist.needs_review_hint": "Carga detectada automáticamente — toca para editar/confirmar",

@@ -206,6 +206,11 @@ class Charge(db.Model):
     # unavailable dates stop being polled, while recent charges (ENTSO-E
     # publishes with a delay) get re-tried across boots until filled.
     co2_attempts = db.Column(db.Integer, default=0)
+    # v3.0.116: True while the value is a fallback estimate from this
+    # install's own history, written when the grid platform cannot be
+    # reached. The backfill keeps such rows in its sights and replaces
+    # them with the real number as soon as ENTSO-E answers again.
+    co2_estimated = db.Column(db.Boolean, default=False)
     notes = db.Column(db.Text)
     location_lat = db.Column(db.Float)
     location_lon = db.Column(db.Float)
@@ -288,6 +293,7 @@ class Charge(db.Model):
             'loss_pct': self.loss_pct,
             'co2_g_per_kwh': self.co2_g_per_kwh,
             'co2_kg': self.co2_kg,
+            'co2_estimated': bool(self.co2_estimated),
             'notes': self.notes,
             'location_lat': self.location_lat,
             'location_lon': self.location_lon,

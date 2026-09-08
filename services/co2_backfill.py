@@ -40,14 +40,19 @@ MIN_KICK_INTERVAL_S = 1800
 
 
 def missing_co2_filter(Charge):
-    """SQLAlchemy predicate for "grid charge still without CO2".
+    """SQLAlchemy predicate for "grid charge still without a real CO2 value".
 
-    NULL = never fetched; 0 = legacy poison marker from a failed lookup.
+    NULL = never fetched; 0 = legacy poison marker from a failed lookup;
+    v3.0.116 adds rows carrying a fallback estimate — they hold a number
+    for the user, but the real one is still owed, so the backfill must
+    keep them and overwrite them once ENTSO-E answers.
     PV charges get their CO2 from the lifecycle estimate, never ENTSO-E,
     so they are excluded.
     """
     return and_(
-        or_(Charge.co2_g_per_kwh.is_(None), Charge.co2_g_per_kwh == 0),
+        or_(Charge.co2_g_per_kwh.is_(None),
+            Charge.co2_g_per_kwh == 0,
+            Charge.co2_estimated.is_(True)),
         Charge.charge_type != 'PV',
     )
 
@@ -132,6 +137,7 @@ def backfill_co2(app):
     # co2_attempts counter is bumped so a genuinely unfillable date is
     # eventually dropped across runs (see CO2_MAX_ATTEMPTS).
     skip_ids = set()
+    unreachable = False
 
     while _backfill_running:
         with app.app_context():
@@ -161,6 +167,7 @@ def backfill_co2(app):
                 if co2:
                     charge.co2_g_per_kwh = co2
                     charge.co2_attempts = 0
+                    charge.co2_estimated = False    # the real number wins
                     if charge.kwh_loaded:
                         charge.co2_kg = round(charge.kwh_loaded * co2 / 1000, 2)
                     db.session.commit()
@@ -185,6 +192,7 @@ def backfill_co2(app):
                             "CO2 backfill: ENTSO-E unreachable — stopping "
                             "this run, no attempt counted"
                         )
+                        unreachable = True
                         break
 
                     # v3.0.114: a charge from TODAY is not a failed
@@ -219,6 +227,23 @@ def backfill_co2(app):
                     # Don't spin on a persistently-erroring row.
                     skip_ids.add(charge.id)
                     time.sleep(RETRY_INTERVAL)
+
+    # v3.0.116: the platform is down, so nothing can be looked up right
+    # now — fill the gap with a marked estimate instead of leaving the
+    # user with empty CO2 for the whole outage. Every one of those rows
+    # stays on the backfill's list and is replaced by the real number as
+    # soon as ENTSO-E answers again.
+    if unreachable:
+        try:
+            from services.co2_estimate import fill_estimates
+            n = fill_estimates(app)
+            if n:
+                logger.info(
+                    f"CO2 backfill: platform unreachable — {n} charge(s) "
+                    f"filled with a marked estimate for now"
+                )
+        except Exception as e:
+            logger.warning(f"CO2 estimate fallback failed: {e}")
 
     _backfill_running = False
     logger.info("CO2 backfill thread finished")

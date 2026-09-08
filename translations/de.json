@@ -326,6 +326,7 @@
   "hist.filter": "Filtern",
   "hist.km": "km",
   "hist.kwh": "kWh",
+  "hist.co2_estimated": "Geschätzt aus der eigenen Historie — der echte Netzwert wird nachgetragen, sobald die Plattform wieder antwortet",
   "hist.loss": "Verluste",
   "hist.needs_review": "Prüfen",
   "hist.needs_review_hint": "Automatisch erkannte Ladung — zum Bearbeiten/Bestätigen tippen",
