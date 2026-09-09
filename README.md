@@ -9,6 +9,37 @@
 
 Built for EV owners who want **full control over their charging data** — runs locally on your laptop, NAS, or Raspberry Pi. No cloud, no tracking, no subscription. Your data stays on your machine.
 
+> ### ⚠️ Please read before installing
+>
+> **This project is written with AI assistance.** Code, documentation and this
+> README are largely AI-generated and reviewed by a human, not the other way
+> round. Treat it as a hobby project, not as audited software.
+>
+> **It is provided "as is", with no warranty and no liability of any kind** —
+> for errors, for wrong numbers, for lost or corrupted data, for damage to your
+> vehicle or its battery, or for anything that follows from using it. **You use
+> it at your own risk.**
+>
+> Three things deserve saying plainly, because they touch real hardware and real
+> decisions:
+>
+> - **Remote control moves a real car.** The app can start and stop charging and
+>   climate control and, for some brands, lock and unlock the vehicle. It is off
+>   by default and must be enabled per vehicle. Enable it only if you accept
+>   that consequence.
+> - **The battery certificate is a self-assessment, not an appraisal.** It is
+>   computed from this app's own recorded data and does not replace an
+>   accredited battery test. Do not use it as the basis of a sale or a warranty
+>   claim without an independent measurement.
+> - **It talks to manufacturer APIs with your account credentials or API keys.**
+>   Those interfaces are outside this project's control and may change, throttle
+>   or refuse access at any time; some are not officially supported by the
+>   manufacturer. Costs, CO2 figures and consumption values are estimates
+>   derived from your own inputs and may be wrong.
+>
+> Not affiliated with, endorsed by, or supported by any vehicle manufacturer.
+> Product and brand names belong to their respective owners.
+
 ---
 
 ## Screenshots
@@ -463,4 +494,18 @@ Pull requests welcome! Areas where help is appreciated:
 
 ## License
 
-Robert Manuwald 2021-2026
+Robert Manuwald 2021-2026 — released under the MIT License (see `LICENSE`).
+
+### Disclaimer
+
+This software is provided **"as is", without warranty of any kind**, express or
+implied, including but not limited to the warranties of merchantability,
+fitness for a particular purpose and non-infringement. In no event shall the
+author be liable for any claim, damages or other liability arising from the
+software or its use.
+
+**Large parts of this project — code, tests and documentation — are
+AI-generated.** They are reviewed before release, but reviewing is not the same
+as auditing: mistakes are possible anywhere, including in the parts that read
+from or send commands to a vehicle. Anyone relying on this software for
+something that matters should verify it themselves.
