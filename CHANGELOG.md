@@ -2,6 +2,45 @@
 
 ## v3.0.122 (2026-09-09)
 
+### The remote-control opt-in did nothing at all
+
+Switching it on sent no request, showed no error, and was back off after
+the next page load. The switch is bound by an inline script that sits in the
+middle of the settings page, and an inline script runs immediately — while the
+section it binds to is rendered thousands of characters further down. So
+`querySelectorAll` matched nothing, no handler was attached, and there was
+nothing anywhere to explain the behaviour.
+
+The handling now lives in one file, `static/js/remote_control.js`, using event
+delegation on `document`. That cannot fail the same way: the listener sits on
+something that always exists and the lookup happens when the click happens.
+Both pages that offer remote control share it, so there is one implementation
+to get right rather than two to keep in step.
+
+### Remote control on the dashboard
+
+When it is switched on for a vehicle, the controls appear on the dashboard
+itself instead of only in Settings. When it is not, nothing appears there —
+the prominent placement must not become a way around the decision, so the
+opt-in remains the condition for the card existing at all.
+
+### Tests: the interface is now driven, not just rendered
+
+Every test in this repo checked that the server answers correctly or that the
+template produces the right markup. None of them pressed a button — which is
+exactly why a control that rendered perfectly and did nothing could ship.
+
+`tests/test_ui_behaviour.py` starts a real instance against a throwaway data
+directory and drives it with a browser: it clicks the opt-in and requires that
+a request reaches the server, that the switch stays on, that the command
+buttons unlock and that the change survives as data; and it checks that the
+dashboard shows no controls for a vehicle that never opted in. The test was
+confirmed against the original defect before the fix — it fails there with
+"no request reached the server".
+
+`EV_DATA_DIR` now relocates everything the app writes, which is what lets that
+test run without touching a real installation's database.
+
 ### The Škoda API key expiry is actually shown now
 
 v3.0.121 read the key's expiry date from every response and shipped the

@@ -1163,7 +1163,14 @@
                 </script>
                 <script>
                 // ── Škoda: Umstellung auf die offizielle API ──────────────
-                (function () {
+                //
+                // WARTEN, bis das Dokument steht. Dieser Block liegt mitten in
+                // der Seite und lief bisher SOFORT — die Abschnitte, an die er
+                // sich haengt, werden aber erst tausende Zeichen weiter unten
+                // gerendert. querySelectorAll fand nichts, es gab weder Fehler
+                // noch Netzaufruf: der Schalter liess sich umlegen, sprang beim
+                // naechsten Seitenaufbau zurueck, und nichts erklaerte warum.
+                document.addEventListener('DOMContentLoaded', function () {
                     document.querySelectorAll('[data-switch-vehicle]').forEach(box => {
                         const vid = box.dataset.switchVehicle;
                         const btn = box.querySelector('.sw-go');
@@ -1197,78 +1204,11 @@
                             }
                         });
                     });
-                })();
+                });
 
-                // ── Fernsteuerung ────────────────────────────────────────
-                (function () {
-                    const SENSITIVE = ['unlock'];
-                    const CONFIRM = {{ t('remote.confirm_unlock')|tojson }};
-                    const SENT    = {{ t('remote.sent')|tojson }};
-
-                    document.querySelectorAll('[data-remote-vehicle]').forEach(box => {
-                        const vid = box.dataset.remoteVehicle;
-                        const optin = box.querySelector('.rc-optin');
-                        const st = box.querySelector('.rc-status');
-                        const controls = () => box.querySelectorAll('.rc-cmd, .rc-limit');
-
-                        optin.addEventListener('change', async () => {
-                            const on = optin.checked;
-                            // Knoepfe erst freigeben, wenn der Server den Schalter
-                            // wirklich gespeichert hat — sonst zeigt die Oberflaeche
-                            // eine Erlaubnis, die es nicht gibt.
-                            optin.disabled = true;
-                            try {
-                                const r = await fetch('/api/vehicle/' + vid + '/remote-optin', {
-                                    method: 'POST',
-                                    headers: {'Content-Type': 'application/json'},
-                                    body: JSON.stringify({enabled: on})
-                                });
-                                const d = await r.json();
-                                const real = !!(d.ok && d.enabled);
-                                optin.checked = real;
-                                controls().forEach(el => el.disabled = !real);
-                                st.textContent = '';
-                            } catch (e) {
-                                optin.checked = !on;
-                                st.innerHTML = '<span class="text-danger">' + e.message + '</span>';
-                            } finally {
-                                optin.disabled = false;
-                            }
-                        });
-
-                        box.querySelectorAll('.rc-cmd').forEach(b => {
-                            b.addEventListener('click', async () => {
-                                const cmd = b.dataset.cmd;
-                                const body = {};
-                                if (SENSITIVE.indexOf(cmd) !== -1) {
-                                    if (!confirm(CONFIRM)) return;
-                                    body.confirm = '1';
-                                }
-                                const lim = box.querySelector('.rc-limit');
-                                if (cmd === 'charging_limit' && lim) body.target_soc = lim.value;
-                                b.disabled = true;
-                                st.innerHTML = '<span class="spinner-border spinner-border-sm"></span>';
-                                try {
-                                    const r = await fetch('/api/vehicle/' + vid + '/remote/' + cmd, {
-                                        method: 'POST',
-                                        headers: {'Content-Type': 'application/json'},
-                                        body: JSON.stringify(body)
-                                    });
-                                    const d = await r.json();
-                                    // „gesendet", nie „erledigt": die Hersteller-API nimmt
-                                    // den Auftrag entgegen, das Auto handelt danach.
-                                    st.innerHTML = d.ok
-                                        ? '<span class="text-success">' + (d.message || SENT) + '</span>'
-                                        : '<span class="text-danger">' + (d.error || 'Fehler') + '</span>';
-                                } catch (e) {
-                                    st.innerHTML = '<span class="text-danger">' + e.message + '</span>';
-                                } finally {
-                                    b.disabled = false;
-                                }
-                            });
-                        });
-                    });
-                })();
+                // Fernsteuerung: gemeinsame Datei static/js/remote_control.js
+                // (per Ereignis-Delegation, damit die Reihenfolge im Dokument
+                //  keine Rolle mehr spielen kann).
                 </script>
                 <script>
                 async function installPkg(pkg, btn, opts) {
@@ -1346,7 +1286,8 @@
             <div class="card-body">
                 <p class="text-muted small">{{ t('skoda.remote_hint') }}</p>
                 {% for rv in remote_vehicles %}
-                <div class="border rounded p-3 mb-3" data-remote-vehicle="{{ rv.id }}">
+                <div class="border rounded p-3 mb-3" data-remote-vehicle="{{ rv.id }}"
+                     data-rc-sensitive="unlock" data-rc-confirm="{{ t('remote.confirm_unlock') }}">
                     <div class="d-flex justify-content-between align-items-center flex-wrap gap-2">
                         <div class="fw-semibold">{{ rv.name }} <span class="text-muted small">{{ brand_label(rv.brand) }}</span></div>
                         <div class="form-check form-switch mb-0">
@@ -1379,6 +1320,7 @@
                 {% endfor %}
             </div>
         </div>
+        <script src="/static/js/remote_control.js"></script>
         {% endif %}
 
         <div class="card mb-4 settings-card" id="sec-entsoe">

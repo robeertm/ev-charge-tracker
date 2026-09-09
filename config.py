@@ -1,7 +1,13 @@
 import os
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-DATA_DIR = os.path.join(BASE_DIR, 'data')
+
+# EV_DATA_DIR relocates everything the app writes — database, caches,
+# exports. Two reasons it exists: a browser test needs to drive a REAL
+# instance without touching the developer's own database, and a
+# self-hoster may want the data on a different disk than the code.
+# Unset, nothing changes: the data stays next to the app as before.
+DATA_DIR = os.environ.get('EV_DATA_DIR') or os.path.join(BASE_DIR, 'data')
 # On some mounted filesystems, SQLite may not work. Use a local fallback.
 try:
     os.makedirs(DATA_DIR, exist_ok=True)

@@ -18,6 +18,41 @@
     </div>
     <i class="bi bi-chevron-right text-muted"></i>
 </a>
+{% if dash_remote %}
+{# Fernsteuerung, prominent: sie erscheint hier NUR, wenn sie fuer das
+   Fahrzeug ausdruecklich eingeschaltet wurde. Kein Opt-in, keine Karte —
+   das Dashboard darf nicht zur Hintertuer um die Entscheidung herum werden. #}
+<div class="card mb-3 border-primary-subtle">
+    <div class="card-body py-3">
+        {% for rv in dash_remote %}
+        <div class="{% if not loop.first %}mt-3 pt-3 border-top{% endif %}"
+             data-remote-vehicle="{{ rv.id }}"
+             data-rc-sensitive="unlock" data-rc-confirm="{{ t('remote.confirm_unlock') }}">
+            <div class="d-flex align-items-center gap-2 flex-wrap mb-2">
+                <span class="fw-bold"><i class="bi bi-broadcast-pin text-primary"></i> {{ t('skoda.remote_title') }}</span>
+                <span class="text-muted small">{{ rv.name }}</span>
+            </div>
+            <div class="d-flex flex-wrap gap-2 align-items-center">
+                {% for c in rv.commands %}
+                <button type="button"
+                        class="btn btn-sm {% if c == 'unlock' %}btn-outline-danger{% else %}btn-outline-primary{% endif %} rc-cmd"
+                        data-cmd="{{ c }}">{{ t('remote.cmd_' + c) }}</button>
+                {% endfor %}
+                {% if 'charging_limit' in rv.commands %}
+                <div class="input-group input-group-sm" style="width:auto">
+                    <input type="number" min="50" max="100" step="5" value="80"
+                           class="form-control form-control-sm rc-limit" style="width:5rem">
+                    <span class="input-group-text">%</span>
+                </div>
+                {% endif %}
+            </div>
+            <div class="small mt-2 rc-status"></div>
+        </div>
+        {% endfor %}
+    </div>
+</div>
+<script src="/static/js/remote_control.js"></script>
+{% endif %}
 <div id="rollbackBanner" class="alert alert-info mb-3 d-none d-flex align-items-start gap-2">
     <i class="bi bi-arrow-counterclockwise fs-4"></i>
     <div class="flex-grow-1">

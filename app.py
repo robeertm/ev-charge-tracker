@@ -3245,7 +3245,38 @@ def register_routes(app):
         vehicle_features = get_features(
             (AppConfig.get('vehicle_api_brand', '') or '').lower()
         )
+        # Fernsteuerung aufs Dashboard — aber NUR fuer Fahrzeuge, deren
+        # Besitzer sie ausdruecklich eingeschaltet hat. Ist nichts
+        # eingeschaltet, erscheint hier auch nichts: das Opt-in ist die
+        # Bedingung, nicht bloss eine Voreinstellung im Einstellungsmenue.
+        _dash_remote = []
+        try:
+            from models.database import Vehicle as _DrV
+            from services.vehicle import get_connector
+            from services.vehicle.base import remote_commands_of
+            from services.vehicle.catalog import credentials_present
+            for _rv in (_DrV.query.filter_by(is_archived=False,
+                                             remote_control_enabled=True).all()):
+                _rb = (_rv.api_brand or '').lower()
+                if not credentials_present(_rb, _rv.api_username,
+                                           _rv.api_password, _rv.api_vin):
+                    continue
+                try:
+                    _rc = remote_commands_of(get_connector(_rb, {
+                        'username': _rv.api_username or '',
+                        'password': _rv.api_password or '',
+                        'pin': _rv.api_pin or '', 'region': _rv.api_region or 'EU',
+                        'vin': _rv.api_vin or ''}))
+                except Exception:
+                    continue
+                if _rc:
+                    _dash_remote.append({'id': _rv.id, 'name': _rv.name,
+                                         'brand': _rb, 'commands': _rc})
+        except Exception as _de:
+            logger.warning(f"dashboard remote scan failed ({type(_de).__name__}: {_de})")
+
         return render_template('dashboard.html',
+                               dash_remote=_dash_remote,
                                stats=stats, chart_data=chart_data,
                                acdc=acdc, yearly=yearly,
                                vehicle_configured=vehicle_configured,
