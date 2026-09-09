@@ -115,3 +115,24 @@ def test_every_used_key_is_actually_translated():
     de = json.loads((ROOT / 'translations' / 'de.json').read_text())
     missing = sorted(k for k in _used_keys() if k not in de)
     assert not missing, f'benutzt, aber nirgends uebersetzt: {missing}'
+
+
+def test_nothing_decides_a_vehicle_is_configured_by_username_alone():
+    """The official Škoda API has no username — it authenticates with an
+    API key bound to a VIN. Four separate places used to spell the
+    "is this car set up?" test as `api_username`, and one of them (the
+    sync service) skipped SILENTLY, so a correctly configured Škoda was
+    simply never synced and said nothing about it. The answer lives in
+    services/vehicle/catalog.credentials_present(); this test stops a
+    fifth copy from appearing.
+    """
+    hits = []
+    for p in list((ROOT / 'services').rglob('*.py')) + [ROOT / 'app.py']:
+        for i, line in enumerate(p.read_text().split('\n'), 1):
+            code = line.split('#')[0]
+            if 'api_username' not in code:
+                continue
+            if re.search(r'(if\s+not\s+[\w.]*api_username\s*[:)]|'
+                         r'and\s+[\w.]*api_username\s*[:)])', code):
+                hits.append(f'{p.name}:{i}: {line.strip()[:80]}')
+    assert not hits, ('these gate on api_username alone:\n  ' + '\n  '.join(hits))

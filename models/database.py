@@ -128,6 +128,14 @@ class Vehicle(db.Model):
     api_region = db.Column(db.String(8))
     api_vin = db.Column(db.String(40))
     auto_sync = db.Column(db.Boolean, default=True)
+    # v3.0.121: remote control (Škoda official API) is OFF unless the owner
+    # turns it on for THIS car. Reading a vehicle's state and moving its
+    # hardware are different permissions, and a connector that can do the
+    # second one by default would make every stored API key a remote
+    # control for a real car. Default False, and the API layer refuses the
+    # command as well — a hidden button is not a safety property.
+    remote_control_enabled = db.Column(db.Boolean, default=False, nullable=False,
+                                       server_default='0')
 
     # Lifecycle
     is_archived = db.Column(db.Boolean, default=False, nullable=False)
@@ -163,6 +171,7 @@ class Vehicle(db.Model):
             'api_pin': self.api_pin,
             'api_region': self.api_region,
             'api_vin': self.api_vin,
+            'remote_control_enabled': bool(self.remote_control_enabled),
             'auto_sync': self.auto_sync,
             'is_archived': self.is_archived,
             'first_registered_at': self.first_registered_at.isoformat() if self.first_registered_at else None,

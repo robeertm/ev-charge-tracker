@@ -315,6 +315,14 @@ def create_app(config_class=Config):
                 db.session.execute(text('ALTER TABLE vehicles ADD COLUMN first_registered_at DATE'))
             if 'battery_kwh_gross' not in veh_columns:
                 db.session.execute(text('ALTER TABLE vehicles ADD COLUMN battery_kwh_gross REAL'))
+            # v3.0.121: per-vehicle remote-control opt-in for the official
+            # Škoda API. NOT NULL DEFAULT 0 on purpose — an upgrade must
+            # never hand an existing install a capability to move a real
+            # car that nobody asked for.
+            if 'remote_control_enabled' not in veh_columns:
+                db.session.execute(text(
+                    'ALTER TABLE vehicles ADD COLUMN remote_control_enabled '
+                    'BOOLEAN NOT NULL DEFAULT 0'))
         except Exception:
             pass  # fresh install — create_all() handles it
 
@@ -2907,7 +2915,9 @@ def register_routes(app):
         from models.database import Vehicle
         v = Vehicle.query.get_or_404(vid)
         _ajax = request.form.get('ajax') == '1'
-        if not (v.api_brand and v.api_username):
+        from services.vehicle.catalog import credentials_present
+        if not credentials_present(v.api_brand, v.api_username,
+                                   v.api_password, v.api_vin):
             if _ajax:
                 return jsonify({'ok': False, 'error': t('flash.vehicle_test_no_creds')}), 400
             flash(t('flash.vehicle_test_no_creds'), 'warning')
@@ -2932,13 +2942,170 @@ def register_routes(app):
             flash(t('flash.vehicle_test_failed', name=v.name, error=str(e)), 'danger')
         return redirect('/settings#sec-fleet')
 
+    # ── Škoda: official API ────────────────────────────────────────
+    @app.route('/api/vehicle/<int:vid>/skoda/switch', methods=['POST'])
+    def api_skoda_switch(vid):
+        """Move one vehicle from the retiring Škoda access to the official API.
+
+        The key and VIN are PROVED before anything is written: a switch
+        that stores unverified credentials and only fails at the next
+        background sync would take a working car offline hours later,
+        with the old credentials already overwritten.
+
+        Nothing but the credentials changes — charges, trips and history
+        stay attached to the same vehicle row.
+        """
+        from models.database import Vehicle
+        from services.vehicle.skoda_public_api import SkodaApiError, get_vehicle
+        v = Vehicle.query.get_or_404(vid)
+        data = request.get_json(silent=True) or request.form
+        key = (data.get('api_key') or '').strip()
+        vin = (data.get('vin') or v.api_vin or '').strip().upper()
+        if not key or not vin:
+            return jsonify({'ok': False, 'error': t('skoda.err_need_key_vin')}), 400
+        try:
+            probe = get_vehicle(key, vin, parts=['info'], spend_reserve=True)
+        except SkodaApiError as e:
+            return jsonify({'ok': False, 'kind': e.kind, 'error': str(e)}), 200
+        v.api_brand = 'skoda_api'
+        v.api_password = key
+        v.api_vin = vin
+        # The old access needed an account; the new one does not. Leaving
+        # the address behind would keep a credential around that no longer
+        # unlocks anything and only reads as "still configured".
+        v.api_username = ''
+        db.session.commit()
+        logger.info(f"Vehicle {v.id} switched to the official Skoda API")
+        return jsonify({
+            'ok': True,
+            'name': ((probe.get('vehicle') or {}).get('name') or v.name),
+            'key_expires_at': probe.get('_key_expires_at'),
+        })
+
+    # NOT /remote/enable: that would sit under the same prefix as
+    # /remote/<command> and the two would only be told apart by
+    # Werkzeug preferring a static rule. A command called "enable" would
+    # then silently become unreachable. Different path, no ambiguity.
+    @app.route('/api/vehicle/<int:vid>/remote-optin', methods=['POST'])
+    def api_vehicle_remote_optin(vid):
+        """Turn remote control on or off for one vehicle. Opt-in, per car."""
+        from models.database import Vehicle
+        v = Vehicle.query.get_or_404(vid)
+        data = request.get_json(silent=True) or request.form
+        want = str(data.get('enabled', '')).lower() in ('1', 'true', 'yes', 'on')
+        v.remote_control_enabled = want
+        db.session.commit()
+        logger.info(f"Vehicle {v.id}: remote control {'enabled' if want else 'disabled'}")
+        return jsonify({'ok': True, 'enabled': want})
+
+    @app.route('/api/vehicle/<int:vid>/remote')
+    def api_vehicle_remote_caps(vid):
+        """What this car can be told to do, and whether it may be told.
+
+        The UI draws its buttons from this. Brands differ — the official
+        Škoda API has ventilation but no lock, Kia/Hyundai the other way
+        round — and hard-coding that in the template is how the brand
+        list drifted from the connectors in the first place.
+        """
+        from models.database import Vehicle
+        from services.vehicle.base import SENSITIVE_COMMANDS, remote_commands_of
+        v = Vehicle.query.get_or_404(vid)
+        cmds = []
+        try:
+            from services.vehicle import get_connector
+            from services.vehicle.catalog import credentials_present
+            if credentials_present(v.api_brand, v.api_username,
+                                   v.api_password, v.api_vin):
+                conn = get_connector((v.api_brand or '').lower(), {
+                    'username': v.api_username or '',
+                    'password': v.api_password or '',
+                    'pin': v.api_pin or '',
+                    'region': v.api_region or 'EU',
+                    'vin': v.api_vin or '',
+                })
+                cmds = remote_commands_of(conn)
+        except Exception as e:
+            logger.debug(f"remote caps for vehicle {vid}: {e}")
+        return jsonify({
+            'enabled': bool(v.remote_control_enabled),
+            'commands': cmds,
+            'sensitive': sorted(SENSITIVE_COMMANDS),
+        })
+
+    @app.route('/api/vehicle/<int:vid>/remote/<command>', methods=['POST'])
+    def api_vehicle_remote_command(vid, command):
+        """Send one remote command to a vehicle.
+
+        Three gates, deliberately not one:
+
+        1. the vehicle's own opt-in, off until somebody turns it on;
+        2. an explicit ``confirm`` for commands that change the car's
+           physical security — allowing remote pre-heating in winter is
+           not the same decision as being one stray click from unlocking
+           the car in a car park;
+        3. the connector itself, which refuses a command it never
+           advertised.
+
+        A single check in the template would mean one forgotten condition
+        is enough to move somebody's real car.
+        """
+        from models.database import Vehicle
+        from services.vehicle.base import (RemoteNotSupported, SENSITIVE_COMMANDS,
+                                           remote_commands_of)
+        from services.vehicle.catalog import credentials_present
+        v = Vehicle.query.get_or_404(vid)
+
+        if not v.remote_control_enabled:
+            return jsonify({'ok': False, 'kind': 'remote_disabled',
+                            'error': t('remote.err_off')}), 403
+        if not credentials_present(v.api_brand, v.api_username,
+                                   v.api_password, v.api_vin):
+            return jsonify({'ok': False, 'kind': 'no_creds',
+                            'error': t('flash.vehicle_test_no_creds')}), 400
+
+        params = dict(request.get_json(silent=True) or request.form or {})
+        if command in SENSITIVE_COMMANDS and \
+                str(params.get('confirm', '')).lower() not in ('1', 'true', 'yes'):
+            return jsonify({'ok': False, 'kind': 'needs_confirm',
+                            'error': t('remote.err_confirm')}), 400
+
+        try:
+            from services.vehicle import get_connector
+            conn = get_connector((v.api_brand or '').lower(), {
+                'username': v.api_username or '',
+                'password': v.api_password or '',
+                'pin': v.api_pin or '',
+                'region': v.api_region or 'EU',
+                'vin': v.api_vin or '',
+            })
+            if command not in remote_commands_of(conn):
+                return jsonify({'ok': False, 'kind': 'unsupported',
+                                'error': t('remote.err_unsupported')}), 400
+            res = conn.send_remote(command, params)
+        except RemoteNotSupported:
+            return jsonify({'ok': False, 'kind': 'unsupported',
+                            'error': t('remote.err_unsupported')}), 400
+        except Exception as e:
+            kind = getattr(e, 'kind', 'error')
+            return jsonify({'ok': False, 'kind': kind, 'error': str(e),
+                            'retry_after': getattr(e, 'retry_after', None)}), 200
+
+        logger.info(f"Vehicle {v.id} ({v.api_brand}): remote command {command} sent")
+        # "sent", never "done": these APIs answer 202 / queue the request
+        # and the car acts afterwards. Reporting success would be a claim
+        # we cannot back until the next state read.
+        return jsonify({'ok': True, 'accepted': bool(res.get('accepted')),
+                        'message': t('remote.sent')})
+
     @app.route('/vehicles/<int:vid>/sync', methods=['POST'])
     def vehicles_sync(vid):
         """Manual one-shot sync for a single vehicle. Same path as the
         background loop's _sync_one_vehicle, just on demand."""
         from models.database import Vehicle
         v = Vehicle.query.get_or_404(vid)
-        if not (v.api_brand and v.api_username):
+        from services.vehicle.catalog import credentials_present
+        if not credentials_present(v.api_brand, v.api_username,
+                                   v.api_password, v.api_vin):
             flash(t('flash.vehicle_sync_no_creds'), 'warning')
             return redirect('/settings#sec-fleet')
         try:
@@ -3830,6 +3997,63 @@ def register_routes(app):
         except Exception:
             _vehicle_catalog = []
 
+        # Remote control + the Škoda changeover, both computed here rather
+        # than probed per vehicle from the browser: asking the connector
+        # what it supports costs no network call, and one round trip per
+        # car would make the page slower for a list that never changes
+        # between reloads.
+        _remote_vehicles = []
+        _skoda_legacy = []
+        try:
+            # app.py does NOT import Vehicle at module level — every route
+            # pulls it in locally. Relying on a bare `Vehicle` here raised
+            # NameError, and the broad `except` below swallowed it: the
+            # page rendered fine and simply showed neither the changeover
+            # notice nor the remote-control section. Hence the import, and
+            # hence the warning instead of a debug line further down.
+            from models.database import Vehicle as _RcVehicle
+            from services.vehicle import get_connector
+            from services.vehicle.base import remote_commands_of
+            from services.vehicle.catalog import by_key, credentials_present
+            for _v in (_RcVehicle.query.filter_by(is_archived=False)
+                       .order_by(_RcVehicle.id).all()):
+                _brand = (_v.api_brand or '').lower()
+                _cat = by_key(_brand)
+                if _cat and _cat.legacy:
+                    _skoda_legacy.append({
+                        'id': _v.id, 'name': _v.name,
+                        'vin': _v.api_vin or '',
+                        'sunset': _cat.sunset, 'replaced_by': _cat.replaced_by,
+                    })
+                if not credentials_present(_brand, _v.api_username,
+                                           _v.api_password, _v.api_vin):
+                    continue
+                try:
+                    _conn = get_connector(_brand, {
+                        'username': _v.api_username or '',
+                        'password': _v.api_password or '',
+                        'pin': _v.api_pin or '',
+                        'region': _v.api_region or 'EU',
+                        'vin': _v.api_vin or '',
+                    })
+                except Exception:
+                    continue
+                _cmds = remote_commands_of(_conn)
+                if _cmds:
+                    _remote_vehicles.append({
+                        'id': _v.id, 'name': _v.name,
+                        'brand': _brand,
+                        'enabled': bool(_v.remote_control_enabled),
+                        'commands': _cmds,
+                    })
+        except Exception as _e:
+            # WARNING, not debug: if this breaks, two whole UI sections
+            # disappear without a trace and the page still looks correct.
+            logger.warning(
+                f"remote/legacy scan failed ({type(_e).__name__}: {_e}) — "
+                f"the remote-control section and the Škoda changeover "
+                f"notice will be missing from Settings")
+
         # Kia/Hyundai: the connector may be installed but too old for the
         # headless CCI password sign-in (needs hyundai-kia-connect-api
         # >=4.26.3, upstream #1273). In that case 'kia' IS in
@@ -3940,6 +4164,8 @@ def register_routes(app):
                                # neither can name a brand the registry does
                                # not know (see services/vehicle/catalog.py).
                                vehicle_catalog=_vehicle_catalog,
+                               remote_vehicles=_remote_vehicles,
+                               skoda_legacy_vehicles=_skoda_legacy,
                                hyundai_kia_sdk_outdated=hyundai_kia_sdk_outdated,
                                hyundai_kia_sdk_version=hyundai_kia_sdk_version,
                                hyundai_kia_python_too_old=hyundai_kia_python_too_old,

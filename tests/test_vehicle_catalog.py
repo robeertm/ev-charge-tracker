@@ -76,7 +76,33 @@ def test_the_catalog_survives_json_serialisation():
     import json
     rows = brands_for_ui()
     assert rows and json.loads(json.dumps(rows)) == rows
-    assert all({'key', 'label', 'pkg', 'token'} == set(r) for r in rows)
+    assert all({'key', 'label', 'pkg', 'token',
+                'legacy', 'sunset', 'replaced_by'} == set(r) for r in rows)
+
+
+def test_a_retired_brand_stays_selectable_but_is_not_offered():
+    """A legacy brand must still appear in the catalog the fleet form
+    renders — a <select> that cannot represent the value stored in the
+    database would silently rewrite it the next time the form is saved.
+    The wizard filters it out separately, so nobody sets up a NEW car on
+    an access the manufacturer is switching off."""
+    from services.vehicle.catalog import legacy_keys
+    keys = legacy_keys()
+    assert 'skoda' in keys, 'the retiring Škoda access must be flagged'
+    for k in keys:
+        b = next(x for x in BRANDS if x.key == k)
+        assert b.sunset, f'{k}: a deprecation without a date is not actionable'
+        assert b.replaced_by, f'{k}: say what replaces it'
+        assert any(x.key == b.replaced_by for x in BRANDS), \
+            f'{k}: replacement {b.replaced_by} is not in the catalog'
+
+
+def test_labels_of_offered_brands_are_unique():
+    """Two tiles reading 'Škoda' would be a coin flip for the user. The
+    legacy entry may share the label because the fleet form marks it with
+    its sunset date, but the wizard must never show two of the same."""
+    offered = [b.label for b in BRANDS if not b.legacy]
+    assert len(offered) == len(set(offered)), offered
 
 
 def test_kia_and_hyundai_are_the_only_token_brands():

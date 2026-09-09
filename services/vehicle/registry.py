@@ -29,6 +29,7 @@ _CONNECTOR_MODULES = [
     'connector_smart',
     'connector_porsche',
     'connector_xpeng',
+    'connector_skoda_public',
 ]
 for _mod in _CONNECTOR_MODULES:
     try:

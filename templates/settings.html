@@ -44,6 +44,9 @@
     ('locations', 'bi-geo-alt',     t('set.locations_title')),
     ('pv',        'bi-sun',         t('set.pv_title')),
     ('api',       'bi-arrow-repeat', t('set.sync_title')),
+] + ([
+    ('remote',    'bi-broadcast-pin', t('skoda.remote_title')),
+] if remote_vehicles else []) + [
     ('entsoe',    'bi-cloud',       t('set.entsoe_title')),
     ('operators', 'bi-building',    t('set.operators_title')),
     ('database',  'bi-database',    t('set.db_title')),
@@ -92,6 +95,38 @@
 
         <!-- v2.29 Fahrzeuge / Flotte ─────────────────────────────── -->
         <div class="card mb-4 settings-card" id="sec-fleet">
+            {% if skoda_legacy_vehicles %}
+            {# Der Hersteller schaltet den bisherigen Zugang ab. Ein Hinweis ohne
+               Datum und ohne Knopf wäre eine Sorge ohne Ausweg — deshalb beides. #}
+            <div class="alert alert-warning m-3 mb-0" id="skodaSwitchBox">
+                <div class="fw-bold"><i class="bi bi-arrow-left-right"></i> {{ t('skoda.switch_title') }}</div>
+                <div class="small mt-1">{{ t('skoda.switch_body', date=skoda_legacy_vehicles[0].sunset) }}</div>
+                {% for lv in skoda_legacy_vehicles %}
+                <div class="mt-3 p-2 border rounded bg-body" data-switch-vehicle="{{ lv.id }}">
+                    <div class="fw-semibold small mb-2">{{ lv.name }}</div>
+                    <div class="row g-2 align-items-end">
+                        <div class="col-12 col-md-6">
+                            {# „Passwort“ waere hier schlicht falsch: verlangt wird
+                               der API-Schluessel aus der MyŠkoda-App, nicht das
+                               Konto-Passwort. Wer das verwechselt, scheitert. #}
+                            <label class="form-label small mb-1">{{ t('skoda.field_api_key') }}</label>
+                            <input type="password" class="form-control form-control-sm sw-key" autocomplete="new-password"
+                                   placeholder="msk_…">
+                        </div>
+                        <div class="col-12 col-md-4">
+                            <label class="form-label small mb-1">VIN</label>
+                            <input type="text" class="form-control form-control-sm sw-vin" value="{{ lv.vin or '' }}" autocomplete="off">
+                        </div>
+                        <div class="col-12 col-md-2">
+                            <button type="button" class="btn btn-sm btn-warning w-100 sw-go">{{ t('skoda.switch_btn') }}</button>
+                        </div>
+                    </div>
+                    <div class="small mt-2 text-muted">{{ t('skoda.key_hint') }}</div>
+                    <div class="small mt-1 sw-status"></div>
+                </div>
+                {% endfor %}
+            </div>
+            {% endif %}
             <div class="card-header bg-white fw-bold">
                 <i class="bi bi-collection"></i> {{ t('set.fleet_title') }}
             </div>
@@ -120,7 +155,7 @@
                                 </td>
                                 <td class="small">{{ v.brand or '—' }}{% if v.model %} · {{ v.model }}{% endif %}</td>
                                 <td class="text-end small">{% if v.battery_kwh %}{{ "%.1f"|format(v.battery_kwh) }} kWh{% else %}—{% endif %}</td>
-                                <td class="small">{% if v.api_brand %}<i class="bi bi-broadcast text-success"></i> {{ v.api_brand }}{% if not v.auto_sync %} <span class="text-muted">({{ t('set.fleet_sync_off') }})</span>{% endif %}{% else %}<span class="text-muted">—</span>{% endif %}</td>
+                                <td class="small">{% if v.api_brand %}<i class="bi bi-broadcast text-success"></i> {{ brand_label(v.api_brand) }}{% if not v.auto_sync %} <span class="text-muted">({{ t('set.fleet_sync_off') }})</span>{% endif %}{% else %}<span class="text-muted">—</span>{% endif %}</td>
                                 <td>
                                     {% if v.is_archived %}
                                     <span class="badge bg-secondary">{{ t('set.fleet_archived') }}</span>
@@ -129,7 +164,7 @@
                                     {% endif %}
                                 </td>
                                 <td class="text-end">
-                                    {% if v.api_brand and v.api_username %}
+                                    {% if v.api_brand and (v.api_username or (v.api_password and v.api_vin)) %}
                                     <form method="POST" action="/vehicles/{{ v.id }}/test" class="d-inline">
                                         <button type="submit" class="btn btn-sm btn-outline-info"
                                                 title="{{ t('set.fleet_test') }}">
@@ -269,7 +304,11 @@
                                        stored as 'vw' keep working — that is still the VW
                                        connector's own key. #}
                                     {% for b in (vehicle_catalog or []) %}
-                                    <option value="{{ b.key }}">{{ b.label }}</option>
+                                    {# Legacy bleibt wählbar, sonst könnte das Formular den
+                                       gespeicherten Wert nicht darstellen und würde ihn beim
+                                       Speichern still überschreiben. Der Zusatz nennt das
+                                       Abschaltdatum — „veraltet“ allein ist nicht handhabbar. #}
+                                    <option value="{{ b.key }}">{{ b.label }}{% if b.legacy %} — {{ t('set.brand_legacy_until', date=b.sunset) }}{% endif %}</option>
                                     {% endfor %}
                                 </select>
                             </div>
@@ -1105,6 +1144,115 @@
                 })();
                 </script>
                 <script>
+                // ── Škoda: Umstellung auf die offizielle API ──────────────
+                (function () {
+                    document.querySelectorAll('[data-switch-vehicle]').forEach(box => {
+                        const vid = box.dataset.switchVehicle;
+                        const btn = box.querySelector('.sw-go');
+                        const st  = box.querySelector('.sw-status');
+                        if (!btn) return;
+                        btn.addEventListener('click', async () => {
+                            const key = box.querySelector('.sw-key').value.trim();
+                            const vin = box.querySelector('.sw-vin').value.trim();
+                            btn.disabled = true;
+                            st.innerHTML = '<span class="spinner-border spinner-border-sm"></span>';
+                            try {
+                                const r = await fetch('/api/vehicle/' + vid + '/skoda/switch', {
+                                    method: 'POST',
+                                    headers: {'Content-Type': 'application/json'},
+                                    body: JSON.stringify({api_key: key, vin: vin})
+                                });
+                                const d = await r.json();
+                                if (d.ok) {
+                                    // Neu laden: Marke, Abschnitte und der Hinweis selbst
+                                    // haengen am Serverzustand — die Seite halb von Hand
+                                    // nachzuziehen waere die zweite Wahrheit.
+                                    st.innerHTML = '<span class="text-success"><i class="bi bi-check-lg"></i></span>';
+                                    setTimeout(() => location.reload(), 900);
+                                } else {
+                                    st.innerHTML = '<span class="text-danger">' + (d.error || 'Fehler') + '</span>';
+                                    btn.disabled = false;
+                                }
+                            } catch (e) {
+                                st.innerHTML = '<span class="text-danger">' + e.message + '</span>';
+                                btn.disabled = false;
+                            }
+                        });
+                    });
+                })();
+
+                // ── Fernsteuerung ────────────────────────────────────────
+                (function () {
+                    const SENSITIVE = ['unlock'];
+                    const CONFIRM = {{ t('remote.confirm_unlock')|tojson }};
+                    const SENT    = {{ t('remote.sent')|tojson }};
+
+                    document.querySelectorAll('[data-remote-vehicle]').forEach(box => {
+                        const vid = box.dataset.remoteVehicle;
+                        const optin = box.querySelector('.rc-optin');
+                        const st = box.querySelector('.rc-status');
+                        const controls = () => box.querySelectorAll('.rc-cmd, .rc-limit');
+
+                        optin.addEventListener('change', async () => {
+                            const on = optin.checked;
+                            // Knoepfe erst freigeben, wenn der Server den Schalter
+                            // wirklich gespeichert hat — sonst zeigt die Oberflaeche
+                            // eine Erlaubnis, die es nicht gibt.
+                            optin.disabled = true;
+                            try {
+                                const r = await fetch('/api/vehicle/' + vid + '/remote-optin', {
+                                    method: 'POST',
+                                    headers: {'Content-Type': 'application/json'},
+                                    body: JSON.stringify({enabled: on})
+                                });
+                                const d = await r.json();
+                                const real = !!(d.ok && d.enabled);
+                                optin.checked = real;
+                                controls().forEach(el => el.disabled = !real);
+                                st.textContent = '';
+                            } catch (e) {
+                                optin.checked = !on;
+                                st.innerHTML = '<span class="text-danger">' + e.message + '</span>';
+                            } finally {
+                                optin.disabled = false;
+                            }
+                        });
+
+                        box.querySelectorAll('.rc-cmd').forEach(b => {
+                            b.addEventListener('click', async () => {
+                                const cmd = b.dataset.cmd;
+                                const body = {};
+                                if (SENSITIVE.indexOf(cmd) !== -1) {
+                                    if (!confirm(CONFIRM)) return;
+                                    body.confirm = '1';
+                                }
+                                const lim = box.querySelector('.rc-limit');
+                                if (cmd === 'charging_limit' && lim) body.target_soc = lim.value;
+                                b.disabled = true;
+                                st.innerHTML = '<span class="spinner-border spinner-border-sm"></span>';
+                                try {
+                                    const r = await fetch('/api/vehicle/' + vid + '/remote/' + cmd, {
+                                        method: 'POST',
+                                        headers: {'Content-Type': 'application/json'},
+                                        body: JSON.stringify(body)
+                                    });
+                                    const d = await r.json();
+                                    // „gesendet", nie „erledigt": die Hersteller-API nimmt
+                                    // den Auftrag entgegen, das Auto handelt danach.
+                                    st.innerHTML = d.ok
+                                        ? '<span class="text-success">' + (d.message || SENT) + '</span>'
+                                        : '<span class="text-danger">' + (d.error || 'Fehler') + '</span>';
+                                } catch (e) {
+                                    st.innerHTML = '<span class="text-danger">' + e.message + '</span>';
+                                } finally {
+                                    b.disabled = false;
+                                }
+                            });
+                        });
+                    });
+                })();
+                </script>
+                <script>
                 async function installPkg(pkg, btn, opts) {
                     opts = opts || {};
                     const statusEl = document.getElementById('installStatus');
@@ -1173,6 +1321,48 @@
         </div>
 
         <!-- ENTSO-E API -->
+        {% if remote_vehicles %}
+        <!-- Fernsteuerung -->
+        <div class="card mb-4 settings-card" id="sec-remote">
+            <div class="card-header"><i class="bi bi-broadcast-pin"></i> {{ t('skoda.remote_title') }}</div>
+            <div class="card-body">
+                <p class="text-muted small">{{ t('skoda.remote_hint') }}</p>
+                {% for rv in remote_vehicles %}
+                <div class="border rounded p-3 mb-3" data-remote-vehicle="{{ rv.id }}">
+                    <div class="d-flex justify-content-between align-items-center flex-wrap gap-2">
+                        <div class="fw-semibold">{{ rv.name }} <span class="text-muted small">{{ brand_label(rv.brand) }}</span></div>
+                        <div class="form-check form-switch mb-0">
+                            <input class="form-check-input rc-optin" type="checkbox" role="switch"
+                                   id="rcOptin{{ rv.id }}" {% if rv.enabled %}checked{% endif %}>
+                            <label class="form-check-label small" for="rcOptin{{ rv.id }}">{{ t('skoda.remote_optin') }}</label>
+                        </div>
+                    </div>
+                    {# Die Knöpfe kommen aus dem, was der Connector meldet — nicht aus
+                       einer zweiten Liste im Template. Gesperrt, solange das Opt-in aus ist. #}
+                    <div class="mt-3 d-flex flex-wrap gap-2 rc-buttons">
+                        {% for c in rv.commands %}
+                        <button type="button"
+                                class="btn btn-sm {% if c == 'unlock' %}btn-outline-danger{% else %}btn-outline-secondary{% endif %} rc-cmd"
+                                data-cmd="{{ c }}" {% if not rv.enabled %}disabled{% endif %}>
+                            {{ t('remote.cmd_' + c) }}
+                        </button>
+                        {% endfor %}
+                        {% if 'charging_limit' in rv.commands %}
+                        <div class="input-group input-group-sm" style="width:auto">
+                            <input type="number" min="50" max="100" step="5" value="80"
+                                   class="form-control form-control-sm rc-limit" style="width:5rem"
+                                   {% if not rv.enabled %}disabled{% endif %}>
+                            <span class="input-group-text">%</span>
+                        </div>
+                        {% endif %}
+                    </div>
+                    <div class="small mt-2 rc-status"></div>
+                </div>
+                {% endfor %}
+            </div>
+        </div>
+        {% endif %}
+
         <div class="card mb-4 settings-card" id="sec-entsoe">
             <div class="card-header bg-white fw-bold">
                 <i class="bi bi-cloud"></i> {{ t('set.entsoe_title') }}

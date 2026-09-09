@@ -327,7 +327,8 @@ needed.
 | **Kia** | `hyundai-kia-connect-api` | Username / Password ¹ |
 | **Hyundai** | `hyundai-kia-connect-api` | Username / Password ¹ |
 | **Volkswagen** | `carconnectivity` + connector | Username / Password |
-| **Skoda** | `carconnectivity` + connector | Username / Password |
+| **Škoda** | none — official MyŠkoda Public API | API key (MyŠkoda app) + VIN ² |
+| **Škoda (old access)** | `carconnectivity` + connector | Username / Password ³ |
 | **Seat** | `carconnectivity` + connector | Username / Password |
 | **Cupra** | `carconnectivity` + connector | Username / Password |
 | **Audi** | `carconnectivity` + connector | Username / Password |
@@ -355,6 +356,21 @@ There the app falls back to fetching a refresh token once through a browser
 ("Fetch Token" in Settings, valid about a year). It detects which of the two
 cases it is in and offers only the one that can actually work, instead of
 pointing at an upgrade that cannot happen.
+
+**Škoda note:** Škoda is retiring the unofficial app API in October 2026. The app now
+speaks the official [MyŠkoda Public API](https://public.api.connect.skoda-auto.cz/docs):
+create an API key in the MyŠkoda app (under *API keys*), bound to the vehicles you pick,
+and enter it with the VIN. Settings shows a one-form changeover for cars still on the old
+access, and keeps everything already recorded. Two limits worth knowing: the official API
+allows **20 requests per hour per vehicle** (the app budgets them and keeps a few back for
+your own manual refresh), and it has **no trips or charging-history endpoints** — trips are
+derived from parking events, as they are for other brands.
+
+**Remote control:** for Škoda (official API) and Kia/Hyundai the app can start and stop
+charging and climate control, set a charge limit, and — Kia/Hyundai only — lock and unlock.
+It is **off by default and enabled per vehicle** in Settings; unlocking asks for a separate
+confirmation. Commands are reported as *sent*, because these APIs queue the request and the
+car acts afterwards.
 
 **XPENG note:** XPENG has no public brand SDK, so it connects through the [Enode](https://enode.com) aggregator (the same route the community Home Assistant integrations use). Create an Enode app (Client ID + Secret), link your XPENG account once via Enode's hosted flow, then enter the keys under Settings > Vehicle API — brand *XPENG*, Client ID as username, Client Secret as password. Needs no extra package (rides on `requests`). Provides SoC, range, odometer, charging status and location.
 

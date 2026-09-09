@@ -84,3 +84,57 @@ class VehicleConnector(ABC):
     @abstractmethod
     def brand_name() -> str:
         """Human-readable brand name for the UI."""
+
+    # ── optional: remote control ──────────────────────────────────────
+    # Not abstract on purpose. A connector that says nothing supports
+    # nothing, so adding a brand can never accidentally expose commands
+    # it has not implemented.
+    def remote_commands(self) -> list:
+        """Command names from REMOTE_COMMANDS this connector can send."""
+        return []
+
+    def send_remote(self, command: str, params: dict) -> dict:
+        """Send one command. Returns ``{'accepted': bool}``.
+
+        Raises RemoteNotSupported when the brand cannot do it. Callers
+        must have checked the vehicle's opt-in BEFORE getting here.
+        """
+        raise RemoteNotSupported(command)
+
+
+# ── Remote control ────────────────────────────────────────────────────
+#
+# One vocabulary for every brand, so the UI renders buttons from what a
+# connector says it can do instead of carrying a per-brand list of its
+# own — the drift that put a Škoda tile on the VW connector started
+# exactly that way.
+REMOTE_COMMANDS = (
+    'charging_start', 'charging_stop', 'charging_limit',
+    'ac_start', 'ac_stop',
+    'ventilation_start', 'ventilation_stop',
+    'lock', 'unlock',
+)
+
+# Commands that change the car's physical security, as opposed to its
+# comfort or its charging. These need a deliberate confirmation of their
+# own: turning remote control on so you can pre-heat the car in winter is
+# not the same decision as being one stray click away from unlocking it
+# in a car park.
+SENSITIVE_COMMANDS = frozenset({'unlock'})
+
+
+class RemoteNotSupported(RuntimeError):
+    """This brand cannot do that — a clear answer, not a stack trace."""
+
+
+def remote_commands_of(connector) -> list:
+    """What this connector supports, filtered to the shared vocabulary.
+
+    Filtering here rather than trusting the connector means a typo in one
+    brand cannot put a button in the UI that no route can service.
+    """
+    try:
+        names = list(connector.remote_commands() or [])
+    except Exception:
+        return []
+    return [n for n in names if n in REMOTE_COMMANDS]

@@ -75,3 +75,20 @@ def init_app(app):
     app.jinja_env.globals['t'] = t
     app.jinja_env.globals['current_lang'] = get_language
     app.jinja_env.globals['supported_languages'] = SUPPORTED_LANGUAGES
+
+    def _brand_label(key):
+        """Human label for a stored ``api_brand`` key.
+
+        The fleet table used to print the raw key ('skoda_api'), which is
+        an internal identifier and means nothing to the person reading
+        it. Falls back to the key so an unknown value is still visible
+        rather than becoming an empty cell.
+        """
+        try:
+            from services.vehicle.catalog import by_key
+            b = by_key(key or '')
+            return b.label if b else (key or '')
+        except Exception:
+            return key or ''
+
+    app.jinja_env.globals['brand_label'] = _brand_label

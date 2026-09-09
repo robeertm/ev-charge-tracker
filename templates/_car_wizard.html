@@ -238,7 +238,12 @@
   // from the registry: its Škoda tile stored api_brand='vw', so an Enyaq
   // was handed to the VW WeConnect connector and the sign-in could only
   // fail, while Audi and Dacia had no tile at all.
-  const BRANDS = {{ vehicle_catalog|tojson if vehicle_catalog is defined else '[]'|safe }};
+  // Legacy-Marken werden hier ABSICHTLICH ausgefiltert: wer heute ein Auto
+  // einrichtet, soll nicht auf einen Zugang gesetzt werden, den der
+  // Hersteller gerade abschaltet. In der Flottenliste bleiben sie
+  // wählbar, damit bestehende Fahrzeuge ihren Wert behalten.
+  const BRANDS = ({{ vehicle_catalog|tojson if vehicle_catalog is defined else '[]'|safe }})
+                   .filter(b => !b.legacy);
 
   let step = 1, sel = null, savedId = null, pollTimer = null;
 

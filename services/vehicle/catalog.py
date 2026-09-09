@@ -43,19 +43,34 @@ class Brand:
     ``token``  — True when the brand uses the Kia/Hyundai sign-in pane
                  (password via the SDK's CCI flow, browser token as
                  fallback) instead of the plain credential pane.
+    ``legacy`` — the brand still works but its API is being retired. It
+                 stays selectable so existing vehicles keep their stored
+                 value (a <select> that cannot represent what is in the
+                 database would silently rewrite it on the next save),
+                 but it is not offered as a choice to someone setting up
+                 a new car.
+    ``sunset`` — free text naming when the old access stops, shown next
+                 to the label. A date is what makes a deprecation
+                 actionable; "deprecated" on its own is not.
     """
 
-    __slots__ = ('key', 'label', 'pkg', 'token')
+    __slots__ = ('key', 'label', 'pkg', 'token', 'legacy', 'sunset', 'replaced_by')
 
-    def __init__(self, key: str, label: str, pkg: Optional[str], token: bool = False):
+    def __init__(self, key: str, label: str, pkg: Optional[str], token: bool = False,
+                 legacy: bool = False, sunset: str = '', replaced_by: str = ''):
         self.key = key
         self.label = label
         self.pkg = pkg
         self.token = token
+        self.legacy = legacy
+        self.sunset = sunset
+        self.replaced_by = replaced_by
 
     def as_dict(self) -> dict:
         return {'key': self.key, 'label': self.label,
-                'pkg': self.pkg or '', 'token': self.token}
+                'pkg': self.pkg or '', 'token': self.token,
+                'legacy': self.legacy, 'sunset': self.sunset,
+                'replaced_by': self.replaced_by}
 
 
 # Order is display order: the two brands with the richest data first, then
@@ -63,7 +78,14 @@ class Brand:
 BRANDS: List[Brand] = [
     Brand('hyundai',  'Hyundai',      'hyundai-kia', token=True),
     Brand('kia',      'Kia',          'hyundai-kia', token=True),
-    Brand('skoda',    'Škoda',        'skoda'),
+    # The official Škoda API — no package, plain HTTPS with an API key
+    # the owner creates in the MyŠkoda app.
+    Brand('skoda_api', 'Škoda',        None),
+    # The old access. Škoda stops serving third-party clients in October
+    # 2026; kept selectable so existing cars keep working until they are
+    # switched over, but not offered to anyone setting up a new one.
+    Brand('skoda',    'Škoda',        'skoda',
+          legacy=True, sunset='10/2026', replaced_by='skoda_api'),
     Brand('vw',       'VW',           'vw'),
     Brand('seat',     'Seat',         'seatcupra'),
     Brand('cupra',    'Cupra',        'seatcupra'),
@@ -110,5 +132,42 @@ PACKAGES: Dict[str, List[str]] = {
 
 
 def brands_for_ui() -> List[dict]:
-    """The catalog as plain dicts, ready for ``|tojson`` in a template."""
+    """The catalog as plain dicts, ready for ``|tojson`` in a template.
+
+    Includes the legacy entries: the fleet form must be able to display
+    what is already stored.
+    """
     return [b.as_dict() for b in BRANDS]
+
+
+def by_key(key: str) -> Optional[Brand]:
+    for b in BRANDS:
+        if b.key == key:
+            return b
+    return None
+
+
+def legacy_keys() -> List[str]:
+    """Brands whose API is being retired — the ones worth warning about."""
+    return [b.key for b in BRANDS if b.legacy]
+
+
+def credentials_present(brand: str, username: str = '', password: str = '',
+                        vin: str = '') -> bool:
+    """Is this vehicle configured enough to talk to its API?
+
+    Three places used to spell this out as ``api_brand and api_username``,
+    which was true for every brand until the official Škoda API arrived —
+    it authenticates with an API key and a VIN and has **no username at
+    all**. A correctly configured Škoda would therefore have been told it
+    had no credentials, by the "test connection" button, by the manual
+    sync and by the fleet table, all three.
+
+    So the question is asked once, here, in terms of what the brands
+    actually need: either a user account, or a key bound to a VIN.
+    """
+    if not (brand or '').strip():
+        return False
+    if (username or '').strip():
+        return True
+    return bool((password or '').strip() and (vin or '').strip())

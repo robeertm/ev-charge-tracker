@@ -453,6 +453,59 @@ class _HyundaiKiaBase(VehicleConnector):
             self._vehicle = None
             return False
 
+    # ── remote control ────────────────────────────────────────────────
+    #
+    # Every one of these wakes the car and spends 12 V battery, the same
+    # as a force refresh — that is why they sit behind the per-vehicle
+    # opt-in and are never fired by any background loop.
+    _REMOTE_MAP = {
+        'charging_start': 'start_charge',
+        'charging_stop':  'stop_charge',
+        'ac_start':       'start_climate',
+        'ac_stop':        'stop_climate',
+        'lock':           'lock',
+        'unlock':         'unlock',
+    }
+
+    def remote_commands(self) -> list:
+        # Advertised only when the SDK really has the method: the library
+        # gained and renamed calls over the years, and a button that
+        # raises AttributeError is worse than a missing one.
+        mgr_cls = None
+        try:
+            from hyundai_kia_connect_api import VehicleManager as mgr_cls  # noqa: F401
+        except Exception:
+            return []
+        out = [k for k, m in self._REMOTE_MAP.items() if hasattr(mgr_cls, m)]
+        if hasattr(mgr_cls, 'set_charge_limits'):
+            out.append('charging_limit')
+        return out
+
+    def send_remote(self, command: str, params: dict) -> dict:
+        from .base import RemoteNotSupported
+        if command not in self.remote_commands():
+            raise RemoteNotSupported(command)
+        self._ensure_auth()
+        mgr = self._get_manager()
+        vehicle = self._get_vehicle()
+        vid = getattr(vehicle, 'id', None)
+
+        if command == 'charging_limit':
+            pct = int((params or {}).get('target_soc') or 0)
+            if not 50 <= pct <= 100:
+                raise ValueError('Ladelimit muss zwischen 50 und 100 % liegen.')
+            # The SDK takes AC and DC limits together; sending the same
+            # value for both is what the app's single "charge limit"
+            # means, and leaves no half-applied state behind.
+            _call_with_deadline(mgr.set_charge_limits, vid, pct, pct,
+                                label='set_charge_limits')
+            return {'accepted': True}
+
+        method = getattr(mgr, self._REMOTE_MAP[command])
+        _call_with_deadline(method, vid, label=self._REMOTE_MAP[command])
+        # The manufacturer cloud queues the request; the car acts after.
+        return {'accepted': True}
+
     def test_connection(self) -> bool:
         return self.authenticate()
 

@@ -228,7 +228,14 @@ def _sync_one_vehicle(app, vehicle):
     brand = (vehicle.api_brand or '').strip()
     if not brand:
         return None
-    if not vehicle.api_username:
+    # NOT `if not vehicle.api_username`. That was true for every brand
+    # until the official Škoda API, which authenticates with an API key
+    # bound to a VIN and has no username at all — so a correctly
+    # configured Škoda was skipped here, silently, and simply never
+    # synced. One shared answer to "is this configured", in catalog.py.
+    from .catalog import credentials_present
+    if not credentials_present(brand, vehicle.api_username,
+                               vehicle.api_password, vehicle.api_vin):
         return None  # creds incomplete; skip silently
 
     # Rate-limit counter: per-vehicle keys keep different Kia/Hyundai

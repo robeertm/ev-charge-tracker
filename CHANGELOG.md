@@ -1,5 +1,80 @@
 # Changelog
 
+## v3.0.121 (2026-09-09)
+
+### Škoda: the official API, before the old one is switched off
+
+Škoda is retiring the unofficial app API that this app (and the community
+libraries it builds on) has used for Škoda cars. The published date is October
+2026. This release adds the official MyŠkoda Public API alongside it.
+
+The official API is a different shape in three ways that matter:
+
+- **An API key instead of an account.** The owner creates it in the MyŠkoda
+  app, bound to the vehicles they choose, and it expires. The app reads the
+  expiry from every response so it can warn before service stops rather than
+  after.
+- **One read endpoint and a hard quota.** Twenty requests per hour per
+  vehicle, for reads and remote commands together. The app tracks the
+  remaining budget from the response headers and keeps a few requests back, so
+  a background refresh can no longer spend the last of the hour and leave a
+  person's own "sync now" failing.
+- **No trips and no charging history.** Those endpoints do not exist in the
+  official API. Trips continue to be derived from parking events, as they
+  already are for other brands; history already imported stays untouched.
+
+**Switching over is one form.** A car still on the old access shows a notice in
+Settings with the shutdown date and a field for the key and VIN. The
+credentials are proved against the car before anything is written — a switch
+that stored unverified credentials would take a working car offline hours
+later, with the old ones already gone. Everything recorded so far stays with
+the same vehicle.
+
+Existing Škoda cars keep working until they are switched. The old access stays
+selectable in the fleet form (a dropdown that cannot represent what is in the
+database would silently rewrite it on the next save) but is no longer offered
+when setting up a new car.
+
+### Remote control — opt-in, per vehicle, off by default
+
+Škoda's official API and the Kia/Hyundai SDK can both start and stop charging
+and climate control; Kia/Hyundai can also lock and unlock. That is now
+available from Settings, and it is **off until it is switched on for a
+specific car**.
+
+- Buttons are rendered from what the connector reports it can do, so no brand
+  shows a control it cannot perform.
+- Unlocking asks for its own confirmation. Allowing remote pre-heating in
+  winter is not the same decision as being one stray click from unlocking the
+  car in a car park.
+- The opt-in is enforced in the API layer as well as the UI. A hidden button
+  is not a safety property.
+- Commands report "sent", never "done": these APIs answer 202 and the car acts
+  afterwards.
+
+Auxiliary heating is deliberately not included — its call requires the
+vehicle's security PIN, which is a different credential with a different risk
+profile than a read-only API key.
+
+### Fixed
+
+- Four separate places decided "is this car configured?" by asking whether a
+  username was stored. The official Škoda API has no username at all, so a
+  correctly configured car was told it had no credentials by the connection
+  test and by the fleet table — and, worst of the four, was **skipped silently
+  by the background sync**, so it simply never synced and said nothing. One
+  shared answer now, with a test that stops a fifth copy appearing.
+- The fleet table printed the raw brand key ('skoda_api') instead of the
+  brand's name.
+- An unknown lock state is no longer reported as "unlocked". The API
+  documents three answers — locked, unlocked and *cannot tell* — and reading
+  the third as "unlocked" puts an open-padlock warning on a car nobody can
+  vouch for. Found by reading a real vehicle, not the specification.
+- Range from the official API arrives in metres; reporting it unconverted
+  would have claimed a range no electric car has.
+- A car in motion reports no position. Reading the empty coordinates as 0/0
+  would drop a pin in the Gulf of Guinea and corrupt the trip log.
+
 ## v3.0.120 (2026-09-09)
 
 ### Every car brand now works out of the box in a container
