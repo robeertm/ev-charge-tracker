@@ -1,5 +1,31 @@
 # Changelog
 
+## v3.0.123 (2026-09-09)
+
+### Half the app still talked to the Škoda API that is being switched off
+
+A vehicle's brand is stored in two places: the row in `vehicles`, which
+drives the background sync, and a flat set of `vehicle_api_*` keys in
+AppConfig, which drive the single-vehicle code paths — including the
+dashboard's live status.
+
+The changeover form wrote only the row. So after switching a car to the
+official API, the background sync correctly used it while the dashboard kept
+calling the old one, and **each looked right on its own**: the settings page
+showed the new brand, the sync history showed data from the official API, and
+only the newest record — the one the dashboard had written — was still from
+the retiring connector.
+
+The copying now happens in one function that both the changeover and the
+vehicle form call, and an install where the two have already drifted repairs
+itself on the next start. Nobody should have to notice this themselves.
+
+### Fixed
+
+- The account name from the retiring Škoda access is cleared from the legacy
+  keys as well. It no longer unlocks anything and only made the install look
+  configured.
+
 ## v3.0.122 (2026-09-09)
 
 ### The remote-control opt-in did nothing at all

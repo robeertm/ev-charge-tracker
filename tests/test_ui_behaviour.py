@@ -18,6 +18,7 @@ These tests start a real instance against a throwaway data directory
 fail — where Playwright or its browser is not installed, so the suite
 still runs on a machine that only has Python.
 """
+import json
 import os
 import socket
 import subprocess
@@ -206,3 +207,55 @@ def test_every_inline_handler_waits_for_the_document():
             offenders.append(f'settings.html:{line}')
     assert not offenders, (
         'these bind handlers before the document exists: ' + ', '.join(offenders))
+
+
+def test_the_switch_over_also_updates_the_legacy_config_keys(live_app):
+    """A vehicle's brand lives in two places, and both must move together.
+
+    The row in ``vehicles`` drives the background sync; the flat
+    ``vehicle_api_*`` keys in AppConfig drive the single-vehicle paths,
+    including the dashboard's live status. The Škoda changeover wrote only
+    the row — so the sync used the official API while the dashboard kept
+    calling the API that is being switched off, and each looked correct on
+    its own. The mismatch was visible nowhere.
+    """
+    import sqlite3
+    base, data_dir = live_app
+    db = os.path.join(data_dir, 'ev_tracker.db')
+
+    con = sqlite3.connect(db)
+    con.execute("UPDATE vehicles SET api_brand='skoda', api_username='a@b.c',"
+                " api_password='pw', api_vin='TMBTESTVIN000001'")
+    con.execute("INSERT OR REPLACE INTO app_config (key, value)"
+                " VALUES ('vehicle_api_brand', 'skoda')")
+    con.commit()
+    con.close()
+
+    import urllib.error
+    import urllib.request
+    body = json.dumps({'api_key': 'not-a-real-key',
+                       'vin': 'TMBTESTVIN000001'}).encode()
+    req = urllib.request.Request(base + '/api/vehicle/1/skoda/switch', data=body,
+                                 headers={'Content-Type': 'application/json'})
+    try:
+        answer = json.loads(urllib.request.urlopen(req, timeout=30).read())
+    except urllib.error.HTTPError as e:
+        answer = json.loads(e.read())
+
+    con = sqlite3.connect(db)
+    (row_brand,) = con.execute(
+        'SELECT api_brand FROM vehicles ORDER BY id LIMIT 1').fetchone()
+    cfg = con.execute(
+        "SELECT value FROM app_config WHERE key='vehicle_api_brand'").fetchone()
+    con.close()
+
+    if answer.get('ok'):
+        assert row_brand == 'skoda_api'
+        assert cfg and cfg[0] == 'skoda_api', (
+            'the vehicle row moved to the official API but the legacy config '
+            f'key still says {cfg}')
+    else:
+        # The key is fake, so the switch is refused — which is itself the
+        # point: nothing may be written before the credentials are proved.
+        assert row_brand == 'skoda', 'credentials were stored without proving them'
+        assert cfg and cfg[0] == 'skoda'

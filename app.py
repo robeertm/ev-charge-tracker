@@ -27,6 +27,59 @@ from config import Config, DATA_DIR
 from services.i18n import t
 from services.co2_backfill import missing_co2_filter as _missing_co2_filter
 
+def mirror_primary_vehicle_to_legacy_config(v) -> bool:
+    """Copy the primary vehicle's settings into the legacy AppConfig keys.
+
+    The app reads a vehicle's brand and credentials from TWO places: the
+    ``vehicles`` row, and a set of flat ``vehicle_api_*`` keys in
+    AppConfig that the single-vehicle code paths still use — the
+    dashboard's live status route among them.
+
+    That is one fact in two places, and it drifted the moment something
+    wrote only one of them: the Škoda changeover form updated the vehicle
+    row, so the background sync correctly used the official API while the
+    dashboard kept talking to the retiring one. Both looked fine on their
+    own.
+
+    So the copying happens here, once, and every caller that changes a
+    vehicle's credentials calls it. Returns True when anything changed.
+    """
+    from models.database import AppConfig as _AC, Vehicle as _V
+    if v is None:
+        return False
+    primary = (_V.query.filter_by(is_archived=False).order_by(_V.id.asc()).first()
+               or _V.query.order_by(_V.id.asc()).first())
+    if primary is None or primary.id != v.id:
+        return False
+
+    changed = False
+
+    def _set(key, val):
+        nonlocal changed
+        val = '' if val is None else str(val)
+        if (_AC.get(key, '') or '') != val:
+            _AC.set(key, val)
+            changed = True
+
+    _set('car_model', v.name)
+    _set('battery_kwh', v.battery_kwh)
+    _set('battery_soh_baseline', v.battery_soh_baseline)
+    _set('battery_co2_per_kwh', v.battery_co2_per_kwh)
+    _set('max_ac_kw', v.max_ac_kw)
+    _set('fossil_co2_per_km', v.fossil_co2_per_km)
+    _set('recuperation_kwh_per_km', v.recuperation_kwh_per_km)
+    _set('vehicle_api_brand', v.api_brand or '')
+    _set('vehicle_api_username', v.api_username or '')
+    # Only when there is one: an empty password must not erase a stored
+    # credential that the form simply did not resend.
+    if v.api_password:
+        _set('vehicle_api_password', v.api_password)
+    _set('vehicle_api_pin', v.api_pin or '')
+    _set('vehicle_api_region', v.api_region or '')
+    _set('vehicle_api_vin', v.api_vin or '')
+    return changed
+
+
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
@@ -529,6 +582,25 @@ def create_app(config_class=Config):
                     logger.warning(f"v2.29 backfill on {_t} skipped: {_e}")
             db.session.commit()
             logger.info(f"v2.29 migration: backfilled vehicle_id={_seed.id} on all child tables")
+
+        # v3.0.123: repair installs where the vehicle row and the legacy
+        # AppConfig keys disagree. The Škoda changeover form in 3.0.121
+        # wrote only the row, so the background sync used the official
+        # API while the dashboard's live status kept calling the old one
+        # — with nothing on either screen to show that they differed.
+        # Runs on every boot and does nothing once the two agree.
+        try:
+            from models.database import Vehicle as _MirV
+            _mv = (_MirV.query.filter_by(is_archived=False)
+                   .order_by(_MirV.id.asc()).first()
+                   or _MirV.query.order_by(_MirV.id.asc()).first())
+            if _mv is not None and mirror_primary_vehicle_to_legacy_config(_mv):
+                db.session.commit()
+                logger.info(
+                    "Repaired legacy AppConfig keys from the primary vehicle "
+                    f"(brand now '{_mv.api_brand}') — they had drifted apart")
+        except Exception as _me:
+            logger.warning(f"legacy AppConfig mirror check failed: {_me}")
 
         # v3.0 thg_quotas backfill — runs on every boot but no-ops once
         # filled. Needed for installs that already ran the v2.29 seed
@@ -2636,24 +2708,7 @@ def register_routes(app):
                    .order_by(_V.id.asc()).first()
                    or _V.query.order_by(_V.id.asc()).first())
         if primary is not None and primary.id == v.id:
-            def _mirror(key, val):
-                AppConfig.set(key, '' if val is None else str(val))
-            _mirror('car_model', v.name)
-            _mirror('battery_kwh', v.battery_kwh)
-            _mirror('battery_soh_baseline', v.battery_soh_baseline)
-            _mirror('battery_co2_per_kwh', v.battery_co2_per_kwh)
-            _mirror('max_ac_kw', v.max_ac_kw)
-            _mirror('fossil_co2_per_km', v.fossil_co2_per_km)
-            _mirror('recuperation_kwh_per_km', v.recuperation_kwh_per_km)
-            # API creds also mirror so the legacy sync_service finds
-            # them. Password stays only when explicitly entered.
-            _mirror('vehicle_api_brand', v.api_brand or '')
-            _mirror('vehicle_api_username', v.api_username or '')
-            if v.api_password:
-                _mirror('vehicle_api_password', v.api_password)
-            _mirror('vehicle_api_pin', v.api_pin or '')
-            _mirror('vehicle_api_region', v.api_region or '')
-            _mirror('vehicle_api_vin', v.api_vin or '')
+            mirror_primary_vehicle_to_legacy_config(v)
         if _ajax:
             return jsonify({'ok': True, 'vehicle_id': v.id, 'name': v.name,
                             'api_brand': v.api_brand or ''})
@@ -2974,6 +3029,12 @@ def register_routes(app):
         # the address behind would keep a credential around that no longer
         # unlocks anything and only reads as "still configured".
         v.api_username = ''
+        # The single-vehicle code paths — the dashboard's live status
+        # among them — read the brand from AppConfig, not from this row.
+        # Without this line the background sync used the official API
+        # while the dashboard kept talking to the retiring one, and both
+        # looked correct in isolation.
+        mirror_primary_vehicle_to_legacy_config(v)
         db.session.commit()
         logger.info(f"Vehicle {v.id} switched to the official Skoda API")
         return jsonify({
