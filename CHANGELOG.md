@@ -34,6 +34,22 @@ Charge history lives in a named volume and survives updates, restarts and
 The native systemd install is unchanged and remains the right choice where the
 data directory has to sit on an encrypted volume.
 
+### Encryption is opt-in now, not the default
+
+The application stopped requiring LUKS in v3.0.94, but the installer had not
+caught up: it pulled in `cryptsetup`, dropped the unlock helper into
+`/usr/local/bin` and added a sudoers rule for `cryptsetup luksChangeKey` on
+every machine — because the helper simply exists in the repository, not
+because anyone had asked for encryption. A plain install has no use for any of
+it.
+
+The helper and its package are installed only when `EV_WITH_LUKS=1` says so.
+A host that already has an encrypted `/dev/mapper/evdata` keeps them either
+way: that is the same signal the application itself reads, so installer and
+application can never disagree, and re-running the installer can never take
+the unlock path away from a machine that depends on it to boot.
+
+
 ## v3.0.117 (2026-09-08)
 
 ### "Missing CO2" no longer counts charges that show a number

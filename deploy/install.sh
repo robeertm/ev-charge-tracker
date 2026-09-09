@@ -10,7 +10,14 @@
 #   EV_APP_DIR=<path>       Install path (default: /srv/ev-data/app)
 #   EV_USER=<name>          Service user (default: ev-tracker)
 #   EV_WITH_TAILSCALE=1     Install Tailscale automatically (default: interactive prompt)
+#   EV_WITH_LUKS=1          Also set up the LUKS unlock helper (default: OFF)
 #   EV_UNATTENDED=1         Skip all interactive prompts, assume defaults
+#
+# Encryption is OPT-IN. A plain install stores its data in a normal directory
+# and needs no passphrase at boot, which is what almost every install wants.
+# Set EV_WITH_LUKS=1 only if /srv/ev-data is (or will be) an encrypted volume.
+# A machine that ALREADY has one keeps its helper either way — re-running this
+# script never takes the unlock path away from a host that depends on it.
 set -euo pipefail
 
 # ── Config ────────────────────────────────────────────────────────
@@ -18,6 +25,17 @@ REPO="${EV_REPO:-https://github.com/robeertm/ev-charge-tracker.git}"
 BRANCH="${EV_BRANCH:-main}"
 APP_DIR="${EV_APP_DIR:-/srv/ev-data/app}"
 SERVICE_USER="${EV_USER:-ev-tracker}"
+
+# Encryption is opt-in — but never taken away from a host that already uses it.
+# /dev/mapper/evdata is the same signal the application reads
+# (setup_service.luks_in_use), so installer and app can never disagree.
+WITH_LUKS="${EV_WITH_LUKS:-0}"
+if [ "$WITH_LUKS" != "1" ] && [ -e /dev/mapper/evdata ]; then
+    WITH_LUKS=1
+    LUKS_REASON="this host already has an encrypted /dev/mapper/evdata"
+else
+    LUKS_REASON="requested with EV_WITH_LUKS=1"
+fi
 UNATTENDED="${EV_UNATTENDED:-0}"
 WITH_TAILSCALE="${EV_WITH_TAILSCALE:-}"
 APP_PORT="${EV_APP_PORT:-}"
@@ -70,10 +88,12 @@ export DEBIAN_FRONTEND=noninteractive
 apt-get update -qq
 
 log "Installiere Basis-Pakete …"
+LUKS_PKG=""
+[ "$WITH_LUKS" = "1" ] && LUKS_PKG="cryptsetup"
 apt-get install -y -qq \
     python3 python3-venv python3-pip \
     git curl sqlite3 \
-    cryptsetup \
+    $LUKS_PKG \
     fail2ban unattended-upgrades \
     ca-certificates > /dev/null
 ok "Pakete installiert."
@@ -198,8 +218,14 @@ if ! visudo -c -f "$SUDOERS_PATH" > /dev/null; then
 fi
 ok "sudoers-Regel installiert: $SUDOERS_PATH"
 
-# ── optional: LUKS unlock helper ──────────────────────────────────
-if [ -f "$APP_DIR/deploy/ev-unlock" ]; then
+# ── optional: LUKS unlock helper (opt-in) ─────────────────────────
+# Was installed for everyone before, because the file simply exists in the
+# repository — together with a sudoers rule for `cryptsetup luksChangeKey`.
+# A plain install has no use for either.
+if [ "$WITH_LUKS" != "1" ]; then
+    log "Verschluesselung: aus (Standard). Mit EV_WITH_LUKS=1 einschalten."
+elif [ -f "$APP_DIR/deploy/ev-unlock" ]; then
+    log "Verschluesselung: an — $LUKS_REASON."
     install -m 755 "$APP_DIR/deploy/ev-unlock" /usr/local/bin/ev-unlock
     # Append LUKS-specific sudoers rules
     if ! grep -q "ev-unlock" "$SUDOERS_PATH"; then
