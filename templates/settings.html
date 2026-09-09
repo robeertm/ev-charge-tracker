@@ -259,15 +259,18 @@
                                 <label class="form-label small">{{ t('set.fleet_field_api_brand') }}</label>
                                 <select class="form-select form-select-sm" name="api_brand" id="vf_api_brand">
                                     <option value="">—</option>
-                                    <option value="kia">Kia</option>
-                                    <option value="hyundai">Hyundai</option>
-                                    <option value="vw">VW Group (Skoda/Seat/VW)</option>
-                                    <option value="tesla">Tesla</option>
-                                    <option value="renault">Renault</option>
-                                    <option value="mg">MG</option>
-                                    <option value="polestar">Polestar</option>
-                                    <option value="porsche">Porsche</option>
-                                    <option value="smart">Smart</option>
+                                    {# Rendered from services/vehicle/catalog.py so this list
+                                       cannot drift from the connectors again. The single
+                                       "VW Group (Skoda/Seat/VW)" entry it replaced stored
+                                       api_brand='vw' for every one of them, which handed a
+                                       Škoda to the VW WeConnect connector; skoda, seat,
+                                       cupra and audi are separate connectors upstream and
+                                       are now separately selectable. Existing vehicles
+                                       stored as 'vw' keep working — that is still the VW
+                                       connector's own key. #}
+                                    {% for b in (vehicle_catalog or []) %}
+                                    <option value="{{ b.key }}">{{ b.label }}</option>
+                                    {% endfor %}
                                 </select>
                             </div>
                             <div class="col-12 col-sm-6 col-md-4">

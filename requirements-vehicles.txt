@@ -1,0 +1,47 @@
+# Vehicle-API connectors — every brand the app can talk to, in one file.
+#
+# WHY A SEPARATE FILE. These are baked into the container image (see
+# Dockerfile) so a container install can talk to every supported car the
+# moment it starts: no "package needed" tile, no install button, and
+# nothing that lives only in the container's writable layer and vanishes
+# on the next `docker compose pull`. Pulling a newer image brings newer
+# connectors along with it — that is the whole point.
+#
+# They are NOT in requirements.txt because that file must stay installable
+# on Python 3.11. hyundai-kia-connect-api declares Requires-Python >=3.12
+# from 4.23.1 onward, so folding it into the core list would break every
+# native install on Raspberry Pi OS bookworm. The native installer and the
+# in-app updater therefore install this file BEST-EFFORT, one line at a
+# time: a package that will not install on the local interpreter is
+# skipped, and the app keeps the brands it can serve.
+
+# Kia UVO / Hyundai Bluelink.
+# >=4.26.5 for the headless CCI password sign-in (needs Python >=3.12; on
+# 3.11 this line is skipped and the app routes users to the browser token).
+hyundai-kia-connect-api>=4.26.5
+
+# VW group. `carconnectivity` is the shared base; one connector per brand.
+# All five are needed — the registry registers vw, skoda, seat, cupra AND
+# audi, and each maps to its own connector type at runtime.
+carconnectivity>=0.11.0
+carconnectivity-connector-volkswagen
+carconnectivity-connector-skoda
+carconnectivity-connector-seatcupra
+carconnectivity-connector-audi
+
+teslapy>=2.0.0                 # Tesla
+renault-api>=0.2.0             # Renault / Dacia
+aiohttp                        # required by renault-api's async client
+pypolestar>=1.0.0              # Polestar
+saic-ismart-client-ng>=0.5.0   # MG (SAIC iSMART)
+pySmartHashtag>=0.1.0          # Smart #1 / #3
+pyporscheconnectapi>=0.1.0     # Porsche Connect
+
+# XPENG needs no package — its connector rides on `requests` from
+# requirements.txt and talks to the Enode aggregator REST API.
+
+# NOT here on purpose: selenium + webdriver-manager. They drive the
+# one-off Kia/Hyundai browser token, which needs a real browser binary
+# the slim image does not carry. On Python 3.12 the password sign-in
+# makes that flow unnecessary; where it is needed, the Fahrzeug-API page
+# still installs them on demand.

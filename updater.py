@@ -114,19 +114,49 @@ def _extract_and_unwrap(zip_path: Path, staging: Path) -> Path:
 
 
 def _running_under_systemd() -> bool:
-    """True if the current process was launched by systemd (Linux service).
-
-    Under systemd the spawn-helper approach breaks: the helper ends up in
-    the same cgroup as the service, so when the service exits to allow the
-    file-swap, systemd kills the helper along with it. On systemd we do the
-    swap inline instead and rely on `Restart=always` to bring the app back.
-    """
+    """True if the current process was launched by systemd (Linux service)."""
     if os.name == 'nt':
         return False
     if os.environ.get('INVOCATION_ID'):
         return True
     try:
         return Path('/run/systemd/system').is_dir()
+    except Exception:
+        return False
+
+
+def swaps_inline() -> bool:
+    """True when the update must be applied in THIS process, not by a helper.
+
+    Two situations, one answer.
+
+    **systemd**: the detached helper lands in the same cgroup as the
+    service, so when the service exits to let the swap happen, systemd
+    kills the helper along with it.
+
+    **A container**: worse. The app is normally PID 1, and when PID 1
+    exits the container stops and every other process in it is killed —
+    including a helper that is halfway through replacing files. The
+    detached-helper path cannot work in a container at all, and the
+    public image has no systemd, no INVOCATION_ID and no
+    /run/systemd/system, so this predicate used to answer False there and
+    send it down exactly that path.
+
+    That is the difference between the published image and the private
+    one behind the Ioniq 6 host: the private image sets INVOCATION_ID by
+    hand in its entrypoint, precisely so this returns True. Container
+    users of the published image had no such luck — which is why the
+    detection belongs in the app, not in someone's Dockerfile.
+
+    After an inline swap the caller re-executes the process
+    (services.restart_service), so this needs no supervisor and no
+    restart policy either.
+    """
+    if _running_under_systemd():
+        return True
+    try:
+        from services.runtime_env import in_container
+        return in_container()
     except Exception:
         return False
 
@@ -199,22 +229,68 @@ def _inline_swap(staging_root: Path, new_version: str = '') -> bool:
     # the caller will exit() right after — if pip runs in a background thread
     # it gets killed along with the process.
     req = app_dir / 'requirements.txt'
+    # A native install keeps its interpreter in a virtualenv next to the
+    # app; a container has none and installs into the image's own
+    # site-packages. This used to look ONLY for the virtualenv and skip
+    # the whole dependency step without a word when there wasn't one —
+    # so in a container an update that shipped a new dependency (a new
+    # vehicle connector, say) installed nothing at all, and the app came
+    # back reporting the new version while missing the thing the version
+    # was about. sys.executable is the right answer in both cases.
     venv_py = None
     for vname in ('venv', '.venv'):
         cand = app_dir / vname / 'bin' / 'python'
         if cand.exists():
             venv_py = cand
             break
-    if venv_py and req.exists():
-        logger.info("Running pip install -r requirements.txt (inline)…")
+    pip_py = str(venv_py) if venv_py else sys.executable
+    if req.exists():
+        logger.info(f"Running pip install -r requirements.txt via {pip_py} (inline)…")
         try:
             subprocess.run(
-                [str(venv_py), '-m', 'pip', 'install', '-r', str(req)],
+                [pip_py, '-m', 'pip', 'install', '-r', str(req)],
                 check=False,
                 timeout=300,
             )
         except Exception as e:
             logger.warning(f"pip install failed (continuing): {e}")
+
+    # Vehicle connectors — best effort, ONE LINE AT A TIME.
+    #
+    # Not `-r` as a whole: hyundai-kia-connect-api needs Python >=3.12, so
+    # on a Raspberry Pi OS bookworm box (3.11) a single unsatisfiable line
+    # would abort the file and cost the user every OTHER brand as well.
+    # Installed line by line, that box simply keeps the brands it can run.
+    #
+    # The container does not come through here — its connectors are baked
+    # into the image (Dockerfile) and arrive with the next image pull.
+    vreq = app_dir / 'requirements-vehicles.txt'
+    if vreq.exists():
+        try:
+            lines = [ln.split('#')[0].strip()
+                     for ln in vreq.read_text().splitlines()]
+            wanted = [ln for ln in lines if ln]
+            logger.info(f"Refreshing {len(wanted)} vehicle connectors (best effort)…")
+            for spec in wanted:
+                try:
+                    # NOT --upgrade. On a machine that already has a
+                    # working connector, --upgrade would pull the newest
+                    # release of it during a routine app update and could
+                    # change how a live car sync behaves — a blast radius
+                    # nobody asked for. Without the flag pip still
+                    # upgrades whenever the SPEC demands it (e.g.
+                    # hyundai-kia-connect-api>=4.26.5 against an older
+                    # one), which is exactly when an upgrade is intended.
+                    r = subprocess.run(
+                        [pip_py, '-m', 'pip', 'install', spec],
+                        check=False, capture_output=True, timeout=300,
+                    )
+                    if r.returncode != 0:
+                        logger.info(f"  skipped {spec} (not installable here)")
+                except Exception as e:
+                    logger.info(f"  skipped {spec}: {e}")
+        except Exception as e:
+            logger.warning(f"vehicle connector refresh failed (continuing): {e}")
 
     # Clean up staging
     try:
@@ -339,8 +415,8 @@ def apply_update(zip_url: str, new_version: str, force: bool = False) -> bool:
             logger.error("Staging root missing app.py — aborting update")
             return False
 
-        if _running_under_systemd():
-            logger.info("Detected systemd — applying update inline, will exit for restart")
+        if swaps_inline():
+            logger.info("Applying update inline (systemd or container), will restart after")
             if not _inline_swap(staging_root, new_version=new_version):
                 return False
             return True

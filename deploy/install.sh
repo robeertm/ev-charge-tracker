@@ -139,6 +139,28 @@ log "Installiere requirements.txt — kann 2–5 min dauern (pandas/matplotlib/n
 sudo -u "$SERVICE_USER" "$APP_DIR/venv/bin/pip" install --progress-bar on -r "$APP_DIR/requirements.txt"
 ok "Python-Abhängigkeiten installiert."
 
+# Fahrzeug-Connectoren: ALLE Marken, aber zeilenweise und ohne Abbruch.
+# hyundai-kia-connect-api verlangt Python >=3.12; auf Raspberry Pi OS
+# bookworm (3.11) würde diese eine Zeile in einem "-r"-Lauf die ganze
+# Datei kippen und den Nutzer auch jede ANDERE Marke kosten. Einzeln
+# installiert behält so ein Rechner schlicht die Marken, die er kann.
+if [ -f "$APP_DIR/requirements-vehicles.txt" ]; then
+  log "Installiere Fahrzeug-Connectoren (alle Marken, best effort) …"
+  _veh_ok=0; _veh_skip=0
+  while IFS= read -r _line; do
+    _spec="${_line%%#*}"
+    _spec="$(printf '%s' "$_spec" | tr -d '[:space:]')"
+    [ -z "$_spec" ] && continue
+    if sudo -u "$SERVICE_USER" "$APP_DIR/venv/bin/pip" install --quiet "$_spec" >/dev/null 2>&1; then
+      _veh_ok=$((_veh_ok+1))
+    else
+      _veh_skip=$((_veh_skip+1))
+      warn "  übersprungen: $_spec (auf diesem Python nicht installierbar)"
+    fi
+  done < "$APP_DIR/requirements-vehicles.txt"
+  ok "Fahrzeug-Connectoren: $_veh_ok installiert, $_veh_skip übersprungen."
+fi
+
 # ── Port selection ────────────────────────────────────────────────
 # Default is 7654 unless already in use, in which case we walk up from
 # 7655 looking for the next free port. EV_APP_PORT=<n> pins a specific

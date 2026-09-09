@@ -2,9 +2,14 @@
 import asyncio
 import logging
 
+# Upstream moved: there is no `pyporscheconnectapi.client` module any
+# more and `connection` no longer exports `PorscheConnect`. Both imports
+# raised ImportError against every published version, so HAS_PORSCHE was
+# permanently False — the brand could never register and the wizard tile
+# stayed on "Paket nötig" no matter how often the package was installed.
+# Verified against pyporscheconnectapi 0.2.8.
 try:
-    from pyporscheconnectapi.client import PorscheConnectApi
-    from pyporscheconnectapi.connection import PorscheConnect
+    from pyporscheconnectapi.account import PorscheConnectAccount
     HAS_PORSCHE = True
 except ImportError:
     HAS_PORSCHE = False
@@ -19,6 +24,23 @@ CREDENTIAL_FIELDS = [
     {"key": "password", "label": "Passwort", "type": "password"},
     {"key": "vin", "label": "VIN (optional)", "type": "text"},
 ]
+
+
+def _num(value):
+    """Unwrap whatever shape a measurement arrives in, to int or None.
+
+    Upstream hands back a plain number for some fields and a
+    ``{'value': …, 'unit': …}`` dict or small object for others.
+    """
+    if value is None:
+        return None
+    if isinstance(value, dict):
+        value = value.get('value')
+    inner = getattr(value, 'value', value)
+    try:
+        return int(round(float(inner)))
+    except (TypeError, ValueError):
+        return None
 
 
 def _run_async(coro):
@@ -36,42 +58,42 @@ def _run_async(coro):
 class PorscheConnector(VehicleConnector):
 
     async def _fetch(self, force=False):
-        conn = PorscheConnect(
-            email=self.credentials['username'],
+        account = PorscheConnectAccount(
+            username=self.credentials['username'],
             password=self.credentials['password'],
         )
-        api = PorscheConnectApi(conn)
-        vehicles = await conn.getVehicles()
-        if not vehicles:
-            raise RuntimeError("Kein Porsche-Fahrzeug gefunden")
-
-        vin = self.credentials.get('vin', '').strip()
+        wanted = (self.credentials.get('vin') or '').strip()
         vehicle = None
-        for v in vehicles:
-            if vin and v.get('vin') == vin:
-                vehicle = v
-                break
-        if not vehicle:
+        if wanted:
+            vehicle = await account.get_vehicle(wanted)
+        if vehicle is None:
+            vehicles = await account.get_vehicles()
+            if not vehicles:
+                raise RuntimeError("Kein Porsche-Fahrzeug gefunden")
             vehicle = vehicles[0]
 
-        v_vin = vehicle.get('vin', '')
-        stored = await api.getStoredOverview(v_vin)
-        emob = stored.get('batteryLevel', {})
+        # The vehicle object is empty until an overview is pulled into it;
+        # the stored one is the cached snapshot and does not wake the car.
+        await vehicle.get_stored_overview()
 
-        soc = emob.get('value')
-        range_km = stored.get('remainingRanges', {}).get('electricalRange', {}).get('distance', {}).get('value')
-        is_charging = emob.get('chargingState') == 'CHARGING' if emob.get('chargingState') else False
-        odometer = stored.get('mileage', {}).get('value')
+        soc = _num(getattr(vehicle, 'main_battery_level', None))
+        range_km = _num(getattr(vehicle, 'remaining_range', None))
+        if range_km is None:
+            range_km = _num(getattr(vehicle, 'electric_range', None))
+        odometer = _num(getattr(vehicle, 'mileage', None))
+        is_charging = bool(getattr(vehicle, 'direct_charge_on', False)) or \
+            'CHARGING' in str(getattr(vehicle, 'charging_state', '') or '').upper()
 
-        await conn.close()
+        model = getattr(vehicle, 'model_name', None) or 'Porsche'
+        v_vin = getattr(vehicle, 'vin', '') or wanted
 
         return VehicleStatus(
-            soc_percent=int(soc) if soc is not None else None,
-            odometer_km=int(odometer) if odometer is not None else None,
+            soc_percent=soc,
+            odometer_km=odometer,
             is_charging=is_charging,
-            estimated_range_km=int(range_km) if range_km is not None else None,
-            vehicle_name=vehicle.get('modelDescription', 'Porsche'),
-            vehicle_model=vehicle.get('modelDescription', 'Porsche'),
+            estimated_range_km=range_km,
+            vehicle_name=str(model),
+            vehicle_model=str(model),
             raw_data={'vin': v_vin},
         )
 

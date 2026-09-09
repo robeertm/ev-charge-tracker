@@ -308,7 +308,19 @@ From your phone (same network): `http://<your-pc-ip>:7654`
 
 ## Vehicle API — Supported Brands
 
-Connect your car to automatically fetch SoC, odometer, and charging status. All packages installable directly from Settings UI (no terminal needed).
+Connect your car to automatically fetch SoC, odometer, and charging status.
+
+**Docker: nothing to install.** Every connector below is baked into the image, so all
+brands are ready the moment the container starts, and `docker compose pull` brings
+newer connectors with the new image. (This is also why it has to be the image: a
+connector installed from the running app would live in the container's writable
+layer, which the next pull discards.)
+
+**Native install:** `deploy/install.sh` installs the same list, one package at a time,
+and skips anything the local Python cannot satisfy — the Kia/Hyundai SDK needs Python
+3.12, so on Raspberry Pi OS bookworm (3.11) that one line is skipped and every other
+brand still works. Anything skipped can be installed later from Settings, no terminal
+needed.
 
 | Brand | Package | Auth |
 |-------|---------|------|

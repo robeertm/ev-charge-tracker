@@ -25,11 +25,24 @@ ENV PYTHONUNBUFFERED=1 \
 
 WORKDIR /app
 
-# Install dependencies first for better layer caching. Only the core
-# runtime deps are installed; optional vehicle-API connectors stay
-# commented out in requirements.txt and are added from the app UI.
-COPY requirements.txt ./
-RUN pip install --no-cache-dir -r requirements.txt
+# Install dependencies first for better layer caching.
+#
+# Both lists are baked in: the core runtime AND every vehicle-API
+# connector. A container install therefore talks to all supported brands
+# the moment it starts — no "package needed" tile, no install button.
+#
+# Baking them in is not a convenience, it is the only place they survive.
+# A connector pip-installed from the running app lands in the container's
+# writable layer, which `docker compose pull` throws away on the next
+# update: the user would lose their car connection every time they
+# updated. In the image layer, a newer image simply brings newer
+# connectors along.
+#
+# One layer, not two: the two lists must be resolved TOGETHER. Installed
+# separately, pip would satisfy requirements.txt first and then let the
+# connectors quietly move a shared dependency (requests) underneath it.
+COPY requirements.txt requirements-vehicles.txt ./
+RUN pip install --no-cache-dir -r requirements.txt -r requirements-vehicles.txt
 
 # App source.
 COPY . .

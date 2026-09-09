@@ -269,3 +269,38 @@ def main():
 
 if __name__ == '__main__':
     sys.exit(main())
+
+
+# ── latin-1 safety of the PDF text (added after the Škoda finding) ─────
+# fpdf's core fonts are latin-1 only. The sanitiser used to be a
+# hand-kept list of replacements that CLAIMED latin-1 safety; anything
+# outside the list and outside latin-1 went straight to pdf.cell() and
+# raised UnicodeEncodeError. A vehicle called "Škoda Enyaq" was enough to
+# kill the certificate — U+0160 has no latin-1 slot — so no Škoda owner
+# could generate one at all.
+import pytest as _pytest
+
+from services.battery_cert_service import latin1_safe as _latin1_safe
+
+
+@_pytest.mark.parametrize('probe', [
+    'Škoda Enyaq 60',        # the one that broke it
+    'Cupra Born',
+    'Citroën ë-C4',          # latin-1 CAN do these — must stay untouched
+    'Prüfung ±2 %',
+    'Zell-Spreizung (max−min)',
+    'Ø 3,7 V · 96 Zellen',
+    '日産 Leaf',              # nothing latin-1 can express
+    '',
+])
+def test_certificate_text_never_leaves_latin1(probe):
+    _latin1_safe(probe).encode('latin-1')       # must not raise
+
+
+def test_characters_latin1_has_are_not_stripped():
+    """Decomposing everything would silently turn Prüfung into Prufung."""
+    assert _latin1_safe('Prüfung Citroën groß') == 'Prüfung Citroën groß'
+
+
+def test_a_character_latin1_lacks_falls_back_to_its_base_letter():
+    assert _latin1_safe('Škoda') == 'Skoda'

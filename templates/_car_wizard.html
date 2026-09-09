@@ -1,7 +1,7 @@
 {# ── "Auto einrichten" — guided wizard ─────────────────────────────────
    One place to add a car end-to-end: brand → vehicle → connect → sync →
    done. Reuses existing endpoints (/vehicles/save?ajax=1,
-   /api/vehicle/brand-install, /api/vehicle/token/*, /vehicles/<id>/test).
+   /api/vehicle/install, /api/vehicle/token/*, /vehicles/<id>/test).
    Included from settings.html; shares its Jinja context. #}
 <div class="modal fade" id="carWizardModal" tabindex="-1" aria-hidden="true">
   <div class="modal-dialog modal-dialog-centered modal-lg modal-dialog-scrollable">
@@ -233,20 +233,12 @@
   // (id/brand/name/username), or null. Drives the jump straight to sign-in.
   const WIZ_CONNECT = {{ wiz_connect|tojson if wiz_connect is defined else 'null'|safe }};
 
-  // Brand catalog: api_brand value, install pkg key, label, whether it needs the token flow.
-  const BRANDS = [
-    {key:'hyundai', pkg:'hyundai-kia', label:'Hyundai', token:true},
-    {key:'kia',     pkg:'hyundai-kia', label:'Kia',     token:true},
-    {key:'vw',      pkg:'skoda',       label:'Škoda',   token:false},
-    {key:'vw',      pkg:'vw',          label:'VW',      token:false},
-    {key:'vw',      pkg:'seatcupra',   label:'Seat / Cupra', token:false},
-    {key:'tesla',   pkg:'tesla',       label:'Tesla',   token:false},
-    {key:'renault', pkg:'renault',     label:'Renault / Dacia', token:false},
-    {key:'polestar',pkg:'polestar',    label:'Polestar',token:false},
-    {key:'mg',      pkg:'mg',          label:'MG',      token:false},
-    {key:'smart',   pkg:'smart',       label:'Smart #1/#3', token:false},
-    {key:'porsche', pkg:'porsche',     label:'Porsche', token:false},
-  ];
+  // Brand catalog — served by services/vehicle/catalog.py, NOT written
+  // out here a second time. The hard-coded list this replaced had drifted
+  // from the registry: its Škoda tile stored api_brand='vw', so an Enyaq
+  // was handed to the VW WeConnect connector and the sign-in could only
+  // fail, while Audi and Dacia had no tile at all.
+  const BRANDS = {{ vehicle_catalog|tojson if vehicle_catalog is defined else '[]'|safe }};
 
   let step = 1, sel = null, savedId = null, pollTimer = null;
 
@@ -291,7 +283,7 @@
   async function installBrand(pkg, btn){
     btn.disabled=true; q('cwBrandInstallStatus').innerHTML='<span class="spinner-border spinner-border-sm"></span>';
     try{
-      const r = await fetch('/api/vehicle/brand-install',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({package:pkg})});
+      const r = await fetch('/api/vehicle/install',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({package:pkg})});
       const d = await r.json();
       if(d.success){ q('cwBrandInstallStatus').innerHTML = '<span class="text-success">'+(T.wiz_install_restart||'Installiert — App startet neu, bitte gleich erneut öffnen.')+'</span>'; }
       else { q('cwBrandInstallStatus').innerHTML='<span class="text-danger">'+(d.error||'Fehler')+'</span>'; btn.disabled=false; }

@@ -52,6 +52,7 @@ gracefully: missing secondary signals come back as ``None`` and the
 certificate prints throughput, cycle-equivalents and charging-behaviour
 stress factors alongside the SoH it could determine.
 """
+import unicodedata
 import os
 import tempfile
 from datetime import date, datetime
@@ -551,17 +552,62 @@ def _cell_voltage_chart(cell_voltages, tmp_dir):
     return path
 
 
+# Characters latin-1 has no slot for but a reader expects to see in
+# a particular shape. Everything NOT listed here is handled by the
+# general rule below — the list is for legibility, not for safety.
+_LATIN1_NICE = {
+    '—': '-', '–': '-', '‑': '-', '−': '-', '·': '-', '•': '-',
+    '²': '2', '₂': '2', 'Ø': 'O', '€': 'EUR ', '→': '->',
+    '≥': '>=', '≤': '<=', '±': '+/-', '≈': '~',
+    '“': '"', '”': '"', '„': '"', '‘': "'", '’': "'", '…': '...',
+}
+
+def latin1_safe(text):
+    """latin-1 safe BY CONSTRUCTION (fpdf core fonts are latin-1 only).
+
+    This used to be a hand-kept list of replacements with a
+    docstring claiming latin-1 safety. It was not safe: any
+    character outside the list and outside latin-1 reached
+    ``pdf.cell()`` and raised UnicodeEncodeError, which killed the
+    whole certificate. A vehicle called "Škoda Enyaq" was enough —
+    U+0160 is not in latin-1 — so no Škoda owner could ever
+    generate a battery certificate.
+
+    Now anything left over is decomposed to its base letter
+    (Š -> S, Č -> C) and only replaced with '?' if even that has
+    no latin-1 form. Characters latin-1 DOES have (ä, é, ë, ß)
+    are kept exactly as they are — decomposing everything would
+    have quietly turned "Prüfung" into "Prufung".
+    """
+    s = ''.join(_LATIN1_NICE.get(ch, ch) for ch in str(text))
+    try:
+        s.encode('latin-1')
+        return s                      # the common case, untouched
+    except UnicodeEncodeError:
+        pass
+    out = []
+    for ch in s:
+        try:
+            ch.encode('latin-1')
+            out.append(ch)
+            continue
+        except UnicodeEncodeError:
+            pass
+        base = ''.join(c for c in unicodedata.normalize('NFKD', ch)
+                       if not unicodedata.combining(c))
+        try:
+            base.encode('latin-1')
+        except UnicodeEncodeError:
+            base = ''
+        out.append(base or '?')
+    return ''.join(out)
+
+
 try:
     from fpdf import FPDF
 
     class _CertPDF(FPDF):
-        @staticmethod
-        def _clean(text):
-            """latin-1 safe (fpdf core fonts can't encode arbitrary Unicode)."""
-            return (str(text).replace('—', '-').replace('–', '-').replace('·', '-')
-                    .replace('²', '2').replace('₂', '2').replace('Ø', 'O')
-                    .replace('€', 'EUR ').replace('→', '->').replace('≥', '>=')
-                    .replace('±', '+/-').replace('•', '-'))
+        _clean = staticmethod(latin1_safe)
 
         def footer(self):
             self.set_y(-15)

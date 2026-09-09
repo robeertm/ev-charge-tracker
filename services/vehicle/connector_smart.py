@@ -2,9 +2,15 @@
 import asyncio
 import logging
 
+# Upstream moved: `SmartApi` was dropped and `SmartAccount` left
+# `pysmarthashtag.models` for `pysmarthashtag.account`. Both imports here
+# raised ImportError against every published version of the package, so
+# HAS_SMART was permanently False — the brand could never register, the
+# wizard tile said "Paket nötig" for good, and the install button
+# installed a package that changed nothing. Verified against
+# pySmartHashtag 0.12.2.
 try:
-    from pysmarthashtag.api import SmartApi
-    from pysmarthashtag.models import SmartAccount
+    from pysmarthashtag.account import SmartAccount
     HAS_SMART = True
 except ImportError:
     HAS_SMART = False
@@ -17,7 +23,23 @@ logger = logging.getLogger(__name__)
 CREDENTIAL_FIELDS = [
     {"key": "username", "label": "E-Mail (Hello Smart)", "type": "text"},
     {"key": "password", "label": "Passwort", "type": "password"},
+    {"key": "vin", "label": "VIN (optional, bei mehreren Fahrzeugen)", "type": "text"},
 ]
+
+
+def _num(value):
+    """Unwrap a pysmarthashtag ``ValueWithUnit`` (or a plain number) to int.
+
+    Nearly every measurement upstream is a ``ValueWithUnit`` namedtuple,
+    not a bare float — ``int(vehicle.odometer)`` raised TypeError.
+    """
+    if value is None:
+        return None
+    inner = getattr(value, 'value', value)
+    try:
+        return int(round(float(inner)))
+    except (TypeError, ValueError):
+        return None
 
 
 def _run_async(coro):
@@ -39,29 +61,33 @@ class SmartConnector(VehicleConnector):
             username=self.credentials['username'],
             password=self.credentials['password'],
         )
-        api = SmartApi(account)
-        await api.async_update()
-
-        vehicles = account.vehicles
+        # get_vehicles() fills account.vehicles in place and returns None;
+        # get_vehicle_information(vin) is what actually pulls the state.
+        await account.get_vehicles()
+        vehicles = account.vehicles or {}
         if not vehicles:
             raise RuntimeError("Kein Smart-Fahrzeug gefunden")
 
-        vin = list(vehicles.keys())[0]
-        vehicle = vehicles[vin]
+        wanted = (self.credentials.get('vin') or '').strip()
+        vin = wanted if wanted in vehicles else list(vehicles.keys())[0]
+        await account.get_vehicle_information(vin)
+        vehicle = account.vehicles[vin]
 
         soc = None
         range_km = None
         is_charging = False
         odometer = None
 
-        if hasattr(vehicle, 'battery'):
-            bat = vehicle.battery
-            soc = int(bat.soc) if hasattr(bat, 'soc') and bat.soc is not None else None
-            range_km = int(bat.range) if hasattr(bat, 'range') and bat.range is not None else None
-            is_charging = bat.charging_status == 'CHARGING' if hasattr(bat, 'charging_status') else False
+        bat = getattr(vehicle, 'battery', None)
+        if bat is not None:
+            soc = _num(getattr(bat, 'remaining_battery_percent', None))
+            range_km = _num(getattr(bat, 'remaining_range', None))
+            status = getattr(bat, 'charging_status', None)
+            # Upstream reports an enum on some firmwares and a plain
+            # string on others; compare on the name either way.
+            is_charging = 'CHARGING' in str(getattr(status, 'name', status) or '').upper()
 
-        if hasattr(vehicle, 'odometer') and vehicle.odometer is not None:
-            odometer = int(vehicle.odometer)
+        odometer = _num(getattr(vehicle, 'odometer', None))
 
         return VehicleStatus(
             soc_percent=soc,

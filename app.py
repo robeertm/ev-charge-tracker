@@ -2251,7 +2251,7 @@ def register_routes(app):
         # Only an authenticated session may disable auth — this prevents a
         # drive-by POST on an exposed instance from turning the gate off.
         if not is_logged_in():
-            return jsonify({'error': 'nicht eingeloggt'}), 401
+            return jsonify({'error': t('err.not_logged_in')}), 401
         disable_auth()
         return jsonify({'ok': True, 'message': t('msg.auth_disabled')})
 
@@ -2261,7 +2261,7 @@ def register_routes(app):
             is_logged_in, verify_credentials, get_username, set_credentials,
         )
         if not is_logged_in():
-            return jsonify({'error': 'nicht eingeloggt'}), 401
+            return jsonify({'error': t('err.not_logged_in')}), 401
         data = request.get_json(silent=True) or request.form
         current = data.get('current_password') or ''
         new_pw = data.get('new_password') or ''
@@ -2410,20 +2410,13 @@ def register_routes(app):
             # database that no longer exists. Drop them.
             _drop_wal_sidecars(db_path)
 
-            # Schedule a systemd restart a few hundred ms into the future
-            # so the HTTP response has time to flush.
-            def _delayed_restart():
-                import time as _t
-                _t.sleep(0.5)
-                try:
-                    subprocess.run(
-                        ['sudo', '-n', '/bin/systemctl', 'restart', 'ev-tracker.service'],
-                        timeout=10,
-                    )
-                except Exception:
-                    pass
-            import threading as _th
-            _th.Thread(target=_delayed_restart, daemon=True).start()
+            # Restart a few hundred ms into the future so the HTTP
+            # response has time to flush. This used to call systemd
+            # directly and swallow the failure, which meant a container
+            # install answered "App startet neu …" and then kept serving
+            # the OLD database handles.
+            from services.restart_service import schedule_restart
+            schedule_restart(0.5, reason='backup import')
 
             return jsonify({
                 'ok': True,
@@ -2473,7 +2466,7 @@ def register_routes(app):
     def api_system_updates_apply():
         from services import system_update_service
         if not system_update_service.unattended_upgrades_available():
-            return jsonify({'error': 'unattended-upgrades ist auf diesem System nicht installiert.'}), 400
+            return jsonify({'error': t('err.unattended_missing')}), 400
         started = system_update_service.start_apply()
         if not started:
             return jsonify({'error': t('err.update_job_running')}), 409
@@ -3829,6 +3822,14 @@ def register_routes(app):
             vehicle_brands = []
         installed_brand_keys = [b['key'] for b in vehicle_brands]
 
+        # Everything the UI may offer, whether or not its package is here
+        # yet: a brand the user cannot see is a brand they cannot install.
+        try:
+            from services.vehicle.catalog import brands_for_ui
+            _vehicle_catalog = brands_for_ui()
+        except Exception:
+            _vehicle_catalog = []
+
         # Kia/Hyundai: the connector may be installed but too old for the
         # headless CCI password sign-in (needs hyundai-kia-connect-api
         # >=4.26.3, upstream #1273). In that case 'kia' IS in
@@ -3934,6 +3935,11 @@ def register_routes(app):
                                car_model_val=AppConfig.get('car_model', Config.CAR_MODEL),
                                vehicle_brands=vehicle_brands,
                                installed_brand_keys=installed_brand_keys,
+                               # The one brand catalog — the wizard tiles and
+                               # the fleet <select> both render from this, so
+                               # neither can name a brand the registry does
+                               # not know (see services/vehicle/catalog.py).
+                               vehicle_catalog=_vehicle_catalog,
                                hyundai_kia_sdk_outdated=hyundai_kia_sdk_outdated,
                                hyundai_kia_sdk_version=hyundai_kia_sdk_version,
                                hyundai_kia_python_too_old=hyundai_kia_python_too_old,
@@ -4125,8 +4131,15 @@ def register_routes(app):
     @app.route('/api/co2/<date_str>')
     def api_get_co2(date_str):
         """Fetch CO2 intensity for a date (and optional hour) via ENTSO-E."""
+        # Parsed outside the try: a malformed date is the CALLER's mistake,
+        # and answering it with 500 plus the raw strptime text ("time data
+        # '1' does not match format '%Y-%m-%d'") reports our own server as
+        # broken for a bad link or a stale bookmark.
         try:
             target = datetime.strptime(date_str, '%Y-%m-%d')
+        except ValueError:
+            return jsonify({'error': t('err.bad_date', value=date_str)}), 400
+        try:
             hour = request.args.get('hour', type=int)
             api_key = AppConfig.get('entsoe_api_key', Config.ENTSOE_API_KEY)
             if not api_key:
@@ -4354,7 +4367,7 @@ def register_routes(app):
         )
         cfg = BRAND_CONFIG.get(brand)
         if not cfg:
-            return jsonify({'error': 'Marke nicht gefunden'}), 404
+            return jsonify({'error': t('err.brand_not_found')}), 404
         return jsonify({
             'step1_login_url': _build_login_url(cfg),
             'step2_ccsp_url': get_manual_step2_url(brand),
@@ -4367,28 +4380,17 @@ def register_routes(app):
         import subprocess
         import sys
 
-        PACKAGES = {
-            # >=4.26.5 for the headless CCI password sign-in (bypasses the IdP
-            # WAF that blocks the legacy browser authorize, upstream #1273).
-            # selenium/webdriver-manager stay for the browser-login *fallback*.
-            'hyundai-kia': ['hyundai-kia-connect-api>=4.26.5', 'selenium', 'webdriver-manager'],
-            'vw': ['carconnectivity', 'carconnectivity-connector-volkswagen'],
-            'skoda': ['carconnectivity', 'carconnectivity-connector-skoda'],
-            'seatcupra': ['carconnectivity', 'carconnectivity-connector-seatcupra'],
-            'tesla': ['teslapy'],
-            'renault': ['renault-api', 'aiohttp'],
-            'polestar': ['pypolestar'],
-            'mg': ['saic-ismart-client-ng'],
-            'smart': ['pySmartHashtag'],
-            'porsche': ['pyporscheconnectapi'],
-        }
+        # One map, in services/vehicle/catalog.py, shared with both
+        # templates and the native installer. It used to live here as a
+        # second copy of the wizard's JavaScript list, and the two drifted.
+        from services.vehicle.catalog import PACKAGES
 
         data = request.get_json() or {}
         pkg_key = data.get('package', '')
         upgrade = bool(data.get('upgrade'))
         packages = PACKAGES.get(pkg_key)
         if not packages:
-            return jsonify({'success': False, 'error': f'Unbekanntes Paket: {pkg_key}'}), 400
+            return jsonify({'success': False, 'error': t('err.unknown_package', pkg=pkg_key)}), 400
 
         # Python <3.12 can never install an SDK with the CCI password login
         # (every release >=4.23.1 requires Python >=3.12). Refuse the doomed
@@ -4447,18 +4449,8 @@ def register_routes(app):
             # "Unknown vehicle brand: kia" until the service was
             # restarted out-of-band. A clean restart picks up the newly
             # pip-installed connector via fresh imports — reliable.
-            def _delayed_restart():
-                import time as _t
-                _t.sleep(1.0)  # let the HTTP response flush
-                try:
-                    subprocess.run(
-                        ['sudo', '-n', '/bin/systemctl', 'restart', 'ev-tracker.service'],
-                        timeout=10,
-                    )
-                except Exception as _e:
-                    logger.warning(f"Post-install restart failed: {_e}")
-            import threading as _th
-            _th.Thread(target=_delayed_restart, daemon=True).start()
+            from services.restart_service import schedule_restart
+            schedule_restart(1.0, reason=f'installed {pkg_key}')
             return jsonify({
                 'success': True,
                 'installed': packages,
@@ -4922,23 +4914,12 @@ def register_routes(app):
         # Restart via systemd in a short-delayed background thread so
         # this response flushes to the browser first. Same pattern as
         # /api/backup/import.
-        def _delayed_restart():
-            import time as _t
-            _t.sleep(0.7)
-            try:
-                subprocess.run(
-                    ['sudo', '-n', '/bin/systemctl', 'restart', 'ev-tracker.service'],
-                    timeout=10,
-                )
-            except Exception:
-                pass
-            # Belt and suspenders — if sudo restart didn't take (e.g. no
-            # systemd on this host, or the sudoers rule is missing), fall
-            # back to os._exit so a supervisor still restarts us.
-            os._exit(0)
-
-        import threading as _th
-        _th.Thread(target=_delayed_restart, daemon=True).start()
+        # The belt-and-suspenders os._exit(0) that used to live here is
+        # now a re-exec inside schedule_restart(): exiting only helps
+        # where something outside restarts us, and left a plain
+        # `docker run` user with a stopped container.
+        from services.restart_service import schedule_restart
+        schedule_restart(0.7, reason='factory reset')
 
         return jsonify({
             'ok': True,
@@ -4987,15 +4968,31 @@ def register_routes(app):
         if not ok:
             return jsonify({'error': 'update_failed', 'version': new_version}), 500
 
-        # Schedule a delayed graceful shutdown so this response can flush.
-        # The helper is already detached and is waiting on our PID with a
-        # ~30s budget; 1.5s gives the JSON response time to reach the browser.
-        import threading
-        def _shutdown():
-            import time as _t
-            _t.sleep(1.5)
-            os._exit(0)
-        threading.Thread(target=_shutdown, daemon=True).start()
+        # How we go away depends on which path apply_update took, and the
+        # two are NOT interchangeable.
+        #
+        # Inline swap (systemd, or a container): the files are already
+        # replaced and nothing outside is waiting for us, so we restart
+        # ourselves. schedule_restart re-executes the process when there
+        # is no systemd, which is what makes this work in a container
+        # with no restart policy at all — plain os._exit(0) there would
+        # stop the container and leave the user with no app.
+        #
+        # Detached helper (a native install without systemd): the helper
+        # is waiting on OUR PID before it swaps anything. It has to see
+        # us die, so here exiting IS the mechanism, and re-executing
+        # would leave the helper waiting for a process that never ends.
+        from updater import swaps_inline
+        if swaps_inline():
+            from services.restart_service import schedule_restart
+            schedule_restart(1.5, reason=f'update to {new_version}')
+        else:
+            import threading
+            def _shutdown():
+                import time as _t
+                _t.sleep(1.5)
+                os._exit(0)
+            threading.Thread(target=_shutdown, daemon=True).start()
 
         return jsonify({
             'staged': True,

@@ -1,5 +1,141 @@
 # Changelog
 
+## v3.0.120 (2026-09-09)
+
+### Every car brand now works out of the box in a container
+
+The container image shipped no vehicle connector at all. Every brand tile in
+the car wizard read "package needed", and the install button next to it
+posted to `/api/vehicle/brand-install` — a route that has never existed in
+this app. Flask answered with its HTML 404 page, the button did
+`await r.json()` on it, and the user got "JSON.parse: unexpected character at
+line 1 column 1". Nobody has ever been able to install a connector from the
+wizard.
+
+Both halves are gone. The image now bakes in every connector
+(`requirements-vehicles.txt`), so a fresh container talks to all supported
+brands the moment it starts, and a newer image brings newer connectors with
+it. The button — still there for native installs — posts to
+`/api/vehicle/install`, which is the route that exists.
+
+Baking them in is not just convenience. A connector installed from the
+running app lands in the container's writable layer, and `docker compose
+pull` discards that layer on the next update: the car connection was lost
+every single time the app was updated.
+
+### Škoda, Seat, Cupra, Audi and Dacia were unreachable or wrong
+
+The wizard's Škoda tile stored the brand as `vw`, so a Škoda was signed in
+against VW WeConnect and could only fail. Seat and Cupra shared that tile and
+that wrong value. Audi and Dacia had working connectors and no way at all to
+pick them. The fleet form offered one lump entry, "VW Group (Skoda/Seat/VW)",
+with the same single value behind it.
+
+There is now one brand catalog, next to the connectors it describes, and both
+the wizard and the fleet form render from it. Fourteen brands, each stored
+under the key its own connector registers. Vehicles already stored as `vw`
+keep working — that is still the VW connector's key.
+
+### Smart and Porsche could never load
+
+Both connectors imported names their libraries do not have: `SmartApi` was
+dropped upstream and `SmartAccount` moved out of `pysmarthashtag.models`,
+and `pyporscheconnectapi.client` no longer exists. The import failed, the
+brand never registered, and the tile said "package needed" forever — while
+the install button dutifully installed a package that changed nothing.
+
+Both are rewritten against the current libraries. Note that the sign-in
+itself is untested for these two brands: it needs a real manufacturer
+account.
+
+### The battery certificate crashed for any car with a Š in its name
+
+The PDF text sanitiser had a docstring promising latin-1 safety and a
+hand-written list of about ten replacements to deliver it. Anything outside
+that list and outside latin-1 went straight to the PDF writer and raised —
+"Škoda Enyaq" was enough. No Škoda owner could generate a battery
+certificate at all.
+
+It is now safe by construction: characters latin-1 cannot hold are reduced to
+their base letter (Š → S) and, failing that, to "?". Characters latin-1 *can*
+hold are untouched, so "Prüfung" and "Citroën" still read correctly.
+
+### In-app updates now work in a container
+
+"Check for update" and "install" worked on a systemd host and quietly could
+not work in a container built from this repo's Dockerfile — which is every
+container install except one private image that patches around it.
+
+Two reasons, both fixed in the app where they belong rather than in a
+Dockerfile:
+
+- The updater picks between swapping files **in this process** and spawning a
+  **detached helper** that waits for this process to die and then swaps from
+  outside. It chose the helper whenever systemd was absent. In a container the
+  app is PID 1, and when PID 1 exits the container stops and kills every other
+  process in it — including a helper halfway through replacing files. The
+  choice is now made on "is this a container" as well as "is this systemd".
+- The dependency step looked only for a virtualenv next to the app. A
+  container has none, so the step was skipped without a word: a release that
+  shipped a new vehicle connector installed nothing, and the app came back
+  reporting the new version while missing the very thing it was for. It now
+  installs with the running interpreter when there is no virtualenv.
+
+Restarting after the swap re-executes the process rather than exiting, so it
+needs no init system, no supervisor and no restart policy. Marking inherited
+descriptors close-on-exec first is part of that and not optional: the server's
+listening socket is inheritable, and without it the replacement process finds
+port 7654 already taken by a socket it inherited from itself, and the app is
+gone.
+
+Verified by running it: an update inside a container went 3.0.120 → 3.0.121
+live, the container never restarted, a dependency that was new in that release
+was really installed, and the pre-update backup and the crash-rollback marker
+behaved exactly as they do on a systemd host.
+
+### Fixed
+
+- `requests` is no longer pinned to an exact version. `carconnectivity`
+  requires `requests~=2.32.5`, which made the entire VW group unresolvable;
+  on a native install pip quietly upgraded past the pin anyway. Now bounded
+  below 3.x.
+- Restarting the app was implemented three times — after a backup import,
+  after a connector install, after a factory reset — and only one of the
+  three had noticed that `sudo systemctl restart` does nothing in a
+  container. The other two told the browser "restarting…" and then did not.
+  All three now call one function that falls back to re-executing the
+  process, which needs no init system, no supervisor and no restart policy.
+- Fifteen `cert.*` strings were used with a German inline fallback and
+  existed in none of the six translation files, so the OBD section of the
+  battery certificate printed German in every language. They are translated
+  now.
+- The native installer and the in-app updater install the vehicle connectors
+  one line at a time. A single unsatisfiable requirement — the Kia/Hyundai
+  SDK needs Python 3.12 — used to be able to abort the whole file and cost
+  the user every other brand as well. Deliberately without `--upgrade`: on a
+  machine whose connector already works, a routine app update must not pull
+  the newest release of it and change how a live car sync behaves. pip still
+  upgrades when the requirement itself asks for it.
+- A malformed date in `/api/co2/<date>` answered 500 with the raw parser
+  text ("time data '1' does not match format '%Y-%m-%d'"), reporting the
+  server as broken for what is a bad link. It answers 400 with a readable
+  message now. All 57 GET routes were crawled; this was the only one.
+- Five API error messages were hard-coded German and reached every language
+  ("nicht eingeloggt", "Unbekanntes Paket: …"). Translated.
+
+### Tests
+
+Two new suites, both static, so they run without a database, a Flask app or
+any optional connector package:
+
+- every `fetch()` in every template must resolve to a route the app
+  registers (this is the check the missing `brand-install` route failed), and
+  every translation key used anywhere must exist in all six languages;
+- every brand offered in the UI must be registered by a connector, must have
+  an installable package, and must be shipped in the image.
+
+78 tests, up from 28.
+
 ## v3.0.119 (2026-09-09)
 
 ### German text reached every language in the car wizard
