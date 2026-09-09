@@ -3,7 +3,7 @@
 > **Self-hosted dashboard for tracking your electric vehicle charges** — costs, kWh, CO2, recuperation, charging losses, live vehicle status, a self-generated **battery-health certificate**, and in-browser **OBD/ELM327** cell readout. Multi-vehicle / fleet support, connects to 15 EV brands via API. Available in 6 languages.
 
 [![Latest Release](https://img.shields.io/github/v/release/robeertm/ev-charge-tracker)](https://github.com/robeertm/ev-charge-tracker/releases)
-[![License](https://img.shields.io/badge/license-MIT-blue)](LICENSE)
+[![License: Source-available](https://img.shields.io/badge/license-source--available-blue.svg)](LICENSE)
 ![Python](https://img.shields.io/badge/python-3.10%2B-blue)
 ![Self-Hosted](https://img.shields.io/badge/self--hosted-yes-green)
 
@@ -494,7 +494,11 @@ Pull requests welcome! Areas where help is appreciated:
 
 ## License
 
-Robert Manuwald 2021-2026 — released under the MIT License (see `LICENSE`).
+**Source-available — free to run, not for redistribution.** © 2021-2026 Robert Manuwald,
+all rights reserved. You may download and run EV Charge Tracker for your own personal or
+internal use, and adapt the configuration to your own vehicles and tariffs. Modifying,
+redistributing, or hosting it for others is not permitted without written permission.
+The charge data *you* record is yours. See [LICENSE](LICENSE).
 
 ### Disclaimer
 
