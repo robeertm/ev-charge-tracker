@@ -11,8 +11,8 @@ one app on a Linux box.
 
 The image is now built here and published to the GitHub Container Registry for
 **amd64 and arm64**, so a Raspberry Pi or an ARM NAS pulls the same one-line
-install as a normal server. A compose file, an example environment file and an
-installer come with the repository:
+install as a normal server. A compose file and an installer come with the
+repository:
 
 ```
 curl -fsSL https://raw.githubusercontent.com/robeertm/ev-charge-tracker/main/deploy/docker-install.sh | bash

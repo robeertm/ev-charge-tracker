@@ -19,7 +19,7 @@ services:
       # Signs the session cookie. The installer writes a random value into
       # .env; without it the app falls back to a key that is public in the
       # source, which would let anyone forge a session on an exposed install.
-      SECRET_KEY: "${SECRET_KEY:?SECRET_KEY missing — copy .env.example to .env and put a random value in it}"
+      SECRET_KEY: "${SECRET_KEY:?SECRET_KEY missing — put SECRET_KEY=<random> in a .env file next to this one, or let deploy/docker-install.sh do it}"
       # Optional: an ENTSO-E token enables the real CO2 intensity of your grid.
       # Leave empty and the app simply does without it.
       ENTSOE_API_KEY: "${ENTSOE_API_KEY:-}"
