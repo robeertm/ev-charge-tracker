@@ -312,8 +312,8 @@ Connect your car to automatically fetch SoC, odometer, and charging status. All 
 
 | Brand | Package | Auth |
 |-------|---------|------|
-| **Kia** | `hyundai-kia-connect-api` | Refresh-Token (OAuth via Selenium) |
-| **Hyundai** | `hyundai-kia-connect-api` | Refresh-Token (OAuth via Selenium) |
+| **Kia** | `hyundai-kia-connect-api` | Username / Password ¹ |
+| **Hyundai** | `hyundai-kia-connect-api` | Username / Password ¹ |
 | **Volkswagen** | `carconnectivity` + connector | Username / Password |
 | **Skoda** | `carconnectivity` + connector | Username / Password |
 | **Seat** | `carconnectivity` + connector | Username / Password |
@@ -330,7 +330,19 @@ Connect your car to automatically fetch SoC, odometer, and charging status. All 
 
 After installing, configure credentials in Settings > Vehicle API. Optional background sync polls your vehicle at a configurable interval (1-12h).
 
-**Kia/Hyundai note:** Password login is blocked by reCAPTCHA. Use the "Fetch Token" button in settings — opens Chrome with mobile user-agent for the OAuth flow. Token is valid for ~1 year.
+**¹ Kia/Hyundai:** signing in with username and password works — but only on
+**Python 3.12 or newer**. The sign-in needs `hyundai-kia-connect-api` ≥ 4.26.5,
+and every release of that SDK from 4.23.1 onward declares `Requires-Python
+>=3.12`. The Docker image ships 3.12, so a container install signs in like
+every other brand here.
+
+A **native** install on an older interpreter cannot install that SDK at all —
+Raspberry Pi OS bookworm still ships Python 3.11, where `pip install
+'hyundai-kia-connect-api>=4.26.5'` simply finds no matching distribution.
+There the app falls back to fetching a refresh token once through a browser
+("Fetch Token" in Settings, valid about a year). It detects which of the two
+cases it is in and offers only the one that can actually work, instead of
+pointing at an upgrade that cannot happen.
 
 **XPENG note:** XPENG has no public brand SDK, so it connects through the [Enode](https://enode.com) aggregator (the same route the community Home Assistant integrations use). Create an Enode app (Client ID + Secret), link your XPENG account once via Enode's hosted flow, then enter the keys under Settings > Vehicle API — brand *XPENG*, Client ID as username, Client Secret as password. Needs no extra package (rides on `requests`). Provides SoC, range, odometer, charging status and location.
 
