@@ -75,12 +75,27 @@ def main():
 
     app = _make_app()
     fails = 0
+    skips = 0
 
     def check(name, cond):
         nonlocal fails
         print(('PASS' if cond else 'FAIL'), name)
         if not cond:
             fails += 1
+
+    # The certificate is a PDF, and fpdf is a production dependency that a
+    # developer machine may simply not have. Without it generate_certificate()
+    # returns None BY DESIGN — asserting on bytes then crashes with a
+    # TypeError that reads like a product bug. Skip those checks and say so:
+    # a run that cannot test something must report that, not fail as if it had.
+    def check_pdf(name, pdf, cond=None):
+        nonlocal skips
+        if not bc._HAVE_FPDF:
+            skips += 1
+            print('SKIP', name, '(fpdf not installed)')
+            return
+        check(name, cond if cond is not None
+              else (isinstance(pdf, (bytes, bytearray)) and len(pdf) > 1000))
 
     with app.app_context():
         db.create_all()
@@ -132,7 +147,7 @@ def main():
         check('ownership separate (~1.0y)', abs(d['ownership_years'] - 1.0) < 0.1)
         check('gross carried', abs(d['vehicle']['gross_kwh'] - 67.3) < 0.01)
         pdf = bc.generate_certificate(v.id)
-        check('used-car pdf renders', isinstance(pdf, (bytes, bytearray)) and len(pdf) > 1000)
+        check_pdf('used-car pdf renders', pdf)
 
     # ── OBD reading feeds the certificate ────────────────────────────
     app_obd = _make_app()
@@ -154,11 +169,11 @@ def main():
         check('certified source obd', d['certified_source'] == 'obd')
         check('certified soh from obd', abs(d['certified_soh'] - 95.5) < 0.01)
         pdf = bc.generate_certificate(v.id)
-        check('obd pdf renders', isinstance(pdf, (bytes, bytearray)) and len(pdf) > 1000)
+        check_pdf('obd pdf renders', pdf)
 
         pdf = bc.generate_certificate(v.id)
-        check('pdf bytes produced', isinstance(pdf, (bytes, bytearray)) and len(pdf) > 1000)
-        check('pdf has %PDF header', bytes(pdf[:4]) == b'%PDF')
+        check_pdf('pdf bytes produced', pdf)
+        check_pdf('pdf has %PDF header', pdf, pdf is not None and bytes(pdf[:4]) == b'%PDF')
 
         # grade label resolves (not empty / not the raw key)
         gl = data['grade']['label_key']
@@ -194,7 +209,7 @@ def main():
         check('recon: headline between OBD and measured',
               94.7 <= d['certified_soh'] <= d['measured']['soh_pct'] + 0.05)
         pdf = bc.generate_certificate(v.id)
-        check('recon: pdf renders', isinstance(pdf, (bytes, bytearray)) and len(pdf) > 1000)
+        check_pdf('recon: pdf renders', pdf)
 
     # ── Sparse-data path: only narrow windows, no BMS SoH ────────────
     app2 = _make_app()
@@ -242,10 +257,13 @@ def main():
         check('no-api-soh: measured drives cert', d['certified_source'] == 'measured')
         check('no-api-soh: can_certify True', d['can_certify'] is True)
         pdf = bc.generate_certificate(v.id)
-        check('no-api-soh: pdf renders from charge data',
-              isinstance(pdf, (bytes, bytearray)) and len(pdf) > 1000)
+        check_pdf('no-api-soh: pdf renders from charge data', pdf)
 
-    print('\n%d check(s) failed' % fails if fails else '\nAll checks passed')
+    # Ein Lauf, der etwas NICHT geprueft hat, muss das sagen — sonst liest
+    # sich „All checks passed" wie eine Zusicherung, die es nicht gibt.
+    rest = (' (%d skipped — fpdf not installed)' % skips) if skips else ''
+    print('\n%d check(s) failed%s' % (fails, rest) if fails
+          else '\nAll checks passed%s' % rest)
     return 1 if fails else 0
 
 
