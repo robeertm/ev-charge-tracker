@@ -13,41 +13,94 @@ Built for EV owners who want **full control over their charging data** — runs 
 
 ## Screenshots
 
+Every image below is one real screen of the running app, filled by the demo
+seeder (`tools/seed_demo.py`) — two years of one fictional car, 395 charges,
+41 720 km. No real installation and no real person's data appears here.
+
+Desktop shots are 1920 × 1080, phone shots 390 × 844 (2×). Both are exactly
+one screenful, so what you see is what you get when you open the page.
+
 ### Dashboard
 ![Dashboard](docs/screenshots/dashboard.png)
-*Monthly cost chart, AC/DC/PV breakdown, yearly summary — everything on one page.*
+*Range estimate, highlights, cost and CO2 headline figures, consumption against
+outside temperature, and the monthly cost chart across the whole history.*
 
-### Dark Mode
-![Dark Mode](docs/screenshots/dashboard-dark.png)
-*Day/night toggle synced across all tabs.*
+### Dark mode
+![Dark mode](docs/screenshots/dashboard-dark.png)
+*One toggle, remembered across tabs and pages.*
 
-### Live Vehicle Status
-![Vehicle](docs/screenshots/vehicle.png) ![Vehicle Dark](docs/screenshots/vehicle-dark.png)
-*Battery, range, odometer, 12V, SoH, tyre pressure, doors — pulled directly from the car via Vehicle API. Cached or live-refresh on demand.*
+### Live vehicle status
+![Vehicle](docs/screenshots/vehicle.png)
+![Vehicle, dark](docs/screenshots/vehicle-dark.png)
+*Battery, range, odometer, 12 V, state of health — pulled from the car over the
+vehicle API, cached or refreshed on demand.*
 
-### Fahrtenbuch (Trip Log)
-![Trips](docs/screenshots/trips.png)
-*Auto-built from GPS pings: trips, totals, commute distance, map of all stops, smart-sync every 10 min during waking hours.*
+### Driving log
+![Driving log](docs/screenshots/trips.png)
+*Built from GPS pings: trips, distances, stops and the map of where the car has been.*
 
-### New Charge — Start/Stop tracking
-![New Charge](docs/screenshots/input.png)
-*AC / DC / **PV** button row, auto-fills SoC, odometer, and CO2 from the live grid. Start/Stop triggers a force-refresh from the car.*
+### New charge
+![New charge](docs/screenshots/input.png)
+*AC / DC / **PV** in one row. State of charge, odometer and grid CO2 are filled in
+for you; start/stop asks the car directly.*
 
 ### History
 ![History](docs/screenshots/history.png)
-*Filter by year and charge type, inline edit km, CSV export.*
+*Filter by year and type, edit inline, export to CSV.*
 
-### Maintenance Log
+### Report
+![Report](docs/screenshots/report.png)
+*Any period as a printable summary — cost, energy, CO2, price per kilometre.*
+
+### Maintenance log
 ![Maintenance](docs/screenshots/maintenance.png)
-*Inspections, tyres, parts — with cost tracking and next-service reminders by date or odometer.*
+*Inspections, tyres, parts — with cost and a reminder by date or by odometer.*
 
-### Live Log Viewer
+### OBD
+![OBD](docs/screenshots/obd.png)
+*Read the battery management system over a dongle: cell voltages, pack values,
+state of health — and a battery certificate as a PDF.*
+
+### Live log viewer
 ![Logs](docs/screenshots/logs.png)
-*In-app log window: auto-refresh, level filter, text search, optional HTTP access logging, CSV download.*
+*Auto-refreshing log window with level filter, search and CSV download.*
 
-### Settings — Vehicle API
+### Settings
 ![Settings](docs/screenshots/settings.png)
-*Vehicle API auto-sync with configurable smart window (default 06:00 – 22:00, every 10 min). 15 supported brands, GHG quota, ENTSO-E, HTTPS, PV system — all configurable from the UI.*
+*Vehicle API, sync window, GHG quota, ENTSO-E, HTTPS, PV — all from the UI, no
+config file to edit.*
+
+### On a phone
+
+The layout is not a shrunken desktop: cards stack, the table becomes a list,
+and the charts keep their labels.
+
+| Dashboard | Dark mode | New charge |
+| --- | --- | --- |
+| ![Dashboard on a phone](docs/screenshots/mobile/dashboard.png) | ![Dark mode on a phone](docs/screenshots/mobile/dashboard-dark.png) | ![New charge on a phone](docs/screenshots/mobile/input.png) |
+
+| History | Driving log | Vehicle |
+| --- | --- | --- |
+| ![History on a phone](docs/screenshots/mobile/history.png) | ![Driving log on a phone](docs/screenshots/mobile/trips.png) | ![Vehicle on a phone](docs/screenshots/mobile/vehicle.png) |
+
+| Report | Maintenance | Settings |
+| --- | --- | --- |
+| ![Report on a phone](docs/screenshots/mobile/report.png) | ![Maintenance on a phone](docs/screenshots/mobile/maintenance.png) | ![Settings on a phone](docs/screenshots/mobile/settings.png) |
+
+| Vehicle, dark | OBD | Logs |
+| --- | --- | --- |
+| ![Vehicle dark on a phone](docs/screenshots/mobile/vehicle-dark.png) | ![OBD on a phone](docs/screenshots/mobile/obd.png) | ![Logs on a phone](docs/screenshots/mobile/logs.png) |
+
+<details>
+<summary>Try it with the same data</summary>
+
+```bash
+docker exec ev-charge-tracker python tools/seed_demo.py
+```
+
+Only works on an installation that has no charges yet — demo numbers must
+never mix with a real history.
+</details>
 
 ---
 
