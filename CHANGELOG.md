@@ -1,5 +1,39 @@
 # Changelog
 
+## v3.0.118 (2026-09-09)
+
+### Installing with Docker is one command now
+
+Until now the container was something you had to build yourself: clone the
+repository, wait for the image, work out the port and the volume, and remember
+to set a secret key. That is a lot of steps for someone who only wants to run
+one app on a Linux box.
+
+The image is now built here and published to the GitHub Container Registry for
+**amd64 and arm64**, so a Raspberry Pi or an ARM NAS pulls the same one-line
+install as a normal server. A compose file, an example environment file and an
+installer come with the repository:
+
+```
+curl -fsSL https://raw.githubusercontent.com/robeertm/ev-charge-tracker/main/deploy/docker-install.sh | bash
+```
+
+It checks that Docker is present and usable, says plainly what to do when it is
+not, generates a private `SECRET_KEY`, pulls the image and waits until the app
+actually answers before reporting success — a started container is not the same
+as a running app.
+
+Running it again updates instead of breaking: the compose file is refreshed and
+the image pulled, while the environment file and the data volume are left
+alone. Rolling a new secret key on every run would have logged everyone out and
+thrown away a hand-entered ENTSO-E token.
+
+Charge history lives in a named volume and survives updates, restarts and
+`docker compose down`.
+
+The native systemd install is unchanged and remains the right choice where the
+data directory has to sit on an encrypted volume.
+
 ## v3.0.117 (2026-09-08)
 
 ### "Missing CO2" no longer counts charges that show a number

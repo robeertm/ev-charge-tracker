@@ -173,6 +173,64 @@ Built for EV owners who want **full control over their charging data** — runs 
 
 ---
 
+## Install with Docker (recommended on Linux)
+
+One command. It installs Docker Compose's config, generates a private secret
+key, pulls the ready-built image and starts the app — nothing is compiled on
+your machine.
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/robeertm/ev-charge-tracker/main/deploy/docker-install.sh | bash
+```
+
+Then open `http://localhost:7654` — or `http://<your-server-ip>:7654` from
+another machine — and the setup wizard takes it from there.
+
+Images are published for **amd64 and arm64**, so this works on a normal server
+as well as on a Raspberry Pi or an ARM NAS.
+
+<details>
+<summary>Prefer to do it by hand?</summary>
+
+```bash
+mkdir ev-charge-tracker && cd ev-charge-tracker
+curl -fsSL https://raw.githubusercontent.com/robeertm/ev-charge-tracker/main/docker-compose.yml -o docker-compose.yml
+printf 'SECRET_KEY=%s\n' "$(openssl rand -hex 32)" > .env
+docker compose up -d
+```
+
+`SECRET_KEY` signs the session cookie. Without your own value the app falls
+back to a key that is published in this repository, which would let anyone
+forge a session on an install that is reachable from outside.
+</details>
+
+**Everyday commands**
+
+```bash
+cd ~/ev-charge-tracker-docker
+docker compose pull && docker compose up -d   # update to the latest version
+docker compose logs -f                        # watch the log
+docker compose down                           # stop (your data stays)
+```
+
+Charge history, settings and exports live in the named volume
+`ev-tracker-data`. They survive updates, restarts and `docker compose down` —
+only `docker compose down -v` deletes them.
+
+**Options** — put them in `.env` next to the compose file:
+
+| Variable | Default | What it does |
+| --- | --- | --- |
+| `EV_PORT` | `7654` | Port on the host |
+| `TZ` | `Europe/Berlin` | Time zone used for timestamps |
+| `ENTSOE_API_KEY` | empty | Enables the real CO2 intensity of your grid |
+| `SECRET_KEY` | — | Required. Signs the session cookie |
+
+> The app speaks plain HTTP. Put it behind a reverse proxy, a VPN or Tailscale
+> before exposing it to the internet.
+
+---
+
 ## Quick Start
 
 ```bash

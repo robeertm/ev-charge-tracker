@@ -1,0 +1,65 @@
+# Build the container image and publish it to the GitHub Container Registry.
+#
+# Why this exists: without a published image every user has to clone the
+# repository and build it themselves — minutes of waiting, a Git checkout and
+# a toolchain on a machine that was only supposed to run one container. With
+# the image published, installing is a single `docker compose up -d`.
+#
+# Two architectures on purpose. A lot of self-hosters run this on a Raspberry
+# Pi or an ARM NAS; an amd64-only image simply refuses to start there, with an
+# error that reads like a broken download rather than a wrong architecture.
+name: Container image
+
+on:
+  push:
+    branches: [main]
+    # Documentation-only changes do not change the image.
+    paths-ignore: ['**.md', 'docs/**']
+  release:
+    types: [published]
+  workflow_dispatch:
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE_NAME: ${{ github.repository }}
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: docker/setup-qemu-action@v3
+      - uses: docker/setup-buildx-action@v3
+
+      - name: Log in to the registry
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Work out the tags
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+          tags: |
+            type=raw,value=latest,enable={{is_default_branch}}
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+            type=sha,format=short
+
+      - name: Build and push
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max

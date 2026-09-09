@@ -1,0 +1,40 @@
+# EV Charge Tracker — one container, one volume, nothing else.
+#
+#   docker compose up -d
+#
+# The image is pulled from the GitHub Container Registry, so nothing is built
+# on your machine. Everything the app writes — the SQLite database, caches,
+# exports — lives in the named volume `ev-tracker-data` and survives an
+# update, a restart and `docker compose down`.
+services:
+  ev-charge-tracker:
+    image: ghcr.io/robeertm/ev-charge-tracker:latest
+    container_name: ev-charge-tracker
+    restart: unless-stopped
+    ports:
+      # HOST:CONTAINER — change the left number to move the app to another
+      # port on your machine. 7654 is the app's canonical port everywhere.
+      - "${EV_PORT:-7654}:7654"
+    environment:
+      # Signs the session cookie. The installer writes a random value into
+      # .env; without it the app falls back to a key that is public in the
+      # source, which would let anyone forge a session on an exposed install.
+      SECRET_KEY: "${SECRET_KEY:?SECRET_KEY missing — copy .env.example to .env and put a random value in it}"
+      # Optional: an ENTSO-E token enables the real CO2 intensity of your grid.
+      # Leave empty and the app simply does without it.
+      ENTSOE_API_KEY: "${ENTSOE_API_KEY:-}"
+      TZ: "${TZ:-Europe/Berlin}"
+    volumes:
+      - ev-tracker-data:/app/data
+    healthcheck:
+      # The app answers /api/health before the setup wizard has been run, so
+      # this reports "healthy" on a fresh install too.
+      test: ["CMD", "python", "-c",
+             "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:7654/api/health', timeout=5).status==200 else 1)"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 40s
+
+volumes:
+  ev-tracker-data:
