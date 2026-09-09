@@ -258,6 +258,9 @@ class XpengConnector(VehicleConnector):
             logger.error(f"XPENG (Enode) auth failed: {e}")
             return False
 
+    def verify_credentials(self) -> None:
+        self._ensure_auth()
+
     def test_connection(self) -> bool:
         try:
             self._list_vehicles()

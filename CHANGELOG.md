@@ -1,5 +1,31 @@
 # Changelog
 
+## v3.0.124 (2026-09-09)
+
+### The "test connection" button worked for two brands out of ten
+
+It called `connector._ensure_auth()` — a **private** method that only the
+Kia/Hyundai and XPENG connectors happen to define. For VW, Škoda, Seat, Cupra,
+Audi, Tesla, Renault, Dacia, Polestar, MG, Smart and Porsche the button
+answered with an AttributeError instead of a verdict, and had done so for as
+long as those brands existed. The XPENG connector even carried a comment
+explaining that its `_ensure_auth` was named that way "so the Testen button
+works", which documents the problem rather than fixing it: a private name had
+become an accidental interface that every new brand had to guess.
+
+There is a public one now, `verify_credentials()`, with a default that works
+for any connector. Brands that can explain *why* a sign-in failed override it
+and keep their better wording — the official Škoda API, for instance, now
+answers "Missing or invalid API key" instead of a Python attribute error.
+
+### The Škoda API key can be replaced
+
+The key expires, and until now it could only be entered once — during the
+changeover. After that no field led back to it, so a key approaching its
+expiry date could not be renewed at all. The expiry line in Settings now
+carries a "Replace the API key" form. The new key is checked against the car
+before it is stored; if the check fails, the existing one is left untouched.
+
 ## v3.0.123 (2026-09-09)
 
 ### Half the app still talked to the Škoda API that is being switched off

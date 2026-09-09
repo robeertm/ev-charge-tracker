@@ -110,6 +110,35 @@
                 {% if ks.quota and ks.quota.get('remaining') is not none %}
                 <span class="text-muted ms-1">· {{ t('skoda.quota', left=ks.quota.get('remaining'), total=ks.quota.get('limit')) }}</span>
                 {% endif %}
+                {# Ein Schluessel, der ablaeuft, MUSS ersetzbar sein — und nicht nur
+                   dann, wenn er schon abgelaufen ist. Bis hierhin gab es den
+                   Eintragsweg nur einmalig bei der Umstellung; danach fuehrte kein
+                   Weg mehr zu diesem Feld. #}
+                <div class="mt-2" data-switch-vehicle="{{ ks.id }}">
+                    <button class="btn btn-sm btn-outline-secondary" type="button"
+                            data-bs-toggle="collapse" data-bs-target="#keyReplace{{ ks.id }}">
+                        <i class="bi bi-key"></i> {{ t('skoda.key_replace_title') }}
+                    </button>
+                    <div class="collapse mt-2" id="keyReplace{{ ks.id }}">
+                        <div class="small text-muted mb-2">{{ t('skoda.key_replace_hint') }}</div>
+                        <div class="row g-2 align-items-end">
+                            <div class="col-12 col-md-6">
+                                <label class="form-label small mb-1">{{ t('skoda.field_api_key') }}</label>
+                                <input type="password" class="form-control form-control-sm sw-key"
+                                       autocomplete="new-password" placeholder="msk_…">
+                            </div>
+                            <div class="col-12 col-md-4">
+                                <label class="form-label small mb-1">VIN</label>
+                                <input type="text" class="form-control form-control-sm sw-vin"
+                                       value="{{ ks.vin or '' }}" autocomplete="off">
+                            </div>
+                            <div class="col-12 col-md-2">
+                                <button type="button" class="btn btn-sm btn-primary w-100 sw-go">{{ t('skoda.key_replace_btn') }}</button>
+                            </div>
+                        </div>
+                        <div class="small mt-2 sw-status"></div>
+                    </div>
+                </div>
             </div>
             {% endfor %}
             {% endif %}

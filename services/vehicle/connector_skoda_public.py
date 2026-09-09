@@ -122,6 +122,12 @@ class SkodaPublicConnector(VehicleConnector):
     def test_connection(self) -> bool:
         return self.authenticate()
 
+    def verify_credentials(self) -> None:
+        # Let the API's own reason through — "key expired", "not valid for
+        # this vehicle", "quota exhausted" each need a different action
+        # from the user, and "rejected" tells them none of it.
+        self._fetch(spend_reserve=True)
+
     def get_status(self, force=False) -> VehicleStatus:
         """Read the vehicle.
 

@@ -85,6 +85,27 @@ class VehicleConnector(ABC):
     def brand_name() -> str:
         """Human-readable brand name for the UI."""
 
+    def verify_credentials(self) -> None:
+        """Check the stored credentials and RAISE with a reason if they fail.
+
+        The "Testen" button in the vehicle list used to call
+        ``connector._ensure_auth()`` — a *private* method that only two of
+        the ten connector modules happen to have. For every other brand
+        the button answered with an AttributeError instead of a verdict,
+        and it had done so for as long as those brands existed. The XPENG
+        connector even carried a comment saying its ``_ensure_auth`` was
+        named that way "so the Testen button works", which documents the
+        problem rather than fixing it: a private name had become an
+        accidental interface that every new brand had to guess.
+
+        So this is the public one. The default is good enough for any
+        connector whose ``test_connection`` already does the work;
+        connectors that can explain *why* a sign-in failed override it and
+        raise their own, better message.
+        """
+        if not self.test_connection():
+            raise RuntimeError('Die hinterlegten Zugangsdaten wurden abgelehnt.')
+
     # ── optional: remote control ──────────────────────────────────────
     # Not abstract on purpose. A connector that says nothing supports
     # nothing, so adding a brand can never accidentally expose commands

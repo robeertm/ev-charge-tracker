@@ -1468,5 +1468,8 @@
   "remote.cmd_ac_start": "Klima starten",
   "remote.cmd_ac_stop": "Klima stoppen",
   "skoda.field_api_key": "API-Schlüssel",
-  "skoda.key_soon": "Der API-Schlüssel läuft in {days} Tagen ab ({date}). Erzeuge rechtzeitig einen neuen in der MyŠkoda-App und trage ihn beim Fahrzeug ein — sonst hört die Synchronisierung ohne Vorwarnung auf."
+  "skoda.key_soon": "Der API-Schlüssel läuft in {days} Tagen ab ({date}). Erzeuge rechtzeitig einen neuen in der MyŠkoda-App und trage ihn beim Fahrzeug ein — sonst hört die Synchronisierung ohne Vorwarnung auf.",
+  "skoda.key_replace_title": "API-Schlüssel ersetzen",
+  "skoda.key_replace_hint": "Erzeuge in der MyŠkoda-App einen neuen Schlüssel und trage ihn hier ein. Er wird erst am Fahrzeug geprüft und dann gespeichert — schlägt die Prüfung fehl, bleibt der alte Schlüssel unangetastet.",
+  "skoda.key_replace_btn": "Schlüssel speichern"
 }

@@ -2987,7 +2987,7 @@ def register_routes(app):
                 'vin': v.api_vin or '',
             }
             connector = get_connector(v.api_brand.lower(), creds)
-            connector._ensure_auth()
+            connector.verify_credentials()
             if _ajax:
                 return jsonify({'ok': True, 'message': t('flash.vehicle_test_ok', name=v.name)})
             flash(t('flash.vehicle_test_ok', name=v.name), 'success')
@@ -4159,6 +4159,7 @@ def register_routes(app):
                             _days = (_d.date() - _dt.now(_d.tzinfo).date()).days
                         _skoda_keys.append({
                             'id': _v.id, 'name': _v.name,
+                            'vin': _v.api_vin or '',
                             'expires_at': (str(_exp)[:10] if _exp else ''),
                             'days_left': _days,
                             'quota': (_raw.get('rate_limit') or {}),

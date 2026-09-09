@@ -299,3 +299,39 @@ def test_every_remote_command_has_a_label_in_every_language():
         d = json.loads((root / 'translations' / f'{lang}.json').read_text())
         missing = [c for c in REMOTE_COMMANDS if f'remote.cmd_{c}' not in d]
         assert not missing, f'{lang}: no label for {missing}'
+
+
+def test_every_connector_answers_the_public_credential_check():
+    """The 'Testen' button used to call ``connector._ensure_auth()`` — a
+    PRIVATE method that only two of the ten connector modules have. For
+    every other brand it answered with an AttributeError instead of a
+    verdict, and had done so for as long as those brands existed; the
+    XPENG connector even carried a comment saying its ``_ensure_auth``
+    was named that way so the button would work, which documents the
+    problem instead of fixing it.
+
+    ``verify_credentials`` is the public contract. Every connector class
+    must have it — inherited is fine, that is the point of a default.
+    """
+    import importlib
+    import pkgutil
+
+    import services.vehicle as pkg
+    from services.vehicle.base import VehicleConnector
+
+    checked = []
+    for mod in pkgutil.iter_modules(pkg.__path__):
+        if not mod.name.startswith('connector_'):
+            continue
+        try:
+            m = importlib.import_module(f'services.vehicle.{mod.name}')
+        except Exception:
+            continue                       # optional dependency absent
+        for name in dir(m):
+            obj = getattr(m, name)
+            if (isinstance(obj, type) and issubclass(obj, VehicleConnector)
+                    and obj is not VehicleConnector):
+                assert callable(getattr(obj, 'verify_credentials', None)), \
+                    f'{mod.name}.{name} cannot answer the credential check'
+                checked.append(f'{mod.name}.{name}')
+    assert len(checked) >= 5, f'too few connectors inspected: {checked}'

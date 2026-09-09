@@ -1468,5 +1468,8 @@
   "remote.cmd_ac_start": "Avvia clima",
   "remote.cmd_ac_stop": "Ferma clima",
   "skoda.field_api_key": "Chiave API",
-  "skoda.key_soon": "La chiave API scade fra {days} giorni ({date}). Creane una nuova nell’app MyŠkoda per tempo e inseriscila per il veicolo, altrimenti la sincronizzazione si ferma senza preavviso."
+  "skoda.key_soon": "La chiave API scade fra {days} giorni ({date}). Creane una nuova nell’app MyŠkoda per tempo e inseriscila per il veicolo, altrimenti la sincronizzazione si ferma senza preavviso.",
+  "skoda.key_replace_title": "Sostituisci la chiave API",
+  "skoda.key_replace_hint": "Crea una nuova chiave nell’app MyŠkoda e inseriscila qui. Viene verificata sull’auto prima di essere salvata: se la verifica fallisce, la chiave attuale resta intatta.",
+  "skoda.key_replace_btn": "Salva chiave"
 }

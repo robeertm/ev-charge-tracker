@@ -506,6 +506,12 @@ class _HyundaiKiaBase(VehicleConnector):
         # The manufacturer cloud queues the request; the car acts after.
         return {'accepted': True}
 
+    def verify_credentials(self) -> None:
+        # _ensure_auth raises with the provider's own, actionable wording
+        # (expired token, captcha lockout, SDK too old) — far better than
+        # a generic "rejected".
+        self._ensure_auth()
+
     def test_connection(self) -> bool:
         return self.authenticate()
 

@@ -1468,5 +1468,8 @@
   "remote.cmd_ac_start": "Start climate",
   "remote.cmd_ac_stop": "Stop climate",
   "skoda.field_api_key": "API key",
-  "skoda.key_soon": "The API key expires in {days} days ({date}). Create a new one in the MyŠkoda app in good time and enter it for the vehicle — otherwise syncing stops without warning."
+  "skoda.key_soon": "The API key expires in {days} days ({date}). Create a new one in the MyŠkoda app in good time and enter it for the vehicle — otherwise syncing stops without warning.",
+  "skoda.key_replace_title": "Replace the API key",
+  "skoda.key_replace_hint": "Create a new key in the MyŠkoda app and enter it here. It is checked against the car before it is stored — if the check fails, the existing key is left untouched.",
+  "skoda.key_replace_btn": "Save key"
 }

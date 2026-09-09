@@ -1468,5 +1468,8 @@
   "remote.cmd_ac_start": "Klimaat starten",
   "remote.cmd_ac_stop": "Klimaat stoppen",
   "skoda.field_api_key": "API-sleutel",
-  "skoda.key_soon": "De API-sleutel verloopt over {days} dagen ({date}). Maak op tijd een nieuwe in de MyŠkoda-app en voer die in bij het voertuig — anders stopt het synchroniseren zonder waarschuwing."
+  "skoda.key_soon": "De API-sleutel verloopt over {days} dagen ({date}). Maak op tijd een nieuwe in de MyŠkoda-app en voer die in bij het voertuig — anders stopt het synchroniseren zonder waarschuwing.",
+  "skoda.key_replace_title": "API-sleutel vervangen",
+  "skoda.key_replace_hint": "Maak een nieuwe sleutel in de MyŠkoda-app en voer hem hier in. Hij wordt eerst bij de auto gecontroleerd en dan opgeslagen — mislukt de controle, dan blijft de huidige sleutel ongemoeid.",
+  "skoda.key_replace_btn": "Sleutel opslaan"
 }
