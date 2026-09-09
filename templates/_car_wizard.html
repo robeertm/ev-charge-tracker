@@ -213,7 +213,18 @@
     wiz_signin_fail_hint:  {{ t('wiz.signin_fail_hint')|tojson }},
     wiz_login_prompt:      {{ t('wiz.login_prompt')|tojson }},
     wiz_token_login_btn:   {{ t('wiz.token_login_btn')|tojson }},
-    wiz_connected:         {{ t('wiz.connected')|tojson }}
+    wiz_connected:         {{ t('wiz.connected')|tojson }},
+    // Diese sieben fehlten: das Template benutzte T.wiz_* , der Server fuellte
+    // sie aber nie — der deutsche Rueckfalltext hinter || erschien damit in
+    // JEDER Sprache. Sie sind kein Zierrat: „Paket noetig" und der
+    // Installations-Knopf stehen im ersten Schritt jeder neuen Marke.
+    wiz_needs_install:     {{ t('wiz.needs_install')|tojson }},
+    wiz_install_hint:      {{ t('wiz.install_hint')|tojson }},
+    wiz_install_btn:       {{ t('wiz.install_btn')|tojson }},
+    wiz_install_restart:   {{ t('wiz.install_restart')|tojson }},
+    wiz_spec_applied:      {{ t('wiz.spec_applied')|tojson }},
+    wiz_test_ok:           {{ t('wiz.test_ok')|tojson }},
+    wiz_test_fail_hint:    {{ t('wiz.test_fail_hint')|tojson }}
   });
   const INSTALLED = {{ installed_brand_keys|tojson if installed_brand_keys is defined else '[]'|safe }};
   const NOVNC_URL = {{ novnc_url|tojson if novnc_url is defined else '""'|safe }};

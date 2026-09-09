@@ -2786,13 +2786,21 @@ def register_routes(app):
         if prof is None:
             key = profile_for_brand(v.brand or v.api_brand)
             prof = get_profile(key)
+        # Der Zusatz („experimentell", „nur SoH", …) ist eine Aussage ueber das
+        # Profil und gehoert uebersetzt — der Name selbst ist technisch und
+        # bleibt in jeder Sprache gleich.
+        def _note(p):
+            nk = p.get('note_key')
+            return t(nk) if nk else None
         return jsonify({
             'profile': key,
             'label': prof['label'],
+            'note': _note(prof),
             'header': prof['header'],
             'init': prof['init'],
             'pids': prof['pids'],
-            'available': [{'key': k, 'label': p['label']} for k, p in PROFILES.items()],
+            'available': [{'key': k, 'label': p['label'], 'note': _note(p)}
+                          for k, p in PROFILES.items()],
         })
 
     @app.route('/api/obd/scan', methods=['GET', 'POST'])

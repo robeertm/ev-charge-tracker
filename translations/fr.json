@@ -1408,5 +1408,16 @@
   "wiz.browser_hint": "Une fenêtre de connexion s’est ouverte dans un nouvel onglet. Connectez-vous là (y compris reCAPTCHA) – cette page attend automatiquement.",
   "wiz.open_login_window": "Ouvrir la fenêtre de connexion",
   "wiz.login_prompt": "Connectez-vous dans la fenêtre de connexion (y compris reCAPTCHA)…",
-  "wiz.email_required": "Veuillez d’abord saisir l’e-mail."
+  "wiz.email_required": "Veuillez d’abord saisir l’e-mail.",
+  "wiz.install_btn": "Installer",
+  "wiz.install_hint": "Cette marque nécessite l'installation unique d'un paquet (l'application redémarre).",
+  "wiz.install_restart": "Installé — l'application redémarre, rouvrez-la dans un instant.",
+  "wiz.needs_install": "Paquet requis",
+  "wiz.spec_applied": "Données du véhicule appliquées",
+  "wiz.test_fail_hint": "La voiture a quand même été ajoutée — vous pourrez corriger les identifiants plus tard.",
+  "wiz.test_ok": "Connexion OK !",
+  "obd.note.experimental": "expérimental, non vérifié",
+  "obd.note.soh_only": "SoH uniquement",
+  "obd.note.cells_soc_exp": "cellules + température, SoC expérimental",
+  "vehicle.copy_failed": "Échec de la copie"
 }

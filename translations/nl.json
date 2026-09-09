@@ -1408,5 +1408,16 @@
   "wiz.browser_hint": "Er is een inlogvenster in een nieuw tabblad geopend. Log daar in (incl. reCAPTCHA) – deze pagina wacht automatisch.",
   "wiz.open_login_window": "Inlogvenster openen",
   "wiz.login_prompt": "Log in in het inlogvenster (incl. reCAPTCHA)…",
-  "wiz.email_required": "Voer eerst het e-mailadres in."
+  "wiz.email_required": "Voer eerst het e-mailadres in.",
+  "wiz.install_btn": "Installeren",
+  "wiz.install_hint": "Dit merk heeft eenmalig een pakket nodig (de app start daarbij opnieuw).",
+  "wiz.install_restart": "Geïnstalleerd — de app start opnieuw, open hem zo weer.",
+  "wiz.needs_install": "Pakket nodig",
+  "wiz.spec_applied": "Voertuiggegevens overgenomen",
+  "wiz.test_fail_hint": "De auto is toch aangemaakt — je kunt de gegevens later corrigeren.",
+  "wiz.test_ok": "Verbinding OK!",
+  "obd.note.experimental": "experimenteel, niet geverifieerd",
+  "obd.note.soh_only": "alleen SoH",
+  "obd.note.cells_soc_exp": "cellen + temperatuur, SoC experimenteel",
+  "vehicle.copy_failed": "Kopiëren mislukt"
 }

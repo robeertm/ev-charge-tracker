@@ -141,7 +141,7 @@ document.getElementById('btnCopyRaw').addEventListener('click', async () => {
         b.innerHTML = '<i class="bi bi-check2"></i>';
         setTimeout(() => { b.innerHTML = orig; }, 1500);
     } catch(e) {
-        alert('Kopieren fehlgeschlagen: ' + e.message);
+        alert({{ t('vehicle.copy_failed')|tojson }} + ': ' + e.message);
     }
 });
 </script>

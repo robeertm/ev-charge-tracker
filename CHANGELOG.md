@@ -1,5 +1,35 @@
 # Changelog
 
+## v3.0.119 (2026-09-09)
+
+### German text reached every language in the car wizard
+
+The wizard's status messages are written by JavaScript, and the template
+reads them from a dictionary the server fills. Fourteen of those strings were
+used; seven were ever filled. The rest fell through to the German literal
+written next to them as a fallback — so a user on English, Spanish, French,
+Italian or Dutch was told "Paket nötig" the moment they picked a brand that
+needs a package installed, and "Verbindung OK!" when the connection worked.
+
+The seven missing keys exist now and are handed to the page like the others.
+They are not decoration: "package needed", the install button and the install
+hint are the first three things anyone sees when adding a car.
+
+### The OBD profile list said what it thinks, in German only
+
+Three profile names carried a judgement inside the name — "experimentell,
+unbestätigt", "nur SoH", "Zellen+Temp, SoC exp." — and a name is not
+translated, so those words stayed German everywhere.
+
+The judgement is now separate from the name. The name stays technical and
+identical in every language ("XPENG (G6 — BMS 704/784)"); the note beside it
+is translated. The list reads, for example, "XPENG (G6 — BMS 704/784) —
+experimental, unverified" and says the same thing in all six languages.
+
+### Fixed
+
+**"Copy failed" in the raw vehicle data view** was hardcoded German.
+
 ## v3.0.118 (2026-09-09)
 
 ### Installing with Docker is one command now

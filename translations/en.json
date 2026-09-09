@@ -1408,5 +1408,16 @@
   "wiz.browser_hint": "A login window opened in a new tab. Sign in there (incl. reCAPTCHA) – this page waits automatically.",
   "wiz.open_login_window": "Open login window",
   "wiz.login_prompt": "Sign in in the login window (incl. reCAPTCHA)…",
-  "wiz.email_required": "Please enter the e-mail first."
+  "wiz.email_required": "Please enter the e-mail first.",
+  "wiz.install_btn": "Install",
+  "wiz.install_hint": "This brand needs a package installed once (the app restarts while it does).",
+  "wiz.install_restart": "Installed — the app is restarting, please open it again in a moment.",
+  "wiz.needs_install": "Package needed",
+  "wiz.spec_applied": "Vehicle details applied",
+  "wiz.test_fail_hint": "The car has been added anyway — you can correct the credentials later.",
+  "wiz.test_ok": "Connection OK!",
+  "obd.note.experimental": "experimental, unverified",
+  "obd.note.soh_only": "SoH only",
+  "obd.note.cells_soc_exp": "cells + temperature, SoC experimental",
+  "vehicle.copy_failed": "Copy failed"
 }

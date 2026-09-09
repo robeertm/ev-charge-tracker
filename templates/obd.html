@@ -549,7 +549,8 @@
     profileSel.innerHTML = '';
     (p.available || []).forEach(a => {
       const o = document.createElement('option');
-      o.value = a.key; o.textContent = a.label;
+      o.value = a.key;
+      o.textContent = a.note ? `${a.label} — ${a.note}` : a.label;
       if (a.key === p.profile) o.selected = true;
       profileSel.appendChild(o);
     });

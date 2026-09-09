@@ -1408,5 +1408,16 @@
   "wiz.browser_hint": "Se ha abierto una ventana de acceso en una pestaña nueva. Inicia sesión allí (incl. reCAPTCHA): esta página espera automáticamente.",
   "wiz.open_login_window": "Abrir ventana de acceso",
   "wiz.login_prompt": "Inicia sesión en la ventana de acceso (incl. reCAPTCHA)…",
-  "wiz.email_required": "Introduce primero el correo electrónico."
+  "wiz.email_required": "Introduce primero el correo electrónico.",
+  "wiz.install_btn": "Instalar",
+  "wiz.install_hint": "Esta marca necesita instalar un paquete una sola vez (la aplicación se reinicia).",
+  "wiz.install_restart": "Instalado: la aplicación se está reiniciando, vuelve a abrirla en un momento.",
+  "wiz.needs_install": "Paquete necesario",
+  "wiz.spec_applied": "Datos del vehículo aplicados",
+  "wiz.test_fail_hint": "El coche se ha añadido igualmente: puedes corregir las credenciales más tarde.",
+  "wiz.test_ok": "¡Conexión correcta!",
+  "obd.note.experimental": "experimental, sin verificar",
+  "obd.note.soh_only": "solo SoH",
+  "obd.note.cells_soc_exp": "celdas + temperatura, SoC experimental",
+  "vehicle.copy_failed": "Error al copiar"
 }

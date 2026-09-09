@@ -327,7 +327,8 @@ PROFILES = {
     # remaining life (SoH, %). Supported by a subset of EVs; gives at least
     # a headline SoH when the manufacturer map is unknown.
     'generic_ev': {
-        'label': 'Generisch (OBD-II PID 015B — nur SoH)',
+        'label': 'OBD-II PID 015B',
+        'note_key': 'obd.note.soh_only',
         'header': '7DF',
         'init': _init_lines(),
         'pids': ['015B'],
@@ -352,7 +353,10 @@ PROFILES = {
     # capture can be re-decoded once verified against CarScanner. Byte offset
     # = 3 (the 62 11 xx service echo) + the community "Bn" data-byte index.
     'xpeng': {
-        'label': 'XPENG (G6 — experimentell, unbestätigt)',
+        'label': 'XPENG (G6 — BMS 704/784)',
+        # Bewertung getrennt vom Namen, damit sie uebersetzbar ist:
+        # der Name ist technisch, der Zusatz ist eine Aussage ueber ihn.
+        'note_key': 'obd.note.experimental',
         'header': '704',
         'init': _init_lines_xpeng(),
         'pids': ['221101', '221103', '221105', '221106',
@@ -483,7 +487,8 @@ PROFILES = {
     #     experimental on pre-2018 cars (cells/temps stay valid). Pack CURRENT
     #     is only on the passive 0x1DB broadcast, not a group read → omitted.
     'nissan_leaf': {
-        'label': 'Nissan Leaf / e-NV200 (LBC 79B — Zellen+Temp, SoC exp.)',
+        'label': 'Nissan Leaf / e-NV200 (LBC 79B)',
+        'note_key': 'obd.note.cells_soc_exp',
         'header': '79B',
         'init': _init_flowctrl('79B', '7BB'),
         'pids': ['2101', '2102', '2104'],
