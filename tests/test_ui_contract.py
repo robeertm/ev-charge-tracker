@@ -136,3 +136,18 @@ def test_nothing_decides_a_vehicle_is_configured_by_username_alone():
                          r'and\s+[\w.]*api_username\s*[:)])', code):
                 hits.append(f'{p.name}:{i}: {line.strip()[:80]}')
     assert not hits, ('these gate on api_username alone:\n  ' + '\n  '.join(hits))
+
+
+def test_a_warning_that_was_promised_is_actually_rendered():
+    """The Škoda API key expires. The app reads the expiry from every
+    response and the strings exist in six languages — but for a while
+    nothing rendered them, so the promise "warns you in time" was not
+    kept and the tracker would have gone dark on a 401 one morning with
+    no explanation.
+
+    Data collected and never shown is worse than data not collected: it
+    reads like a feature in the code and is absent on the screen.
+    """
+    templates = ''.join(p.read_text() for p in (ROOT / 'templates').rglob('*.html'))
+    for key in ('skoda.key_expires', 'skoda.key_soon', 'skoda.quota'):
+        assert key in templates, f'{key} exists but no template renders it'

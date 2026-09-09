@@ -1,5 +1,21 @@
 # Changelog
 
+## v3.0.122 (2026-09-09)
+
+### The Škoda API key expiry is actually shown now
+
+v3.0.121 read the key's expiry date from every response and shipped the
+warning text in six languages — and then rendered it nowhere. The promise that
+the app "warns before service stops rather than after" was not kept: the key
+would simply have expired one morning and syncing would have stopped with a
+401 and no explanation.
+
+Settings now shows, per Škoda vehicle on the official API, when the key
+expires and how much of the hourly request quota is left, and turns that into
+a warning inside the last 30 days. A test keeps the strings and the template
+together, because data that is collected and never displayed reads like a
+feature in the code and is absent on the screen.
+
 ## v3.0.121 (2026-09-09)
 
 ### Škoda: the official API, before the old one is switched off

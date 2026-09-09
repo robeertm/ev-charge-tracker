@@ -95,6 +95,24 @@
 
         <!-- v2.29 Fahrzeuge / Flotte ─────────────────────────────── -->
         <div class="card mb-4 settings-card" id="sec-fleet">
+            {% if skoda_key_status %}
+            {# Der Schluessel der offiziellen Škoda-API laeuft ab. Wer davon erst
+               durch einen 401 erfaehrt, hat schon Messwerte verloren — deshalb
+               steht Ablauf und Stundenkontingent hier, und ab 30 Tagen als Warnung. #}
+            {% for ks in skoda_key_status %}
+            <div class="alert {% if ks.days_left is not none and ks.days_left <= 30 %}alert-warning{% else %}alert-light border{% endif %} m-3 mb-0 py-2 small">
+                <span class="fw-semibold">{{ ks.name }}</span>
+                {% if ks.days_left is not none and ks.days_left <= 30 %}
+                    — {{ t('skoda.key_soon', days=ks.days_left, date=ks.expires_at) }}
+                {% elif ks.expires_at %}
+                    — {{ t('skoda.key_expires', date=ks.expires_at) }}
+                {% endif %}
+                {% if ks.quota and ks.quota.get('remaining') is not none %}
+                <span class="text-muted ms-1">· {{ t('skoda.quota', left=ks.quota.get('remaining'), total=ks.quota.get('limit')) }}</span>
+                {% endif %}
+            </div>
+            {% endfor %}
+            {% endif %}
             {% if skoda_legacy_vehicles %}
             {# Der Hersteller schaltet den bisherigen Zugang ab. Ein Hinweis ohne
                Datum und ohne Knopf wäre eine Sorge ohne Ausweg — deshalb beides. #}

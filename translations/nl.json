@@ -1467,5 +1467,6 @@
   "remote.cmd_charging_limit": "Laadlimiet instellen",
   "remote.cmd_ac_start": "Klimaat starten",
   "remote.cmd_ac_stop": "Klimaat stoppen",
-  "skoda.field_api_key": "API-sleutel"
+  "skoda.field_api_key": "API-sleutel",
+  "skoda.key_soon": "De API-sleutel verloopt over {days} dagen ({date}). Maak op tijd een nieuwe in de MyŠkoda-app en voer die in bij het voertuig — anders stopt het synchroniseren zonder waarschuwing."
 }

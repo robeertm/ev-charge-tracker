@@ -1467,5 +1467,6 @@
   "remote.cmd_charging_limit": "Imposta limite di carica",
   "remote.cmd_ac_start": "Avvia clima",
   "remote.cmd_ac_stop": "Ferma clima",
-  "skoda.field_api_key": "Chiave API"
+  "skoda.field_api_key": "Chiave API",
+  "skoda.key_soon": "La chiave API scade fra {days} giorni ({date}). Creane una nuova nell’app MyŠkoda per tempo e inseriscila per il veicolo, altrimenti la sincronizzazione si ferma senza preavviso."
 }

@@ -1467,5 +1467,6 @@
   "remote.cmd_charging_limit": "Définir la limite de charge",
   "remote.cmd_ac_start": "Démarrer la clim",
   "remote.cmd_ac_stop": "Arrêter la clim",
-  "skoda.field_api_key": "Clé API"
+  "skoda.field_api_key": "Clé API",
+  "skoda.key_soon": "La clé API expire dans {days} jours ({date}). Créez-en une nouvelle dans l’application MyŠkoda à temps et saisissez-la pour le véhicule, sinon la synchronisation s’arrêtera sans prévenir."
 }

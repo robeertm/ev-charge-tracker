@@ -1467,5 +1467,6 @@
   "remote.cmd_charging_limit": "Fijar límite de carga",
   "remote.cmd_ac_start": "Iniciar climatización",
   "remote.cmd_ac_stop": "Detener climatización",
-  "skoda.field_api_key": "Clave API"
+  "skoda.field_api_key": "Clave API",
+  "skoda.key_soon": "La clave API caduca en {days} días ({date}). Crea una nueva en la app MyŠkoda a tiempo e introdúcela en el vehículo; de lo contrario la sincronización se detendrá sin aviso."
 }

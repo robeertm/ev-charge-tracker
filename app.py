@@ -4004,6 +4004,7 @@ def register_routes(app):
         # between reloads.
         _remote_vehicles = []
         _skoda_legacy = []
+        _skoda_keys = []
         try:
             # app.py does NOT import Vehicle at module level — every route
             # pulls it in locally. Relying on a bare `Vehicle` here raised
@@ -4046,6 +4047,33 @@ def register_routes(app):
                         'enabled': bool(_v.remote_control_enabled),
                         'commands': _cmds,
                     })
+                # An API key that expires is only useful if somebody is
+                # told before it does. The expiry and the remaining
+                # hourly quota are recorded with every sync; read the
+                # latest one back so the page can warn in time instead
+                # of the tracker going dark on a 401 one morning.
+                if _brand == 'skoda_api':
+                    try:
+                        import json as _j
+                        from datetime import datetime as _dt
+                        from models.database import VehicleSync as _VS
+                        _last = (_VS.query.filter_by(vehicle_id=_v.id)
+                                 .order_by(_VS.timestamp.desc()).first())
+                        _raw = _j.loads(_last.raw_json) if (_last and _last.raw_json) else {}
+                        _exp = _raw.get('key_expires_at')
+                        _days = None
+                        if _exp:
+                            _d = _dt.fromisoformat(str(_exp).replace('Z', '+00:00'))
+                            _days = (_d.date() - _dt.now(_d.tzinfo).date()).days
+                        _skoda_keys.append({
+                            'id': _v.id, 'name': _v.name,
+                            'expires_at': (str(_exp)[:10] if _exp else ''),
+                            'days_left': _days,
+                            'quota': (_raw.get('rate_limit') or {}),
+                        })
+                    except Exception as _ke:
+                        logger.debug(f"skoda key status for {_v.id}: {_ke}")
+
         except Exception as _e:
             # WARNING, not debug: if this breaks, two whole UI sections
             # disappear without a trace and the page still looks correct.
@@ -4166,6 +4194,7 @@ def register_routes(app):
                                vehicle_catalog=_vehicle_catalog,
                                remote_vehicles=_remote_vehicles,
                                skoda_legacy_vehicles=_skoda_legacy,
+                               skoda_key_status=_skoda_keys,
                                hyundai_kia_sdk_outdated=hyundai_kia_sdk_outdated,
                                hyundai_kia_sdk_version=hyundai_kia_sdk_version,
                                hyundai_kia_python_too_old=hyundai_kia_python_too_old,

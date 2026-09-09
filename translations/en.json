@@ -1467,5 +1467,6 @@
   "remote.cmd_charging_limit": "Set charge limit",
   "remote.cmd_ac_start": "Start climate",
   "remote.cmd_ac_stop": "Stop climate",
-  "skoda.field_api_key": "API key"
+  "skoda.field_api_key": "API key",
+  "skoda.key_soon": "The API key expires in {days} days ({date}). Create a new one in the MyŠkoda app in good time and enter it for the vehicle — otherwise syncing stops without warning."
 }
