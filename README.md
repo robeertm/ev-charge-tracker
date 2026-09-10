@@ -238,7 +238,7 @@ never mix with a real history.
 - **Result**: an end user can take ownership of a VM without touching a terminal — no SSH, no `cryptsetup`, no manpages
 
 ### Self-hosting / updates
-- **In-app updater** — "Update available" button in Settings actually rolls out the new release on your machine (download zip, stage, detached helper swaps files, pip install, restart). No `git pull`, no terminal.
+- **In-app updater** — "Update available" button in Settings actually rolls out the new release on your machine (download zip, stage, detached helper swaps files, pip install, restart). No `git pull`, no terminal. **Container installs are the exception**: they update by pulling a new image (see the Docker section), and the app says so instead of offering a swap that a `docker compose pull` would silently undo.
 - **systemd-aware**: under systemd the file swap is done inline in the running process and the supervisor restarts the service; outside systemd the legacy detached-helper flow is used
 - **Automatic rollback on a broken update** — before every swap, a backup of the files that would be overwritten is written to `updates/backup_pre_v<OLD>/` along with a `UPDATE_PENDING.json` marker. On each boot, a pre-flight state machine checks the marker: three failed boots in a row (or a port-7654 bind timeout within 60 seconds of launch) trigger an automatic restore of the previous version plus a `LAST_ROLLBACK.json` note for the UI. Works under any supervisor that restarts on crash. `data/`, `venv/`, `.git/`, `logs/`, `updates/` are never touched by the backup/restore.
 - **Dashboard update banner** — a visible banner appears on the dashboard when a newer release is available; clicking jumps directly to `Settings → #updaterCard`. If the last update auto-rolled back, a second banner explains which versions were involved and offers a one-click dismiss (`DELETE /api/update/last-rollback`). Update-check response is cached in `sessionStorage` for 30 minutes so page-hopping doesn't hit the GitHub API on every view.
@@ -300,6 +300,15 @@ docker compose down                           # stop (your data stays)
 Charge history, settings and exports live in the named volume
 `ev-tracker-data`. They survive updates, restarts and `docker compose down` —
 only `docker compose down -v` deletes them.
+
+**A container updates by pulling its image, not from inside the app.** The
+application code lives in the image; only the data directory is a volume. An
+update applied from within the container would land in the container's
+writable layer and be discarded the next time the container is recreated —
+putting the app back on the version the image carries, with nothing to say so.
+The app knows this about itself: on a container install the update card reports
+the new version and links the release notes, and offers the `docker compose
+pull` line above instead of an install button.
 
 **Options** — put them in `.env` next to the compose file:
 

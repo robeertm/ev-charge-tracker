@@ -230,7 +230,7 @@ def _friendly_auth_message(err: Exception) -> str:
     return ''
 
 from .base import VehicleConnector, VehicleStatus
-from .registry import register
+from .registry import describe, register
 
 logger = logging.getLogger(__name__)
 
@@ -243,6 +243,7 @@ REGIONS = {
 
 _REGION_FIELD = {
     "key": "region", "label": "Region", "type": "select",
+    "label_key": "cred.region", "optional": True,
     "options": [{"value": "EU", "label": "Europa"},
                 {"value": "US", "label": "USA"},
                 {"value": "CA", "label": "Kanada"},
@@ -256,18 +257,28 @@ _REGION_FIELD = {
 # no browser/reCAPTCHA/refresh-token dance. A legacy 48-char refresh_token still
 # works too (the SDK auto-detects the format), so existing installs keep running.
 KIA_CREDENTIAL_FIELDS = [
-    {"key": "username", "label": "E-Mail (Kia Connect Account)", "type": "text"},
+    {"key": "username", "label": "E-Mail (Kia Connect Account)", "type": "text",
+     "label_key": "cred.email", "context": "Kia Connect"},
     {"key": "password", "label": "Passwort (Kia Connect Account)", "type": "password",
+     "label_key": "cred.password", "context": "Kia Connect",
+     "help_key": "cred.help_password_direct",
      "help": "Dein normales Kia-Connect-Passwort — die App meldet sich direkt an."},
-    {"key": "pin", "label": "PIN (4-stellig aus Kia Connect App)", "type": "password"},
+    {"key": "pin", "label": "PIN (4-stellig aus Kia Connect App)", "type": "password",
+     "label_key": "cred.pin", "context": "Kia Connect",
+     "optional": True, "help_key": "cred.help_pin"},
     _REGION_FIELD,
 ]
 
 HYUNDAI_CREDENTIAL_FIELDS = [
-    {"key": "username", "label": "E-Mail (Bluelink Account)", "type": "text"},
+    {"key": "username", "label": "E-Mail (Bluelink Account)", "type": "text",
+     "label_key": "cred.email", "context": "Bluelink"},
     {"key": "password", "label": "Passwort (Bluelink Account)", "type": "password",
+     "label_key": "cred.password", "context": "Bluelink",
+     "help_key": "cred.help_password_direct",
      "help": "Dein normales Bluelink-Passwort — die App meldet sich direkt an."},
-    {"key": "pin", "label": "PIN (4-stellig aus Bluelink App)", "type": "password"},
+    {"key": "pin", "label": "PIN (4-stellig aus Bluelink App)", "type": "password",
+     "label_key": "cred.pin", "context": "Bluelink",
+     "optional": True, "help_key": "cred.help_pin"},
     _REGION_FIELD,
 ]
 
@@ -358,7 +369,8 @@ class _HyundaiKiaBase(VehicleConnector):
             _managers.pop(key, None)
             mgr = None
         if mgr is None:
-            region = REGIONS.get(self.credentials.get('region', 'EU'), 1)
+            region = REGIONS.get(
+                (self.credentials.get('region') or 'EU').strip().upper(), 1)
             # ``password`` is the account password (headless CCI sign-in) or a
             # legacy 48-char refresh_token — the SDK auto-detects which.
             mgr = _managers[key] = VehicleManager(
@@ -629,6 +641,8 @@ class HyundaiConnector(_HyundaiKiaBase):
 
 
 # Register if dependency is installed
+describe('kia', KiaConnector)
+describe('hyundai', HyundaiConnector)
 if HAS_HYUNDAI_KIA:
     register('kia', KiaConnector)
     register('hyundai', HyundaiConnector)

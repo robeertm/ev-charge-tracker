@@ -49,8 +49,13 @@ class Config:
     ENTSOE_API_KEY = os.environ.get('ENTSOE_API_KEY', '')
     ENTSOE_COUNTRY = 'DE'
 
-    APP_VERSION = '3.0.124'
+    APP_VERSION = '3.0.125'
     GITHUB_REPO = 'robeertm/ev-charge-tracker'
+    # The published image. Named here so the update card can tell a
+    # container user exactly what to pull instead of leaving them to
+    # work it out — the app cannot replace its own image from inside.
+    CONTAINER_IMAGE = os.environ.get(
+        'EV_CONTAINER_IMAGE', 'ghcr.io/robeertm/ev-charge-tracker:latest')
     APP_HOST = os.environ.get('APP_HOST', '0.0.0.0')
     APP_PORT = int(os.environ.get('APP_PORT', '7654'))
 

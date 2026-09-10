@@ -249,15 +249,26 @@
     // entry instead of showing stale pre-update values on page load. Without
     // this, users saw e.g. a raw 125 % e-GMP SoH lingering after v2.27.0
     // introduced display-time baseline scaling.
-    const CACHE_KEY = 'ev_vehicle_data_v2_{{ config.APP_VERSION }}';
-    // One-shot cleanup: drop the legacy unkeyed entry and any older version
-    // slots so localStorage doesn't grow a slot per release over time.
+    // Keyed by VEHICLE as well as version. One shared slot meant the
+    // second car's dashboard painted the first car's battery, range and
+    // odometer from cache on load — before any request went out — and
+    // then merged the missing fields of one car into the other on every
+    // refresh. A cache entry describes one car; its key has to say which.
+    const CACHE_VEHICLE = '{{ active_vehicle.id if active_vehicle else "all" }}';
+    const CACHE_PREFIX = 'ev_vehicle_data_v3_{{ config.APP_VERSION }}_';
+    const CACHE_KEY = CACHE_PREFIX + CACHE_VEHICLE;
+    // One-shot cleanup: drop the legacy unkeyed entry and any older
+    // version slots so localStorage doesn't grow a slot per release.
+    // Other vehicles' entries for THIS version are kept — they are not
+    // stale, they belong to a car that is simply not on screen.
     try {
         for (let i = localStorage.length - 1; i >= 0; i--) {
             const k = localStorage.key(i);
-            if (k === 'ev_vehicle_data' || (k && k.startsWith('ev_vehicle_data_v2_') && k !== CACHE_KEY)) {
-                localStorage.removeItem(k);
-            }
+            if (!k) continue;
+            const veraltet = k === 'ev_vehicle_data'
+                || k.startsWith('ev_vehicle_data_v2_')
+                || (k.startsWith('ev_vehicle_data_v3_') && !k.startsWith(CACHE_PREFIX));
+            if (veraltet) localStorage.removeItem(k);
         }
     } catch(e) {}
 

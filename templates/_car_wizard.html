@@ -129,29 +129,39 @@
                 </div>
               </details>
             </div>
-            {# Other brands: username/password #}
+            {# Other brands: exactly the boxes THIS brand asks for.
+               The five fixed inputs that used to stand here were the
+               reason an owner of the official Skoda API had to guess
+               which of them the API key belonged in — it has neither a
+               user name nor a PIN. Labels, help texts and which boxes
+               appear all come from the brand's own connector. #}
             <div id="cwConnectCreds" style="display:none">
               <p class="text-muted small">{{ t('wiz.creds_help') }}</p>
               <div class="row g-2">
-                <div class="col-12 col-sm-6">
-                  <label class="form-label small">{{ t('wiz.account_email') }}</label>
+                <div class="col-12 col-sm-6 cw-cred" data-col="api_username">
+                  <label class="form-label small" for="cw_username_creds">{{ t('wiz.account_email') }}</label>
                   <input type="text" class="form-control form-control-sm" name="api_username" id="cw_username_creds" autocomplete="off">
+                  <div class="form-text small cw-cred-help"></div>
                 </div>
-                <div class="col-12 col-sm-6">
-                  <label class="form-label small">{{ t('wiz.password_label') }}</label>
+                <div class="col-12 col-sm-6 cw-cred" data-col="api_password">
+                  <label class="form-label small" for="cw_password_creds">{{ t('wiz.password_label') }}</label>
                   <input type="password" class="form-control form-control-sm" name="api_password" id="cw_password_creds" autocomplete="new-password">
+                  <div class="form-text small cw-cred-help"></div>
                 </div>
-                <div class="col-6 col-sm-4">
-                  <label class="form-label small">{{ t('wiz.pin_label') }}</label>
+                <div class="col-6 col-sm-4 cw-cred" data-col="api_pin">
+                  <label class="form-label small" for="cw_pin_creds">{{ t('wiz.pin_label') }}</label>
                   <input type="text" class="form-control form-control-sm" name="api_pin" id="cw_pin_creds" maxlength="20">
+                  <div class="form-text small cw-cred-help"></div>
                 </div>
-                <div class="col-6 col-sm-4">
-                  <label class="form-label small">{{ t('wiz.region_label') }}</label>
+                <div class="col-6 col-sm-4 cw-cred" data-col="api_region">
+                  <label class="form-label small" for="cw_region_creds">{{ t('wiz.region_label') }}</label>
                   <input type="text" class="form-control form-control-sm" name="api_region" id="cw_region_creds" value="EU" maxlength="6">
+                  <div class="form-text small cw-cred-help"></div>
                 </div>
-                <div class="col-12 col-sm-4">
-                  <label class="form-label small">{{ t('wiz.vin_label') }}</label>
+                <div class="col-12 col-sm-4 cw-cred" data-col="api_vin">
+                  <label class="form-label small" for="cw_vin_creds">{{ t('wiz.vin_label') }}</label>
                   <input type="text" class="form-control form-control-sm" name="api_vin" id="cw_vin_creds" maxlength="40">
+                  <div class="form-text small cw-cred-help"></div>
                 </div>
               </div>
             </div>
@@ -242,6 +252,53 @@
   // einrichtet, soll nicht auf einen Zugang gesetzt werden, den der
   // Hersteller gerade abschaltet. In der Flottenliste bleiben sie
   // wählbar, damit bestehende Fahrzeuge ihren Wert behalten.
+  const CRED_FELDER = {{ (credential_fields or {})|tojson if credential_fields is defined else '{}'|safe }};
+  const CRED_OPTIONAL_W = {{ t('cred.optional')|tojson }};
+  const CRED_KEY_LINK_W = {{ t('cred.key_link')|tojson }};
+
+  // Beschriftung und Sichtbarkeit der Zugangsfelder je Marke.
+  function zeigeCredFelder(){
+    const felder = (sel && CRED_FELDER[sel.key]) || [];
+    const nachSpalte = {};
+    felder.forEach(f => { nachSpalte[f.column] = f; });
+    document.querySelectorAll('.cw-cred').forEach(box => {
+      const f = nachSpalte[box.dataset.col];
+      let eingabe = box.querySelector('input, select');
+      const hilfe = box.querySelector('.cw-cred-help');
+      if(!f){ box.hidden = true; if(eingabe) eingabe.disabled = true; return; }
+      box.hidden = false;
+      const willSelect = (f.options || []).length > 0;
+      if(eingabe && willSelect !== (eingabe.tagName === 'SELECT')){
+        const neu = document.createElement(willSelect ? 'select' : 'input');
+        neu.id = eingabe.id; neu.name = eingabe.name;
+        neu.className = willSelect ? 'form-select form-select-sm'
+                                   : 'form-control form-control-sm';
+        if(willSelect){
+          (f.options || []).forEach(o => {
+            const opt = document.createElement('option');
+            opt.value = o.value; opt.textContent = o.label;
+            neu.appendChild(opt);
+          });
+          neu.value = eingabe.value || (f.options[0] || {}).value || '';
+        } else { neu.type = 'text'; neu.value = eingabe.value || ''; }
+        eingabe.replaceWith(neu); eingabe = neu;
+      }
+      if(eingabe) eingabe.disabled = false;
+      const label = box.querySelector('label');
+      if(label) label.textContent = f.label + (f.optional ? ' (' + CRED_OPTIONAL_W + ')' : '');
+      if(hilfe){
+        hilfe.textContent = f.help || '';
+        if(f.help_url){
+          const a = document.createElement('a');
+          a.href = f.help_url; a.target = '_blank'; a.rel = 'noopener';
+          a.textContent = ' ' + CRED_KEY_LINK_W + ' \u2197';
+          hilfe.appendChild(a);
+        }
+        hilfe.hidden = !f.help && !f.help_url;
+      }
+    });
+  }
+
   const BRANDS = ({{ vehicle_catalog|tojson if vehicle_catalog is defined else '[]'|safe }})
                    .filter(b => !b.legacy);
 
@@ -340,6 +397,7 @@
       const isToken = sel && sel.token;
       q('cwConnectToken').style.display = isToken?'':'none';
       q('cwConnectCreds').style.display = isToken?'none':'';
+      if(!isToken) zeigeCredFelder();
     }
   }
 
@@ -360,11 +418,18 @@
       const pw = g('cw_password_token');
       if(pw) fd.set('api_password', pw);
     } else if(sel){
-      fd.set('api_username', g('cw_username_creds'));
-      if(g('cw_password_creds')) fd.set('api_password', g('cw_password_creds'));
-      fd.set('api_pin', g('cw_pin_creds'));
-      fd.set('api_region', g('cw_region_creds') || 'EU');
-      fd.set('api_vin', g('cw_vin_creds'));
+      // Nur die Felder senden, die diese Marke kennt. Ein Feld, das sie
+      // nicht kennt, gar nicht zu schicken, laesst einen gespeicherten
+      // Wert unangetastet — statt ihn mit einem leeren zu ueberschreiben.
+      const spalten = (CRED_FELDER[sel.key] || []).map(f => f.column);
+      const quelle = {api_username:'cw_username_creds', api_password:'cw_password_creds',
+                      api_pin:'cw_pin_creds', api_region:'cw_region_creds',
+                      api_vin:'cw_vin_creds'};
+      spalten.forEach(spalte => {
+        const wert = g(quelle[spalte]);
+        if(spalte === 'api_password'){ if(wert) fd.set(spalte, wert); }
+        else fd.set(spalte, wert);
+      });
     }
     const r = await fetch('/vehicles/save',{method:'POST', body:fd});
     const d = await r.json();

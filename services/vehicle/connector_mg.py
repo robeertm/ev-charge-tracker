@@ -10,15 +10,19 @@ except ImportError:
     HAS_SAIC = False
 
 from .base import VehicleConnector, VehicleStatus
-from .registry import register
+from .registry import describe, register
 
 logger = logging.getLogger(__name__)
 
 CREDENTIAL_FIELDS = [
-    {"key": "username", "label": "E-Mail / Telefon (MG iSMART)", "type": "text"},
-    {"key": "password", "label": "Passwort", "type": "password"},
-    {"key": "vin", "label": "VIN (optional)", "type": "text"},
-    {"key": "region", "label": "Region", "type": "select",
+    {"key": "username", "label": "E-Mail / Telefon (MG iSMART)", "type": "text",
+     "label_key": "cred.email_or_phone", "context": "MG iSMART"},
+    {"key": "password", "label": "Passwort", "type": "password",
+     "label_key": "cred.password", "context": "MG iSMART"},
+    {"key": "vin", "label": "VIN (optional)", "type": "text",
+     "label_key": "cred.vin", "optional": True, "help_key": "cred.help_vin_multi"},
+    {"key": "region", "label": "Region", "type": "select", "label_key": "cred.region",
+     "optional": True,
      "options": [
          {"value": "eu", "label": "Europa"},
          {"value": "cn", "label": "China"},
@@ -46,7 +50,10 @@ def _run_async(coro):
 class MGConnector(VehicleConnector):
 
     async def _fetch(self, force=False):
-        region = self.credentials.get('region', 'eu')
+        # Kleinschreiben: die Tabelle unten ist klein geschrieben, das
+        # Formular speicherte die Region aber lange in Grossbuchstaben —
+        # 'CN' fiel damit wortlos auf das EU-Gateway zurueck.
+        region = (self.credentials.get('region') or 'eu').strip().lower()
         base_url = REGION_URLS.get(region, REGION_URLS['eu'])
         config = SaicApiConfiguration(
             username=self.credentials['username'],
@@ -123,5 +130,6 @@ class MGConnector(VehicleConnector):
         return "MG (iSMART)"
 
 
+describe('mg', MGConnector)
 if HAS_SAIC:
     register('mg', MGConnector)

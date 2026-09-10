@@ -209,6 +209,24 @@ def _compute_sleep_secs(app) -> tuple[int, bool]:
         return (int(hours * 3600), True)
 
 
+
+def counter_keys(vehicle_id):
+    """The AppConfig keys holding one vehicle's daily API budget.
+
+    Per-vehicle keys keep two accounts' 200/day budgets independent.
+    Vehicle#1 keeps the legacy key names so an in-flight counter survives
+    the v2.29 upgrade.
+
+    The dashboard's manual refresh used to count against the flat legacy
+    keys for *every* car, so refreshing the second vehicle ate the
+    first one's budget. Both callers now ask here.
+    """
+    if vehicle_id == 1 or vehicle_id is None:
+        return 'vehicle_api_counter_date', 'vehicle_api_counter'
+    return (f'vehicle_{vehicle_id}_api_counter_date',
+            f'vehicle_{vehicle_id}_api_counter')
+
+
 def _sync_one_vehicle(app, vehicle):
     """Sync a single Vehicle row. Returns the persisted VehicleSync or None.
 
@@ -233,20 +251,12 @@ def _sync_one_vehicle(app, vehicle):
     # bound to a VIN and has no username at all — so a correctly
     # configured Škoda was skipped here, silently, and simply never
     # synced. One shared answer to "is this configured", in catalog.py.
-    from .catalog import credentials_present
+    from .catalog import credentials_of, credentials_present
     if not credentials_present(brand, vehicle.api_username,
                                vehicle.api_password, vehicle.api_vin):
         return None  # creds incomplete; skip silently
 
-    # Rate-limit counter: per-vehicle keys keep different Kia/Hyundai
-    # accounts' 200/day budgets independent. Vehicle#1 keeps the legacy
-    # key names so an in-flight counter survives the v2.29 upgrade.
-    if vehicle.id == 1:
-        cnt_date_key = 'vehicle_api_counter_date'
-        cnt_key = 'vehicle_api_counter'
-    else:
-        cnt_date_key = f'vehicle_{vehicle.id}_api_counter_date'
-        cnt_key = f'vehicle_{vehicle.id}_api_counter'
+    cnt_date_key, cnt_key = counter_keys(vehicle.id)
     today_str = date.today().isoformat()
     if AppConfig.get(cnt_date_key, '') != today_str:
         AppConfig.set(cnt_date_key, today_str)
@@ -263,13 +273,7 @@ def _sync_one_vehicle(app, vehicle):
         return None
     AppConfig.set(cnt_key, str(api_count + 1))
 
-    creds = {
-        'username': vehicle.api_username or '',
-        'password': vehicle.api_password or '',
-        'pin': vehicle.api_pin or '',
-        'region': vehicle.api_region or 'EU',
-        'vin': vehicle.api_vin or '',
-    }
+    creds = credentials_of(vehicle)
 
     # ── Determine effective force flag ──
     mode = AppConfig.get('vehicle_sync_mode', 'cached')

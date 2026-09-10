@@ -46,9 +46,16 @@ logger = logging.getLogger(__name__)
 # leaving it silently absent (see skoda_public_api.get_vehicle).
 PARTS = ['info', 'status', 'odometer', 'parkingPosition', 'charging', 'fuelStatus']
 
+# Two boxes, and only two. The old form showed five — user name,
+# password, PIN, region and VIN — to every brand alike, so an owner of
+# this brand had to guess which of them the API key belonged in. It has
+# no account and no PIN at all.
 CREDENTIAL_FIELDS = [
-    {"key": "password", "label": "API-Schlüssel (MyŠkoda-App)", "type": "password"},
-    {"key": "vin", "label": "Fahrgestellnummer (VIN)", "type": "text"},
+    {"key": "password", "label": "API-Schlüssel (MyŠkoda-App)", "type": "password",
+     "label_key": "cred.api_key", "context": "MyŠkoda",
+     "help_key": "cred.help_skoda_key", "help_url": KEY_MANAGEMENT_URL},
+    {"key": "vin", "label": "Fahrgestellnummer (VIN)", "type": "text",
+     "label_key": "cred.vin", "help_key": "cred.help_skoda_vin"},
 ]
 
 # States in which the cable is physically connected. CONNECT_CABLE is the

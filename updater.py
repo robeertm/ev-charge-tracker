@@ -125,6 +125,37 @@ def _running_under_systemd() -> bool:
         return False
 
 
+def updates_by_image() -> bool:
+    """True when this installation is updated by replacing its image.
+
+    A container's application code lives in the image, not in a volume:
+    only ``/app/data`` is declared as one. An in-app update writes the
+    new files into the container's **writable layer**, which is exactly
+    the layer ``docker compose pull`` throws away when it recreates the
+    container. Measured on the published image:
+
+        3.0.124 → in-app update → 3.0.125 → ``docker restart`` → 3.0.125
+                                          → container recreated → 3.0.124
+
+    with no message anywhere, and the updater's own
+    ``updates/backup_pre_*`` rollback copy gone with it. So the app
+    reported a version that a perfectly routine container operation
+    silently took back — and a user who then followed the documented
+    image-update path ended up *behind* where they thought they were.
+
+    The Dockerfile already says this about connectors ("a connector
+    pip-installed from the running app lands in the writable layer,
+    which `docker compose pull` throws away"). It is just as true of the
+    app's own code, and this is where that is acted on.
+
+    So a container is told the truth instead: the update exists, here is
+    what changed, and it arrives with the next image. The check itself
+    keeps running — knowing a new version is out is useful either way.
+    """
+    from services.runtime_env import in_container
+    return in_container()
+
+
 def swaps_inline() -> bool:
     """True when the update must be applied in THIS process, not by a helper.
 
@@ -377,19 +408,39 @@ def _vehicle_is_charging_from_sqlite() -> bool:
         return False
 
 
-def apply_update(zip_url: str, new_version: str, force: bool = False) -> bool:
+def apply_update(zip_url: str, new_version: str, force: bool = False,
+                 allow_in_container: bool = False) -> bool:
     """Download a release ZIP, stage it, then hand off to ``updater_helper``.
 
     Returns True if the helper was successfully spawned. The caller is
     responsible for shutting down the Flask process shortly afterwards
     so the helper can swap files.
 
+    Container gate: refuses outright when this install updates by image
+    (see ``updates_by_image``), because the swap would be thrown away
+    with the writable layer the next time the container is recreated.
+    The gate sits here as well as in the route on purpose — the route
+    is where today's caller lives, this is where tomorrow's will. The
+    CLI entry point below passes ``allow_in_container=True``: someone
+    who has opened a shell inside the container and typed "y" has said
+    plainly that they want it anyway, and it is their own throwaway
+    layer to spend.
+
     Charging gate: when ``force`` is False (default), refuses to apply
     the update while the vehicle is actively charging. Restarting
     mid-charge breaks the sync loop briefly and can miss the
     charge-end transition the app normally logs automatically. Pass
-    ``force=True`` to bypass (emergency path).
+    ``force=True`` to bypass (emergency path). ``force`` deliberately
+    does NOT lift the container gate: charging is a matter of timing,
+    an image-based install is a matter of where the files live.
     """
+    if not allow_in_container and updates_by_image():
+        logger.warning(
+            f"apply_update(v{new_version}) refused: this installation is "
+            "updated by pulling a new container image. A file swap here "
+            "would be discarded when the container is next recreated."
+        )
+        return False
     if not force and _vehicle_is_charging_from_sqlite():
         logger.warning(
             f"apply_update(v{new_version}) refused: vehicle is currently charging. "
@@ -438,7 +489,8 @@ if __name__ == '__main__':
     if new_ver:
         print(f"New version available: {new_ver}")
         if input("Apply update? (y/N): ").strip().lower() == 'y':
-            if apply_update(url, new_ver):
+            # Von Hand in der Shell des Containers: ausdruecklich erlaubt.
+            if apply_update(url, new_ver, allow_in_container=True):
                 print("Update staged. The app will restart automatically.")
                 print("Stop the running Flask process now if it isn't already shutting down.")
             else:

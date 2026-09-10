@@ -45,15 +45,26 @@ except ImportError:  # requests is a hard dependency, but stay defensive
     HAS_REQUESTS = False
 
 from .base import VehicleConnector, VehicleStatus
-from .registry import register
+from .registry import describe, register
 
 logger = logging.getLogger(__name__)
 
+# XPENG authenticates against the Enode aggregator with a client ID and
+# secret, not with a car-account e-mail and password. That is exactly why
+# it used to be missing from the brand list: both credential boxes were
+# hard-labelled for an account login, so a tile would have asked for the
+# wrong two things. Now that the form draws its labels from here, the
+# brand can be offered like any other.
 CREDENTIAL_FIELDS = [
-    {"key": "username", "label": "Enode Client ID", "type": "text"},
-    {"key": "password", "label": "Enode Client Secret", "type": "password"},
-    {"key": "region", "label": "Umgebung (EU/PROD oder TEST/SAND)", "type": "text"},
-    {"key": "vin", "label": "VIN (optional, bei mehreren Fahrzeugen)", "type": "text"},
+    {"key": "username", "label": "Enode Client ID", "type": "text",
+     "label_key": "cred.client_id", "context": "Enode"},
+    {"key": "password", "label": "Enode Client Secret", "type": "password",
+     "label_key": "cred.client_secret", "context": "Enode"},
+    {"key": "region", "label": "Umgebung (EU/PROD oder TEST/SAND)", "type": "text",
+     "label_key": "cred.environment", "optional": True,
+     "help_key": "cred.help_xpeng_env"},
+    {"key": "vin", "label": "VIN (optional, bei mehreren Fahrzeugen)", "type": "text",
+     "label_key": "cred.vin", "optional": True, "help_key": "cred.help_vin_multi"},
 ]
 
 # Enode has two isolated environments. Sandbox is for development against
@@ -285,5 +296,6 @@ class XpengConnector(VehicleConnector):
         return "XPENG (via Enode)"
 
 
+describe('xpeng', XpengConnector)
 if HAS_REQUESTS:
     register('xpeng', XpengConnector)

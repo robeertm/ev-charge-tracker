@@ -186,6 +186,87 @@ def test_the_dashboard_only_offers_control_after_the_opt_in(live_app):
         browser.close()
 
 
+def _sichtbare_cred_labels(page):
+    return page.eval_on_selector_all(
+        '.vf-cred',
+        """els => els.filter(e => e.offsetParent !== null)
+                    .map(e => e.querySelector('label').textContent.trim())""")
+
+
+def test_the_form_asks_only_for_what_the_chosen_brand_needs(live_app):
+    """The customer's screen, driven in a browser.
+
+    He set up an Enyaq on the official Škoda API — an API key and a VIN,
+    no account, no PIN — and the form presented "Benutzername",
+    "Passwort" and "PIN" anyway, so he had to try which box the key
+    belonged in. Measured before the change: all five boxes for every
+    brand alike.
+    """
+    base, data_dir = live_app
+    _seed_vehicle(data_dir)
+    with playwright_api.sync_playwright() as pw:
+        browser = pw.chromium.launch()
+        page = browser.new_page()
+        errors = []
+        page.on('pageerror', lambda e: errors.append(str(e)))
+        _open_settings(page, base)
+        page.query_selector_all('[data-edit-vehicle]')[-1].click()
+        page.wait_for_timeout(500)
+
+        page.select_option('#vf_api_brand', 'skoda_api')
+        page.dispatch_event('#vf_api_brand', 'change')
+        page.wait_for_timeout(300)
+        skoda = _sichtbare_cred_labels(page)
+        assert len(skoda) == 2, f'expected two boxes, got {skoda}'
+        assert any('VIN' in l for l in skoda)
+        assert not any('PIN' in l for l in skoda), skoda
+
+        page.select_option('#vf_api_brand', 'kia')
+        page.dispatch_event('#vf_api_brand', 'change')
+        page.wait_for_timeout(300)
+        kia = _sichtbare_cred_labels(page)
+        assert len(kia) == 4, f'expected four boxes, got {kia}'
+        assert any('PIN' in l for l in kia), kia
+        # Kia names its regions, so the box is a list, not free text.
+        assert page.eval_on_selector('#vf_api_region', 'e => e.tagName') == 'SELECT'
+
+        assert not errors, errors
+        browser.close()
+
+
+def test_switching_brands_in_the_form_does_not_wipe_a_stored_value(live_app):
+    """A box the brand does not use is not sent, and what is not sent is
+    not overwritten. Otherwise glancing at another brand would silently
+    clear the VIN."""
+    base, data_dir = live_app
+    _seed_vehicle(data_dir)
+    import sqlite3
+    with playwright_api.sync_playwright() as pw:
+        browser = pw.chromium.launch()
+        page = browser.new_page()
+        _open_settings(page, base)
+        page.query_selector_all('[data-edit-vehicle]')[-1].click()
+        page.wait_for_timeout(500)
+        # Tesla asks for an account and a token — no VIN box at all.
+        page.select_option('#vf_api_brand', 'tesla')
+        page.dispatch_event('#vf_api_brand', 'change')
+        page.wait_for_timeout(300)
+        assert page.eval_on_selector('#vf_api_vin', 'e => e.disabled') is True
+        # Rename at the same time: if the save did not happen at all the
+        # VIN would also survive, and the test would pass for no reason.
+        page.fill('#vf_name', 'Enyaq umbenannt')
+        page.eval_on_selector("form[action='/vehicles/save']", 'f => f.submit()')
+        page.wait_for_timeout(2000)
+        browser.close()
+
+    con = sqlite3.connect(os.path.join(data_dir, 'ev_tracker.db'))
+    name, vin = con.execute(
+        'SELECT name, api_vin FROM vehicles ORDER BY id LIMIT 1').fetchone()
+    con.close()
+    assert name == 'Enyaq umbenannt', 'the form never saved — nothing is proven'
+    assert vin == 'TMBTESTVIN000001', f'the stored VIN was lost ({vin!r})'
+
+
 def test_every_inline_handler_waits_for_the_document():
     """The structural rule behind the bug, checked without a browser.
 

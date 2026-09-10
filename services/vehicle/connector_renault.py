@@ -10,14 +10,17 @@ except ImportError:
     HAS_RENAULT = False
 
 from .base import VehicleConnector, VehicleStatus
-from .registry import register
+from .registry import describe, register
 
 logger = logging.getLogger(__name__)
 
 CREDENTIAL_FIELDS = [
-    {"key": "username", "label": "E-Mail (MyRenault / MyDacia)", "type": "text"},
-    {"key": "password", "label": "Passwort", "type": "password"},
-    {"key": "locale", "label": "Region", "type": "select",
+    {"key": "username", "label": "E-Mail (MyRenault / MyDacia)", "type": "text",
+     "label_key": "cred.email", "context": "MyRenault / MyDacia"},
+    {"key": "password", "label": "Passwort", "type": "password",
+     "label_key": "cred.password", "context": "MyRenault / MyDacia"},
+    {"key": "locale", "label": "Region", "type": "select", "label_key": "cred.region",
+     "optional": True,
      "options": [
          {"value": "de_DE", "label": "Deutschland"},
          {"value": "at_AT", "label": "Oesterreich"},
@@ -139,6 +142,8 @@ class DaciaConnector(_RenaultBase):
         return "Dacia (MyDacia)"
 
 
+describe('renault', RenaultConnector)
+describe('dacia', DaciaConnector)
 if HAS_RENAULT:
     register('renault', RenaultConnector)
     register('dacia', DaciaConnector)

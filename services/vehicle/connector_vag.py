@@ -23,7 +23,7 @@ except ImportError:
     HAS_CARCONNECTIVITY = False
 
 from .base import VehicleConnector, VehicleStatus
-from .registry import register
+from .registry import describe, register
 
 
 def _dump_vag_vehicle(vehicle, max_depth=2):
@@ -70,9 +70,12 @@ def _dump_vag_vehicle(vehicle, max_depth=2):
                 'vin': getattr(vehicle, 'vin', None)}
 
 CREDENTIAL_FIELDS = [
-    {"key": "username", "label": "E-Mail / Benutzername", "type": "text"},
-    {"key": "password", "label": "Passwort", "type": "password"},
-    {"key": "vin", "label": "FIN / VIN (optional, bei mehreren Fahrzeugen)", "type": "text"},
+    {"key": "username", "label": "E-Mail / Benutzername", "type": "text",
+     "label_key": "cred.email_or_user"},
+    {"key": "password", "label": "Passwort", "type": "password",
+     "label_key": "cred.password"},
+    {"key": "vin", "label": "FIN / VIN (optional, bei mehreren Fahrzeugen)", "type": "text",
+     "label_key": "cred.vin", "optional": True, "help_key": "cred.help_vin_multi"},
 ]
 
 
@@ -337,6 +340,10 @@ class AudiConnector(VAGConnector):
 
 
 # Register if dependency is installed
+for _k, _c in (('vw', VWConnector), ('skoda', SkodaConnector),
+               ('seat', SeatConnector), ('cupra', CupraConnector),
+               ('audi', AudiConnector)):
+    describe(_k, _c)
 if HAS_CARCONNECTIVITY:
     register('vw', VWConnector)
     register('skoda', SkodaConnector)

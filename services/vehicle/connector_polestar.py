@@ -9,14 +9,17 @@ except ImportError:
     HAS_POLESTAR = False
 
 from .base import VehicleConnector, VehicleStatus
-from .registry import register
+from .registry import describe, register
 
 logger = logging.getLogger(__name__)
 
 CREDENTIAL_FIELDS = [
-    {"key": "username", "label": "E-Mail (Polestar ID)", "type": "text"},
-    {"key": "password", "label": "Passwort", "type": "password"},
-    {"key": "vin", "label": "VIN (optional, bei mehreren Fahrzeugen)", "type": "text"},
+    {"key": "username", "label": "E-Mail (Polestar ID)", "type": "text",
+     "label_key": "cred.email", "context": "Polestar ID"},
+    {"key": "password", "label": "Passwort", "type": "password",
+     "label_key": "cred.password", "context": "Polestar ID"},
+    {"key": "vin", "label": "VIN (optional, bei mehreren Fahrzeugen)", "type": "text",
+     "label_key": "cred.vin", "optional": True, "help_key": "cred.help_vin_multi"},
 ]
 
 
@@ -86,5 +89,6 @@ class PolestarConnector(VehicleConnector):
         return "Polestar"
 
 
+describe('polestar', PolestarConnector)
 if HAS_POLESTAR:
     register('polestar', PolestarConnector)

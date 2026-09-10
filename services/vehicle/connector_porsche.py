@@ -15,14 +15,17 @@ except ImportError:
     HAS_PORSCHE = False
 
 from .base import VehicleConnector, VehicleStatus
-from .registry import register
+from .registry import describe, register
 
 logger = logging.getLogger(__name__)
 
 CREDENTIAL_FIELDS = [
-    {"key": "username", "label": "E-Mail (Porsche ID)", "type": "text"},
-    {"key": "password", "label": "Passwort", "type": "password"},
-    {"key": "vin", "label": "VIN (optional)", "type": "text"},
+    {"key": "username", "label": "E-Mail (Porsche ID)", "type": "text",
+     "label_key": "cred.email", "context": "Porsche ID"},
+    {"key": "password", "label": "Passwort", "type": "password",
+     "label_key": "cred.password", "context": "Porsche ID"},
+    {"key": "vin", "label": "VIN (optional)", "type": "text",
+     "label_key": "cred.vin", "optional": True, "help_key": "cred.help_vin_multi"},
 ]
 
 
@@ -120,5 +123,6 @@ class PorscheConnector(VehicleConnector):
         return "Porsche (Connect)"
 
 
+describe('porsche', PorscheConnector)
 if HAS_PORSCHE:
     register('porsche', PorscheConnector)

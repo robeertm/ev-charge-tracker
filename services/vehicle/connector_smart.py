@@ -16,14 +16,17 @@ except ImportError:
     HAS_SMART = False
 
 from .base import VehicleConnector, VehicleStatus
-from .registry import register
+from .registry import describe, register
 
 logger = logging.getLogger(__name__)
 
 CREDENTIAL_FIELDS = [
-    {"key": "username", "label": "E-Mail (Hello Smart)", "type": "text"},
-    {"key": "password", "label": "Passwort", "type": "password"},
-    {"key": "vin", "label": "VIN (optional, bei mehreren Fahrzeugen)", "type": "text"},
+    {"key": "username", "label": "E-Mail (Hello Smart)", "type": "text",
+     "label_key": "cred.email", "context": "Hello Smart"},
+    {"key": "password", "label": "Passwort", "type": "password",
+     "label_key": "cred.password", "context": "Hello Smart"},
+    {"key": "vin", "label": "VIN (optional, bei mehreren Fahrzeugen)", "type": "text",
+     "label_key": "cred.vin", "optional": True, "help_key": "cred.help_vin_multi"},
 ]
 
 
@@ -122,5 +125,6 @@ class SmartConnector(VehicleConnector):
         return "Smart (#1 / #3)"
 
 
+describe('smart', SmartConnector)
 if HAS_SMART:
     register('smart', SmartConnector)

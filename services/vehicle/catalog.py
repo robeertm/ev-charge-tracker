@@ -97,16 +97,16 @@ BRANDS: List[Brand] = [
     Brand('mg',       'MG',           'mg'),
     Brand('smart',    'Smart #1/#3',  'smart'),
     Brand('porsche',  'Porsche',      'porsche'),
+    Brand('xpeng',    'XPENG (Enode)', None),
 ]
 
-# XPENG is deliberately NOT in the list above. Its connector is
-# registered and works, but it authenticates against the Enode
-# aggregator with a client ID and a client secret, not with the car
-# account's e-mail and password. Both credential panes are labelled for
-# the latter, so a tile would ask for the wrong two things. Rendering
-# per-brand labels from ``connector.credential_fields()`` is the real
-# fix and its own piece of work; until then XPENG stays reachable by
-# setting ``api_brand`` directly rather than half-offered here.
+# XPENG used to be deliberately absent from the list above: it
+# authenticates against the Enode aggregator with a client ID and a
+# client secret, not with a car account's e-mail and password, and both
+# credential boxes were hard-labelled for the latter — so a tile would
+# have asked for the wrong two things. The form now draws its labels
+# from ``connector.credential_fields()``, which is exactly the fix that
+# comment asked for, so the brand is offered like any other.
 
 
 # pip packages per group key. The install button and the native
@@ -152,8 +152,99 @@ def legacy_keys() -> List[str]:
     return [b.key for b in BRANDS if b.legacy]
 
 
+# One credential column per connector field key. ``locale`` and
+# ``region`` are the same stored column on purpose: they are the same
+# question ("which market is this account in?") and Renault happens to
+# spell it the other way. Before this map, ``locale`` was in Renault's
+# field list and in NO credential dict anywhere, so a French owner could
+# type a region into the form and the connector still signed them in
+# against de_DE.
+FIELD_COLUMN = {
+    'username': 'api_username',
+    'password': 'api_password',
+    'pin': 'api_pin',
+    'region': 'api_region',
+    'locale': 'api_region',
+    'vin': 'api_vin',
+}
+
+
+def form_fields(brand: str) -> List[dict]:
+    """What the credential form should show for this brand.
+
+    The answer comes from the connector itself (see
+    ``registry.credential_fields_of``), enriched with the form input each
+    field writes to. An unknown or empty brand yields ``[]`` — no brand,
+    no credential boxes.
+    """
+    from .registry import credential_fields_of
+    out = []
+    for f in credential_fields_of((brand or '').strip().lower()):
+        col = FIELD_COLUMN.get(f.get('key'))
+        if not col:
+            continue
+        d = dict(f)
+        d['column'] = col
+        d['input_id'] = 'vf_' + col
+        out.append(d)
+    return out
+
+
+def fields_for_ui() -> Dict[str, List[dict]]:
+    """``{brand key: [field, …]}`` for every brand the UI can offer.
+
+    Rendered into the settings page and the car wizard so the browser can
+    redraw the credential boxes the moment the brand changes, without a
+    round trip.
+    """
+    return {b.key: form_fields(b.key) for b in BRANDS}
+
+
+def required_columns(brand: str) -> List[str]:
+    """The credential columns this brand cannot work without."""
+    return [f['column'] for f in form_fields(brand) if not f.get('optional')]
+
+
+def credentials_of(vehicle) -> Dict[str, str]:
+    """The credential dict to hand a connector for THIS vehicle.
+
+    There were seven hand-written copies of this dict — in the sync
+    service, in five routes and in the legacy AppConfig helper — and all
+    seven listed the same five keys. None of them carried ``locale``,
+    which is the only region key Renault and Dacia read.
+    """
+    get = lambda col: (getattr(vehicle, col, '') or '')       # noqa: E731
+    return {
+        'username': get('api_username'),
+        'password': get('api_password'),
+        'pin': get('api_pin'),
+        'region': get('api_region') or 'EU',
+        'locale': get('api_region') or 'de_DE',
+        'vin': get('api_vin'),
+    }
+
+
+def legacy_credentials() -> Dict[str, str]:
+    """Credentials from the flat ``vehicle_api_*`` AppConfig keys.
+
+    These mirror the PRIMARY vehicle and nothing else, so this is the
+    fallback for an install that has no vehicle rows at all — never the
+    way to answer "which car is on screen". It lives here so there is
+    one copy of it rather than one per caller.
+    """
+    from models.database import AppConfig
+    return {
+        'username': AppConfig.get('vehicle_api_username', ''),
+        'password': AppConfig.get('vehicle_api_password', ''),
+        'pin': AppConfig.get('vehicle_api_pin', ''),
+        'region': AppConfig.get('vehicle_api_region', 'EU') or 'EU',
+        'locale': AppConfig.get('vehicle_api_region', '') or 'de_DE',
+        'vin': AppConfig.get('vehicle_api_vin', ''),
+    }
+
+
 def credentials_present(brand: str, username: str = '', password: str = '',
-                        vin: str = '') -> bool:
+                        vin: str = '', pin: str = '', region: str = '') -> bool:
     """Is this vehicle configured enough to talk to its API?
 
     Three places used to spell this out as ``api_brand and api_username``,
@@ -163,11 +254,22 @@ def credentials_present(brand: str, username: str = '', password: str = '',
     had no credentials, by the "test connection" button, by the manual
     sync and by the fleet table, all three.
 
-    So the question is asked once, here, in terms of what the brands
-    actually need: either a user account, or a key bound to a VIN.
+    So the question is asked once, here — and asked of the brand, which
+    is the only thing that knows. A leftover user name from a previous
+    brand no longer counts as "configured": it is not a credential this
+    connector will ever send.
     """
-    if not (brand or '').strip():
+    brand = (brand or '').strip().lower()
+    if not brand:
         return False
-    if (username or '').strip():
-        return True
-    return bool((password or '').strip() and (vin or '').strip())
+    values = {'api_username': username, 'api_password': password,
+              'api_vin': vin, 'api_pin': pin, 'api_region': region}
+    needed = required_columns(brand)
+    if not needed:
+        # A brand we cannot describe (hand-set api_brand, or a connector
+        # module that failed to import). Fall back to the old question
+        # rather than declaring a working vehicle unconfigured.
+        if (username or '').strip():
+            return True
+        return bool((password or '').strip() and (vin or '').strip())
+    return all((values.get(col) or '').strip() for col in needed)

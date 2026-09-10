@@ -8,13 +8,15 @@ except ImportError:
     HAS_TESLAPY = False
 
 from .base import VehicleConnector, VehicleStatus
-from .registry import register
+from .registry import describe, register
 
 logger = logging.getLogger(__name__)
 
 CREDENTIAL_FIELDS = [
-    {"key": "username", "label": "E-Mail (Tesla Account)", "type": "text"},
+    {"key": "username", "label": "E-Mail (Tesla Account)", "type": "text",
+     "label_key": "cred.email", "context": "Tesla Account"},
     {"key": "password", "label": "Refresh-Token",  "type": "password",
+     "label_key": "cred.refresh_token", "help_key": "cred.help_tesla_token",
      "help": "Tesla nutzt OAuth — Refresh-Token aus Auth-Flow oder teslapy cache.json."},
 ]
 
@@ -166,5 +168,6 @@ class TeslaConnector(VehicleConnector):
         return "Tesla"
 
 
+describe('tesla', TeslaConnector)
 if HAS_TESLAPY:
     register('tesla', TeslaConnector)

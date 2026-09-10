@@ -359,25 +359,45 @@
                                     {% endfor %}
                                 </select>
                             </div>
-                            <div class="col-12 col-sm-6 col-md-4">
-                                <label class="form-label small">{{ t('set.fleet_field_api_user') }}</label>
+                            {# Die Zugangsfelder richten sich nach der MARKE.
+                               Vorher standen hier fuenf feste Kaesten fuer alle:
+                               wer die offizielle Skoda-Schnittstelle nutzt, hat
+                               weder Benutzernamen noch PIN und musste raten, in
+                               welchen Kasten der API-Schluessel gehoert. Welche
+                               Felder eine Marke braucht, weiss nur ihr Connector
+                               — von dort kommen Beschriftung, Hilfetext und
+                               Reihenfolge (services/vehicle/catalog.form_fields).
+                               Die Eingabefelder bleiben alle im Dokument, nur
+                               ihre Huelle wird ein- und ausgeblendet: ein Feld,
+                               das die Marke nicht kennt, wird nicht abgeschickt
+                               und der gespeicherte Wert bleibt unangetastet. #}
+                            <div class="col-12 col-sm-6 col-md-4 vf-cred" data-col="api_username">
+                                <label class="form-label small" for="vf_api_username">{{ t('set.fleet_field_api_user') }}</label>
                                 <input type="text" class="form-control form-control-sm" name="api_username" id="vf_api_username" autocomplete="off">
+                                <div class="form-text small vf-cred-help"></div>
                             </div>
-                            <div class="col-12 col-md-4">
-                                <label class="form-label small">{{ t('set.fleet_field_api_pw') }}</label>
+                            <div class="col-12 col-md-4 vf-cred" data-col="api_password">
+                                <label class="form-label small" for="vf_api_password">{{ t('set.fleet_field_api_pw') }}</label>
                                 <input type="password" class="form-control form-control-sm" name="api_password" id="vf_api_password" autocomplete="new-password" placeholder="{{ t('set.fleet_field_api_pw_keep') }}">
+                                <div class="form-text small vf-cred-help"></div>
                             </div>
-                            <div class="col-6 col-md-3">
-                                <label class="form-label small">{{ t('set.fleet_field_api_pin') }}</label>
+                            <div class="col-6 col-md-3 vf-cred" data-col="api_pin">
+                                <label class="form-label small" for="vf_api_pin">{{ t('set.fleet_field_api_pin') }}</label>
                                 <input type="text" class="form-control form-control-sm" name="api_pin" id="vf_api_pin" maxlength="20">
+                                <div class="form-text small vf-cred-help"></div>
                             </div>
-                            <div class="col-6 col-md-3">
-                                <label class="form-label small">{{ t('set.fleet_field_api_region') }}</label>
+                            <div class="col-6 col-md-3 vf-cred" data-col="api_region">
+                                <label class="form-label small" for="vf_api_region">{{ t('set.fleet_field_api_region') }}</label>
                                 <input type="text" class="form-control form-control-sm" name="api_region" id="vf_api_region" maxlength="6" placeholder="EU">
+                                <div class="form-text small vf-cred-help"></div>
                             </div>
-                            <div class="col-12 col-md-6">
-                                <label class="form-label small">{{ t('set.fleet_field_api_vin') }}</label>
+                            <div class="col-12 col-md-6 vf-cred" data-col="api_vin">
+                                <label class="form-label small" for="vf_api_vin">{{ t('set.fleet_field_api_vin') }}</label>
                                 <input type="text" class="form-control form-control-sm" name="api_vin" id="vf_api_vin" maxlength="40">
+                                <div class="form-text small vf-cred-help"></div>
+                            </div>
+                            <div class="col-12">
+                                <div class="form-text small" id="vf_cred_note">{{ t('cred.pick_brand') }}</div>
                             </div>
                             <div class="col-12 form-check ms-2 mt-2">
                                 <input class="form-check-input" type="checkbox" value="1" name="auto_sync" id="vf_auto_sync" checked>
@@ -968,6 +988,9 @@
 
                 <script>
                 const T = {
+                    upd_container_hint: {{ t('upd.container_hint')|tojson }},
+                    upd_copy: {{ t('upd.copy')|tojson }},
+                    upd_copied: {{ t('upd.copied')|tojson }},
                     api_refresh_token: {{ t('set.api_refresh_token')|tojson }},
                     api_password: {{ t('set.api_password')|tojson }},
                     api_starting: {{ t('set.api_starting')|tojson }},
@@ -2397,6 +2420,7 @@
             }
         });
         document.getElementById('vf_title').textContent = {{ t('set.fleet_form_new')|tojson }};
+        updateCredFields();
     }
     function updateTokenHint() {
         const sel = document.getElementById('vf_api_brand');
@@ -2405,8 +2429,98 @@
         const brand = (sel.value || '').toLowerCase();
         hint.style.display = ['kia', 'hyundai'].includes(brand) ? '' : 'none';
     }
+
+    // Welche Zugangsfelder eine Marke braucht, sagt ihr Connector —
+    // hier kommt die uebersetzte Liste aus catalog.form_fields an.
+    const CRED_FIELDS = {{ (credential_fields or {})|tojson }};
+    const CRED_OPTIONAL = {{ t('cred.optional')|tojson }};
+    const CRED_PICK = {{ t('cred.pick_brand')|tojson }};
+    const CRED_NONE = {{ t('cred.none_needed')|tojson }};
+    const CRED_KEY_LINK = {{ t('cred.key_link')|tojson }};
+
+    // Nennt eine Marke ihre moeglichen Werte, wird aus dem Textfeld eine
+    // Auswahlliste — und umgekehrt. Name, Kennung und der bisherige Wert
+    // wandern mit, sonst verlaere ein Markenwechsel die Eingabe.
+    function passeControlAn(box, alt, f) {
+        const willSelect = (f.options || []).length > 0;
+        const istSelect = alt && alt.tagName === 'SELECT';
+        if (!alt || willSelect === istSelect) return alt;
+        const neu = document.createElement(willSelect ? 'select' : 'input');
+        neu.id = alt.id; neu.name = alt.name;
+        neu.className = willSelect ? 'form-select form-select-sm'
+                                   : 'form-control form-control-sm';
+        if (willSelect) {
+            (f.options || []).forEach(o => {
+                const opt = document.createElement('option');
+                opt.value = o.value; opt.textContent = o.label;
+                neu.appendChild(opt);
+            });
+            neu.value = alt.value || (f.options[0] || {}).value || '';
+        } else {
+            neu.type = 'text';
+            neu.value = alt.value || '';
+        }
+        alt.replaceWith(neu);
+        return neu;
+    }
+
+    function updateCredFields() {
+        const sel = document.getElementById('vf_api_brand');
+        if (!sel) return;
+        const felder = CRED_FIELDS[(sel.value || '').toLowerCase()] || [];
+        const nachSpalte = {};
+        felder.forEach(f => { nachSpalte[f.column] = f; });
+        document.querySelectorAll('.vf-cred').forEach(box => {
+            const f = nachSpalte[box.dataset.col];
+            // Ein Feld, das diese Marke nicht kennt, wird ausgeblendet UND
+            // abgeschaltet: abgeschaltete Felder schickt der Browser nicht
+            // mit, und der Server laesst gespeicherte Werte in Ruhe, die
+            // er nicht bekommt. Ein Markenwechsel loescht also nichts.
+            let eingabe = box.querySelector('input, select');
+            const hilfe = box.querySelector('.vf-cred-help');
+            if (!f) {
+                box.hidden = true;
+                if (eingabe) eingabe.disabled = true;
+                return;
+            }
+            box.hidden = false;
+            // Keine Umsortierung per CSS-`order`: die Reihenfolge im
+            // Dokument ist schon die richtige, und ein `order` auf einer
+            // Bootstrap-Zeile schob das VIN-Feld hinter das Haekchen
+            // „Automatischer Sync".
+            eingabe = passeControlAn(box, eingabe, f);
+            if (eingabe) eingabe.disabled = false;
+            const label = box.querySelector('label');
+            if (label) {
+                label.textContent = f.label + (f.optional ? ' (' + CRED_OPTIONAL + ')' : '');
+            }
+            if (hilfe) {
+                hilfe.textContent = f.help || '';
+                if (f.help_url) {
+                    const a = document.createElement('a');
+                    a.href = f.help_url; a.target = '_blank'; a.rel = 'noopener';
+                    a.textContent = ' ' + CRED_KEY_LINK + ' \u2197';
+                    hilfe.appendChild(a);
+                }
+                hilfe.hidden = !f.help && !f.help_url;
+            }
+        });
+        const note = document.getElementById('vf_cred_note');
+        if (note) {
+            const brand = (sel.value || '').toLowerCase();
+            note.textContent = !brand ? CRED_PICK : (felder.length ? '' : CRED_NONE);
+            note.hidden = !note.textContent;
+        }
+    }
+
     const apiBrandSel = document.getElementById('vf_api_brand');
-    if (apiBrandSel) apiBrandSel.addEventListener('change', updateTokenHint);
+    if (apiBrandSel) {
+        apiBrandSel.addEventListener('change', () => {
+            updateTokenHint();
+            updateCredFields();
+        });
+    }
+    updateCredFields();
 
     document.querySelectorAll('[data-edit-vehicle]').forEach(btn => {
         btn.addEventListener('click', () => {
@@ -2414,15 +2528,31 @@
             try { v = JSON.parse(btn.getAttribute('data-edit-vehicle')); }
             catch (e) { return; }
             clearForm();
+            // Marke zuerst, damit die Felder existieren, BEVOR ihre Werte
+            // gesetzt werden — eine Auswahlliste, die es noch nicht gibt,
+            // nimmt keinen Wert an.
+            const brandEl = document.getElementById('vf_api_brand');
+            if (brandEl) { brandEl.value = v.api_brand || ''; }
+            updateCredFields();
             for (const [k, fid] of Object.entries(fieldMap)) {
                 const el = document.getElementById(fid);
                 if (!el || v[k] == null) continue;
-                if (el.type === 'checkbox') el.checked = !!v[k];
-                else el.value = v[k];
+                if (el.type === 'checkbox') { el.checked = !!v[k]; continue; }
+                // Eine Auswahlliste, die den gespeicherten Wert nicht
+                // darstellen kann, wuerde ihn beim naechsten Speichern
+                // still ueberschreiben. Also bekommt er einen Eintrag.
+                if (el.tagName === 'SELECT' && v[k] !== ''
+                        && !Array.from(el.options).some(o => o.value === v[k])) {
+                    const opt = document.createElement('option');
+                    opt.value = v[k]; opt.textContent = v[k];
+                    el.appendChild(opt);
+                }
+                el.value = v[k];
             }
             document.getElementById('vf_title').textContent =
                 {{ t('set.fleet_form_edit')|tojson }} + ': ' + (v.name || '');
             updateTokenHint();
+            updateCredFields();
             collapse.show();
             form.scrollIntoView({behavior: 'smooth', block: 'center'});
         });
@@ -2677,16 +2807,46 @@
             if (data.update_available) {
                 pendingVersion = data.latest;
                 pendingZipUrl = data.zip_url;
-                result.innerHTML =
-                    '<div class="alert alert-info">' +
+                const kopf =
                     T.app_new_version + ' <strong>v' + data.latest + '</strong> ' +
-                    '(' + T.app_current + ': v' + data.current + ')' +
-                    '<div class="mt-2">' +
-                    '<button class="btn btn-sm btn-primary me-2" id="btnInstallUpdate"><i class="bi bi-download"></i> ' + T.app_install_now + '</button>' +
-                    '<a href="' + data.release_url + '" target="_blank" class="btn btn-sm btn-outline-secondary"><i class="bi bi-github"></i> ' + T.app_release_notes + '</a>' +
-                    '</div>' +
-                    '</div>';
-                document.getElementById('btnInstallUpdate').addEventListener('click', () => doInstall(false));
+                    '(' + T.app_current + ': v' + data.current + ')';
+                const notizen =
+                    '<a href="' + data.release_url + '" target="_blank" class="btn btn-sm btn-outline-secondary">' +
+                    '<i class="bi bi-github"></i> ' + T.app_release_notes + '</a>';
+                if (data.by_image) {
+                    // Diese Installation laeuft aus einem Abbild. Ein
+                    // Dateitausch von innen wuerde beim naechsten
+                    // Neuerzeugen des Containers spurlos verschwinden —
+                    // also steht hier, wie es wirklich geht, mit einem
+                    // Klick zum Kopieren statt Abtippen.
+                    const befehl = 'docker compose pull && docker compose up -d';
+                    result.innerHTML =
+                        '<div class="alert alert-info">' + kopf +
+                        '<div class="mt-2 small">' + T.upd_container_hint + '</div>' +
+                        '<div class="input-group input-group-sm mt-2">' +
+                        '<input type="text" class="form-control font-monospace" id="updImageCmd" readonly value="' + befehl + '">' +
+                        '<button class="btn btn-outline-secondary" id="btnCopyImageCmd" type="button">' +
+                        '<i class="bi bi-clipboard"></i> ' + T.upd_copy + '</button>' +
+                        '</div>' +
+                        '<div class="mt-2">' + notizen + '</div>' +
+                        '</div>';
+                    const cbtn = document.getElementById('btnCopyImageCmd');
+                    if (cbtn) cbtn.addEventListener('click', async () => {
+                        const feld = document.getElementById('updImageCmd');
+                        try { await navigator.clipboard.writeText(feld.value); }
+                        catch (e) { feld.select(); document.execCommand('copy'); }
+                        cbtn.innerHTML = '<i class="bi bi-check2"></i> ' + T.upd_copied;
+                    });
+                } else {
+                    result.innerHTML =
+                        '<div class="alert alert-info">' + kopf +
+                        '<div class="mt-2">' +
+                        '<button class="btn btn-sm btn-primary me-2" id="btnInstallUpdate"><i class="bi bi-download"></i> ' + T.app_install_now + '</button>' +
+                        notizen +
+                        '</div>' +
+                        '</div>';
+                    document.getElementById('btnInstallUpdate').addEventListener('click', () => doInstall(false));
+                }
             } else if (data.latest === null) {
                 result.innerHTML = '<div class="alert alert-success">' + T.app_up_to_date + '</div>';
             } else {

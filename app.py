@@ -802,14 +802,90 @@ def _pv_annual_yield_for_form() -> str:
 
 
 def _get_vehicle_credentials():
-    """Build credentials dict from AppConfig for vehicle API."""
-    return {
-        'username': AppConfig.get('vehicle_api_username', ''),
-        'password': AppConfig.get('vehicle_api_password', ''),
-        'pin': AppConfig.get('vehicle_api_pin', ''),
-        'region': AppConfig.get('vehicle_api_region', 'EU'),
-        'vin': AppConfig.get('vehicle_api_vin', ''),
-    }
+    """Credentials from the legacy AppConfig mirror (primary vehicle).
+
+    Only for installs with no vehicle rows — everything else goes
+    through ``_active_vehicle_api``.
+    """
+    from services.vehicle.catalog import legacy_credentials
+    return legacy_credentials()
+
+
+def _credential_fields_for_ui():
+    """Per-brand credential boxes, translated, ready for ``|tojson``.
+
+    The connectors describe their fields in a language-neutral way — a
+    ``label_key`` plus, where it helps, the manufacturer's own product
+    name as ``context`` ("Bluelink", "MyŠkoda"). Proper nouns are not
+    translated; everything around them is. That keeps six languages to
+    about twenty keys instead of one per brand and field.
+    """
+    from services.vehicle.catalog import BRANDS, form_fields
+    out = {}
+    for b in BRANDS:
+        felder = []
+        for f in form_fields(b.key):
+            ctx = f.get('context') or ''
+            label = t(f['label_key'], context=ctx) if f.get('label_key') else f.get('label', '')
+            if ctx and f.get('label_key'):
+                label = f'{label} ({ctx})'
+            hilfe = t(f['help_key'], context=ctx) if f.get('help_key') else (f.get('help') or '')
+            felder.append({
+                'column': f['column'],
+                'label': label,
+                'help': hilfe,
+                'help_url': f.get('help_url', ''),
+                'optional': bool(f.get('optional')),
+                # A brand that names its choices gets a list, not a free
+                # text box. Renault's region is a locale like "de_DE" and
+                # MG's is lower-case "eu" — both are values nobody should
+                # have to guess the spelling of.
+                'options': list(f.get('options') or []),
+            })
+        out[b.key] = felder
+    return out
+
+
+def _active_vehicle_api(vehicle_id=None):
+    """Which car does a dashboard request act on — and with whose key?
+
+    Returns ``(brand, credentials, vehicle_id, vehicle)``; ``brand`` is
+    ``''`` when nothing is configured.
+
+    This exists because the picker used to decide only half the question.
+    Every route that fetched live data read its brand and credentials
+    from the flat ``vehicle_api_*`` keys in AppConfig — which mirror the
+    **primary** vehicle and nothing else — and then stamped the row it
+    got back with the id of the vehicle the picker was pointing at. So on
+    a two-car install, switching to the second car showed the first car's
+    battery, range and odometer under the second car's name, and wrote
+    them into the second car's history. Measured on two dummy cars: with
+    the picker on the Enyaq, ``/api/vehicle/status`` answered with the
+    Kona's 37 750 km and stored it as the Enyaq's.
+
+    Asking one question in two places is what made that possible, so it
+    is asked once here: the connector and the stamp now come from the
+    same answer and cannot disagree.
+
+    The AppConfig fallback stays for the case it was written for — an
+    install with no vehicle rows at all — and only for that.
+    """
+    from models.database import Vehicle
+    from services.vehicle.catalog import credentials_of
+    if vehicle_id is None:
+        picked = _active_vehicle_id()
+        vehicle_id = picked if isinstance(picked, int) else None
+    v = Vehicle.query.get(vehicle_id) if isinstance(vehicle_id, int) else None
+    if v is None:
+        # Fleet view ('all') or no selection yet: act on the first
+        # non-archived car, which is what the picker itself defaults to.
+        v = (Vehicle.query.filter_by(is_archived=False)
+             .order_by(Vehicle.id.asc()).first()
+             or Vehicle.query.order_by(Vehicle.id.asc()).first())
+    if v is None:
+        return (AppConfig.get('vehicle_api_brand', '') or '',
+                _get_vehicle_credentials(), None, None)
+    return ((v.api_brand or '').strip().lower(), credentials_of(v), v.id, v)
 
 
 def _vehicle_attr(vehicle_id, attr, fallback):
@@ -2664,7 +2740,14 @@ def register_routes(app):
         v.fossil_co2_per_km = _float(request.form.get('fossil_co2_per_km'))
         v.recuperation_kwh_per_km = _float(request.form.get('recuperation_kwh_per_km'))
         v.api_brand = (request.form.get('api_brand', '') or '').strip().lower() or None
-        v.api_username = (request.form.get('api_username', '') or '').strip() or None
+        # The form only sends the credential boxes the chosen brand
+        # actually uses; the rest are disabled and therefore absent. A
+        # field that was not sent is not the same as a field that was
+        # cleared — writing None for both would wipe a stored VIN the
+        # moment someone switched brands to look at another one. So a
+        # missing key leaves the stored value alone.
+        if 'api_username' in request.form:
+            v.api_username = (request.form.get('api_username', '') or '').strip() or None
         # Password: keep existing when blank (so editing other fields
         # doesn't clear it). New entry with empty password = None.
         # Trim surrounding whitespace: an autofill/copy-paste space makes the
@@ -2672,11 +2755,19 @@ def register_routes(app):
         new_pw = (request.form.get('api_password', '') or '').strip()
         if new_pw:
             v.api_password = new_pw
-        elif not vid:
+        elif not vid and 'api_password' in request.form:
             v.api_password = None
-        v.api_pin = (request.form.get('api_pin', '') or '').strip() or None
-        v.api_region = (request.form.get('api_region', '') or '').strip().upper() or None
-        v.api_vin = (request.form.get('api_vin', '') or '').strip().upper() or None
+        if 'api_pin' in request.form:
+            v.api_pin = (request.form.get('api_pin', '') or '').strip() or None
+        if 'api_region' in request.form:
+            # NICHT in Grossbuchstaben zwingen. Dieselbe Spalte traegt je
+            # nach Marke 'EU' (Kia), 'eu' (MG, das seine Gateway-Tabelle
+            # klein schreibt und bei 'EU' wortlos auf Europa zurueckfaellt)
+            # und 'de_DE' (Renault). Wie die Schreibweise aussieht, weiss
+            # der Connector — er normalisiert sie beim Lesen.
+            v.api_region = (request.form.get('api_region', '') or '').strip() or None
+        if 'api_vin' in request.form:
+            v.api_vin = (request.form.get('api_vin', '') or '').strip().upper() or None
         v.auto_sync = request.form.get('auto_sync') == '1'
         try:
             fr = request.form.get('first_registered_at', '').strip()
@@ -2970,7 +3061,7 @@ def register_routes(app):
         from models.database import Vehicle
         v = Vehicle.query.get_or_404(vid)
         _ajax = request.form.get('ajax') == '1'
-        from services.vehicle.catalog import credentials_present
+        from services.vehicle.catalog import credentials_of, credentials_present
         if not credentials_present(v.api_brand, v.api_username,
                                    v.api_password, v.api_vin):
             if _ajax:
@@ -2979,13 +3070,7 @@ def register_routes(app):
             return redirect('/settings#sec-fleet')
         try:
             from services.vehicle import get_connector
-            creds = {
-                'username': v.api_username or '',
-                'password': v.api_password or '',
-                'pin': v.api_pin or '',
-                'region': v.api_region or 'EU',
-                'vin': v.api_vin or '',
-            }
+            creds = credentials_of(v)
             connector = get_connector(v.api_brand.lower(), creds)
             connector.verify_credentials()
             if _ajax:
@@ -3074,16 +3159,11 @@ def register_routes(app):
         cmds = []
         try:
             from services.vehicle import get_connector
-            from services.vehicle.catalog import credentials_present
+            from services.vehicle.catalog import credentials_of, credentials_present
             if credentials_present(v.api_brand, v.api_username,
                                    v.api_password, v.api_vin):
-                conn = get_connector((v.api_brand or '').lower(), {
-                    'username': v.api_username or '',
-                    'password': v.api_password or '',
-                    'pin': v.api_pin or '',
-                    'region': v.api_region or 'EU',
-                    'vin': v.api_vin or '',
-                })
+                conn = get_connector((v.api_brand or '').lower(),
+                                     credentials_of(v))
                 cmds = remote_commands_of(conn)
         except Exception as e:
             logger.debug(f"remote caps for vehicle {vid}: {e}")
@@ -3113,7 +3193,7 @@ def register_routes(app):
         from models.database import Vehicle
         from services.vehicle.base import (RemoteNotSupported, SENSITIVE_COMMANDS,
                                            remote_commands_of)
-        from services.vehicle.catalog import credentials_present
+        from services.vehicle.catalog import credentials_of, credentials_present
         v = Vehicle.query.get_or_404(vid)
 
         if not v.remote_control_enabled:
@@ -3132,13 +3212,8 @@ def register_routes(app):
 
         try:
             from services.vehicle import get_connector
-            conn = get_connector((v.api_brand or '').lower(), {
-                'username': v.api_username or '',
-                'password': v.api_password or '',
-                'pin': v.api_pin or '',
-                'region': v.api_region or 'EU',
-                'vin': v.api_vin or '',
-            })
+            conn = get_connector((v.api_brand or '').lower(),
+                                 credentials_of(v))
             if command not in remote_commands_of(conn):
                 return jsonify({'ok': False, 'kind': 'unsupported',
                                 'error': t('remote.err_unsupported')}), 400
@@ -3164,7 +3239,7 @@ def register_routes(app):
         background loop's _sync_one_vehicle, just on demand."""
         from models.database import Vehicle
         v = Vehicle.query.get_or_404(vid)
-        from services.vehicle.catalog import credentials_present
+        from services.vehicle.catalog import credentials_of, credentials_present
         if not credentials_present(v.api_brand, v.api_username,
                                    v.api_password, v.api_vin):
             flash(t('flash.vehicle_sync_no_creds'), 'warning')
@@ -3266,7 +3341,11 @@ def register_routes(app):
         chart_data = get_chart_data(vehicle_id=vid_filter)
         acdc = get_ac_dc_stats(vehicle_id=vid_filter)
         yearly = get_yearly_stats(vehicle_id=vid_filter)
-        vehicle_configured = bool(AppConfig.get('vehicle_api_brand', ''))
+        # Which car is on screen decides whether the live card appears
+        # and which tiles it carries — not the legacy AppConfig mirror,
+        # which only ever describes the primary vehicle.
+        _dash_brand, _dash_creds, _dash_vid, _dash_v = _active_vehicle_api()
+        vehicle_configured = bool(_dash_brand)
         # User's preferred default range for the vehicle-history plots
         # (0 = all). Stored in AppConfig so the choice persists across
         # sessions. Client-side AJAX can override for the current view.
@@ -3303,9 +3382,7 @@ def register_routes(app):
         # fields the brand connector doesn't populate, instead of
         # showing a permanent "—" placeholder.
         from services.vehicle.feature_matrix import get_features
-        vehicle_features = get_features(
-            (AppConfig.get('vehicle_api_brand', '') or '').lower()
-        )
+        vehicle_features = get_features(_dash_brand)
         # Fernsteuerung aufs Dashboard — aber NUR fuer Fahrzeuge, deren
         # Besitzer sie ausdruecklich eingeschaltet hat. Ist nichts
         # eingeschaltet, erscheint hier auch nichts: das Opt-in ist die
@@ -3315,7 +3392,7 @@ def register_routes(app):
             from models.database import Vehicle as _DrV
             from services.vehicle import get_connector
             from services.vehicle.base import remote_commands_of
-            from services.vehicle.catalog import credentials_present
+            from services.vehicle.catalog import credentials_of, credentials_present
             for _rv in (_DrV.query.filter_by(is_archived=False,
                                              remote_control_enabled=True).all()):
                 _rb = (_rv.api_brand or '').lower()
@@ -3323,11 +3400,8 @@ def register_routes(app):
                                            _rv.api_password, _rv.api_vin):
                     continue
                 try:
-                    _rc = remote_commands_of(get_connector(_rb, {
-                        'username': _rv.api_username or '',
-                        'password': _rv.api_password or '',
-                        'pin': _rv.api_pin or '', 'region': _rv.api_region or 'EU',
-                        'vin': _rv.api_vin or ''}))
+                    _rc = remote_commands_of(
+                        get_connector(_rb, credentials_of(_rv)))
                 except Exception:
                     continue
                 if _rc:
@@ -4086,8 +4160,13 @@ def register_routes(app):
         try:
             from services.vehicle.catalog import brands_for_ui
             _vehicle_catalog = brands_for_ui()
+            _credential_fields = _credential_fields_for_ui()
         except Exception:
+            logger.warning('Brand catalog unavailable — the vehicle form '
+                           'will fall back to showing every credential box',
+                           exc_info=True)
             _vehicle_catalog = []
+            _credential_fields = {}
 
         # Remote control + the Škoda changeover, both computed here rather
         # than probed per vehicle from the browser: asking the connector
@@ -4107,7 +4186,7 @@ def register_routes(app):
             from models.database import Vehicle as _RcVehicle
             from services.vehicle import get_connector
             from services.vehicle.base import remote_commands_of
-            from services.vehicle.catalog import by_key, credentials_present
+            from services.vehicle.catalog import by_key, credentials_of, credentials_present
             for _v in (_RcVehicle.query.filter_by(is_archived=False)
                        .order_by(_RcVehicle.id).all()):
                 _brand = (_v.api_brand or '').lower()
@@ -4122,13 +4201,7 @@ def register_routes(app):
                                            _v.api_password, _v.api_vin):
                     continue
                 try:
-                    _conn = get_connector(_brand, {
-                        'username': _v.api_username or '',
-                        'password': _v.api_password or '',
-                        'pin': _v.api_pin or '',
-                        'region': _v.api_region or 'EU',
-                        'vin': _v.api_vin or '',
-                    })
+                    _conn = get_connector(_brand, credentials_of(_v))
                 except Exception:
                     continue
                 _cmds = remote_commands_of(_conn)
@@ -4285,6 +4358,7 @@ def register_routes(app):
                                # neither can name a brand the registry does
                                # not know (see services/vehicle/catalog.py).
                                vehicle_catalog=_vehicle_catalog,
+                               credential_fields=_credential_fields,
                                remote_vehicles=_remote_vehicles,
                                skoda_legacy_vehicles=_skoda_legacy,
                                skoda_key_status=_skoda_keys,
@@ -4901,8 +4975,13 @@ def register_routes(app):
 
     @app.route('/api/vehicle/status')
     def api_vehicle_status():
-        """Fetch current vehicle status with full details."""
-        brand = AppConfig.get('vehicle_api_brand', '')
+        """Fetch current vehicle status with full details.
+
+        Brand, credentials and the id the row is stamped with all come
+        from one resolution (``_active_vehicle_api``) so the car that is
+        asked and the car that is credited are the same one.
+        """
+        brand, _creds, _picked_vid, _picked_v = _active_vehicle_api()
         if not brand:
             return jsonify({'error': 'not_configured'}), 400
 
@@ -4921,7 +5000,7 @@ def register_routes(app):
         # the connector auto-detect password-vs-token and raise real, actionable
         # errors (see connector_hyundai_kia._check_sdk_supports_credential).
         if brand in ('kia', 'hyundai'):
-            if not (AppConfig.get('vehicle_api_password', '') or '').strip():
+            if not (_creds.get('password') or '').strip():
                 return jsonify({'error': t('err.kia_hyundai_no_credential')}), 400
 
         # v3.0.12: 12 V lockout — block manual force-refresh when the
@@ -4932,13 +5011,7 @@ def register_routes(app):
             from services.vehicle.sync_service import (
                 is_12v_low, _latest_12v_percent, LOW_12V_THRESHOLD_PERCENT
             )
-            _picker_low = _active_vehicle_id()
-            _vid_low = _picker_low if isinstance(_picker_low, int) else None
-            if _vid_low is None:
-                from models.database import Vehicle as _Vlow
-                _vlow = (_Vlow.query.filter_by(is_archived=False)
-                         .order_by(_Vlow.id.asc()).first())
-                _vid_low = _vlow.id if _vlow else None
+            _vid_low = _picked_vid
             if _vid_low and is_12v_low(_vid_low):
                 return jsonify({
                     'error': 'low_12v',
@@ -4947,33 +5020,30 @@ def register_routes(app):
                     'message': 'low_12v_confirmation_required',
                 }), 423
 
-        # Rate limiter: max 200 calls/day (Kia EU), track usage
+        # Rate limiter: max 200 calls/day (Kia EU), track usage.
+        # Per vehicle — the background sync has counted that way since
+        # v2.29, and counting manual refreshes globally meant one car's
+        # dashboard could exhaust the other car's budget.
+        from services.vehicle.sync_service import counter_keys
+        _cnt_date_key, _cnt_key = counter_keys(_picked_vid)
         today_str = date.today().isoformat()
-        counter_date = AppConfig.get('vehicle_api_counter_date', '')
+        counter_date = AppConfig.get(_cnt_date_key, '')
         if counter_date != today_str:
-            AppConfig.set('vehicle_api_counter_date', today_str)
-            AppConfig.set('vehicle_api_counter', '0')
-        api_count = int(AppConfig.get('vehicle_api_counter', '0'))
+            AppConfig.set(_cnt_date_key, today_str)
+            AppConfig.set(_cnt_key, '0')
+        api_count = int(AppConfig.get(_cnt_key, '0'))
         if api_count >= 190:  # leave 10 buffer for other apps
             return jsonify({'error': f'Tageslimit erreicht ({api_count}/200). Reset um Mitternacht.'}), 429
-        AppConfig.set('vehicle_api_counter', str(api_count + 1))
+        AppConfig.set(_cnt_key, str(api_count + 1))
 
         try:
             from services.vehicle import get_connector
             from services.vehicle.sync_service import log_sync_result
             from services.stats_service import scale_soh
             import json as _json
-            creds = _get_vehicle_credentials()
-            connector = get_connector(brand, creds)
+            connector = get_connector(brand, _creds)
             s = connector.get_status(force=force)
-            _picker_d = _active_vehicle_id()
-            _stamp_vid_d = _picker_d if isinstance(_picker_d, int) else None
-            if _stamp_vid_d is None:
-                from models.database import Vehicle as _Vd
-                _vd = (_Vd.query.filter_by(is_archived=False)
-                       .order_by(_Vd.id.asc()).first()
-                       or _Vd.query.order_by(_Vd.id.asc()).first())
-                _stamp_vid_d = _vd.id if _vd else None
+            _stamp_vid_d = _picked_vid
             sync = _save_vehicle_sync(s, _get_battery_kwh(vehicle_id=_stamp_vid_d),
                                       raw_json=_json.dumps(s.raw_data, default=str),
                                       vehicle_id=_stamp_vid_d)
@@ -5125,13 +5195,20 @@ def register_routes(app):
     @app.route('/api/update/check')
     def api_update_check():
         """Check GitHub for a strictly newer release."""
-        from updater import check_for_update
+        from updater import check_for_update, updates_by_image
         new_version, zip_url = check_for_update()
+        # A container install still learns that a new version exists and
+        # still gets the release notes — it just cannot install it by
+        # swapping files, so the page must offer the right next step
+        # instead of a button that quietly undoes itself.
+        by_image = updates_by_image()
         return jsonify({
             'current': Config.APP_VERSION,
             'latest': new_version,
             'update_available': bool(new_version),
             'zip_url': zip_url,
+            'by_image': by_image,
+            'image_ref': Config.CONTAINER_IMAGE if by_image else None,
             'release_url': f"https://github.com/{Config.GITHUB_REPO}/releases/tag/v{new_version}" if new_version else None,
         })
 
@@ -5285,8 +5362,20 @@ def register_routes(app):
         sync loop for a few seconds and can miss the charge-end
         transition the app otherwise logs automatically.
         """
-        from updater import check_for_update, apply_update
+        from updater import check_for_update, apply_update, updates_by_image
         from models.database import VehicleSync
+
+        # A container updates by image. Swapping files here would appear
+        # to work and be silently discarded the next time the container
+        # is recreated — see updater.updates_by_image for the measurement.
+        # Refused in the route, not merely hidden in the page: a button
+        # that is only missing from the UI is not a safety property.
+        if updates_by_image():
+            return jsonify({
+                'error': 'updates_by_image',
+                'image': Config.CONTAINER_IMAGE,
+                'message': t('upd.container_refused'),
+            }), 409
 
         force = request.args.get('force') in ('1', 'true', 'yes')
         if not force:
@@ -6171,8 +6260,12 @@ def register_routes(app):
 
     @app.route('/api/trips/sync_now', methods=['POST'])
     def api_trips_sync_now():
-        """Trigger a force vehicle sync from the trips page."""
-        brand = AppConfig.get('vehicle_api_brand', '')
+        """Trigger a force vehicle sync from the trips page.
+
+        Same resolution as the dashboard: the picked car is the one that
+        gets asked, and the one the row is stamped with.
+        """
+        brand, _creds_t, _vid_t, _v_t = _active_vehicle_api()
         if not brand:
             return jsonify({'error': 'no_brand'}), 400
 
@@ -6184,13 +6277,6 @@ def register_routes(app):
             from services.vehicle.sync_service import (
                 is_12v_low, _latest_12v_percent, LOW_12V_THRESHOLD_PERCENT
             )
-            _picker_t = _active_vehicle_id()
-            _vid_t = _picker_t if isinstance(_picker_t, int) else None
-            if _vid_t is None:
-                from models.database import Vehicle as _Vt
-                _vt = (_Vt.query.filter_by(is_archived=False)
-                       .order_by(_Vt.id.asc()).first())
-                _vid_t = _vt.id if _vt else None
             if _vid_t and is_12v_low(_vid_t):
                 return jsonify({
                     'error': 'low_12v',
@@ -6199,34 +6285,26 @@ def register_routes(app):
                     'message': 'low_12v_confirmation_required',
                 }), 423
 
-        # Rate limiter check (Kia EU 200/day)
+        # Rate limiter check (Kia EU 200/day), per vehicle.
+        from services.vehicle.sync_service import counter_keys
+        _cnt_date_key, _cnt_key = counter_keys(_vid_t)
         today_str = date.today().isoformat()
-        counter_date = AppConfig.get('vehicle_api_counter_date', '')
+        counter_date = AppConfig.get(_cnt_date_key, '')
         if counter_date != today_str:
-            AppConfig.set('vehicle_api_counter_date', today_str)
-            AppConfig.set('vehicle_api_counter', '0')
-        api_count = int(AppConfig.get('vehicle_api_counter', '0'))
+            AppConfig.set(_cnt_date_key, today_str)
+            AppConfig.set(_cnt_key, '0')
+        api_count = int(AppConfig.get(_cnt_key, '0'))
         if api_count >= 190:
             return jsonify({'error': f'rate_limit ({api_count}/200)'}), 429
-        AppConfig.set('vehicle_api_counter', str(api_count + 1))
+        AppConfig.set(_cnt_key, str(api_count + 1))
 
         try:
             from services.vehicle import get_connector
             from services.vehicle.sync_service import log_sync_result
             import json as _json
-            creds = _get_vehicle_credentials()
-            connector = get_connector(brand, creds)
+            connector = get_connector(brand, _creds_t)
             status = connector.get_status(force=True)
-            # v2.29: stamp the picker's active (or first non-archived)
-            # vehicle so the row is correctly attributed in fleets.
-            _picker = _active_vehicle_id()
-            _stamp_vid = _picker if isinstance(_picker, int) else None
-            if _stamp_vid is None:
-                from models.database import Vehicle as _V
-                _v = (_V.query.filter_by(is_archived=False)
-                      .order_by(_V.id.asc()).first()
-                      or _V.query.order_by(_V.id.asc()).first())
-                _stamp_vid = _v.id if _v else None
+            _stamp_vid = _vid_t
             sync = _save_vehicle_sync(status, _get_battery_kwh(vehicle_id=_stamp_vid),
                                       raw_json=_json.dumps(status.raw_data, default=str),
                                       vehicle_id=_stamp_vid)

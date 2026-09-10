@@ -1,5 +1,90 @@
 # Changelog
 
+## v3.0.125 (2026-09-10)
+
+### The credential form now asks for what the brand actually needs
+
+Setting up a car on the official Škoda API means an API key and a VIN — that
+interface has no account, no password and no PIN. The form nevertheless
+presented the same five boxes to every brand alike ("user name", "password",
+"PIN", "region", "VIN"), so there was nothing to do but try which box the key
+belonged in.
+
+The information had been in the code all along: every connector implements
+`credential_fields()`, and nothing read it. Now the form draws from it — which
+boxes appear, what they are called, the help text under them, and whether a
+value is a free text or a list to pick from. Škoda's key box links straight to
+the page where the key is created. Kia's region became a list instead of a
+text field, and Renault's locale — which is what that connector actually reads
+— became one too.
+
+Three consequences worth naming:
+
+* **XPENG is selectable.** It signs in with an Enode client ID and secret, and
+  was left out of the brand list precisely because both boxes were labelled for
+  an account login. Now they are labelled correctly.
+* **A brand can describe itself before its package is installed**, which is the
+  situation anyone choosing a brand is actually in.
+* **A box the brand does not use is not sent, and what is not sent is not
+  overwritten**, so glancing at another brand no longer clears a stored VIN.
+
+### Switching vehicles showed the first car's data — and stored it as the second
+
+On an installation with two cars, the picker in the top right chose which car
+the page was *labelled* for, but every live-data route read its brand and
+credentials from a set of flat configuration keys that describe the **first**
+vehicle only. Measured on two vehicles: with the second car selected, the
+dashboard answered with the first car's state of charge, range, 12 V level and
+mileage.
+
+The damaging half was invisible: the row that came back was then credited to
+the *selected* car, so one vehicle's odometer was written into the other
+vehicle's history, where the trip derivation reads it.
+
+The car that gets asked and the car that gets credited now come from one
+resolution and cannot disagree. Alongside it:
+
+* the browser-side cache is keyed by vehicle, so a page no longer paints the
+  other car's values from cache before its first request goes out;
+* the daily API budget is counted per vehicle for manual refreshes too — the
+  background sync had done that since multi-vehicle support landed, so
+  refreshing one car used to spend the other car's allowance;
+* the region column is no longer forced to upper case. One column carries
+  `EU` (Kia), `eu` (MG) and `de_DE` (Renault); MG's gateway table is lower case
+  and fell back to Europe on a miss, so a China MG was quietly served the
+  European gateway. Each connector now normalises its own value.
+* Renault and Dacia read a `locale`, and no credential dictionary anywhere
+  carried that key — the region picked in the form never reached them. There
+  were seven hand-written copies of that dictionary; there is one now.
+
+### A container install updates by pulling its image
+
+Measured on the published image rather than assumed: an in-app update inside a
+container does apply, and survives a restart — but the application code lives
+in the image, and only the data directory is a volume. The new files therefore
+sit in the container's writable layer, which is exactly what `docker compose
+pull` discards when it recreates the container. The version then goes back to
+what the image carries, with nothing to say so, and the updater's own rollback
+copy is gone too.
+
+So a container is told the truth instead. The check still runs and still links
+the release notes; in place of the install button there is the one line that
+does the job, with a button to copy it. Everything the app has written stays in
+the volume and is untouched by the pull.
+
+Native and virtual-machine installations are unaffected: the in-app update
+works there exactly as before.
+
+### Also
+
+* The Kia/Hyundai hint still said a refresh token was needed instead of a
+  password. Direct password sign-in has worked since v3.0.108 on Python 3.12;
+  the browser token is the fallback for older installations, and the hint now
+  says that.
+* A vehicle counts as configured when it has what its own brand needs, rather
+  than "any user name" — a name left behind by a previous brand is not a
+  credential the current connector will ever send.
+
 ## v3.0.124 (2026-09-09)
 
 ### The "test connection" button worked for two brands out of ten
@@ -1172,7 +1257,7 @@ in all six languages.
 A battery-*health* certificate is only meaningful if it can state a real SoH.
 Until now the certificate was issued even when no SoH could be determined at
 all — it simply printed an "n/a" grade. For a car whose cloud API never reports
-a BMS SoH (e.g. ev-mike), that produced a certificate with no health figure,
+a BMS SoH (a Škoda, for instance), that produced a certificate with no health figure,
 which is worse than none.
 
 The certificate is now refused outright when **none** of the three SoH sources
@@ -1373,7 +1458,7 @@ Documentation pass, no behaviour change.
   third-party trademark references were removed as well (`grep -i` now finds
   none anywhere in the repo), and the personal-name attributions ("… asked/
   wanted …") were dropped from the entries — the changelog describes *what*
-  changed, not who requested it. The `ev-robert` install hostname stays where it
+  changed, not who requested it. The install hostname stays where it
   appears in production incident notes, since it is a technical identifier.
 - **`README.md`** — documented the features shipped since the last README update:
   the **self-generated battery-health certificate** (coulomb-count method, A–F
@@ -1658,7 +1743,7 @@ Skoda's normal case is unaffected: when the cloud never publishes an is_charging
 
 ### Charge auto-detect: guard against stale-cached pre-charge SoC echo
 
-Observed on ev-robert on 2026-07-29: the car was driven ~236 km (SoC dropped from 97 % → 37 %), parked, plugged in, and charged for 3.5 h back to 87 %. But the BlueLink/UVO cloud kept echoing the pre-drive SoC of 97 % on every cached poll for the full 15 h between the drive-end and the next force-refresh. When motion was finally detected and a force-refresh landed, the odometer jumped +236 km and is_charging flipped to True in the same tick — with SoC correctly reporting 37 %. The next non-charging sample after the session ended showed SoC 87 %, giving a real +50 % / ~32 kWh charge that the auto-detect nonetheless silently dropped.
+Observed on one installation on 2026-07-29: the car was driven ~236 km (SoC dropped from 97 % → 37 %), parked, plugged in, and charged for 3.5 h back to 87 %. But the BlueLink/UVO cloud kept echoing the pre-drive SoC of 97 % on every cached poll for the full 15 h between the drive-end and the next force-refresh. When motion was finally detected and a force-refresh landed, the odometer jumped +236 km and is_charging flipped to True in the same tick — with SoC correctly reporting 37 %. The next non-charging sample after the session ended showed SoC 87 %, giving a real +50 % / ~32 kWh charge that the auto-detect nonetheless silently dropped.
 
 Root cause: `_detect_auto_charge` walks back from the charge-end sync to find the last `is_charging=False` row and uses its SoC as the "before charging" starting point. That row (10:22:33 in this incident) still carried the stale 97 % cache echo. The detector then computed `soc_to - soc_from = 87 - 97 = -10 %`, which is well below the +3 % minimum-gain threshold, and returned silently without a log line — leaving the whole 32 kWh charge unrecorded and no forensic trail.
 
@@ -1667,13 +1752,13 @@ Analogous shape to v3.0.32 (BlueLink echoing the charge-START SoC on the first `
 - **Stale-echo guard** at the pre-charge sample: if `pre_charge_row.soc_percent` is **higher** than the first `is_charging=True` sample's SoC, treat it as a stale cache echo and use the first-charging sample as the starting SoC instead. That's within ~1 % of the real start value (one poll-interval into the session at most), which is well inside the noise floor of a charge estimate. Emits an INFO log line when it triggers so the correction is visible in the journal.
 - **Silent-return breadcrumbs**: the two "SoC bounds missing" and "gain below threshold" early returns in `_detect_auto_charge` now log an INFO line with the values that caused the skip. Previously the detector could refuse to create a charge with no observable trace — this session's diagnosis required pulling raw sync rows out of the DB to reconstruct why. Future misfires show up directly in `journalctl -u ev-tracker.service | grep 'Auto-charge skipped'`.
 
-Retroactive: the missing 2026-07-29 charge on ev-robert was inserted manually before the version bump (id=505, 38.15 kWh AC, SoC 37→87, 111 g/kWh CO2, `needs_review=True`).
+Retroactive: the missing 2026-07-29 charge on that installation was inserted manually before the version bump (id=505, 38.15 kWh AC, SoC 37→87, 111 g/kWh CO2, `needs_review=True`).
 
 ## v3.0.67 (2026-07-06)
 
 ### Kia/Hyundai bg-loop hang recovery: bounded SDK-call timeouts + heartbeat watchdog
 
-Observed on ev-robert on 2026-07-06: the bg-loop ticked normally through the 06:00 morning wake-up window (smart→force + three follow-up cached ticks), then went silent from 06:30:46 until 15:51:27 — nine and a half hours of no syncs while the systemd process reported "active (running)" the whole time. Same symptom shape as the MySkoda hang v3.0.59 addressed, this time on the Kia/Hyundai path: the underlying `hyundai_kia_connect_api` has no socket-level timeout, so a stalled cloud response wedges the calling thread on a socket read forever. v3.0.5's watchdog only covered the `force_refresh_vehicle_state` path; the cached-mode calls that fire every 10 min during the smart window (`check_and_refresh_token`, `update_all_vehicles_with_cached_state`, `update_vehicle_with_cached_state`) had no protection.
+Observed on one installation on 2026-07-06: the bg-loop ticked normally through the 06:00 morning wake-up window (smart→force + three follow-up cached ticks), then went silent from 06:30:46 until 15:51:27 — nine and a half hours of no syncs while the systemd process reported "active (running)" the whole time. Same symptom shape as the MySkoda hang v3.0.59 addressed, this time on the Kia/Hyundai path: the underlying `hyundai_kia_connect_api` has no socket-level timeout, so a stalled cloud response wedges the calling thread on a socket read forever. v3.0.5's watchdog only covered the `force_refresh_vehicle_state` path; the cached-mode calls that fire every 10 min during the smart window (`check_and_refresh_token`, `update_all_vehicles_with_cached_state`, `update_vehicle_with_cached_state`) had no protection.
 
 Two-layer fix:
 
@@ -1815,11 +1900,11 @@ Polled (PE-pair) trips are unaffected; this only changes the SDK-only fallback p
 
 ### Self-heal: auto-enable background sync when credentials exist but the toggle was never set
 
-The Skoda host (ev-mike) had `vehicle_sync_enabled=false` from day one — the setup wizard never sets the flag, and the user has to find the "Auto-Sync" checkbox in Settings → Fahrzeuge to opt in. Symptom: no `src=bg-loop` entries in the logs, no GPS in any VehicleSync, 0 ParkingEvents, and every Fahrtenbuch row stuck on "Ort unbekannt" even though MySkoda was returning data fine.
+The Škoda installation had `vehicle_sync_enabled=false` from day one — the setup wizard never sets the flag, and the user has to find the "Auto-Sync" checkbox in Settings → Fahrzeuge to opt in. Symptom: no `src=bg-loop` entries in the logs, no GPS in any VehicleSync, 0 ParkingEvents, and every Fahrtenbuch row stuck on "Ort unbekannt" even though MySkoda was returning data fine.
 
 Fix in `start_sync()`: distinguish "key unset" from "user said false". When at least one fleet vehicle has API credentials and `AppConfig.vehicle_sync_enabled` is `None` (key absent), auto-flip to `'true'` once and start the loop. An explicit `'false'` from the user still wins — only the unset case gets healed.
 
-Manually applied to ev-mike during diagnosis (flag set, service restarted) — first bg-loop sync caught GPS, PE#1 created at home (label='home'). This release ships the same self-heal to every install so the next provision doesn't repeat the symptom.
+Manually applied to that installation during diagnosis (flag set, service restarted) — first bg-loop sync caught GPS, PE#1 created at home (label='home'). This release ships the same self-heal to every install so the next provision doesn't repeat the symptom.
 
 ## v3.0.56 (2026-06-10)
 
@@ -2056,7 +2141,7 @@ The Discard button now: calls the server endpoint, then mirrors the dismissal in
 
 ### Trip split: zero-duration legacy trips refuse to open
 
-ev-robert has five ParkingEvent pairs with `departed_at == arrived_at` (a quirk of how the state machine flushed flush-on-stop on a single sync long before v3.0.32). The splitter modal used to open on these, show an empty map, and silently fail with a confusing warning on every map tap because there's literally no time interval to insert a stop into. The endpoint now returns `422 trip_too_short` upfront with the actual endpoint timestamps; the modal renders a clear "fix the endpoint timestamps first" message and locks the Save button so the user knows what's required.
+One installation has five ParkingEvent pairs with `departed_at == arrived_at` (a quirk of how the state machine flushed flush-on-stop on a single sync long before v3.0.32). The splitter modal used to open on these, show an empty map, and silently fail with a confusing warning on every map tap because there's literally no time interval to insert a stop into. The endpoint now returns `422 trip_too_short` upfront with the actual endpoint timestamps; the modal renders a clear "fix the endpoint timestamps first" message and locks the Save button so the user knows what's required.
 
 ## v3.0.39 (2026-06-01)
 
@@ -2080,7 +2165,7 @@ Added a client-side `isInsideWindow` guard too: any stop whose timestamp would f
 
 ### /input resume banner: dismiss is now permanent per saved_id
 
-The resume banner was reported reappearing on ev-robert even after clicking Verwerfen. Root cause: server-side `active_session` is driven purely by URL params (`?saved_id=X&active=1`), and a stuck bookmark / browser-history entry kept reloading those params. The old `window.location.replace` reload also occasionally came back from iOS Safari's cache with the params re-attached.
+The resume banner was reported reappearing even after clicking Verwerfen. Root cause: server-side `active_session` is driven purely by URL params (`?saved_id=X&active=1`), and a stuck bookmark / browser-history entry kept reloading those params. The old `window.location.replace` reload also occasionally came back from iOS Safari's cache with the params re-attached.
 
 Reworked Verwerfen:
 
@@ -2157,7 +2242,7 @@ Added a mobile CSS rule (`@media (max-width: 768px)`) that lifts every text/numb
 
 The price-per-kWh input on all three forms (new charge, in-page edit modal on /input and /history, full-page /edit) had `step="0.01"`, which forced the browser to reject any value that didn't round to two decimals. Auto-detected and reconstructed entries store the operator price as-configured (e.g. `0.3287 €/kWh`), so the user couldn't save them without manually rounding first — for the reconstructed v3.0.32 entry the form simply refused with *"ungültiger Wert"*. Relaxed `step` to `0.0001` so any tariff with up to four decimal places submits cleanly while the spinner still works.
 
-A retrospective sweep of the last 14 days of vehicle-sync data turned up one further missed charge: ev-dirk on 2026-05-22 at work (50→90 %, ~31.4 kWh AC). The sync log was clean, so this predates the v3.0.32 cloud-echo fix and was likely missed by an earlier detector version. Reconstructed as `needs_review`.
+A retrospective sweep of the last 14 days of vehicle-sync data turned up one further missed charge on 2026-05-22 at work (50→90 %, ~31.4 kWh AC). The sync log was clean, so this predates the v3.0.32 cloud-echo fix and was likely missed by an earlier detector version. Reconstructed as `needs_review`.
 
 ## v3.0.32 (2026-05-30)
 
@@ -2167,7 +2252,7 @@ Real report: a 50→82 % home charge finished, but the auto-detection produced n
 
 `soc_to` is now floored at the highest SoC observed during the charging run. A glitchy echo can no longer sink the end-SoC below what the car physically reached, so the detection captures the full window even when the cloud lies on the very last sample.
 
-The missed 2026-05-30 ev-robert charge (50→82 %, ~24.3 kWh, home) was reconstructed manually as `needs_review` so the user can confirm and edit if needed.
+The missed 2026-05-30 charge (50→82 %, ~24.3 kWh, home) was reconstructed manually as `needs_review` so the user can confirm and edit if needed.
 
 ## v3.0.31 (2026-05-29)
 
@@ -2659,7 +2744,7 @@ The vehicle-history chart `vhRegen` (cumulative regen-since-tracking-started) ke
 
 ### Trip log — regen fallback now also kicks in on flat-zero measurements
 
-User report after v2.28.56 deploy: ev-robert's morning commute (2026-04-27 06:48, km=18) still showed Recup 0.0 instead of the new estimate. The v2.28.56 fallback only triggered when the measured value was `None`; trips where `cum_arr - cum_dep` collapsed to exactly 0 (e.g. the departure-side sync snapped to the first sync AFTER drive start, so the delta vanished) bypassed it.
+User report after v2.28.56 deploy: a morning commute (2026-04-27 06:48, km=18) still showed Recup 0.0 instead of the new estimate. The v2.28.56 fallback only triggered when the measured value was `None`; trips where `cum_arr - cum_dep` collapsed to exactly 0 (e.g. the departure-side sync snapped to the first sync AFTER drive start, so the delta vanished) bypassed it.
 
 **Fix**: condition is now `regen is None OR regen == 0` (combined with `km > 0`). Any real drive with km ≥ 1 recuperates non-zero — a measured zero is broken-measurement-shaped, so we'd rather show the estimate. Same change in the SDK-only path.
 

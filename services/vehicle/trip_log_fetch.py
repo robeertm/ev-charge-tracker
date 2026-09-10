@@ -107,23 +107,23 @@ def fetch_day_trip_info(target_date: date, vehicle_id=None) -> dict:
         if veh is None:
             out['skipped_reason'] = f'vehicle_id {vehicle_id} not found'
             return out
+        from .catalog import credentials_of
         brand = (veh.api_brand or '').lower()
-        creds = {
-            'username': veh.api_username or '',
-            'password': veh.api_password or '',
-            'pin':      veh.api_pin or '',
-            'region':   veh.api_region or 'EU',
-            'vin':      veh.api_vin or '',
-        }
+        creds = credentials_of(veh)
     else:
-        brand = (AppConfig.get('vehicle_api_brand', '') or '').lower()
-        creds = {
-            'username': AppConfig.get('vehicle_api_username', ''),
-            'password': AppConfig.get('vehicle_api_password', ''),
-            'pin':      AppConfig.get('vehicle_api_pin', ''),
-            'region':   AppConfig.get('vehicle_api_region', 'EU'),
-            'vin':      AppConfig.get('vehicle_api_vin', ''),
-        }
+        # No vehicle named: the legacy AppConfig mirror, which describes
+        # the primary vehicle. Kept for installs that have no vehicle
+        # rows; a caller that knows which car it means passes the id.
+        from .catalog import credentials_of
+        from models.database import Vehicle as _V
+        _erst = (_V.query.filter_by(is_archived=False)
+                 .order_by(_V.id.asc()).first()
+                 or _V.query.order_by(_V.id.asc()).first())
+        brand = ((_erst.api_brand if _erst else None)
+                 or AppConfig.get('vehicle_api_brand', '') or '').lower()
+        from .catalog import legacy_credentials
+        creds = (credentials_of(_erst) if _erst is not None
+                 else legacy_credentials())
 
     if brand not in SDK_TRIP_BRANDS:
         out['skipped_reason'] = f'brand {brand!r} has no SDK trip endpoint'
