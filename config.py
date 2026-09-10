@@ -49,7 +49,7 @@ class Config:
     ENTSOE_API_KEY = os.environ.get('ENTSOE_API_KEY', '')
     ENTSOE_COUNTRY = 'DE'
 
-    APP_VERSION = '3.0.125'
+    APP_VERSION = '3.0.126'
     GITHUB_REPO = 'robeertm/ev-charge-tracker'
     # The published image. Named here so the update card can tell a
     # container user exactly what to pull instead of leaving them to

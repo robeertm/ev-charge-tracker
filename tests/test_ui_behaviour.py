@@ -267,6 +267,64 @@ def test_switching_brands_in_the_form_does_not_wipe_a_stored_value(live_app):
     assert vin == 'TMBTESTVIN000001', f'the stored VIN was lost ({vin!r})'
 
 
+def test_the_data_check_finds_a_foreign_row_and_removes_only_that_one(live_app):
+    """Drive the clean-up the way its user will.
+
+    A row carrying the other car's odometer is planted, then the card is
+    used from the browser: check, tick the one finding, remove. Nothing
+    must be pre-ticked — a small backwards step is usually a cached
+    reading being re-served, and a pre-ticked destructive action nudges
+    the user into deleting a perfectly good row.
+    """
+    base, data_dir = live_app
+    _seed_vehicle(data_dir)
+    import sqlite3
+    db = os.path.join(data_dir, 'ev_tracker.db')
+    con = sqlite3.connect(db)
+    (vid,) = con.execute('SELECT MIN(id) FROM vehicles').fetchone()
+    for minute, km in ((0, 12340), (10, 37750), (20, 12345), (30, 12350)):
+        con.execute(
+            "INSERT INTO vehicle_syncs (vehicle_id, timestamp, odometer_km,"
+            " soc_percent, raw_json) VALUES (?, ?, ?, 50, '{}')",
+            (vid, f'2026-09-01 10:{minute:02d}:00', km))
+    con.commit()
+    vorher = con.execute('SELECT COUNT(*) FROM vehicle_syncs').fetchone()[0]
+    con.close()
+
+    with playwright_api.sync_playwright() as pw:
+        browser = pw.chromium.launch()
+        page = browser.new_page()
+        errors = []
+        page.on('pageerror', lambda e: errors.append(str(e)))
+        page.on('dialog', lambda d: d.accept())
+        _open_settings(page, base)
+        page.eval_on_selector('#sec-syncaudit', 'e => e.scrollIntoView()')
+        page.click('#btnSyncAudit')
+        page.wait_for_timeout(1500)
+
+        kaesten = page.query_selector_all('.audit-row')
+        assert len(kaesten) == 1, f'expected exactly one finding, got {len(kaesten)}'
+        assert not kaesten[0].is_checked(), \
+            'a destructive action must not come pre-ticked'
+        text = page.inner_text('#syncAuditResult')
+        assert '37.750' in text or '37750' in text, text
+
+        kaesten[0].check()
+        page.click('.audit-del')
+        page.wait_for_timeout(2000)
+        assert not errors, errors
+        browser.close()
+
+    con = sqlite3.connect(db)
+    nachher = con.execute('SELECT COUNT(*) FROM vehicle_syncs').fetchone()[0]
+    uebrig = [r[0] for r in con.execute(
+        'SELECT odometer_km FROM vehicle_syncs ORDER BY timestamp').fetchall()]
+    con.close()
+    assert nachher == vorher - 1, 'exactly one row should have gone'
+    assert 37750 not in uebrig, 'the foreign row is still there'
+    assert 12345 in uebrig and 12350 in uebrig, 'a genuine row was taken too'
+
+
 def test_every_inline_handler_waits_for_the_document():
     """The structural rule behind the bug, checked without a browser.
 

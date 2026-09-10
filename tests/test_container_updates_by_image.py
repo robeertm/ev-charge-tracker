@@ -99,7 +99,11 @@ def test_the_route_refuses_too_and_not_only_the_page():
     and this is a statement about the code, not about a running app."""
     quelle = (ROOT / 'app.py').read_text(encoding='utf-8')
     stelle = quelle.index("def api_update_install")
-    block = quelle[stelle:stelle + 3000]
+    # Bis zur naechsten Funktion, nicht bis zu einer Zeichenzahl: der
+    # Block ist gewachsen und ein fester Ausschnitt haette den Riegel
+    # verloren, ohne dass sich am Riegel etwas geaendert hat.
+    block = quelle[stelle:]
+    block = block[:block.index('    @app.route', 10)]
     assert 'updates_by_image()' in block
     assert "'updates_by_image'" in block
 

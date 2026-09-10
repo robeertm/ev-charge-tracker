@@ -988,6 +988,10 @@
 
                 <script>
                 const T = {
+                    upd_helper_hint: {{ t('upd.helper_hint')|tojson }},
+                    upd_helper_pulling: {{ t('upd.helper_pulling')|tojson }},
+                    upd_helper_restarting: {{ t('upd.helper_restarting')|tojson }},
+                    upd_helper_failed: {{ t('upd.helper_failed')|tojson }},
                     upd_container_hint: {{ t('upd.container_hint')|tojson }},
                     upd_copy: {{ t('upd.copy')|tojson }},
                     upd_copied: {{ t('upd.copied')|tojson }},
@@ -1556,6 +1560,24 @@
         </template>
 
         <!-- Database Info -->
+        {# ── Fahrzeugdaten pruefen ──────────────────────────────
+           Bis v3.0.125 fragte das Dashboard immer das ERSTE Fahrzeug ab
+           und verbuchte die Antwort beim GEWAEHLTEN. Das ist behoben —
+           aber was vorher geschrieben wurde, steht noch da, und es gab
+           keine Stelle, an der man es ueberhaupt sehen konnte. #}
+        <div class="card mb-4 settings-card" id="sec-syncaudit">
+            <div class="card-header bg-white fw-bold">
+                <i class="bi bi-clipboard-check"></i> {{ t('audit.title') }}
+            </div>
+            <div class="card-body">
+                <p class="text-muted small mb-2">{{ t('audit.desc') }}</p>
+                <button class="btn btn-outline-primary btn-sm" id="btnSyncAudit">
+                    <i class="bi bi-search"></i> {{ t('audit.check') }}
+                </button>
+                <div id="syncAuditResult" class="mt-3"></div>
+            </div>
+        </div>
+
         <div class="card mb-4 settings-card" id="sec-database">
             <div class="card-header bg-white fw-bold">
                 <i class="bi bi-database"></i> {{ t('set.db_title') }}
@@ -2813,7 +2835,22 @@
                 const notizen =
                     '<a href="' + data.release_url + '" target="_blank" class="btn btn-sm btn-outline-secondary">' +
                     '<i class="bi bi-github"></i> ' + T.app_release_notes + '</a>';
-                if (data.by_image) {
+                if (data.by_image && data.helper_available) {
+                    // Ein Geschwister-Container kann das Abbild ziehen und
+                    // uns ersetzen. Also gibt es hier wieder einen Knopf —
+                    // vom Handy aus, ohne Konsole auf dem Server.
+                    result.innerHTML =
+                        '<div class="alert alert-info">' + kopf +
+                        '<div class="mt-2 small">' + T.upd_helper_hint + '</div>' +
+                        '<div class="mt-2">' +
+                        '<button class="btn btn-sm btn-primary me-2" id="btnInstallUpdate">' +
+                        '<i class="bi bi-box-arrow-down"></i> ' + T.app_install_now + '</button>' +
+                        notizen +
+                        '</div>' +
+                        '</div>';
+                    document.getElementById('btnInstallUpdate')
+                        .addEventListener('click', () => doInstall(false));
+                } else if (data.by_image) {
                     // Diese Installation laeuft aus einem Abbild. Ein
                     // Dateitausch von innen wuerde beim naechsten
                     // Neuerzeugen des Containers spurlos verschwinden —
@@ -2858,6 +2895,30 @@
         setIdle();
     }
 
+    // Solange der Geschwister-Container arbeitet, seinen Zustand zeigen.
+    // Er ersetzt uns am Ende — dass diese Abfrage dann abbricht, ist der
+    // Erfolg, nicht der Fehler.
+    async function verfolgeHelfer() {
+        const schritt = document.getElementById('updStep');
+        if (!schritt) return;
+        try {
+            const r = await fetch('/api/update/helper', { cache: 'no-store' });
+            const d = await r.json();
+            const st = (d.status && d.status.state) || '';
+            if (st === 'pulling') schritt.textContent = T.upd_helper_pulling;
+            else if (st === 'restarting') schritt.textContent = T.upd_helper_restarting;
+            else if (st === 'failed') {
+                schritt.innerHTML = '<span class="text-danger">' + T.upd_helper_failed
+                    + '</span><pre class="small mt-2 mb-0" style="white-space:pre-wrap">'
+                    + (d.log || '').slice(-800) + '</pre>';
+                return;
+            }
+            if (st !== 'done') setTimeout(verfolgeHelfer, 2000);
+        } catch (e) {
+            // Die App ist weg = der Austausch läuft. pollUntilBack übernimmt.
+        }
+    }
+
     async function doInstall(force) {
         if (!force && !confirm(T.app_install_confirm)) return;
         const installBtn = document.getElementById('btnInstallUpdate');
@@ -2886,10 +2947,13 @@
                 result.innerHTML =
                     '<div class="alert alert-success">' +
                     '<i class="bi bi-check-circle"></i> ' + T.app_install_started + '<br>' +
-                    '<small>' + T.app_install_wait + '</small>' +
+                    '<small id="updStep">' + T.app_install_wait + '</small>' +
                     '<div class="progress mt-2" style="height:6px"><div class="progress-bar progress-bar-striped progress-bar-animated" style="width:100%"></div></div>' +
                     '</div>';
-                // Poll for the app coming back online
+                // Pulling an image takes longer than swapping files and
+                // says nothing while it runs. Show what the sibling is
+                // doing, otherwise a slow line looks like a hang.
+                if (data.by_helper) verfolgeHelfer();
                 setTimeout(pollUntilBack, 5000);
             } else {
                 result.innerHTML = '<div class="alert alert-danger">' + T.app_error + (data.error || 'unknown') + '</div>';
@@ -3881,6 +3945,121 @@
     });
 
     console.log('[notify] handlers attached');
+})();
+</script>
+
+<script>
+// ── Fahrzeugdaten prüfen ───────────────────────────────────────────
+// Ein Kilometerstand steigt nur. Fällt er, kann die Zeile nicht zu
+// diesem Auto gehören. Gelöscht wird nichts von selbst: eine von Hand
+// korrigierte Anzeige sieht genauso aus wie ein fremder Wert, und das
+// kann nur ein Mensch unterscheiden.
+(function () {
+    const btn = document.getElementById('btnSyncAudit');
+    const out = document.getElementById('syncAuditResult');
+    if (!btn || !out) return;
+    const T = {
+        none: {{ t('audit.none')|tojson }},
+        found: {{ t('audit.found')|tojson }},
+        row: {{ t('audit.row')|tojson }},
+        expected: {{ t('audit.expected')|tojson }},
+        delta: {{ t('audit.delta')|tojson }},
+        remove: {{ t('audit.remove')|tojson }},
+        confirm: {{ t('audit.confirm')|tojson }},
+        removed: {{ t('audit.removed')|tojson }},
+        after: {{ t('audit.after_hint')|tojson }},
+        small_hint: {{ t('audit.small_hint')|tojson }},
+        error: {{ t('audit.error')|tojson }},
+    };
+
+    function zahl(n) {
+        return (n === null || n === undefined) ? '—' : n.toLocaleString('de-DE');
+    }
+
+    async function pruefen() {
+        btn.disabled = true;
+        out.innerHTML = '<span class="spinner-border spinner-border-sm"></span>';
+        try {
+            const r = await fetch('/api/sync/audit', { cache: 'no-store' });
+            const d = await r.json();
+            if (!d.total) {
+                out.innerHTML = '<div class="alert alert-success py-2 mb-0">'
+                    + '<i class="bi bi-check-circle"></i> ' + T.none + '</div>';
+                return;
+            }
+            let html = '<div class="alert alert-warning py-2">'
+                + '<i class="bi bi-exclamation-triangle"></i> '
+                + T.found.replace('{count}', d.total) + '</div>';
+            d.vehicles.forEach(v => {
+                if (!v.rows.length) return;
+                html += '<div class="mb-3"><div class="fw-semibold small mb-1">'
+                     + v.name + '</div><ul class="list-group list-group-flush mb-2">';
+                v.rows.forEach(z => {
+                    const wann = z.timestamp ? z.timestamp.replace('T', ' ').slice(0, 16) : '—';
+                    // Nichts vorauswählen: ein kleiner Rückschritt ist meist
+                    // ein wiederholter älterer Wert und völlig in Ordnung.
+                    // Eine Löschaktion vorzuhaken drängt dazu, genau den
+                    // mitzunehmen.
+                    html += '<li class="list-group-item px-0 py-1 small">'
+                         + '<label class="d-flex gap-2 align-items-start mb-0">'
+                         + '<input type="checkbox" class="form-check-input mt-1 audit-row"'
+                         + ' data-vid="' + v.vehicle_id + '" data-id="' + z.id + '">'
+                         + '<span>' + T.row
+                             .replace('{when}', wann)
+                             .replace('{km}', zahl(z.odometer_km))
+                         + ' <span class="text-muted">'
+                         + T.expected.replace('{km}', zahl(z.expected_around_km))
+                         + ' · ' + T.delta.replace('{km}', zahl(z.delta_km))
+                         + '</span></span></label></li>';
+                });
+                html += '</ul><button class="btn btn-sm btn-outline-danger audit-del"'
+                     + ' data-vid="' + v.vehicle_id + '">'
+                     + '<i class="bi bi-trash"></i> ' + T.remove + '</button></div>';
+            });
+            html += '<div class="form-text small">' + T.small_hint + '</div>'
+                 + '<div class="form-text small">' + T.after + '</div>';
+            out.innerHTML = html;
+            out.querySelectorAll('.audit-del').forEach(b => {
+                b.addEventListener('click', () => loeschen(b.dataset.vid));
+            });
+        } catch (e) {
+            out.innerHTML = '<div class="alert alert-danger py-2 mb-0">'
+                + T.error + ' ' + e.message + '</div>';
+        } finally {
+            btn.disabled = false;
+        }
+    }
+
+    async function loeschen(vid) {
+        const ids = Array.from(out.querySelectorAll(
+            '.audit-row[data-vid="' + vid + '"]:checked')).map(e => +e.dataset.id);
+        if (!ids.length) return;
+        if (!confirm(T.confirm.replace('{count}', ids.length))) return;
+        try {
+            const r = await fetch('/api/sync/audit/delete', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ vehicle_id: +vid, row_ids: ids }),
+            });
+            const d = await r.json();
+            if (d.ok) {
+                out.insertAdjacentHTML('afterbegin',
+                    '<div class="alert alert-success py-2">'
+                    + T.removed.replace('{count}', d.deleted) + '</div>');
+                pruefen();
+            } else {
+                out.insertAdjacentHTML('afterbegin',
+                    '<div class="alert alert-danger py-2">' + T.error + ' '
+                    + (d.error || '') + '</div>');
+            }
+        } catch (e) {
+            out.insertAdjacentHTML('afterbegin',
+                '<div class="alert alert-danger py-2">' + T.error + ' '
+                + e.message + '</div>');
+        }
+    }
+
+    btn.addEventListener('click', pruefen);
 })();
 </script>
 

@@ -4422,6 +4422,42 @@ def register_routes(app):
                                last_rollback=_get_last_rollback(),
                                app_version=Config.APP_VERSION)
 
+    # ── SYNC AUDIT ─────────────────────────────────────────────
+    @app.route('/api/sync/audit')
+    def api_sync_audit():
+        """Rows whose odometer says they cannot belong to this vehicle.
+
+        Exists because of the picker bug fixed in v3.0.125: one car's
+        readings were filed under another car, and stopping that could
+        not remove what had already been written.
+        """
+        from services.sync_audit import audit
+        return jsonify(audit())
+
+    @app.route('/api/sync/audit/delete', methods=['POST'])
+    def api_sync_audit_delete():
+        """Delete named rows of ONE vehicle, re-checking each one first.
+
+        Nothing is removed without the user naming it: the listing shows
+        every value first, because a hand-corrected odometer looks the
+        same as a foreign reading and only a person can tell them apart.
+        """
+        from services.sync_audit import delete_rows
+        data = request.get_json(silent=True) or {}
+        try:
+            vid = int(data.get('vehicle_id'))
+        except (TypeError, ValueError):
+            return jsonify({'error': 'vehicle_id required'}), 400
+        ids = data.get('row_ids') or []
+        if not isinstance(ids, list):
+            return jsonify({'error': 'row_ids must be a list'}), 400
+        try:
+            ids = [int(i) for i in ids]
+        except (TypeError, ValueError):
+            return jsonify({'error': 'row_ids must be integers'}), 400
+        ergebnis = delete_rows(vid, ids)
+        return jsonify({'ok': True, **ergebnis})
+
     # ── VEHICLE RAW-DATA VIEWER ────────────────────────────────
     @app.route('/vehicle/raw')
     def vehicle_raw_list():
@@ -4429,13 +4465,35 @@ def register_routes(app):
         detail view where the full raw API dump is pretty-printed."""
         limit = request.args.get('limit', 50, type=int)
         limit = max(1, min(limit, 500))
-        syncs = (VehicleSync.query
-                 .order_by(VehicleSync.timestamp.desc())
-                 .limit(limit).all())
-        brand_key = AppConfig.get('vehicle_api_brand', '')
+        # The list used to show every vehicle's rows mixed together with
+        # nothing saying which car each came from — on the one page where
+        # you would go to check exactly that. It follows the picker now,
+        # and each row carries its vehicle.
+        _brand, _creds, _vid_raw, _v_raw = _active_vehicle_api()
+        q = VehicleSync.query
+        if _vid_raw is not None:
+            q = q.filter(VehicleSync.vehicle_id == _vid_raw)
+        syncs = q.order_by(VehicleSync.timestamp.desc()).limit(limit).all()
+        namen = {}
+        try:
+            from models.database import Vehicle as _Vr
+            namen = {v.id: v.name for v in _Vr.query.all()}
+        except Exception:
+            logger.warning('raw viewer: could not read vehicle names',
+                           exc_info=True)
+        auffaellig = set()
+        try:
+            from services.sync_audit import implausible_rows
+            if _vid_raw is not None:
+                auffaellig = {r['id'] for r in implausible_rows(_vid_raw)}
+        except Exception:
+            logger.warning('raw viewer: sync audit failed', exc_info=True)
         return render_template('vehicle_raw.html',
                                syncs=syncs,
-                               brand_key=brand_key,
+                               brand_key=_brand,
+                               vehicle_names=namen,
+                               flagged_ids=auffaellig,
+                               active_vehicle_name=(_v_raw.name if _v_raw else ''),
                                limit=limit,
                                detail=None)
 
@@ -4456,7 +4514,17 @@ def register_routes(app):
                 raw_error = str(e)
         pretty = _json.dumps(raw_parsed, indent=2, ensure_ascii=False, default=str) \
             if raw_parsed is not None else (sync.raw_json or '')
-        brand_key = AppConfig.get('vehicle_api_brand', '')
+        # The brand of the vehicle THIS row belongs to — the legacy key
+        # describes the first vehicle and would mislabel every other
+        # car's payload.
+        brand_key = ''
+        try:
+            from models.database import Vehicle as _Vd2
+            _vd2 = _Vd2.query.get(sync.vehicle_id) if sync.vehicle_id else None
+            brand_key = (_vd2.api_brand or '') if _vd2 is not None else ''
+        except Exception:
+            logger.warning('raw detail: could not resolve the vehicle',
+                           exc_info=True)
         # Normalized fields we already store in VehicleSync (for the
         # info box above the JSON dump). battery_soh_percent is the
         # scaled (user-facing) value; the raw BMS reading is kept in
@@ -5202,14 +5270,46 @@ def register_routes(app):
         # swapping files, so the page must offer the right next step
         # instead of a button that quietly undoes itself.
         by_image = updates_by_image()
+        # A container CAN be updated from the app after all — not by
+        # swapping its own files, but by asking a sibling container to
+        # pull the new image and recreate it. Where that sibling is
+        # installed the button comes back; where it is not, the manual
+        # command stays.
+        helfer = False
+        if by_image:
+            try:
+                from services import container_update
+                helfer = container_update.available()
+            except Exception:
+                logger.warning('could not check for the updater sibling',
+                               exc_info=True)
         return jsonify({
             'current': Config.APP_VERSION,
             'latest': new_version,
             'update_available': bool(new_version),
             'zip_url': zip_url,
             'by_image': by_image,
+            'helper_available': helfer,
             'image_ref': Config.CONTAINER_IMAGE if by_image else None,
             'release_url': f"https://github.com/{Config.GITHUB_REPO}/releases/tag/v{new_version}" if new_version else None,
+        })
+
+    @app.route('/api/update/helper')
+    def api_update_helper():
+        """What the updater sibling is doing right now.
+
+        The page polls this while an update runs. Once the sibling
+        recreates the app the request stops being answered at all — that
+        silence, followed by a health check reporting the new version,
+        IS the success signal. So this never has to report "done"
+        reliably, and does not pretend to.
+        """
+        from services import container_update
+        return jsonify({
+            'available': container_update.available(),
+            'pending': container_update.pending(),
+            'status': container_update.status(),
+            'log': container_update.log_tail(),
         })
 
     @app.route('/api/restart', methods=['POST'])
@@ -5365,18 +5465,17 @@ def register_routes(app):
         from updater import check_for_update, apply_update, updates_by_image
         from models.database import VehicleSync
 
-        # A container updates by image. Swapping files here would appear
-        # to work and be silently discarded the next time the container
-        # is recreated — see updater.updates_by_image for the measurement.
-        # Refused in the route, not merely hidden in the page: a button
-        # that is only missing from the UI is not a safety property.
-        if updates_by_image():
-            return jsonify({
-                'error': 'updates_by_image',
-                'image': Config.CONTAINER_IMAGE,
-                'message': t('upd.container_refused'),
-            }), 409
-
+        # ── Charging gate FIRST, for every kind of installation ──
+        # This gate exists because an update interrupts the sync loop and
+        # can miss the charge-end transition. Recreating a container does
+        # that just as much as swapping files does, so the container path
+        # must not skip it — putting the container branch above this line
+        # quietly took the gate away from container users, which is
+        # exactly the kind of regression a new feature is good at hiding.
+        #
+        # The query is deliberately NOT scoped to the picked vehicle: a
+        # restart stops the sync loop for the whole fleet, so any car
+        # currently charging is a reason to wait.
         force = request.args.get('force') in ('1', 'true', 'yes')
         if not force:
             last_sync = (VehicleSync.query
@@ -5392,6 +5491,37 @@ def register_routes(app):
                     ),
                     'last_sync_at': last_sync.timestamp.isoformat(),
                 }), 409
+
+        # ── A container updates by image ─────────────────────────────
+        # Swapping files here would appear to work and be silently
+        # discarded the next time the container is recreated — see
+        # updater.updates_by_image for the measurement. Where a sibling
+        # container is installed it can do the real thing: pull the new
+        # image and recreate us. Where it is not, this is refused in the
+        # route and not merely hidden in the page — a button that is only
+        # missing from the UI is not a safety property.
+        if updates_by_image():
+            from services import container_update
+            neue_version, _zip = check_for_update()
+            if container_update.available():
+                # Hand it to the sibling. We do NOT exit here: the
+                # sibling recreates this container, and going away by
+                # ourselves first would leave the user staring at a dead
+                # port while the pull is still running.
+                if container_update.request(neue_version or ''):
+                    return jsonify({
+                        'staged': True,
+                        'by_helper': True,
+                        'version': neue_version,
+                        'message': t('upd.helper_started'),
+                    })
+                return jsonify({'error': 'helper_request_failed',
+                                'message': t('upd.helper_failed_request')}), 500
+            return jsonify({
+                'error': 'updates_by_image',
+                'image': Config.CONTAINER_IMAGE,
+                'message': t('upd.container_refused'),
+            }), 409
 
         new_version, zip_url = check_for_update()
         if not new_version or not zip_url:
@@ -5489,10 +5619,14 @@ def register_routes(app):
         locations = _load_locations()
 
         # Freshness info for the UI
-        last_with_gps = (VehicleSync.query
-                         .filter(VehicleSync.location_lat.isnot(None))
-                         .order_by(VehicleSync.timestamp.desc())
-                         .first())
+        # Both of these describe ONE car. Unfiltered, the trips page
+        # showed the first vehicle's brand buttons and the first
+        # vehicle's GPS freshness while the picker said something else.
+        _brand_tp, _c_tp, _vid_tp, _v_tp = _active_vehicle_api()
+        _gps_q = VehicleSync.query.filter(VehicleSync.location_lat.isnot(None))
+        if _vid_tp is not None:
+            _gps_q = _gps_q.filter(VehicleSync.vehicle_id == _vid_tp)
+        last_with_gps = _gps_q.order_by(VehicleSync.timestamp.desc()).first()
         gps_freshness = None
         if last_with_gps:
             gps_freshness = {
@@ -5502,7 +5636,7 @@ def register_routes(app):
 
         return render_template('trips.html',
                                gps_freshness=gps_freshness,
-                               vehicle_brand=AppConfig.get('vehicle_api_brand', ''),
+                               vehicle_brand=_brand_tp,
                                trips=trips, events=[
                                    {'id': e.id, 'arrived_at': e.arrived_at.isoformat(),
                                     'departed_at': e.departed_at.isoformat() if e.departed_at else None,
@@ -6239,7 +6373,12 @@ def register_routes(app):
         days and store them as VehicleTrip rows. Server-side call only
         (no car wake-up, no 12V drain); counts one per day against the
         200/vehicle daily API budget."""
-        brand = AppConfig.get('vehicle_api_brand', '')
+        # The route read the legacy brand and then called backfill()
+        # WITHOUT a vehicle id, so on a two-car fleet it walked the first
+        # car's trips no matter which one was on screen. backfill() has
+        # taken a vehicle_id since multi-vehicle support landed; nobody
+        # passed it.
+        brand, _c_bf, _vid_bf, _v_bf = _active_vehicle_api()
         if brand not in ('kia', 'hyundai'):
             return jsonify({'error': 'brand_not_supported',
                             'hint': 'SDK trip log only for Kia/Hyundai'}), 400
@@ -6253,7 +6392,7 @@ def register_routes(app):
 
         from services.vehicle.trip_log_fetch import backfill
         try:
-            summary = backfill(days=days)
+            summary = backfill(days=days, vehicle_id=_vid_bf)
             return jsonify({'ok': True, **summary})
         except Exception as e:
             return jsonify({'error': str(e)}), 500

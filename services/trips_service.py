@@ -961,7 +961,17 @@ def get_trips(limit: Optional[int] = None,
     regen_lookup = _load_regen_lookup()
     soc_lookup = _load_soc_lookup()
 
-    brand = (AppConfig.get('vehicle_api_brand', '') or '').lower()
+    # Prefer the vehicle in hand. The same function already scopes its
+    # queries by vehicle_id two lines above, then asked the legacy key
+    # what brand it was — which describes the first vehicle only.
+    brand = ''
+    if vehicle_id is not None:
+        from models.database import Vehicle as _Vb
+        _vb = _Vb.query.get(vehicle_id)
+        if _vb is not None and _vb.api_brand:
+            brand = _vb.api_brand.lower()
+    if not brand:
+        brand = (AppConfig.get('vehicle_api_brand', '') or '').lower()
 
     # Static fallback for trips where the SDK regen delta resolves to
     # None (the car missed a sync window around either trip endpoint, or

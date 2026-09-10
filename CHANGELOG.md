@@ -1,5 +1,83 @@
 # Changelog
 
+## v3.0.126 (2026-09-10)
+
+### A container can now update itself, from a phone, with no shell
+
+v3.0.125 established that a container must not swap its own files — the
+new code lands in the writable layer and the next `docker compose pull`
+throws it away — and left the owner with a command to type. That assumes
+they are sitting at the host. They may be on another continent while the
+server hums away at home.
+
+So a small sibling container does the work. The app asks by dropping a
+marker into a shared volume; the sibling pulls the new image and
+recreates the app. The button is back, and this time what it does
+survives.
+
+**The app itself has no Docker access at all.** The marker is a trigger,
+not an instruction: everything the sibling may do is fixed in its script,
+so the worst anyone reaching the web UI can cause is "update to the
+published image" — never an arbitrary container, image or command.
+
+Existing installations gain the sibling by re-running the same one-line
+installer they were set up with. Where it is absent, the update card
+falls back to showing the command, exactly as in v3.0.125 — nothing
+breaks for anyone who does not want another container.
+
+Proven on a real stack rather than argued: an install on one version,
+a newer image published, one button press, and 18 seconds later the app
+answered on the new version — data volume untouched, and the sibling
+itself never restarted.
+
+### Finding — and removing — readings filed under the wrong car
+
+The picker bug fixed in v3.0.125 wrote one vehicle's readings into
+another vehicle's history. Stopping it could not undo what had already
+been written, and there was no way to even see it: the raw-data list
+showed every vehicle's rows together with nothing saying which car each
+came from.
+
+Settings now has **Check vehicle data**. The test is the vehicle's own
+history judging itself — an odometer only ever rises, so a reading below
+one that came earlier is impossible. It needs no brand knowledge and no
+threshold anyone has to tune.
+
+It is also honest about its limits, which is why nothing is deleted
+automatically and nothing comes pre-ticked:
+
+* every finding shows how far off it is, because a few kilometres is
+  usually the car re-reporting a cached value while thousands is another
+  vehicle, and only a person can judge which;
+* two cars with almost identical mileage produce rows that are wrong but
+  not impossible, and those are not detected — the check reports what it
+  can prove.
+
+The raw-data list now follows the picker, names the vehicle on every row
+and marks the ones that do not fit.
+
+### More places that were still answering for the first vehicle
+
+The same sweep as v3.0.125, carried further:
+
+* the trip log's brand buttons and GPS freshness described the first
+  vehicle while the picker said otherwise;
+* the SDK trip backfill read the first vehicle's brand and then walked
+  its trips — the function has taken a vehicle since multi-vehicle
+  support landed and nobody passed one;
+* the regeneration fallback asked the legacy key what brand a trip
+  belonged to while already holding the vehicle it was scoped to;
+* the raw-data detail view labelled every payload with the first
+  vehicle's brand.
+
+### The fleet table now says which Škoda access a car uses
+
+Both connectors are simply called "Škoda", so the overview showed the
+same word for the current interface and for the one that stops serving
+third parties in October 2026 — the one thing an owner sitting on the
+old access needs to be told, and the only place they would look. The
+dropdown in the form had said it all along; the table now does too.
+
 ## v3.0.125 (2026-09-10)
 
 ### The credential form now asks for what the brand actually needs

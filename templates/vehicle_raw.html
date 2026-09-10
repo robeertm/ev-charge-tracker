@@ -18,10 +18,23 @@
     {% else %}
     <p class="text-muted small mb-2">
         {{ t('raw.list_desc') }}
+        {% if active_vehicle_name %}
+        <br><i class="bi bi-car-front"></i> {{ t('raw.scoped_to', name=active_vehicle_name) }}
+        {% endif %}
         {% if brand_key in ['kia', 'hyundai'] %}
         <br><i class="bi bi-info-circle"></i> {{ t('raw.kia_soh_hint') }}
         {% endif %}
     </p>
+    {% if flagged_ids %}
+    {# Ein Kilometerstand steigt nur. Faellt er, kann die Zeile nicht zu
+       diesem Auto gehoeren — bis v3.0.125 schrieb der Wagenwaehler die
+       Werte des ERSTEN Fahrzeugs unter die Kennung des gewaehlten. #}
+    <div class="alert alert-warning py-2 small">
+        <i class="bi bi-exclamation-triangle"></i>
+        {{ t('raw.flagged_hint', count=flagged_ids|length) }}
+        <a href="/settings#sec-syncaudit">{{ t('raw.flagged_link') }}</a>
+    </div>
+    {% endif %}
     <div class="table-responsive">
         <table class="table table-sm table-hover align-middle">
             <thead class="table-dark">
@@ -37,8 +50,19 @@
             </thead>
             <tbody>
                 {% for s in syncs %}
-                <tr>
-                    <td>{{ s.timestamp.strftime('%d.%m.%Y %H:%M') }}</td>
+                <tr{% if s.id in (flagged_ids or []) %} class="table-warning"{% endif %}>
+                    <td>
+                        {{ s.timestamp.strftime('%d.%m.%Y %H:%M') }}
+                        {% if s.id in (flagged_ids or []) %}
+                        <i class="bi bi-exclamation-triangle text-warning"
+                           title="{{ t('raw.flagged_row') }}"></i>
+                        {% endif %}
+                        {% if vehicle_names and vehicle_names|length > 1 %}
+                        <div class="text-muted" style="font-size:.75rem">
+                            {{ vehicle_names.get(s.vehicle_id, '—') }}
+                        </div>
+                        {% endif %}
+                    </td>
                     <td class="text-end">{% if s.soc_percent is not none %}{{ s.soc_percent }}%{% else %}—{% endif %}</td>
                     <td class="text-end d-none d-md-table-cell">{% if s.odometer_km %}{{ "{:,}".format(s.odometer_km).replace(",", ".") }}{% else %}—{% endif %}</td>
                     <td class="text-end d-none d-md-table-cell">

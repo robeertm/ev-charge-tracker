@@ -46,18 +46,30 @@ $DOCKER compose version >/dev/null 2>&1 || die \
     sudo apt-get install -y docker-compose-plugin"
 ok "$($DOCKER --version)"
 
-# ── 2. Fetch the compose file ─────────────────────────────────────────────
+# ── 2. Fetch the compose file and the updater helper ──────────────────────
 say "Installing into $DIR"
-mkdir -p "$DIR"
+mkdir -p "$DIR/deploy"
 cd "$DIR"
-if command -v curl >/dev/null 2>&1; then
-  curl -fsSL "$REPO_RAW/docker-compose.yml" -o docker-compose.yml
-elif command -v wget >/dev/null 2>&1; then
-  wget -qO docker-compose.yml "$REPO_RAW/docker-compose.yml"
-else
-  die "Neither curl nor wget is available."
-fi
+
+hole() {   # hole <remote path> <local path>
+  if command -v curl >/dev/null 2>&1; then
+    curl -fsSL "$REPO_RAW/$1" -o "$2"
+  elif command -v wget >/dev/null 2>&1; then
+    wget -qO "$2" "$REPO_RAW/$1"
+  else
+    die "Neither curl nor wget is available."
+  fi
+}
+
+hole docker-compose.yml docker-compose.yml
 ok "docker-compose.yml"
+
+# The sibling container that performs updates when the app asks for one.
+# Fetched every run, including on an existing install: that is how a
+# machine set up before this existed gains the button.
+hole deploy/updater.sh deploy/updater.sh
+chmod +x deploy/updater.sh
+ok "deploy/updater.sh (one-click updates)"
 
 # ── 3. Configuration — created once, never overwritten ────────────────────
 # Re-running the installer must not roll a new SECRET_KEY: that would log

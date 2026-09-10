@@ -83,11 +83,23 @@ def init_app(app):
         an internal identifier and means nothing to the person reading
         it. Falls back to the key so an unknown value is still visible
         rather than becoming an empty cell.
+
+        A brand whose access is being retired carries its end date here
+        too. Both Škoda connectors are simply called "Škoda", so the
+        table showed the same word for the current interface and for the
+        one that stops serving third parties in October 2026 — the one
+        thing an owner sitting on the old access needs to be told, and
+        the only place they would look. The dropdown in the form has
+        said it all along; the overview did not.
         """
         try:
             from services.vehicle.catalog import by_key
             b = by_key(key or '')
-            return b.label if b else (key or '')
+            if b is None:
+                return key or ''
+            if b.legacy and b.sunset:
+                return f'{b.label} — {t("set.brand_legacy_until", date=b.sunset)}'
+            return b.label
         except Exception:
             return key or ''
 
