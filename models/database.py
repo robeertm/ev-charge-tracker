@@ -137,6 +137,18 @@ class Vehicle(db.Model):
     remote_control_enabled = db.Column(db.Boolean, default=False, nullable=False,
                                        server_default='0')
 
+    # ── Which wallbox at home this car charges on (v3.0.127) ──────────
+    # The home energy meter can say how many kWh went through the wallbox
+    # and how many of them came from the sun; it can never say WHICH car
+    # was plugged in. That is the one thing we know and it does not, so
+    # the binding lives here, per car, and is off until someone sets it.
+    wallbox_link_enabled = db.Column(db.Boolean, default=False, nullable=False,
+                                     server_default='0')
+    # Empty = whichever wallbox the analyzer itself is configured for.
+    # Set it only in a household with more than one box, where "the"
+    # wallbox is not an answer.
+    wallbox_device_key = db.Column(db.String(64))
+
     # Lifecycle
     is_archived = db.Column(db.Boolean, default=False, nullable=False)
     # v3.0.74: Erstzulassung — the date the car was FIRST registered (new),
@@ -172,6 +184,8 @@ class Vehicle(db.Model):
             'api_region': self.api_region,
             'api_vin': self.api_vin,
             'remote_control_enabled': bool(self.remote_control_enabled),
+            'wallbox_link_enabled': bool(self.wallbox_link_enabled),
+            'wallbox_device_key': self.wallbox_device_key or '',
             'auto_sync': self.auto_sync,
             'is_archived': self.is_archived,
             'first_registered_at': self.first_registered_at.isoformat() if self.first_registered_at else None,
@@ -235,6 +249,14 @@ class Charge(db.Model):
     # session; reconstructed from the is_charging window). The History
     # view marks these red and editing+saving clears the flag.
     needs_review = db.Column(db.Boolean, default=False)
+    # v3.0.127: the home energy meter's record of this same charge, when one
+    # was found. A row, not a set of copied numbers: the measurement belongs
+    # to the meter and stays reversible, and an entry that could not be
+    # matched to any car has to stay visible somewhere too.
+    # Deliberately a plain integer and not a ForeignKey: wallbox_charges
+    # already points back here, and a second constraint the other way makes
+    # the two tables circular — which SQLite cannot create in one pass.
+    wallbox_charge_id = db.Column(db.Integer, index=True)
     created_at = db.Column(db.DateTime, default=datetime.now)
 
     def calculate_fields(self, battery_kwh=None, efficiency=None):
@@ -310,6 +332,111 @@ class Charge(db.Model):
             'operator': self.operator,
             'start_fee_eur': self.start_fee_eur,
             'blocking_fee_eur': self.blocking_fee_eur,
+        }
+
+
+class WallboxCharge(db.Model):
+    """One charge as the home energy meter saw it.
+
+    Kept as its own row rather than a handful of extra columns on
+    :class:`Charge`, for three reasons that each showed up while building it:
+
+    * **A measurement is not an entry.** The charge row is the user's — they
+      may edit the price, correct the odometer, confirm or delete it. The
+      meter's reading is a fact about a wallbox between two timestamps and must
+      not be quietly rewritten by an edit, nor lost by one.
+    * **Not every charge finds a car.** With two cars on one wallbox the meter
+      cannot say which was plugged in; where the match is not unambiguous, the
+      reading has to stay *somewhere visible* instead of being dropped on the
+      floor. ``match_state`` names why.
+    * **Adoption must be reversible.** When the meter's kWh and cost are taken
+      over into the charge row, whatever stood there before is kept here, so
+      "undo" is a real operation and not an apology.
+
+    ``source_id`` is the id the analyzer gave the charge. It is stable once the
+    charge is over — which is the only time the link hands one out — so a
+    re-poll of the same window re-finds this row instead of duplicating it.
+    """
+    __tablename__ = 'wallbox_charges'
+
+    id = db.Column(db.Integer, primary_key=True)
+    source_id = db.Column(db.String(64), nullable=False, index=True)
+    device_key = db.Column(db.String(64), nullable=False, default='')
+    start_ts = db.Column(db.Integer, nullable=False, index=True)
+    end_ts = db.Column(db.Integer, nullable=False)
+
+    energy_kwh = db.Column(db.Float)
+    # NULL, never 0.0, where no supply meter covered the window: a zero would
+    # read as "no sun that day", which is a different statement from "nobody
+    # measured".
+    solar_kwh = db.Column(db.Float)
+    battery_kwh = db.Column(db.Float)
+    grid_kwh = db.Column(db.Float)
+    cost_eur = db.Column(db.Float)
+    cost_model = db.Column(db.String(16))     # 'source' (split) | 'fixed' (flat tariff)
+    coverage = db.Column(db.Float)            # 0..1 of the window the meters saw
+    avg_power_w = db.Column(db.Float)
+    peak_power_w = db.Column(db.Float)
+    session_count = db.Column(db.Integer)
+
+    # ── The match ─────────────────────────────────────────────────────
+    charge_id = db.Column(db.Integer, db.ForeignKey('charges.id'), index=True)
+    vehicle_id = db.Column(db.Integer, db.ForeignKey('vehicles.id'), index=True)
+    # 'matched'  — exactly one charge of one car fits this window
+    # 'unmatched'— no charge fits (car charged elsewhere, or none logged yet)
+    # 'ambiguous'— more than one car could have been the one plugged in
+    match_state = db.Column(db.String(16), default='unmatched', index=True)
+    match_note = db.Column(db.String(200))
+    match_delta_s = db.Column(db.Integer)     # start-time distance of the match
+
+    # What stood in the charge row before the meter's numbers were taken
+    # over. NULL = nothing was ever taken over from here.
+    prev_kwh_loaded = db.Column(db.Float)
+    prev_total_cost = db.Column(db.Float)
+    prev_eur_per_kwh = db.Column(db.Float)
+    applied_at = db.Column(db.DateTime)
+
+    fetched_at = db.Column(db.DateTime, default=datetime.now)
+    matched_at = db.Column(db.DateTime)
+
+    __table_args__ = (
+        db.UniqueConstraint('device_key', 'source_id', name='uq_wallbox_charge'),
+    )
+
+    @property
+    def solar_share(self):
+        """Sun + battery as a fraction of the charge, or None if unmeasured."""
+        if self.cost_model != 'source' or not self.energy_kwh:
+            return None
+        own = float(self.solar_kwh or 0) + float(self.battery_kwh or 0)
+        return round(own / float(self.energy_kwh), 4)
+
+    def to_dict(self):
+        return {
+            'id': self.id,
+            'source_id': self.source_id,
+            'device_key': self.device_key,
+            'start_ts': self.start_ts,
+            'end_ts': self.end_ts,
+            'duration_s': max(0, int(self.end_ts or 0) - int(self.start_ts or 0)),
+            'energy_kwh': self.energy_kwh,
+            'solar_kwh': self.solar_kwh,
+            'battery_kwh': self.battery_kwh,
+            'grid_kwh': self.grid_kwh,
+            'cost_eur': self.cost_eur,
+            'cost_model': self.cost_model,
+            'measured': self.cost_model == 'source',
+            'coverage': self.coverage,
+            'solar_share': self.solar_share,
+            'avg_power_w': self.avg_power_w,
+            'peak_power_w': self.peak_power_w,
+            'session_count': self.session_count,
+            'charge_id': self.charge_id,
+            'vehicle_id': self.vehicle_id,
+            'match_state': self.match_state,
+            'match_note': self.match_note,
+            'applied': self.applied_at is not None,
+            'fetched_at': self.fetched_at.isoformat() if self.fetched_at else None,
         }
 
 

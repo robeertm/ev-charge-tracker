@@ -114,6 +114,24 @@
                         <i class="bi bi-exclamation-triangle-fill"></i> {{ t('hist.needs_review') }}
                     </span>
                     {% endif %}
+                    {% set _wb = (wallbox_readings or {}).get(c.id) %}
+                    {% if _wb %}
+                    {# The measurement came from the house meter, not from the
+                       car and not from a form. It says so, and clicking it
+                       shows the curve the meter recorded. #}
+                    <button type="button"
+                            class="badge border-0 rowStop d-inline-flex align-items-center gap-1
+                                   {{ 'bg-warning text-dark' if _wb.measured and (_wb.solar_share or 0) >= 0.5 else 'bg-secondary' }}"
+                            data-wb-curve="{{ c.id }}"
+                            title="{{ t('wb.badge_hint') }}">
+                        <i class="bi bi-lightning-charge-fill"></i>
+                        {% if _wb.measured and _wb.solar_share is not none %}
+                            {{ (_wb.solar_share * 100)|round|int }}&nbsp;% {{ t('wb.own') }}
+                        {% else %}
+                            {{ t('wb.badge') }}
+                        {% endif %}
+                    </button>
+                    {% endif %}
                     {% if c.operator or c.location_name %}
                     <div class="small text-muted text-truncate" style="max-width: 180px;"
                          title="{{ c.operator }}{% if c.operator and c.location_name %} · {% endif %}{{ c.location_name }}">
@@ -639,3 +657,37 @@
     }
 })();
 </script>
+
+<!-- ── The charge curve as the house meter recorded it ─────────────────── -->
+<div class="modal fade" id="wbCurveModal" tabindex="-1" aria-hidden="true">
+  <div class="modal-dialog modal-lg modal-dialog-centered">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title">
+          <i class="bi bi-lightning-charge-fill"></i> {{ t('wb.curve_title') }}
+        </h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+      </div>
+      <div class="modal-body" id="wbCurveBody"></div>
+      <div class="modal-footer py-2">
+        <span class="text-muted small me-auto">{{ t('wb.curve_source') }}</span>
+        <button type="button" class="btn btn-secondary btn-sm" data-bs-dismiss="modal">
+          {{ t('wb.close') }}
+        </button>
+      </div>
+    </div>
+  </div>
+</div>
+<script>
+  window.WB_I18N = {
+    'wb.solar': {{ t('wb.solar')|tojson }},
+    'wb.battery': {{ t('wb.battery')|tojson }},
+    'wb.grid': {{ t('wb.grid')|tojson }},
+    'wb.self_supplied': {{ t('wb.self_supplied')|tojson }},
+    'wb.curve_none': {{ t('wb.curve_none')|tojson }},
+    'wb.curve_failed': {{ t('wb.curve_failed')|tojson }},
+    'wb.curve_flowed': {{ t('wb.curve_flowed')|tojson }},
+    'wb.loading': {{ t('wb.loading')|tojson }}
+  };
+</script>
+<script src="/static/js/wallbox_curve.js"></script>

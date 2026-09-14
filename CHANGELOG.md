@@ -1,5 +1,80 @@
 # Changelog
 
+## v3.0.127 (2026-09-14)
+
+### The house meter and this app now tell the same story about a home charge
+
+Two programs knew half of a home charge each, and neither could work out
+the other's half.
+
+This one knows *which* car was plugged in, what its state of charge did
+and how far it then drove. A home energy analyzer — the Shelly Energy
+Analyzer — knows how many kilowatt-hours actually went through the
+wallbox and, where a grid meter and a PV or battery series cover the
+window, how many of them came from the sun, from the house battery and
+from the grid, and what that really cost. On a sunny surplus charge those
+two figures are not close: the app has a theoretical number derived from
+the state of charge and prices every kilowatt-hour at the consumer
+tariff, while most of them were never bought at all.
+
+So the app now fetches the measurement and files it against the charge it
+belongs to. Settings → Wallbox takes the analyzer's address and a link
+token; each car is bound to the wallbox it charges on. Past charges are
+pulled in the same pass, as far back as configured.
+
+**What it does with what it finds**
+
+* The history table marks a charge the meter measured, with the share
+  that came from your own roof, and a click opens the charge curve —
+  the same picture the analyzer draws, bands and all, not a second
+  rendering of the same data that could tell a different story.
+* The measured kilowatt-hours and the real cost are taken over into the
+  charge entry, so consumption, cost per 100 km and every total built on
+  them stop over-charging surplus charging. Reversible: what stood in the
+  entry before is kept, and one click puts it back.
+* A price somebody typed in by hand is left alone. Adopting it would
+  discard a decision without saying so, which is why the default only
+  overwrites entries the app detected by itself or that carry no price at
+  all — and why "always" and "never" are both offered.
+
+**Where it deliberately refuses to answer**
+
+With two cars on one wallbox the meter cannot say which was plugged in.
+Where two cars each have a charge in the same window, the reading is
+filed as *ambiguous* and listed in Settings for a person to settle —
+never attached to whichever one happens to be closer. Energy is used to
+break a tie, never to make the decision: the meter measures at the wall
+and the entry may hold a figure derived from the state of charge, so the
+two legitimately differ by the charge losses. A DC charge is never
+claimed at all — that happened at a fast charger.
+
+A reading that finds no charge is kept rather than dropped: the car often
+syncs later, the entry appears, and the next pass matches it cleanly.
+
+**Other things worth knowing**
+
+* The link is read-only and pull-only. The analyzer never writes here,
+  and the token is never sent to the browser — the charge curve is
+  fetched through this server, so the settings page can sit open on a
+  screen without handing the key to whoever walks past.
+* Where no supply meter covered a charge, the three shares are reported
+  as *unmeasured* rather than as zeros. "No sun measured" and "no sun"
+  are different statements and only one of them may be shown as 0 %.
+* The two clocks are allowed to disagree by 90 minutes by default: a car
+  cloud reports a state change long after it happened, while the wallbox
+  knows to the second.
+* New: one table for the meter's readings, two nullable columns
+  elsewhere. An installation that never connects an analyzer carries two
+  empty columns and behaves exactly as before.
+
+Measured rather than argued: 52 checks over the matching rules, each one
+from both sides — the rule fires when it should and stays quiet when it
+should not — plus ten that drive a real server against a stand-in
+analyzer, from the migration through the settings form to the curve the
+browser receives, and a run of the two real programs against each other:
+a charge the app had logged as a theoretical 16.00 kWh at the consumer
+tariff came back as a measured 14.00 kWh, 100 % from the roof, at €0.00.
+
 ## v3.0.126 (2026-09-10)
 
 ### A container can now update itself, from a phone, with no shell

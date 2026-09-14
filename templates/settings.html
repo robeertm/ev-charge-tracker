@@ -43,6 +43,7 @@
     ('thg',       'bi-cash-coin',   t('set.thg_title')),
     ('locations', 'bi-geo-alt',     t('set.locations_title')),
     ('pv',        'bi-sun',         t('set.pv_title')),
+    ('wallbox',   'bi-ev-station',  t('wb.title')),
     ('api',       'bi-arrow-repeat', t('set.sync_title')),
 ] + ([
     ('remote',    'bi-broadcast-pin', t('skoda.remote_title')),
@@ -311,6 +312,24 @@
                             <div class="col-md-3">
                                 <label class="form-label small">{{ t('set.fleet_field_recup') }}</label>
                                 <input type="number" step="0.001" class="form-control form-control-sm" name="recuperation_kwh_per_km" id="vf_recup">
+                            </div>
+                            {# Which wallbox at home this car charges on. The
+                               house meter can say how much went through the
+                               box; it can never say which car was on it. #}
+                            <div class="col-md-6">
+                                <label class="form-label small">{{ t('wb.vehicle_field') }}</label>
+                                <input type="hidden" name="wallbox_present" value="1">
+                                <div class="form-check">
+                                    <input class="form-check-input" type="checkbox"
+                                           name="wallbox_link_enabled" id="vf_wallbox_link">
+                                    <label class="form-check-label small" for="vf_wallbox_link">
+                                        {{ t('wb.vehicle_enable') }}
+                                    </label>
+                                </div>
+                                <input type="text" class="form-control form-control-sm mt-1"
+                                       name="wallbox_device_key" id="vf_wallbox_key"
+                                       placeholder="{{ t('wb.vehicle_key_placeholder') }}">
+                                <div class="form-text small">{{ t('wb.vehicle_key_hint') }}</div>
                             </div>
                             <div class="col-md-3">
                                 <label class="form-label small">
@@ -685,6 +704,147 @@
                     document.getElementById(id).addEventListener('input', calcPvCo2));
                 calcPvCo2();
                 </script>
+            </div>
+        </div>
+
+        <!-- ── Wallbox (Shelly Energy Analyzer) ──────────────────────────
+             The house meter measures the wallbox; this app knows which car was
+             on it. Neither can answer the other's half, so this section is the
+             seam: address + key of the analyzer, how far the two clocks may
+             disagree, and what may be written into a charge entry. -->
+        <div class="card mb-4 settings-card" id="sec-wallbox">
+            <div class="card-header bg-white fw-bold">
+                <i class="bi bi-ev-station"></i> {{ t('wb.title') }}
+            </div>
+            <div class="card-body">
+                <p class="text-muted small">{{ t('wb.desc') }}</p>
+                <form method="POST" class="row g-3">
+                    <input type="hidden" name="action" value="save_wallbox">
+                    <div class="col-12 col-lg-7">
+                        <label class="form-label small fw-bold mb-1">{{ t('wb.url') }}</label>
+                        <input type="url" name="wallbox_url" id="wbUrl" class="form-control"
+                               placeholder="https://10.0.0.5:8765"
+                               value="{{ wallbox.url or '' }}">
+                        <div class="form-text">{{ t('wb.url_hint') }}</div>
+                    </div>
+                    <div class="col-12 col-lg-5">
+                        <label class="form-label small fw-bold mb-1">{{ t('wb.token') }}</label>
+                        <input type="password" name="wallbox_token" id="wbToken"
+                               class="form-control" autocomplete="new-password"
+                               placeholder="{% if wallbox.token_set %}••••••••••••{% else %}{{ t('wb.token_placeholder') }}{% endif %}">
+                        <div class="form-text">{{ t('wb.token_hint') }}</div>
+                    </div>
+
+                    <div class="col-12 col-md-4">
+                        <label class="form-label small fw-bold mb-1">{{ t('wb.apply') }}</label>
+                        <select name="wallbox_apply" class="form-select">
+                            <option value="auto"   {% if wallbox.apply_mode == 'auto' %}selected{% endif %}>{{ t('wb.apply_auto') }}</option>
+                            <option value="always" {% if wallbox.apply_mode == 'always' %}selected{% endif %}>{{ t('wb.apply_always') }}</option>
+                            <option value="never"  {% if wallbox.apply_mode == 'never' %}selected{% endif %}>{{ t('wb.apply_never') }}</option>
+                        </select>
+                        <div class="form-text">{{ t('wb.apply_hint') }}</div>
+                    </div>
+                    <div class="col-6 col-md-4">
+                        <label class="form-label small fw-bold mb-1">{{ t('wb.tolerance') }}</label>
+                        <input type="number" name="wallbox_tolerance" class="form-control"
+                               min="5" max="720" step="5" value="{{ wallbox.tolerance_min or 90 }}">
+                        <div class="form-text">{{ t('wb.tolerance_hint') }}</div>
+                    </div>
+                    <div class="col-6 col-md-4">
+                        <label class="form-label small fw-bold mb-1">{{ t('wb.backfill') }}</label>
+                        <input type="number" name="wallbox_backfill_days" class="form-control"
+                               min="1" max="400" step="1" value="{{ wallbox.backfill_days or 90 }}">
+                        <div class="form-text">{{ t('wb.backfill_hint') }}</div>
+                    </div>
+
+                    <div class="col-12">
+                        <div class="form-check">
+                            <input class="form-check-input" type="checkbox" id="wbEnabled"
+                                   name="wallbox_enabled" {% if wallbox.enabled %}checked{% endif %}>
+                            <label class="form-check-label" for="wbEnabled">{{ t('wb.enabled') }}</label>
+                        </div>
+                        <div class="form-check">
+                            <input class="form-check-input" type="checkbox" id="wbVerify"
+                                   name="wallbox_verify_ssl" {% if wallbox.verify_ssl %}checked{% endif %}>
+                            <label class="form-check-label" for="wbVerify">{{ t('wb.verify_ssl') }}</label>
+                            <div class="form-text">{{ t('wb.verify_ssl_hint') }}</div>
+                        </div>
+                    </div>
+
+                    <div class="col-12 d-flex gap-2 flex-wrap">
+                        <button type="submit" class="btn btn-primary btn-sm">
+                            <i class="bi bi-save"></i> {{ t('wb.save') }}
+                        </button>
+                        <button type="button" class="btn btn-outline-secondary btn-sm" id="wbTestBtn">
+                            <i class="bi bi-plug"></i> {{ t('wb.test') }}
+                        </button>
+                        <button type="button" class="btn btn-outline-primary btn-sm" id="wbSyncBtn">
+                            <i class="bi bi-arrow-repeat"></i> {{ t('wb.sync_now') }}
+                        </button>
+                        <button type="button" class="btn btn-outline-primary btn-sm" id="wbBackfillBtn">
+                            <i class="bi bi-clock-history"></i> {{ t('wb.backfill_now') }}
+                        </button>
+                    </div>
+                </form>
+
+                <div id="wbTestResult" class="mt-3"></div>
+
+                {% if wallbox.last %}
+                <hr>
+                <h6 class="mb-2">{{ t('wb.status') }}</h6>
+                <div id="wbStatus" class="small">
+                    {% if wallbox.last.error %}
+                    <div class="alert alert-warning py-2 mb-2">
+                        <i class="bi bi-exclamation-triangle"></i>
+                        {{ t('wb.last_failed') }} — <code>{{ wallbox.last.error }}</code>
+                    </div>
+                    {% else %}
+                    <div class="d-flex flex-wrap gap-3">
+                        <span><i class="bi bi-check2-circle text-success"></i>
+                              {{ t('wb.last_ok') }}</span>
+                        <span>{{ t('wb.n_new') }}: <strong>{{ wallbox.last.new }}</strong></span>
+                        <span>{{ t('wb.n_matched') }}: <strong>{{ wallbox.counts.matched or 0 }}</strong></span>
+                        <span>{{ t('wb.n_open') }}:
+                              <strong>{{ (wallbox.counts.unmatched or 0) + (wallbox.counts.ambiguous or 0) }}</strong></span>
+                    </div>
+                    {% endif %}
+                </div>
+                {% endif %}
+
+                {% if wallbox.open %}
+                <hr>
+                <h6 class="mb-1">{{ t('wb.open_title') }}</h6>
+                <p class="text-muted small">{{ t('wb.open_desc') }}</p>
+                <div class="table-responsive">
+                    <table class="table table-sm align-middle">
+                        <thead><tr>
+                            <th>{{ t('wb.col_when') }}</th>
+                            <th class="text-end">{{ t('wb.col_kwh') }}</th>
+                            <th>{{ t('wb.col_why') }}</th>
+                            <th></th>
+                        </tr></thead>
+                        <tbody>
+                        {% for o in wallbox.open %}
+                        <tr data-wb-reading="{{ o.id }}">
+                            <td class="text-nowrap"><span class="wbWhen" data-ts="{{ o.start_ts }}">{{ o.start_ts }}</span></td>
+                            <td class="text-end">{{ "%.2f"|format(o.energy_kwh or 0) }}</td>
+                            <td>
+                                <span class="badge {{ 'bg-warning text-dark' if o.match_state == 'ambiguous' else 'bg-secondary' }}">
+                                    {{ t('wb.state_' ~ o.match_state) }}
+                                </span>
+                                <span class="text-muted small d-block">{{ o.match_note or '' }}</span>
+                            </td>
+                            <td class="text-end">
+                                <button type="button" class="btn btn-outline-primary btn-sm wbAssign"
+                                        data-reading="{{ o.id }}">{{ t('wb.assign') }}</button>
+                            </td>
+                        </tr>
+                        {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
+                <div id="wbAssignBox"></div>
+                {% endif %}
             </div>
         </div>
 
@@ -2427,6 +2587,8 @@
         api_region: 'vf_api_region',
         api_vin: 'vf_api_vin',
         auto_sync: 'vf_auto_sync',
+        wallbox_link_enabled: 'vf_wallbox_link',
+        wallbox_device_key: 'vf_wallbox_key',
         first_registered_at: 'vf_first_registered_at',
         acquired_at: 'vf_acquired_at', retired_at: 'vf_retired_at',
         notes: 'vf_notes',
@@ -4060,6 +4222,138 @@
     }
 
     btn.addEventListener('click', pruefen);
+})();
+</script>
+
+<script>
+/* ── Wallbox link: test, fetch, and settle an ambiguous reading ─────────
+   Everything goes through our own server; the browser never receives the
+   analyzer's link token, so this page can sit open on a screen without
+   handing the key to whoever walks past it. */
+(function () {
+    'use strict';
+    var T = {
+        testing:   {{ t('wb.testing')|tojson }},
+        reachable: {{ t('wb.reachable')|tojson }},
+        failed:    {{ t('wb.unreachable')|tojson }},
+        wallboxes: {{ t('wb.wallboxes')|tojson }},
+        sources:   {{ t('wb.sources')|tojson }},
+        started:   {{ t('wb.sync_started')|tojson }},
+        busy:      {{ t('wb.sync_busy')|tojson }},
+        assign:    {{ t('wb.assign_pick')|tojson }},
+        none:      {{ t('wb.assign_none')|tojson }},
+        detach:    {{ t('wb.detach')|tojson }},
+        notcfg:    {{ t('wb.not_configured')|tojson }}
+    };
+    function esc(x) {
+        return String(x == null ? '' : x).replace(/[&<>"']/g, function (c) {
+            return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c];
+        });
+    }
+    function box(html, kind) {
+        var out = document.getElementById('wbTestResult');
+        if (out) out.innerHTML = '<div class="alert alert-' + (kind || 'secondary') +
+            ' py-2 mb-0 small">' + html + '</div>';
+    }
+
+    /* Timestamps are rendered as epoch seconds server-side and turned into
+       local time here: the server may well be in a different zone than the
+       person reading the page, and the analyzer's own log shows local time. */
+    Array.prototype.forEach.call(document.querySelectorAll('.wbWhen'), function (el) {
+        var ts = parseInt(el.dataset.ts || '0', 10);
+        if (ts > 0) el.textContent = new Date(ts * 1000).toLocaleString();
+    });
+
+    var testBtn = document.getElementById('wbTestBtn');
+    if (testBtn) testBtn.addEventListener('click', async function () {
+        box(esc(T.testing));
+        try {
+            var r = await fetch('/api/wallbox/test', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({
+                    url: (document.getElementById('wbUrl') || {}).value || '',
+                    token: (document.getElementById('wbToken') || {}).value || ''
+                })
+            });
+            var d = await r.json();
+            if (!d.ok) { box(esc(T.failed) + ' — <code>' + esc(d.error) + '</code>', 'warning'); return; }
+            var i = d.info || {}, wbs = i.wallboxes || [], src = i.sources || {};
+            var names = wbs.map(function (w) { return w.name || w.device_key; });
+            var have = Object.keys(src).filter(function (k) { return src[k]; });
+            box('<strong>' + esc(T.reachable) + '</strong> ' +
+                esc(i.product || '') + ' ' + esc(i.version || '') +
+                '<br>' + esc(T.wallboxes) + ': ' +
+                esc((i.wallbox || {}).name || (i.wallbox || {}).device_key || '—') +
+                (names.length > 1 ? ' (' + esc(names.join(', ')) + ')' : '') +
+                '<br>' + esc(T.sources) + ': ' + esc(have.join(', ') || '—'), 'success');
+        } catch (e) {
+            box(esc(T.failed) + ' — ' + esc(e.message), 'danger');
+        }
+    });
+
+    async function kick(full) {
+        try {
+            var r = await fetch('/api/wallbox/sync', {
+                method: 'POST', headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({full: !!full})
+            });
+            var d = await r.json();
+            if (!d.ok) { box(esc(d.error === 'not configured' ? T.notcfg : d.error), 'warning'); return; }
+            box(esc(d.started ? T.started : T.busy), 'info');
+            // The pass runs in a thread; the page reload afterwards is what
+            // actually shows its result, so wait long enough for a small
+            // backfill to finish rather than reloading into "still running".
+            setTimeout(function () { location.reload(); }, full ? 12000 : 6000);
+        } catch (e) {
+            box(esc(e.message), 'danger');
+        }
+    }
+    var sB = document.getElementById('wbSyncBtn');
+    if (sB) sB.addEventListener('click', function () { kick(false); });
+    var bB = document.getElementById('wbBackfillBtn');
+    if (bB) bB.addEventListener('click', function () { kick(true); });
+
+    /* An ambiguous reading is the one case the matcher refuses on purpose:
+       two cars, one wallbox, two charges in the same window. Only a person
+       can say which car was plugged in, so here is where they say it. */
+    document.addEventListener('click', async function (e) {
+        var b = e.target.closest ? e.target.closest('.wbAssign') : null;
+        if (!b) return;
+        var id = b.dataset.reading;
+        var out = document.getElementById('wbAssignBox');
+        out.innerHTML = '<div class="text-muted small">…</div>';
+        var r = await fetch('/api/wallbox/candidates/' + id);
+        var d = await r.json();
+        var cands = (d.candidates || []);
+        if (!cands.length) {
+            out.innerHTML = '<div class="alert alert-secondary py-2 small">' +
+                esc(T.none) + '</div>';
+            return;
+        }
+        out.innerHTML = '<div class="card card-body py-2"><div class="small mb-2">' +
+            esc(T.assign) + '</div>' +
+            cands.map(function (c) {
+                return '<button type="button" class="btn btn-sm btn-outline-primary mb-1 wbPick" ' +
+                    'data-reading="' + esc(id) + '" data-charge="' + esc(c.charge_id) + '">' +
+                    esc(c.vehicle || ('#' + c.vehicle_id)) + ' · ' + esc(c.date) + ' ' +
+                    esc(String(c.hour).padStart(2, '0')) + ':00 · ' +
+                    esc(Number(c.kwh_loaded || 0).toFixed(1)) + ' kWh</button>';
+            }).join('') +
+            '<button type="button" class="btn btn-sm btn-outline-secondary mt-1 wbPick" ' +
+            'data-reading="' + esc(id) + '" data-charge="">' + esc(T.detach) + '</button></div>';
+    });
+
+    document.addEventListener('click', async function (e) {
+        var b = e.target.closest ? e.target.closest('.wbPick') : null;
+        if (!b) return;
+        await fetch('/api/wallbox/assign', {
+            method: 'POST', headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({reading_id: b.dataset.reading,
+                                  charge_id: b.dataset.charge || null})
+        });
+        location.reload();
+    });
 })();
 </script>
 

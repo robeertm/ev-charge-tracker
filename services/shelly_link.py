@@ -1,0 +1,580 @@
+"""The wallbox link — pulling home charges from a Shelly Energy Analyzer.
+
+Two programs know half of a home charge each. This one knows *which* car was
+plugged in, what its state of charge did and how far it then drove. The energy
+analyzer in the house knows how many kilowatt-hours actually went through the
+wallbox and — where a grid meter and a PV or battery series cover the window —
+how many of them came from the sun, from the house battery and from the grid,
+and what that really cost. Neither can work out the other's half.
+
+This module fetches the analyzer's half and files it against our charges.
+
+Four rules it is built on, each of them a way it could have gone wrong quietly:
+
+* **We fetch; nothing is pushed at us.** The analyzer never writes here. A push
+  would arrive with no idea which car it belongs to, and matching is precisely
+  the thing only this side can do.
+* **A measurement is kept, not merged.** Every fetched charge becomes a
+  :class:`WallboxCharge` row of its own. What the meter saw stays intact even
+  when the user edits the charge entry, and adoption into the entry keeps the
+  previous values so it can be undone.
+* **A match must be unambiguous or it is not a match.** With two cars on one
+  wallbox the meter cannot say which was plugged in. Where more than one car
+  fits the window, the reading is filed as *ambiguous* and left for a human —
+  never guessed, and never silently attached to the first candidate.
+* **An unmeasured share is null, not zero.** "No sun measured" and "no sun"
+  are different statements, and only one of them may be shown as 0 %.
+"""
+from __future__ import annotations
+
+import logging
+import threading
+import time
+from datetime import datetime, timedelta
+
+logger = logging.getLogger(__name__)
+
+# ── Configuration keys (AppConfig) ────────────────────────────────────────
+K_ENABLED = 'shelly_enabled'
+K_URL = 'shelly_url'
+K_TOKEN = 'shelly_token'
+K_VERIFY = 'shelly_verify_ssl'
+K_TOL = 'shelly_match_tolerance_min'
+K_APPLY = 'shelly_apply_mode'
+K_BACKFILL = 'shelly_backfill_days'
+K_LAST_TS = 'shelly_last_sync_ts'
+K_LAST_RESULT = 'shelly_last_result'
+
+# How far the two clocks may disagree and still describe the same charge.
+# Our own window comes from car syncs — the cloud reports a state change minutes
+# after it happened, and an auto-detected charge is bracketed by two polls that
+# can be an hour apart. The wallbox, by contrast, knows to the second. 90
+# minutes is wide enough for that lag and far narrower than the gap between two
+# charges of the same car on the same day.
+DEFAULT_TOLERANCE_MIN = 90
+
+# Two candidates whose start times lie this close together cannot be told apart
+# by timing alone. If they belong to different cars, that is an ambiguity and
+# not a ranking.
+AMBIGUOUS_WITHIN_S = 30 * 60
+
+DEFAULT_BACKFILL_DAYS = 90
+# What the analyzer's link will hand out in one request.
+MAX_DAYS = 400
+
+_sync_lock = threading.Lock()
+_sync_running = False
+_sync_thread = None
+
+
+# ══════════════════════════════════════════════════════════════════════════
+# Settings
+# ══════════════════════════════════════════════════════════════════════════
+
+def _truthy(v, default=False):
+    if v is None:
+        return default
+    return str(v).strip().lower() in ('1', 'true', 'yes', 'on')
+
+
+def settings():
+    """The link's configuration, already coerced. Call inside an app context."""
+    from models.database import AppConfig
+    try:
+        tol = int(float(AppConfig.get(K_TOL, DEFAULT_TOLERANCE_MIN)))
+    except (TypeError, ValueError):
+        tol = DEFAULT_TOLERANCE_MIN
+    try:
+        days = int(float(AppConfig.get(K_BACKFILL, DEFAULT_BACKFILL_DAYS)))
+    except (TypeError, ValueError):
+        days = DEFAULT_BACKFILL_DAYS
+    apply_mode = str(AppConfig.get(K_APPLY, 'auto') or 'auto').strip().lower()
+    if apply_mode not in ('auto', 'always', 'never'):
+        apply_mode = 'auto'
+    return {
+        'enabled': _truthy(AppConfig.get(K_ENABLED), False),
+        'url': str(AppConfig.get(K_URL, '') or '').strip().rstrip('/'),
+        'token': str(AppConfig.get(K_TOKEN, '') or '').strip(),
+        # The analyzer serves HTTPS with a certificate it signed itself — it is
+        # a box on the home network, not a public site, and there is no
+        # authority that could vouch for it. Verification is therefore off by
+        # default and can be turned on by anyone who installed a real
+        # certificate. The link token is what actually protects the channel.
+        'verify_ssl': _truthy(AppConfig.get(K_VERIFY), False),
+        'tolerance_min': max(5, min(720, tol)),
+        'apply_mode': apply_mode,
+        'backfill_days': max(1, min(MAX_DAYS, days)),
+    }
+
+
+def configured(cfg=None):
+    cfg = cfg or settings()
+    return bool(cfg['enabled'] and cfg['url'] and cfg['token'])
+
+
+# ══════════════════════════════════════════════════════════════════════════
+# Talking to the analyzer
+# ══════════════════════════════════════════════════════════════════════════
+
+class LinkError(RuntimeError):
+    """A failure worth showing the user verbatim — it names what to fix."""
+
+
+def _get(cfg, route, params=None, timeout=25):
+    import requests
+    url = '%s/api/v1/ev/%s' % (cfg['url'], route)
+    try:
+        r = requests.get(
+            url, params=params or {}, timeout=timeout,
+            verify=cfg['verify_ssl'],
+            headers={'X-EV-Link-Token': cfg['token'],
+                     'Accept': 'application/json'},
+        )
+    except requests.exceptions.SSLError as e:
+        raise LinkError('TLS: %s' % e) from e
+    except requests.exceptions.RequestException as e:
+        raise LinkError('unreachable: %s' % e) from e
+    if r.status_code in (401, 403):
+        raise LinkError('rejected (%d) — the link token does not match, or the '
+                        'link is switched off in the analyzer' % r.status_code)
+    if r.status_code == 404:
+        raise LinkError('no link endpoint (404) — the analyzer is older than '
+                        'the wallbox link')
+    if r.status_code >= 400:
+        raise LinkError('HTTP %d' % r.status_code)
+    try:
+        data = r.json()
+    except ValueError as e:
+        # An HTML login page answering 200 is the classic shape of this: the
+        # request reached *something*, just not the link.
+        raise LinkError('not a JSON answer — is the address the analyzer?') from e
+    if not isinstance(data, dict) or not data.get('ok'):
+        raise LinkError(str((data or {}).get('error') or 'refused'))
+    return data.get('data') or {}
+
+
+def probe(cfg=None):
+    """Ask who is at the other end. Used by the "test" button and before a sync."""
+    cfg = cfg or settings()
+    if not cfg['url']:
+        raise LinkError('no address configured')
+    if not cfg['token']:
+        raise LinkError('no link token configured')
+    return _get(cfg, 'info', timeout=12)
+
+
+def fetch_charges(cfg, days=None, since_ts=None):
+    params = {}
+    if since_ts:
+        params['since'] = int(since_ts)
+    else:
+        params['days'] = int(days or DEFAULT_BACKFILL_DAYS)
+    return _get(cfg, 'charges', params, timeout=60)
+
+
+def fetch_curve(cfg, start_ts, end_ts):
+    return _get(cfg, 'curve', {'start': int(start_ts), 'end': int(end_ts)}, timeout=45)
+
+
+# ══════════════════════════════════════════════════════════════════════════
+# Storing what came back
+# ══════════════════════════════════════════════════════════════════════════
+
+def store_charges(payload):
+    """Upsert the fetched charges. Returns (new, updated).
+
+    Idempotent by ``(device_key, source_id)``: the analyzer only hands out
+    charges that are over, so their ids no longer move and a re-poll of the same
+    window finds the same rows instead of duplicating them.
+    """
+    from models.database import db, WallboxCharge
+    key_default = str((payload.get('wallbox') or {}).get('device_key') or '')
+    neu = upd = 0
+    for c in payload.get('charges') or []:
+        sid = str(c.get('id') or '').strip()
+        if not sid:
+            continue
+        dev = str(c.get('device_key') or key_default)
+        row = WallboxCharge.query.filter_by(device_key=dev, source_id=sid).first()
+        if row is None:
+            row = WallboxCharge(device_key=dev, source_id=sid,
+                                match_state='unmatched')
+            db.session.add(row)
+            neu += 1
+        else:
+            upd += 1
+        row.start_ts = int(c.get('start_ts') or 0)
+        row.end_ts = int(c.get('end_ts') or 0)
+        row.energy_kwh = _f(c.get('energy_kwh'))
+        # Passed through exactly as sent — the analyzer sends null where nothing
+        # was measured, and turning that into 0.0 here would invent a fact.
+        row.solar_kwh = _f(c.get('solar_kwh'))
+        row.battery_kwh = _f(c.get('battery_kwh'))
+        row.grid_kwh = _f(c.get('grid_kwh'))
+        row.cost_eur = _f(c.get('cost_eur'))
+        row.cost_model = str(c.get('cost_model') or 'fixed')
+        row.coverage = _f(c.get('coverage'))
+        row.avg_power_w = _f(c.get('avg_power_w'))
+        row.peak_power_w = _f(c.get('peak_power_w'))
+        row.session_count = int(c.get('session_count') or 1)
+        row.fetched_at = datetime.now()
+    db.session.commit()
+    return neu, upd
+
+
+def _f(v):
+    if v is None:
+        return None
+    try:
+        return float(v)
+    except (TypeError, ValueError):
+        return None
+
+
+# ══════════════════════════════════════════════════════════════════════════
+# Matching a reading to a charge
+# ══════════════════════════════════════════════════════════════════════════
+
+def charge_window(c):
+    """(start, end) of one of our charge entries, as local naive datetimes.
+
+    The entry stores a date and whole hours, not timestamps — that is the
+    resolution the app has always had. So the window is the hour the charge
+    started through the end of the hour it finished in, rolling over midnight
+    when the end hour is the smaller one. Where no end hour was ever recorded
+    (legacy rows, manual entries) the window is the start hour alone and the
+    match tolerance does the rest.
+    """
+    if c.date is None:
+        return None, None
+    start = datetime(c.date.year, c.date.month, c.date.day,
+                     int(c.charge_hour or 0), 0, 0)
+    if c.charge_end_hour is None:
+        return start, start + timedelta(hours=1)
+    end = datetime(c.date.year, c.date.month, c.date.day,
+                   int(c.charge_end_hour), 0, 0) + timedelta(hours=1)
+    if end <= start:
+        end += timedelta(days=1)
+    return start, end
+
+
+def _overlaps(a0, a1, b0, b1, tol):
+    """Do the two windows meet, allowing each side to be off by ``tol``?"""
+    return (a0 - tol) < b1 and (a1 + tol) > b0
+
+
+def linked_vehicles(device_key=''):
+    """Cars whose owner said they charge on this wallbox.
+
+    A car with no explicit device key is bound to *the* wallbox — the one the
+    analyzer itself is set up for — which is the whole answer in a household
+    with one box. A car that names a different box is not a candidate here.
+    """
+    from models.database import Vehicle
+    out = []
+    for v in Vehicle.query.filter_by(wallbox_link_enabled=True).all():
+        own = str(v.wallbox_device_key or '').strip()
+        if own and device_key and own != device_key:
+            continue
+        out.append(v)
+    return out
+
+
+def _candidates(wc, vehicles, tol_min):
+    """Our charge entries that could be this wallbox reading. Ranked.
+
+    Every gate here says no for a reason worth being able to quote:
+
+    * a DC charge happened at a fast charger, not on a wallbox at home;
+    * an entry already tied to a *different* reading is taken — a wallbox
+      charge and a charge entry are one to one;
+    * a car that was not bound to this wallbox is nobody's candidate;
+    * and the windows have to actually meet.
+    """
+    from models.database import Charge
+    if not vehicles:
+        return []
+    vids = [v.id for v in vehicles]
+    ws = datetime.fromtimestamp(int(wc.start_ts))
+    we = datetime.fromtimestamp(int(wc.end_ts))
+    tol = timedelta(minutes=tol_min)
+    # One day either side of the wallbox window is all a match can ever span;
+    # the tolerance is hours, not days.
+    lo = (ws - timedelta(days=1)).date()
+    hi = (we + timedelta(days=1)).date()
+
+    rows = (Charge.query
+            .filter(Charge.vehicle_id.in_(vids))
+            .filter(Charge.date >= lo, Charge.date <= hi)
+            .all())
+    out = []
+    for c in rows:
+        if (c.charge_type or 'AC').upper() == 'DC':
+            continue
+        if c.wallbox_charge_id and c.wallbox_charge_id != wc.id:
+            continue
+        cs, ce = charge_window(c)
+        if cs is None:
+            continue
+        if not _overlaps(cs, ce, ws, we, tol):
+            continue
+        delta = abs((cs - ws).total_seconds())
+        # Energy is the tie-breaker, never a gate: the wallbox measures at the
+        # wall and our entry may hold a theoretical figure derived from the
+        # state of charge, so they legitimately differ by the charge losses.
+        de = (abs(float(c.kwh_loaded) - float(wc.energy_kwh or 0))
+              if c.kwh_loaded is not None and wc.energy_kwh else 1e6)
+        out.append((delta, de, c))
+    out.sort(key=lambda t: (t[0], t[1]))
+    return out
+
+
+def match_one(wc, vehicles, tol_min):
+    """Decide what this reading belongs to. Returns (state, charge, note)."""
+    cands = _candidates(wc, vehicles, tol_min)
+    if not cands:
+        return 'unmatched', None, 'no charge of a linked car falls in this window'
+    best = cands[0]
+    rivals = [c for c in cands[1:]
+              if c[2].vehicle_id != best[2].vehicle_id
+              and abs(c[0] - best[0]) < AMBIGUOUS_WITHIN_S]
+    if rivals:
+        # 🔴 Never resolved by "whoever is closer". Two cars, two charges within
+        # half an hour of the same window — the wallbox saw one of them and
+        # cannot say which. Guessing here would put a stranger's kilowatt-hours
+        # into someone's running costs and nobody would ever notice.
+        names = sorted({str(c[2].vehicle_id) for c in [best] + rivals})
+        return ('ambiguous', None,
+                'more than one car has a charge in this window (vehicle ids %s)'
+                % ', '.join(names))
+    return 'matched', best[2], ''
+
+
+def _apply_wanted(mode, charge):
+    """Should the meter's kWh and cost be taken over into the entry?
+
+    ``never``  — annotate only; the entry keeps whatever it says.
+    ``always`` — the meter wins; it is the only real measurement of the two.
+    ``auto``   — the meter wins where nobody has said otherwise: an entry the
+                 app detected by itself and that nobody has confirmed, or one
+                 with no cost at all. A price somebody typed in is left alone,
+                 because overwriting it would silently discard a decision.
+    """
+    if mode == 'never':
+        return False
+    if mode == 'always':
+        return True
+    if charge.needs_review:
+        return True
+    return charge.total_cost is None or charge.eur_per_kwh is None
+
+
+def apply_measurement(wc, charge, battery_kwh=None, efficiency=None):
+    """Take the meter's numbers into the charge entry — reversibly.
+
+    What stood there before is kept on the reading, so the adoption can be
+    undone exactly. Only the energy and the money move: state of charge,
+    odometer, location and notes belong to the car and the meter knows nothing
+    about them.
+    """
+    if wc.applied_at is None:
+        wc.prev_kwh_loaded = charge.kwh_loaded
+        wc.prev_total_cost = charge.total_cost
+        wc.prev_eur_per_kwh = charge.eur_per_kwh
+    charge.kwh_loaded = round(float(wc.energy_kwh or 0), 3)
+    # The per-kWh price becomes an *effective* one: with surplus charging the
+    # sun and the battery cost nothing, so the mixed price of a charge is lower
+    # than the tariff — and that is exactly the number the running-cost figures
+    # should be built on.
+    if wc.energy_kwh:
+        charge.eur_per_kwh = round(float(wc.cost_eur or 0) / float(wc.energy_kwh), 4)
+    # calculate_fields would multiply price × kWh again and round to cents;
+    # letting it do so keeps every derived figure consistent with the rest of
+    # the app rather than introducing a second way of computing a total.
+    charge.calculate_fields(battery_kwh, efficiency)
+    wc.applied_at = datetime.now()
+
+
+def unapply_measurement(wc, charge, battery_kwh=None, efficiency=None):
+    """Put back what the entry said before the meter's numbers were adopted."""
+    if wc.applied_at is None:
+        return False
+    charge.kwh_loaded = wc.prev_kwh_loaded
+    charge.eur_per_kwh = wc.prev_eur_per_kwh
+    charge.total_cost = wc.prev_total_cost
+    charge.calculate_fields(battery_kwh, efficiency)
+    wc.applied_at = None
+    wc.prev_kwh_loaded = wc.prev_total_cost = wc.prev_eur_per_kwh = None
+    return True
+
+
+def _default_specs(vehicle_id):
+    """(battery kWh, charge efficiency) — the fallback when nobody passes one.
+
+    The app has its own self-calibrating versions of both; they live next to
+    the routes and pulling them in from here would make this module import the
+    application it is a part of. So the caller hands them over, and this is
+    what is used when it does not: the car's own capacity, and the fleet
+    average loss the app falls back to before it has learned anything.
+    """
+    from config import Config
+    from models.database import Vehicle
+    v = Vehicle.query.get(vehicle_id) if vehicle_id else None
+    bk = float(getattr(v, 'battery_kwh', None) or 0) or float(
+        getattr(Config, 'BATTERY_CAPACITY_KWH', 0) or 0) or None
+    return bk, 0.88
+
+
+def match_all(cfg=None, device_key='', specs=None):
+    """Re-decide every reading that is not settled yet. Returns a tally.
+
+    Readings already matched are left alone; *ambiguous* and *unmatched* ones
+    are retried on every pass, because the missing half often arrives later —
+    the car syncs, the entry appears, and the same reading then matches
+    cleanly. That is why nothing is ever thrown away for being unmatched.
+    """
+    from models.database import db, WallboxCharge
+    cfg = cfg or settings()
+    vehicles = linked_vehicles(device_key)
+    tally = {'matched': 0, 'ambiguous': 0, 'unmatched': 0, 'applied': 0}
+    open_rows = (WallboxCharge.query
+                 .filter(WallboxCharge.match_state != 'matched')
+                 .order_by(WallboxCharge.start_ts.asc())
+                 .all())
+    for wc in open_rows:
+        state, charge, note = match_one(wc, vehicles, cfg['tolerance_min'])
+        wc.match_state = state
+        wc.match_note = note[:200] if note else None
+        wc.matched_at = datetime.now()
+        if state == 'matched' and charge is not None:
+            wc.charge_id = charge.id
+            wc.vehicle_id = charge.vehicle_id
+            cs, _ = charge_window(charge)
+            wc.match_delta_s = int(abs((cs - datetime.fromtimestamp(wc.start_ts))
+                                       .total_seconds()))
+            charge.wallbox_charge_id = wc.id
+            if _apply_wanted(cfg['apply_mode'], charge):
+                bk, eff = (specs or _default_specs)(charge.vehicle_id)
+                apply_measurement(wc, charge, bk, eff)
+                tally['applied'] += 1
+        else:
+            wc.charge_id = None
+            wc.vehicle_id = None
+        tally[state] = tally.get(state, 0) + 1
+    db.session.commit()
+    return tally
+
+
+# ══════════════════════════════════════════════════════════════════════════
+# One full pass
+# ══════════════════════════════════════════════════════════════════════════
+
+def sync(app, days=None, full=False, specs=None):
+    """Fetch, store, match. Returns a result dict; never raises at the caller."""
+    from models.database import AppConfig
+    import json as _json
+    with app.app_context():
+        cfg = settings()
+        res = {'ok': False, 'ts': int(time.time()), 'new': 0, 'updated': 0,
+               'matched': 0, 'ambiguous': 0, 'unmatched': 0, 'applied': 0,
+               'error': None}
+        if not configured(cfg):
+            res['error'] = 'not configured'
+            return res
+        try:
+            info = probe(cfg)
+            dev = str((info.get('wallbox') or {}).get('device_key') or '')
+            if days is None:
+                last = AppConfig.get(K_LAST_TS, '')
+                try:
+                    last_ts = int(float(last)) if last else 0
+                except (TypeError, ValueError):
+                    last_ts = 0
+                # A first run, or one after a long outage, walks the configured
+                # backfill window; a routine one asks only for what is new.
+                if full or not last_ts or (time.time() - last_ts) > cfg['backfill_days'] * 86400:
+                    payload = fetch_charges(cfg, days=cfg['backfill_days'])
+                else:
+                    payload = fetch_charges(cfg, since_ts=last_ts)
+            else:
+                payload = fetch_charges(cfg, days=int(days))
+            neu, upd = store_charges(payload)
+            tally = match_all(cfg, dev, specs=specs)
+            res.update({'ok': True, 'new': neu, 'updated': upd,
+                        'pending_settle': int(payload.get('pending_settle') or 0),
+                        'wallbox': (payload.get('wallbox') or {}).get('name') or dev})
+            res.update({k: tally.get(k, 0)
+                        for k in ('matched', 'ambiguous', 'unmatched', 'applied')})
+            AppConfig.set(K_LAST_TS, res['ts'])
+        except LinkError as e:
+            res['error'] = str(e)
+            logger.warning('Wallbox link: %s', e)
+        except Exception as e:            # noqa: BLE001 — a background pass must not die
+            res['error'] = '%s: %s' % (type(e).__name__, e)
+            logger.exception('Wallbox link sync failed')
+        try:
+            AppConfig.set(K_LAST_RESULT, _json.dumps(res))
+        except Exception:
+            logger.debug('could not store the link result', exc_info=True)
+        return res
+
+
+def last_result():
+    """The last pass, for the settings page. Never raises."""
+    from models.database import AppConfig
+    import json as _json
+    try:
+        raw = AppConfig.get(K_LAST_RESULT, '')
+        return _json.loads(raw) if raw else None
+    except Exception:
+        return None
+
+
+def is_running():
+    return _sync_running
+
+
+def start_sync(app, days=None, full=False, specs=None):
+    """Run a pass in the background. False if one is already going."""
+    global _sync_running, _sync_thread
+    with _sync_lock:
+        if _sync_running:
+            return False
+        _sync_running = True
+
+    def _run():
+        global _sync_running
+        try:
+            sync(app, days=days, full=full, specs=specs)
+        finally:
+            _sync_running = False
+
+    _sync_thread = threading.Thread(target=_run, daemon=True,
+                                    name='wallbox-link-sync')
+    _sync_thread.start()
+    return True
+
+
+def start_loop(app, interval_s=1800, specs=None):
+    """A quiet poll while the app runs.
+
+    Half-hourly on purpose: the analyzer withholds a charge until it has been
+    over for about twenty minutes anyway, so polling faster only asks the same
+    question more often. A charge that finishes now shows up within the hour,
+    which is the same order of delay the car's own cloud imposes.
+    """
+    def _loop():
+        # Let the app finish booting — the first pass runs a full backfill and
+        # there is no reason for it to compete with startup.
+        time.sleep(90)
+        while True:
+            try:
+                with app.app_context():
+                    on = configured()
+                if on:
+                    sync(app, specs=specs)
+            except Exception:
+                logger.debug('wallbox link loop', exc_info=True)
+            time.sleep(max(300, int(interval_s)))
+
+    threading.Thread(target=_loop, daemon=True, name='wallbox-link-loop').start()

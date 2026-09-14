@@ -245,6 +245,32 @@ def create_app(config_class=Config):
             db.session.execute(text(
                 'ALTER TABLE charges ADD COLUMN needs_review BOOLEAN DEFAULT 0'))
 
+        # ── v3.0.127: the wallbox link ────────────────────────────────
+        # charges keeps a pointer to the meter's reading of the same charge;
+        # vehicles keep which wallbox they charge on. Both nullable, both
+        # meaningless until someone sets up the link, so nothing needs
+        # backfilling — an install that never connects a meter carries two
+        # empty columns and behaves exactly as before.
+        if 'wallbox_charge_id' not in columns:
+            db.session.execute(text(
+                'ALTER TABLE charges ADD COLUMN wallbox_charge_id INTEGER'))
+            db.session.execute(text(
+                'CREATE INDEX IF NOT EXISTS ix_charges_wallbox_charge_id '
+                'ON charges (wallbox_charge_id)'))
+            db.session.commit()
+        try:
+            veh_columns = [c['name'] for c in inspector.get_columns('vehicles')]
+            if 'wallbox_link_enabled' not in veh_columns:
+                db.session.execute(text(
+                    'ALTER TABLE vehicles ADD COLUMN wallbox_link_enabled '
+                    'BOOLEAN NOT NULL DEFAULT 0'))
+            if 'wallbox_device_key' not in veh_columns:
+                db.session.execute(text(
+                    'ALTER TABLE vehicles ADD COLUMN wallbox_device_key VARCHAR(64)'))
+            db.session.commit()
+        except Exception:
+            pass  # fresh install — create_all() built them correctly already
+
         # Migrate: add last_seen_at to parking_events
         try:
             parking_columns = [c['name'] for c in inspector.get_columns('parking_events')]
@@ -483,6 +509,18 @@ def create_app(config_class=Config):
                 logger.info("v3.0.92 CO2 self-heal: backfill kicked on boot")
         except Exception as _e:
             logger.warning(f"CO2 self-heal boot kick failed: {_e}")
+
+        # ── v3.0.127: the wallbox link polls quietly while the app runs ──
+        # Started unconditionally; the loop itself checks whether a link is
+        # configured on every tick, so switching it on in Settings takes
+        # effect without a restart, and an install that never sets one up
+        # runs a thread that sleeps.
+        try:
+            from services import shelly_link as _wl
+            _wl.start_loop(app, specs=_wallbox_specs)
+            logger.info("Wallbox link: poll loop started")
+        except Exception as _e:
+            logger.warning(f"Wallbox link loop could not start: {_e}")
 
         if AppConfig.get('regen_scale_fix_v1', '') != 'done':
             db.session.execute(text(
@@ -935,6 +973,64 @@ def _get_battery_kwh(vehicle_id=None):
         return float(raw) if raw else Config.BATTERY_CAPACITY_KWH
     except (ValueError, TypeError):
         return Config.BATTERY_CAPACITY_KWH
+
+
+def _wallbox_specs(vehicle_id):
+    """(battery kWh, charge efficiency) for the wallbox link.
+
+    Handed to the link as a callback rather than imported by it: both figures
+    are self-calibrating and live here next to the routes that use them, and a
+    service that reached back into the application would make the two import
+    each other.
+    """
+    return _get_battery_kwh(vehicle_id=vehicle_id), _get_charge_efficiency(
+        vehicle_id=vehicle_id)
+
+
+def _wallbox_settings_ctx():
+    """Everything the Settings page needs about the link. Never raises.
+
+    The token comes back masked. Showing it would put a working key into every
+    screenshot of the settings page, and there is nothing to do with it here
+    that requires reading it back — it is typed in once, from the analyzer.
+    """
+    from models.database import Vehicle, WallboxCharge
+    from services import shelly_link as wl
+    try:
+        cfg = wl.settings()
+    except Exception:
+        logger.debug('wallbox settings unreadable', exc_info=True)
+        return {'enabled': False, 'url': '', 'token_set': False}
+    try:
+        offen = (WallboxCharge.query
+                 .filter(WallboxCharge.match_state != 'matched')
+                 .order_by(WallboxCharge.start_ts.desc())
+                 .limit(25).all())
+        counts = {st: WallboxCharge.query.filter_by(match_state=st).count()
+                  for st in ('matched', 'unmatched', 'ambiguous')}
+        bound = [{'id': v.id, 'name': v.name,
+                  'device_key': v.wallbox_device_key or '',
+                  'linked': bool(v.wallbox_link_enabled)}
+                 for v in Vehicle.query.filter_by(is_archived=False)
+                 .order_by(Vehicle.id.asc()).all()]
+    except Exception:
+        logger.debug('wallbox state unreadable', exc_info=True)
+        offen, counts, bound = [], {}, []
+    return {
+        'enabled': cfg['enabled'],
+        'url': cfg['url'],
+        'token_set': bool(cfg['token']),
+        'verify_ssl': cfg['verify_ssl'],
+        'tolerance_min': cfg['tolerance_min'],
+        'apply_mode': cfg['apply_mode'],
+        'backfill_days': cfg['backfill_days'],
+        'configured': wl.configured(cfg),
+        'running': wl.is_running(),
+        'last': wl.last_result(),
+        'counts': counts,
+        'open': [o.to_dict() for o in offen],
+        'vehicles': bound,
+    }
 
 
 def _get_charge_efficiency(vehicle_id=None):
@@ -2739,6 +2835,13 @@ def register_routes(app):
         v.max_ac_kw = _float(request.form.get('max_ac_kw'))
         v.fossil_co2_per_km = _float(request.form.get('fossil_co2_per_km'))
         v.recuperation_kwh_per_km = _float(request.form.get('recuperation_kwh_per_km'))
+        # Which wallbox at home this car charges on. Only read when the form
+        # actually carried the field — the fleet form is also submitted from
+        # places that do not show it, and a missing field must not unpair a car.
+        if 'wallbox_present' in request.form:
+            v.wallbox_link_enabled = 'wallbox_link_enabled' in request.form
+            v.wallbox_device_key = (request.form.get('wallbox_device_key', '')
+                                    or '').strip()[:64] or None
         v.api_brand = (request.form.get('api_brand', '') or '').strip().lower() or None
         # The form only sends the credential boxes the chosen brand
         # actually uses; the rest are disabled and therefore absent. A
@@ -3680,7 +3783,58 @@ def register_routes(app):
                                charge_type=charge_type,
                                year=year_filter,
                                years=years,
+                               wallbox_readings=_wallbox_readings_for(charges),
                                per_page=per_page_eff)
+
+    def _release_wallbox_reading(charge):
+        """Detach the meter's reading from a charge that is going away.
+
+        The reading itself is kept — it is a measurement and still true. It
+        simply goes back to being unmatched, so the next pass can offer it to
+        whatever entry replaces this one.
+        """
+        try:
+            if not getattr(charge, 'wallbox_charge_id', None):
+                return
+            from models.database import WallboxCharge
+            wc = WallboxCharge.query.get(charge.wallbox_charge_id)
+            if wc is None:
+                return
+            wc.charge_id = None
+            wc.vehicle_id = None
+            wc.match_state = 'unmatched'
+            wc.match_note = 'the charge it belonged to was deleted'
+            # The adoption is void with the entry gone; keeping the old values
+            # around would let a later "undo" write them onto a stranger.
+            wc.applied_at = None
+            wc.prev_kwh_loaded = wc.prev_total_cost = wc.prev_eur_per_kwh = None
+            charge.wallbox_charge_id = None
+        except Exception:
+            logger.warning('could not release the wallbox reading of charge %s',
+                           getattr(charge, 'id', '?'), exc_info=True)
+
+    def _wallbox_readings_for(page):
+        """{charge_id: reading} for the rows on screen. One query, never N.
+
+        The history table renders up to a few hundred rows; asking per row
+        would turn one page into one query per charge. Returns an empty map on
+        any failure — the wallbox badge is an addition to the table, never a
+        reason for it not to render.
+        """
+        try:
+            ids = [c.wallbox_charge_id for c in (getattr(page, 'items', None) or [])
+                   if getattr(c, 'wallbox_charge_id', None)]
+            if not ids:
+                return {}
+            from models.database import WallboxCharge
+            rows = WallboxCharge.query.filter(WallboxCharge.id.in_(ids)).all()
+            by_id = {r.id: r for r in rows}
+            return {c.id: by_id[c.wallbox_charge_id].to_dict()
+                    for c in page.items
+                    if getattr(c, 'wallbox_charge_id', None) in by_id}
+        except Exception:
+            logger.debug('wallbox readings for history unavailable', exc_info=True)
+            return {}
 
     def _build_charges_query(args):
         """Shared query/pagination builder for /history and /input.
@@ -3744,6 +3898,7 @@ def register_routes(app):
                                per_page=per_page_raw,
                                operators=_get_operator_list(),
                                operator_prices=_get_operator_prices(),
+                               wallbox_readings=_wallbox_readings_for(charges),
                                battery_kwh=_get_battery_kwh())
 
     # ── EDIT / DELETE ──────────────────────────────────────────
@@ -3848,6 +4003,11 @@ def register_routes(app):
     @app.route('/delete/<int:charge_id>', methods=['POST'])
     def delete_charge(charge_id):
         charge = Charge.query.get_or_404(charge_id)
+        # A wallbox reading attached to this entry must be released, not left
+        # pointing at a row that no longer exists: it would stay "matched"
+        # forever, never be offered to the charge the user logs instead, and
+        # render as a link to nothing in Settings.
+        _release_wallbox_reading(charge)
         db.session.delete(charge)
         db.session.commit()
         flash(t('flash.entry_deleted'), 'warning')
@@ -4140,6 +4300,29 @@ def register_routes(app):
                 else:
                     flash(t('flash.sync_disabled'), 'warning')
 
+            elif action == 'save_wallbox':
+                from services import shelly_link as _wl
+                _url = (request.form.get('wallbox_url') or '').strip().rstrip('/')
+                _tok = (request.form.get('wallbox_token') or '').strip()
+                AppConfig.set(_wl.K_ENABLED,
+                              '1' if 'wallbox_enabled' in request.form else '0')
+                AppConfig.set(_wl.K_URL, _url)
+                # An empty token field does NOT wipe a stored one: the page
+                # renders it masked, and a save of the surrounding settings
+                # would otherwise silently unpair the link.
+                if _tok and set(_tok) != {'\u2022'}:
+                    AppConfig.set(_wl.K_TOKEN, _tok)
+                AppConfig.set(_wl.K_VERIFY,
+                              '1' if 'wallbox_verify_ssl' in request.form else '0')
+                AppConfig.set(_wl.K_TOL, request.form.get(
+                    'wallbox_tolerance', _wl.DEFAULT_TOLERANCE_MIN))
+                AppConfig.set(_wl.K_APPLY, request.form.get('wallbox_apply', 'auto'))
+                AppConfig.set(_wl.K_BACKFILL, request.form.get(
+                    'wallbox_backfill_days', _wl.DEFAULT_BACKFILL_DAYS))
+                flash(t('flash.wallbox_saved'), 'success')
+                if _wl.configured():
+                    _wl.start_sync(app, specs=_wallbox_specs)
+
             # v2.29: legacy actions save_vehicle_api / test_vehicle_api /
             # delete_vehicle_api / sync_vehicle_now / sync_vehicle_force
             # are gone — credentials live in /vehicles/save, test+sync
@@ -4420,7 +4603,167 @@ def register_routes(app):
                                operator_monthly_fees=_get_operator_monthly_fees(),
                                _json_logical_field_labels=_json_logical_field_labels_for_ui(),
                                last_rollback=_get_last_rollback(),
+                               wallbox=_wallbox_settings_ctx(),
                                app_version=Config.APP_VERSION)
+
+    # ══ WALLBOX LINK ═══════════════════════════════════════════
+    # The house meter measures the wallbox; we know which car was on it. These
+    # routes are the seam. Everything reaching the analyzer goes through the
+    # server — the browser never sees the link token, so the settings page can
+    # be open on a screen without handing the key to whoever walks past.
+
+    @app.route('/api/wallbox/test', methods=['POST'])
+    def api_wallbox_test():
+        """Who is at the other end? Answers with the wallboxes it knows."""
+        from services import shelly_link as wl
+        data = request.get_json(silent=True) or {}
+        cfg = wl.settings()
+        # Test what is on screen, not only what is saved — otherwise the first
+        # thing a user can do is save a wrong address and then test it.
+        if (data.get('url') or '').strip():
+            cfg = dict(cfg, url=str(data['url']).strip().rstrip('/'))
+        tok = str(data.get('token') or '').strip()
+        if tok and set(tok) != {'\u2022'}:
+            cfg = dict(cfg, token=tok)
+        try:
+            info = wl.probe(cfg)
+        except wl.LinkError as e:
+            return jsonify({'ok': False, 'error': str(e)}), 200
+        except Exception as e:      # noqa: BLE001
+            return jsonify({'ok': False, 'error': '%s: %s' % (type(e).__name__, e)}), 200
+        return jsonify({'ok': True, 'info': info})
+
+    @app.route('/api/wallbox/sync', methods=['POST'])
+    def api_wallbox_sync():
+        from services import shelly_link as wl
+        data = request.get_json(silent=True) or {}
+        if not wl.configured():
+            return jsonify({'ok': False, 'error': 'not configured'}), 200
+        started = wl.start_sync(app, full=bool(data.get('full')),
+                                specs=_wallbox_specs)
+        return jsonify({'ok': True, 'started': started, 'running': wl.is_running()})
+
+    @app.route('/api/wallbox/status')
+    def api_wallbox_status():
+        from services import shelly_link as wl
+        return jsonify({'ok': True, 'running': wl.is_running(),
+                        'configured': wl.configured(),
+                        'last': wl.last_result(),
+                        'state': _wallbox_settings_ctx()})
+
+    @app.route('/api/wallbox/charge/<int:charge_id>')
+    def api_wallbox_charge(charge_id):
+        """The meter's reading for one of our charges, if there is one."""
+        from models.database import Charge, WallboxCharge
+        c = Charge.query.get_or_404(charge_id)
+        if not c.wallbox_charge_id:
+            return jsonify({'ok': True, 'reading': None})
+        wc = WallboxCharge.query.get(c.wallbox_charge_id)
+        return jsonify({'ok': True, 'reading': wc.to_dict() if wc else None})
+
+    @app.route('/api/wallbox/charge/<int:charge_id>/curve')
+    def api_wallbox_curve(charge_id):
+        """The charge curve, fetched through the server and passed on as-is.
+
+        Unreshaped on purpose: the picture here is meant to be the same picture
+        the analyzer draws, and every transformation on the way would be a
+        chance for the two to tell different stories.
+        """
+        from models.database import Charge, WallboxCharge
+        from services import shelly_link as wl
+        c = Charge.query.get_or_404(charge_id)
+        if not c.wallbox_charge_id:
+            return jsonify({'ok': False, 'error': 'no wallbox reading'}), 200
+        wc = WallboxCharge.query.get(c.wallbox_charge_id)
+        if wc is None:
+            return jsonify({'ok': False, 'error': 'no wallbox reading'}), 200
+        try:
+            curve = wl.fetch_curve(wl.settings(), wc.start_ts, wc.end_ts)
+        except wl.LinkError as e:
+            return jsonify({'ok': False, 'error': str(e)}), 200
+        except Exception as e:      # noqa: BLE001
+            return jsonify({'ok': False, 'error': '%s: %s' % (type(e).__name__, e)}), 200
+        return jsonify({'ok': True, 'curve': curve, 'reading': wc.to_dict()})
+
+    @app.route('/api/wallbox/charge/<int:charge_id>/apply', methods=['POST'])
+    def api_wallbox_apply(charge_id):
+        """Take the meter's kWh and cost over — or put back what was there."""
+        from models.database import db, Charge, WallboxCharge
+        from services import shelly_link as wl
+        undo = bool((request.get_json(silent=True) or {}).get('undo'))
+        c = Charge.query.get_or_404(charge_id)
+        wc = WallboxCharge.query.get(c.wallbox_charge_id) if c.wallbox_charge_id else None
+        if wc is None:
+            return jsonify({'ok': False, 'error': 'no wallbox reading'}), 200
+        bk, eff = _wallbox_specs(c.vehicle_id)
+        if undo:
+            done = wl.unapply_measurement(wc, c, bk, eff)
+        else:
+            wl.apply_measurement(wc, c, bk, eff)
+            done = True
+        db.session.commit()
+        return jsonify({'ok': True, 'applied': wc.applied_at is not None,
+                        'changed': done, 'charge': c.to_dict()})
+
+    @app.route('/api/wallbox/assign', methods=['POST'])
+    def api_wallbox_assign():
+        """Settle an ambiguous reading by hand.
+
+        The one case the matcher refuses on purpose: two cars, one wallbox, two
+        charges in the same window. Only a person knows which car was plugged
+        in, so the decision is theirs and is recorded as such.
+        """
+        from models.database import db, Charge, WallboxCharge
+        from services import shelly_link as wl
+        data = request.get_json(silent=True) or {}
+        wc = WallboxCharge.query.get_or_404(int(data.get('reading_id') or 0))
+        raw = data.get('charge_id')
+        if raw in (None, '', 0, '0'):
+            # Detaching: the reading goes back to being unmatched and the
+            # charge keeps whatever it said before the adoption.
+            if wc.charge_id:
+                old = Charge.query.get(wc.charge_id)
+                if old is not None:
+                    bk, eff = _wallbox_specs(old.vehicle_id)
+                    wl.unapply_measurement(wc, old, bk, eff)
+                    old.wallbox_charge_id = None
+            wc.charge_id = wc.vehicle_id = None
+            wc.match_state = 'unmatched'
+            wc.match_note = 'detached by hand'
+            db.session.commit()
+            return jsonify({'ok': True, 'state': wc.match_state})
+        c = Charge.query.get_or_404(int(raw))
+        if c.wallbox_charge_id and c.wallbox_charge_id != wc.id:
+            return jsonify({'ok': False,
+                            'error': 'that charge already has a wallbox reading'}), 200
+        wc.charge_id, wc.vehicle_id = c.id, c.vehicle_id
+        wc.match_state = 'matched'
+        wc.match_note = 'assigned by hand'
+        wc.matched_at = datetime.now()
+        c.wallbox_charge_id = wc.id
+        if wl.settings()['apply_mode'] != 'never':
+            bk, eff = _wallbox_specs(c.vehicle_id)
+            wl.apply_measurement(wc, c, bk, eff)
+        db.session.commit()
+        return jsonify({'ok': True, 'state': wc.match_state, 'charge': c.to_dict()})
+
+    @app.route('/api/wallbox/candidates/<int:reading_id>')
+    def api_wallbox_candidates(reading_id):
+        """Charges that could be this reading — what the picker offers."""
+        from models.database import Vehicle, WallboxCharge
+        from services import shelly_link as wl
+        wc = WallboxCharge.query.get_or_404(reading_id)
+        cfg = wl.settings()
+        cands = wl._candidates(wc, wl.linked_vehicles(wc.device_key),
+                               cfg['tolerance_min'])
+        namen = {v.id: v.name for v in Vehicle.query.all()}
+        return jsonify({'ok': True, 'reading': wc.to_dict(), 'candidates': [
+            {'charge_id': c.id, 'vehicle_id': c.vehicle_id,
+             'vehicle': namen.get(c.vehicle_id, ''),
+             'date': c.date.isoformat() if c.date else None,
+             'hour': c.charge_hour, 'end_hour': c.charge_end_hour,
+             'kwh_loaded': c.kwh_loaded, 'delta_s': int(delta)}
+            for delta, _de, c in cands]})
 
     # ── SYNC AUDIT ─────────────────────────────────────────────
     @app.route('/api/sync/audit')
