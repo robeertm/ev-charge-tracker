@@ -1593,5 +1593,6 @@
   "flash.wallbox_saved": "Wallbox-koppeling opgeslagen.",
   "wb.curve_grid_only": "Alles van het net — geen PV- of accumeter",
   "wb.curve_split_unknown": "Verloop gemeten — de bronnen erachter niet",
-  "wb.mix_hint": "Bronmix van deze lading, gemeten op de huismeter"
+  "wb.mix_hint": "Bronmix van deze lading, gemeten op de huismeter",
+  "set.companion": "Meet met Shelly-meters wat er echt door het huis loopt en geeft deze app de gemeten kWh van elke laadbeurt, verdeeld over zon, accu en net. Gratis, zelf gehost, van dezelfde maker."
 }

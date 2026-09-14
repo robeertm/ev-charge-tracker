@@ -1593,5 +1593,6 @@
   "flash.wallbox_saved": "Liaison wallbox enregistrée.",
   "wb.curve_grid_only": "Tout du réseau — aucun compteur PV ni batterie",
   "wb.curve_split_unknown": "Déroulé mesuré — les sources derrière ne le sont pas",
-  "wb.mix_hint": "Mélange des sources de cette charge, mesuré au compteur"
+  "wb.mix_hint": "Mélange des sources de cette charge, mesuré au compteur",
+  "set.companion": "Mesure avec des compteurs Shelly ce qui circule vraiment dans la maison et fournit à cette application les kWh mesurés de chaque charge, répartis entre soleil, batterie et réseau. Gratuit, auto-hébergé, du même auteur."
 }

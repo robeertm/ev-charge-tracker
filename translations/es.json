@@ -1593,5 +1593,6 @@
   "flash.wallbox_saved": "Enlace de wallbox guardado.",
   "wb.curve_grid_only": "Todo de la red — sin medidor fotovoltaico ni de batería",
   "wb.curve_split_unknown": "Curso medido — las fuentes detrás no",
-  "wb.mix_hint": "Mezcla de fuentes de esta carga, medida en el contador"
+  "wb.mix_hint": "Mezcla de fuentes de esta carga, medida en el contador",
+  "set.companion": "Mide con contadores Shelly lo que realmente circula en la casa y entrega a esta aplicación los kWh medidos de cada carga, con el reparto entre sol, batería y red. Gratuito, autoalojado, del mismo autor."
 }

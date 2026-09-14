@@ -1,5 +1,23 @@
 # Changelog
 
+## v3.0.131 (2026-09-14)
+
+### The CO2 correction reaches the entries that were already filed
+
+v3.0.130 mixed the carbon intensity of a measured charge — but only
+while taking a measurement over. An entry that had already been filed
+under an older version was ticked off and never looked at again, so the
+very charges on screen kept their grid mix. The catch-up now asks each
+question separately, and corrects those too, once each.
+
+### A word for the companion app
+
+Settings › App info now carries one sentence and a link to the Shelly
+Energy Analyzer — the other half of the wallbox link: it measures with
+Shelly meters what really flows in the house and hands this app the
+measured kWh of every charge, split into sun, battery and grid. Same
+author, free, self-hosted.
+
 ## v3.0.130 (2026-09-14)
 
 ### The CO2 of a mixed charge is now mixed too

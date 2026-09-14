@@ -1593,5 +1593,6 @@
   "flash.wallbox_saved": "Collegamento wallbox salvato.",
   "wb.curve_grid_only": "Tutto dalla rete — nessun contatore FV o batteria",
   "wb.curve_split_unknown": "Andamento misurato — le sorgenti dietro no",
-  "wb.mix_hint": "Mix delle sorgenti di questa ricarica, misurato al contatore"
+  "wb.mix_hint": "Mix delle sorgenti di questa ricarica, misurato al contatore",
+  "set.companion": "Misura con contatori Shelly ciò che scorre davvero in casa e fornisce a questa app i kWh misurati di ogni ricarica, divisi tra sole, batteria e rete. Gratuito, self-hosted, dello stesso autore."
 }

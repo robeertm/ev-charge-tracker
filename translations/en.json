@@ -1593,5 +1593,6 @@
   "flash.wallbox_saved": "Wallbox link saved.",
   "wb.curve_grid_only": "All from the grid — no PV or battery meter",
   "wb.curve_split_unknown": "Course measured — the sources behind it are not",
-  "wb.mix_hint": "Source mix of this charge, measured at the house meter"
+  "wb.mix_hint": "Source mix of this charge, measured at the house meter",
+  "set.companion": "Measures with Shelly meters what really flows in the house — and hands this app the measured kWh of every wallbox charge, split into sun, battery and grid. Free, self-hosted, by the same author."
 }

@@ -1593,5 +1593,6 @@
   "flash.wallbox_saved": "Wallbox-Verbindung gespeichert.",
   "wb.curve_grid_only": "Alles Netzstrom — kein PV- oder Akku-Zähler",
   "wb.curve_split_unknown": "Verlauf gemessen — die Quellen dahinter nicht",
-  "wb.mix_hint": "Quellen-Mischung dieser Ladung, am Hauszähler gemessen"
+  "wb.mix_hint": "Quellen-Mischung dieser Ladung, am Hauszähler gemessen",
+  "set.companion": "Misst mit Shelly-Zählern, was im Haus wirklich fließt — und liefert dieser App die gemessenen kWh jeder Wallbox-Ladung samt Aufteilung in Sonne, Akku und Netz. Kostenlos, selbst gehostet, vom selben Autor."
 }

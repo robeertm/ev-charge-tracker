@@ -669,3 +669,40 @@ def test_27_where_a_figure_is_missing_nothing_is_invented():
     pruefe("grid-only house: unchanged, as it should be",
            Charge.query.get(c4.id).co2_g_per_kwh, 400)
     ctx.pop()
+
+
+def test_28_an_entry_that_was_already_filed_still_gets_its_co2_fixed():
+    """The rows on Robert's screen: taken over and re-typed under an older
+    version, so the catch-up had already ticked them off — and their CO2 was
+    never looked at again. Each job has to ask its own question."""
+    print("== An entry that was already filed still gets its CO2 fixed ==")
+    app, ctx = _app()
+    _config()
+    kia = _car('Kia')
+    c = _charge(kia, TAG, 12, 14, kwh=10.0)
+    c.co2_g_per_kwh = 341
+    c.calculate_fields(kia.battery_kwh, 0.88)
+    db.session.commit()
+    L.store_charges(_payload(_reading('z1', MITTAG, kwh=10.0, solar=9.8,
+                                      battery=0.1, grid=0.1, cost=0.05)))
+    L.match_all()                       # no pv figure yet: CO2 untouched
+    wc = WallboxCharge.query.filter_by(source_id='z1').first()
+    c = Charge.query.get(c.id)
+    pruefe("filed and re-typed", (wc.applied_at is not None, c.charge_type), (True, 'PV'))
+    pruefe("but the CO2 is still the grid mix", c.co2_g_per_kwh, 341)
+    pruefe("and the re-type job is ticked off", wc.prev_needs_review is not None, True)
+
+    # The owner fills in their PV figure. Nothing new arrives from the
+    # analyzer — and the entry must still be corrected.
+    nach = L.hole_versaeumtes_nach('auto', pv_co2=40)
+    c = Charge.query.get(c.id)
+    pruefe("one CO2 was mixed", nach['co2'], 1)
+    pruefe("and it follows the measured mix", c.co2_g_per_kwh,
+           int(round((9.9 * 40 + 0.1 * 341) / 10.0)))
+    pruefe("the original stays for the undo",
+           WallboxCharge.query.filter_by(source_id='z1').first().prev_co2_g_per_kwh, 341)
+
+    print("== ...and only once ==")
+    pruefe("a second pass has nothing to do",
+           L.hole_versaeumtes_nach('auto', pv_co2=40)['co2'], 0)
+    ctx.pop()

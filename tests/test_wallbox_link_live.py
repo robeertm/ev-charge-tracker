@@ -318,6 +318,19 @@ def test_the_history_row_carries_the_source_colours(live):
     assert 'table-danger' not in html, 'a measured home charge still asks to be checked'
 
 
+def test_the_settings_page_points_at_the_companion(live):
+    """Robert: „der ev-tracker andersrum zu shelly analyzer". One sentence and
+    a link — and it has to survive translation, so the German text is checked,
+    not the English fallback."""
+    base, _ = live
+    with urllib.request.urlopen(base + '/settings', timeout=30) as r:
+        html = r.read().decode()
+    assert 'github.com/robeertm/shelly-energy-analyzer' in html
+    assert 'Shelly Energy Analyzer' in html
+    assert 'Shelly-Z\u00e4hlern' in html or 'Shelly meters' in html, \
+        'the sentence fell back to its i18n key'
+
+
 def test_the_curve_comes_through_the_server(live):
     base, data_dir = live
     con = _sqlite(data_dir)

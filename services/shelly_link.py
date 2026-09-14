@@ -459,8 +459,6 @@ def apply_measurement(wc, charge, battery_kwh=None, efficiency=None, pv_co2=None
         wc.prev_eur_per_kwh = charge.eur_per_kwh
         wc.prev_needs_review = charge.needs_review
         wc.prev_charge_type = charge.charge_type
-    if wc.prev_co2_g_per_kwh is None:
-        wc.prev_co2_g_per_kwh = charge.co2_g_per_kwh
     charge.kwh_loaded = round(float(wc.energy_kwh or 0), 3)
     # The per-kWh price becomes an *effective* one: with surplus charging the
     # sun and the battery cost nothing, so the mixed price of a charge is lower
@@ -474,9 +472,18 @@ def apply_measurement(wc, charge, battery_kwh=None, efficiency=None, pv_co2=None
     # The CO2 of a mixed charge is a mix too. Always computed from the ORIGINAL
     # grid intensity (kept on the reading), never from a value this function
     # wrote itself — otherwise a second pass would mix the mix.
+    # 🔴 The base is the ORIGINAL grid intensity, and it is recorded only when
+    # something actually changes. Recording it on every adoption looked
+    # harmless and quietly disabled the catch-up: a row whose CO2 could not be
+    # mixed yet (no PV figure in Settings) was marked "done" and never looked
+    # at again.
     _pv_g = pv_co2() if callable(pv_co2) else pv_co2
-    _misch = co2_aus_mischung(wc, wc.prev_co2_g_per_kwh, _pv_g)
-    if _misch is not None:
+    _basis = (wc.prev_co2_g_per_kwh if wc.prev_co2_g_per_kwh is not None
+              else charge.co2_g_per_kwh)
+    _misch = co2_aus_mischung(wc, _basis, _pv_g)
+    if _misch is not None and _misch != charge.co2_g_per_kwh:
+        if wc.prev_co2_g_per_kwh is None:
+            wc.prev_co2_g_per_kwh = charge.co2_g_per_kwh
         charge.co2_g_per_kwh = _misch
 
     charge.calculate_fields(battery_kwh, efficiency)
@@ -527,7 +534,8 @@ def hole_versaeumtes_nach(mode, specs=None, pv_co2=None):
                     WallboxCharge.charge_id.isnot(None),
                     WallboxCharge.undone_at.is_(None))
             .all())
-    tally = {'applied': 0, 'retyped': 0}
+    tally = {'applied': 0, 'retyped': 0, 'co2': 0}
+    _pv_g = pv_co2() if callable(pv_co2) else pv_co2
     for wc in rows:
         charge = Charge.query.get(wc.charge_id)
         if charge is None:
@@ -536,7 +544,22 @@ def hole_versaeumtes_nach(mode, specs=None, pv_co2=None):
             bk, eff = (specs or _default_specs)(charge.vehicle_id)
             apply_measurement(wc, charge, bk, eff, pv_co2)
             tally['applied'] += 1
-        elif wc.prev_needs_review is None:
+            continue
+
+        # 🔴 Each of the two jobs below has to be its own question. They were
+        # written as one chain, and a row that had already been re-typed then
+        # never had its CO2 looked at again — the very rows on the screen that
+        # started this.
+        if wc.prev_co2_g_per_kwh is None:
+            misch = co2_aus_mischung(wc, charge.co2_g_per_kwh, _pv_g)
+            if misch is not None and misch != charge.co2_g_per_kwh:
+                wc.prev_co2_g_per_kwh = charge.co2_g_per_kwh
+                charge.co2_g_per_kwh = misch
+                bk, eff = (specs or _default_specs)(charge.vehicle_id)
+                charge.calculate_fields(bk, eff)
+                tally['co2'] += 1
+
+        if wc.prev_needs_review is None:
             # Filed before the typing rule existed: record what we found (the
             # undo needs it) and bring the entry along.
             wc.prev_needs_review = bool(charge.needs_review)
@@ -548,10 +571,11 @@ def hole_versaeumtes_nach(mode, specs=None, pv_co2=None):
             if typ:
                 charge.charge_type = typ
             tally['retyped'] += 1
-    if tally['applied'] or tally['retyped']:
+    if any(tally.values()):
         db.session.commit()
-        logger.info('Wallbox link: caught up %d adoption(s), %d re-typed',
-                    tally['applied'], tally['retyped'])
+        logger.info('Wallbox link: caught up %d adoption(s), %d re-typed, '
+                    '%d CO2 mixes', tally['applied'], tally['retyped'],
+                    tally['co2'])
     return tally
 
 
@@ -651,7 +675,7 @@ def sync(app, days=None, full=False, specs=None, pv_co2=None):
         cfg = settings()
         res = {'ok': False, 'ts': int(time.time()), 'new': 0, 'updated': 0,
                'matched': 0, 'ambiguous': 0, 'unmatched': 0, 'applied': 0,
-               'retyped': 0,
+               'retyped': 0, 'co2': 0,
                'error': None}
         if not configured(cfg):
             res['error'] = 'not configured'
@@ -679,12 +703,13 @@ def sync(app, days=None, full=False, specs=None, pv_co2=None):
                                          pv_co2=pv_co2)
             tally['applied'] = tally.get('applied', 0) + nach['applied']
             tally['retyped'] = nach['retyped']
+            tally['co2'] = nach['co2']
             res.update({'ok': True, 'new': neu, 'updated': upd,
                         'pending_settle': int(payload.get('pending_settle') or 0),
                         'wallbox': (payload.get('wallbox') or {}).get('name') or dev})
             res.update({k: tally.get(k, 0)
                         for k in ('matched', 'ambiguous', 'unmatched',
-                                  'applied', 'retyped')})
+                                  'applied', 'retyped', 'co2')})
             AppConfig.set(K_LAST_TS, res['ts'])
         except LinkError as e:
             res['error'] = str(e)
