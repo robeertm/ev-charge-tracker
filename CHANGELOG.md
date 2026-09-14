@@ -1,5 +1,24 @@
 # Changelog
 
+## v3.0.128 (2026-09-14)
+
+### A home without solar gets its charge curve too
+
+The analyzer used to hand over a charge curve only where supply meters
+could split it into sun, battery and grid. A household that simply
+charges off the grid got an empty box — although the wallbox meter had
+recorded every minute of the charge.
+
+It now arrives here as well, in one colour, and the curve says which of
+three things it means: a measured split, a house with no generation at
+all (the whole curve is grid, stated rather than guessed), or a house
+whose generation exists but could not be attributed to this window — the
+course is shown, the colours are not invented. The legend follows: no
+"0 min" rows for equipment the house does not have.
+
+Requires the analyzer at 16.86.0 or newer for the one-colour curve;
+older analyzers keep answering as before.
+
 ## v3.0.127 (2026-09-14)
 
 ### The house meter and this app now tell the same story about a home charge

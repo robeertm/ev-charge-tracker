@@ -171,15 +171,30 @@
       return;
     }
     var sec = d.seconds || {};
+    // The analyzer says in one word what these bands mean. A house without PV
+    // and without a battery drew everything off the grid — the curve is then
+    // entirely red, and a legend listing sun and battery at "0 min" would be
+    // three lines about equipment that does not exist. A house that HAS
+    // generation but no attribution for this window gets the course alone,
+    // and is told so instead of being shown an all-red chart it would have to
+    // believe.
+    var nurNetz = d.split === 'grid_only', ohneSplit = d.split === 'unknown';
+    var zeile = ohneSplit
+      ? T('wb.curve_split_unknown', 'Verlauf gemessen — die Quellen dahinter nicht')
+      : (nurNetz
+         ? T('wb.curve_grid_only', 'Alles Netzstrom — kein PV- oder Akku-Zähler')
+             + ' · ' + fmtMin(sec.total)
+         : T('wb.curve_flowed', 'Wie lange welche Quelle geflossen ist')
+             + ' · ' + fmtMin(sec.total));
     box.innerHTML = head +
-      '<div class="text-muted small mb-1">' +
-        esc(T('wb.curve_flowed', 'Wie lange welche Quelle geflossen ist')) +
-        ' · ' + esc(fmtMin(sec.total)) + '</div>' +
+      '<div class="text-muted small mb-1">' + esc(zeile) + '</div>' +
       '<canvas id="wbcv-' + esc(id) + '" style="width:100%;height:190px;display:block"></canvas>' +
       '<div id="wbct-' + esc(id) + '" class="small text-muted" style="min-height:18px"></div>' +
-      legend([[SRC.solar, T('wb.solar', 'Solar'), fmtMin(sec.solar)],
-              [SRC.battery, T('wb.battery', 'Batterie'), fmtMin(sec.battery)],
-              [SRC.grid, T('wb.grid', 'Netz'), fmtMin(sec.grid)]], 'margin-top:6px');
+      (ohneSplit ? '' : (nurNetz
+        ? legend([[SRC.grid, T('wb.grid', 'Netz'), fmtMin(sec.grid)]], 'margin-top:6px')
+        : legend([[SRC.solar, T('wb.solar', 'Solar'), fmtMin(sec.solar)],
+                  [SRC.battery, T('wb.battery', 'Batterie'), fmtMin(sec.battery)],
+                  [SRC.grid, T('wb.grid', 'Netz'), fmtMin(sec.grid)]], 'margin-top:6px')));
     paint(id);
   }
 

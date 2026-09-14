@@ -1590,5 +1590,7 @@
   "wb.vehicle_enable": "Dieses Auto lädt an der Wallbox",
   "wb.vehicle_key_placeholder": "Geräteschlüssel (leer = die eine Wallbox)",
   "wb.vehicle_key_hint": "Nur ausfüllen, wenn es mehr als eine Wallbox gibt — dann ist „die“ Wallbox keine Antwort.",
-  "flash.wallbox_saved": "Wallbox-Verbindung gespeichert."
+  "flash.wallbox_saved": "Wallbox-Verbindung gespeichert.",
+  "wb.curve_grid_only": "Alles Netzstrom — kein PV- oder Akku-Zähler",
+  "wb.curve_split_unknown": "Verlauf gemessen — die Quellen dahinter nicht"
 }

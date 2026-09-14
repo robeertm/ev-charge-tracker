@@ -1590,5 +1590,7 @@
   "wb.vehicle_enable": "Quest’auto ricarica alla wallbox",
   "wb.vehicle_key_placeholder": "chiave dispositivo (vuoto = l’unica wallbox)",
   "wb.vehicle_key_hint": "Da compilare solo se c’è più di una wallbox — allora «la» wallbox non è una risposta.",
-  "flash.wallbox_saved": "Collegamento wallbox salvato."
+  "flash.wallbox_saved": "Collegamento wallbox salvato.",
+  "wb.curve_grid_only": "Tutto dalla rete — nessun contatore FV o batteria",
+  "wb.curve_split_unknown": "Andamento misurato — le sorgenti dietro no"
 }

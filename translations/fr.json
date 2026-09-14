@@ -1590,5 +1590,7 @@
   "wb.vehicle_enable": "Cette voiture charge sur la wallbox",
   "wb.vehicle_key_placeholder": "clé d’appareil (vide = l’unique wallbox)",
   "wb.vehicle_key_hint": "À remplir seulement s’il y a plus d’une wallbox — alors « la » wallbox n’est pas une réponse.",
-  "flash.wallbox_saved": "Liaison wallbox enregistrée."
+  "flash.wallbox_saved": "Liaison wallbox enregistrée.",
+  "wb.curve_grid_only": "Tout du réseau — aucun compteur PV ni batterie",
+  "wb.curve_split_unknown": "Déroulé mesuré — les sources derrière ne le sont pas"
 }

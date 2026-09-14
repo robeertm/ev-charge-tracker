@@ -1590,5 +1590,7 @@
   "wb.vehicle_enable": "Deze auto laadt aan de wallbox",
   "wb.vehicle_key_placeholder": "apparaatsleutel (leeg = de ene wallbox)",
   "wb.vehicle_key_hint": "Alleen invullen als er meer dan één wallbox is — dan is «de» wallbox geen antwoord.",
-  "flash.wallbox_saved": "Wallbox-koppeling opgeslagen."
+  "flash.wallbox_saved": "Wallbox-koppeling opgeslagen.",
+  "wb.curve_grid_only": "Alles van het net — geen PV- of accumeter",
+  "wb.curve_split_unknown": "Verloop gemeten — de bronnen erachter niet"
 }
