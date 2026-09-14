@@ -62,13 +62,26 @@
     cv.height = rect.height * dpr;
     var ctx = cv.getContext('2d');
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-    var W = rect.width, H = rect.height, PL = 40, PR = 8, PT = 10, PB = 18;
-    var iw = W - PL - PR, ih = H - PT - PB;
+    var W = rect.width, H = rect.height, PR = 8, PT = 10, PB = 18;
     ctx.clearRect(0, 0, W, H);
 
     var ts = d.ts, n = ts.length;
     var peak = Math.max.apply(null, d.load_w) || 1;
     var yMax = peak * 1.08;
+
+    var ACHSENSCHRIFT = '10px system-ui,sans-serif';
+    function kwLabel(v) { return (v / 1000).toFixed(1) + ' kW'; }
+    // The left gutter is MEASURED, not assumed: a fixed 40 px fits "9.9 kW"
+    // and cuts the leading digit off "11.8 kW" — the axis then reads 1.8 kW
+    // for a charge that pulled eleven, which is worse than no axis at all.
+    ctx.font = ACHSENSCHRIFT;
+    var breit = 0;
+    for (var q = 0; q <= 3; q++) {
+      var m = ctx.measureText ? ctx.measureText(kwLabel(yMax * q / 3)) : null;
+      if (m && m.width) breit = Math.max(breit, m.width);
+    }
+    var PL = Math.max(40, Math.ceil(breit) + 10);
+    var iw = W - PL - PR, ih = H - PT - PB;
     function x(i) { return PL + (ts[i] - ts[0]) / Math.max(1, ts[n - 1] - ts[0]) * iw; }
     function y(v) { return PT + ih - (v / yMax) * ih; }
 
@@ -78,7 +91,7 @@
 
     ctx.strokeStyle = grid;
     ctx.fillStyle = muted;
-    ctx.font = '10px system-ui,sans-serif';
+    ctx.font = ACHSENSCHRIFT;
     ctx.textAlign = 'right';
     ctx.lineWidth = 1;
     for (var k = 0; k <= 3; k++) {
@@ -86,7 +99,7 @@
       ctx.globalAlpha = 0.6;
       ctx.beginPath(); ctx.moveTo(PL, yy); ctx.lineTo(W - PR, yy); ctx.stroke();
       ctx.globalAlpha = 1;
-      ctx.fillText((v / 1000).toFixed(1) + ' kW', PL - 5, yy + 3);
+      ctx.fillText(kwLabel(v), PL - 5, yy + 3);
     }
 
     var bands = [[d.solar_w, SRC.solar], [d.battery_w, SRC.battery], [d.grid_w, SRC.grid]];

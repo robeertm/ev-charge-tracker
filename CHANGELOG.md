@@ -16,6 +16,11 @@ whose generation exists but could not be attributed to this window — the
 course is shown, the colours are not invented. The legend follows: no
 "0 min" rows for equipment the house does not have.
 
+The kW axis no longer cuts its own labels in half either: the left
+gutter was a fixed 40 px, which fits "9.9 kW" but not "11.8 kW", so a
+charge that pulled eleven kilowatts was labelled 1.8. It is measured
+now, with the font the labels are drawn in.
+
 Requires the analyzer at 16.86.0 or newer for the one-colour curve;
 older analyzers keep answering as before.
 
