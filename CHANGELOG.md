@@ -1,5 +1,30 @@
 # Changelog
 
+## v3.0.130 (2026-09-14)
+
+### The CO2 of a mixed charge is now mixed too
+
+The app books one carbon intensity per charge. For a charge at a home
+wallbox that was a fiction: 5.63 kWh of sunshine and 0.011 kWh of grid
+were booked at the grid mix — roughly ten times too much for a charge
+that was almost carbon-free.
+
+Where the house meter measured the split, the intensity now follows it:
+own generation at the PV figure from Settings (production CO2 amortised
+over the system's yield and lifetime), the grid part at the grid
+intensity for that window, weighted by the kilowatt-hours. A house
+without PV is unaffected — all grid stays all grid.
+
+The house battery counts as own generation, the same way the charge is
+priced: what comes out of it went in from the roof. A house that charges
+its battery off the grid at night is flattered by that, and the meter
+cannot tell the two apart — better said out loud than papered over with
+a third invented number.
+
+Nothing is invented anywhere: no PV figure in Settings, no grid figure
+for the window, or no measured split, and the entry keeps exactly what
+it had. The undo restores the original intensity along with the rest.
+
 ## v3.0.129 (2026-09-14)
 
 ### A charge at your own wallbox needs no checking

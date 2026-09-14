@@ -577,3 +577,95 @@ def test_25_a_match_the_old_rule_declined_is_settled_later():
     pruefe("the undo marker is cleared",
            WallboxCharge.query.filter_by(source_id='s1').first().undone_at, None)
     ctx.pop()
+
+
+# ══════════════════════════════════════════════════════════════════════════
+# Der CO2-Anteil einer Mischladung
+# ══════════════════════════════════════════════════════════════════════════
+
+def test_26_the_co2_of_a_mixed_charge_is_mixed_too():
+    """Robert: „wird eigentlich dann der co2 anteil auch richtig berechnet bei
+    mischladungen?"
+
+    It was not. The app books ONE intensity per charge, and a charge of 5.63
+    kWh sunshine plus 0.011 kWh grid was booked at the grid mix — roughly ten
+    times too much for a nearly carbon-free charge. Measured on a real
+    installation before this was built.
+    """
+    print("== The CO2 of a mixed charge is mixed too ==")
+    app, ctx = _app()
+    _config()
+    kia = _car('Kia')
+    c = _charge(kia, TAG, 12, 14, kwh=10.0)
+    c.co2_g_per_kwh = 400          # what ENTSO-E said for that window
+    c.calculate_fields(kia.battery_kwh, 0.88)
+    db.session.commit()
+    L.store_charges(_payload(_reading('c1', MITTAG, kwh=10.0, solar=8.0,
+                                      battery=1.0, grid=1.0, cost=0.3)))
+    L.match_all(pv_co2=40)          # the owner's own PV figure, g/kWh
+    c = Charge.query.get(c.id)
+    # (8 + 1) kWh own at 40 g + 1 kWh grid at 400 g, over 10 kWh
+    pruefe("the intensity follows the mix", c.co2_g_per_kwh, 76)
+    pruefe("and the kilograms follow the intensity", c.co2_kg, round(10.0 * 76 / 1000, 2))
+
+    print("== ...and a second pass does not mix the mix ==")
+    wc = WallboxCharge.query.filter_by(source_id='c1').first()
+    L.apply_measurement(wc, c, kia.battery_kwh, 0.88, 40)
+    db.session.commit()
+    pruefe("still the same number", Charge.query.get(c.id).co2_g_per_kwh, 76)
+    pruefe("and the original grid value is kept for the undo",
+           wc.prev_co2_g_per_kwh, 400)
+
+    print("== ...and the undo puts the grid value back ==")
+    L.unapply_measurement(wc, c, kia.battery_kwh, 0.88)
+    db.session.commit()
+    pruefe("grid intensity restored", Charge.query.get(c.id).co2_g_per_kwh, 400)
+    ctx.pop()
+
+
+def test_27_where_a_figure_is_missing_nothing_is_invented():
+    print("== Where a figure is missing, nothing is invented ==")
+    app, ctx = _app()
+    _config()
+    kia = _car('Kia')
+
+    # (a) No PV figure in Settings: the mix cannot be weighed, so the entry
+    #     keeps the grid intensity rather than getting a made-up one.
+    c1 = _charge(kia, TAG, 12, 13, kwh=10.0)
+    c1.co2_g_per_kwh = 400
+    db.session.commit()
+    L.store_charges(_payload(_reading('m1', MITTAG, kwh=10.0, solar=9.0,
+                                      battery=0.0, grid=1.0, cost=0.3)))
+    L.match_all(pv_co2=None)
+    pruefe("no PV figure: untouched", Charge.query.get(c1.id).co2_g_per_kwh, 400)
+
+    # (b) No grid figure either (ENTSO-E was silent): still nothing invented,
+    #     and the backfill thread will fill it in later.
+    c2 = _charge(kia, TAG, 15, 16, kwh=10.0)
+    db.session.commit()
+    L.store_charges(_payload(_reading('m2', datetime(TAG.year, TAG.month, TAG.day, 15),
+                                      kwh=10.0, solar=9.0, battery=0.0, grid=1.0,
+                                      cost=0.3)))
+    L.match_all(pv_co2=40)
+    pruefe("no grid figure: stays empty", Charge.query.get(c2.id).co2_g_per_kwh, None)
+
+    # (c) An unmeasured split: the meter knows the kWh, not their origin.
+    c3 = _charge(kia, TAG, 18, 19, kwh=10.0)
+    c3.co2_g_per_kwh = 400
+    db.session.commit()
+    L.store_charges(_payload(_reading('m3', datetime(TAG.year, TAG.month, TAG.day, 18),
+                                      kwh=10.0, model='fixed', cost=3.0)))
+    L.match_all(pv_co2=40)
+    pruefe("unmeasured split: untouched", Charge.query.get(c3.id).co2_g_per_kwh, 400)
+
+    # (d) A house without PV: all grid, so the mix IS the grid value.
+    c4 = _charge(kia, TAG, 20, 21, kwh=10.0)
+    c4.co2_g_per_kwh = 400
+    db.session.commit()
+    L.store_charges(_payload(_reading('m4', datetime(TAG.year, TAG.month, TAG.day, 20),
+                                      kwh=10.0, solar=0.0, battery=0.0, grid=10.0,
+                                      model='fixed', cost=3.0)))
+    L.match_all(pv_co2=40)
+    pruefe("grid-only house: unchanged, as it should be",
+           Charge.query.get(c4.id).co2_g_per_kwh, 400)
+    ctx.pop()

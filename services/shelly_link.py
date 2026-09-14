@@ -412,7 +412,40 @@ def _ist_pruefnotiz(text):
     return t.startswith('Automatisch erkannt') and t.endswith('bitte pr\u00fcfen')
 
 
-def apply_measurement(wc, charge, battery_kwh=None, efficiency=None):
+def co2_aus_mischung(wc, netz_g, pv_g):
+    """The charge's own CO2 intensity, weighted by where its kWh came from.
+
+    The app books one intensity per charge. For a charge at a wallbox that is
+    a fiction: 5.63 kWh of sunshine and 0.011 kWh of grid were booked at the
+    grid mix, which overstated a nearly carbon-free charge roughly tenfold.
+
+    ``netz_g`` is the grid intensity for the charge window (ENTSO-E, exactly
+    what the entry carried before), ``pv_g`` the owner's own PV intensity from
+    Settings — production CO2 amortised over the system's yield and lifetime.
+
+    🔑 The house battery counts as own generation, the same way the analyzer
+    prices it: what comes out of it went in from the roof. A house that charges
+    its battery off the grid at night would be flattered here — the analyzer
+    cannot tell those apart today, and inventing a third number would be worse
+    than saying so.
+
+    Returns None where anything needed is missing: an unmeasured mix, no PV
+    figure, no grid figure. **Never** a guess.
+    """
+    if netz_g is None or pv_g is None:
+        return None
+    if not wc.energy_kwh or wc.solar_kwh is None or wc.battery_kwh is None \
+            or wc.grid_kwh is None:
+        return None
+    eigen = float(wc.solar_kwh) + float(wc.battery_kwh)
+    netz = float(wc.grid_kwh)
+    summe = eigen + netz
+    if summe <= 0:
+        return None
+    return int(round((eigen * float(pv_g) + netz * float(netz_g)) / summe))
+
+
+def apply_measurement(wc, charge, battery_kwh=None, efficiency=None, pv_co2=None):
     """Take the meter's numbers into the charge entry — reversibly.
 
     What stood there before is kept on the reading, so the adoption can be
@@ -426,6 +459,8 @@ def apply_measurement(wc, charge, battery_kwh=None, efficiency=None):
         wc.prev_eur_per_kwh = charge.eur_per_kwh
         wc.prev_needs_review = charge.needs_review
         wc.prev_charge_type = charge.charge_type
+    if wc.prev_co2_g_per_kwh is None:
+        wc.prev_co2_g_per_kwh = charge.co2_g_per_kwh
     charge.kwh_loaded = round(float(wc.energy_kwh or 0), 3)
     # The per-kWh price becomes an *effective* one: with surplus charging the
     # sun and the battery cost nothing, so the mixed price of a charge is lower
@@ -436,6 +471,14 @@ def apply_measurement(wc, charge, battery_kwh=None, efficiency=None):
     # calculate_fields would multiply price × kWh again and round to cents;
     # letting it do so keeps every derived figure consistent with the rest of
     # the app rather than introducing a second way of computing a total.
+    # The CO2 of a mixed charge is a mix too. Always computed from the ORIGINAL
+    # grid intensity (kept on the reading), never from a value this function
+    # wrote itself — otherwise a second pass would mix the mix.
+    _pv_g = pv_co2() if callable(pv_co2) else pv_co2
+    _misch = co2_aus_mischung(wc, wc.prev_co2_g_per_kwh, _pv_g)
+    if _misch is not None:
+        charge.co2_g_per_kwh = _misch
+
     charge.calculate_fields(battery_kwh, efficiency)
 
     # 🔑 A charge the house meter has measured is not a charge that needs
@@ -458,7 +501,7 @@ def apply_measurement(wc, charge, battery_kwh=None, efficiency=None):
     wc.undone_at = None          # taking it over again settles the argument
 
 
-def hole_versaeumtes_nach(mode, specs=None):
+def hole_versaeumtes_nach(mode, specs=None, pv_co2=None):
     """Settle matched readings the matcher will never look at again.
 
     ``match_all`` deliberately retries only what is NOT matched — a settled
@@ -491,7 +534,7 @@ def hole_versaeumtes_nach(mode, specs=None):
             continue
         if wc.applied_at is None:
             bk, eff = (specs or _default_specs)(charge.vehicle_id)
-            apply_measurement(wc, charge, bk, eff)
+            apply_measurement(wc, charge, bk, eff, pv_co2)
             tally['applied'] += 1
         elif wc.prev_needs_review is None:
             # Filed before the typing rule existed: record what we found (the
@@ -528,11 +571,14 @@ def unapply_measurement(wc, charge, battery_kwh=None, efficiency=None):
             charge.notes = _PRUEFNOTIZ_ZURUECK
     if wc.prev_charge_type is not None:
         charge.charge_type = wc.prev_charge_type
+    if wc.prev_co2_g_per_kwh is not None:
+        charge.co2_g_per_kwh = wc.prev_co2_g_per_kwh
     charge.calculate_fields(battery_kwh, efficiency)
     wc.applied_at = None
     wc.undone_at = datetime.now()
     wc.prev_kwh_loaded = wc.prev_total_cost = wc.prev_eur_per_kwh = None
     wc.prev_needs_review = wc.prev_charge_type = None
+    wc.prev_co2_g_per_kwh = None
     return True
 
 
@@ -553,7 +599,7 @@ def _default_specs(vehicle_id):
     return bk, 0.88
 
 
-def match_all(cfg=None, device_key='', specs=None):
+def match_all(cfg=None, device_key='', specs=None, pv_co2=None):
     """Re-decide every reading that is not settled yet. Returns a tally.
 
     Readings already matched are left alone; *ambiguous* and *unmatched* ones
@@ -583,7 +629,7 @@ def match_all(cfg=None, device_key='', specs=None):
             charge.wallbox_charge_id = wc.id
             if _apply_wanted(cfg['apply_mode'], charge):
                 bk, eff = (specs or _default_specs)(charge.vehicle_id)
-                apply_measurement(wc, charge, bk, eff)
+                apply_measurement(wc, charge, bk, eff, pv_co2)
                 tally['applied'] += 1
         else:
             wc.charge_id = None
@@ -597,7 +643,7 @@ def match_all(cfg=None, device_key='', specs=None):
 # One full pass
 # ══════════════════════════════════════════════════════════════════════════
 
-def sync(app, days=None, full=False, specs=None):
+def sync(app, days=None, full=False, specs=None, pv_co2=None):
     """Fetch, store, match. Returns a result dict; never raises at the caller."""
     from models.database import AppConfig
     import json as _json
@@ -628,8 +674,9 @@ def sync(app, days=None, full=False, specs=None):
             else:
                 payload = fetch_charges(cfg, days=int(days))
             neu, upd = store_charges(payload)
-            tally = match_all(cfg, dev, specs=specs)
-            nach = hole_versaeumtes_nach(cfg['apply_mode'], specs=specs)
+            tally = match_all(cfg, dev, specs=specs, pv_co2=pv_co2)
+            nach = hole_versaeumtes_nach(cfg['apply_mode'], specs=specs,
+                                         pv_co2=pv_co2)
             tally['applied'] = tally.get('applied', 0) + nach['applied']
             tally['retyped'] = nach['retyped']
             res.update({'ok': True, 'new': neu, 'updated': upd,
@@ -667,7 +714,7 @@ def is_running():
     return _sync_running
 
 
-def start_sync(app, days=None, full=False, specs=None):
+def start_sync(app, days=None, full=False, specs=None, pv_co2=None):
     """Run a pass in the background. False if one is already going."""
     global _sync_running, _sync_thread
     with _sync_lock:
@@ -678,7 +725,7 @@ def start_sync(app, days=None, full=False, specs=None):
     def _run():
         global _sync_running
         try:
-            sync(app, days=days, full=full, specs=specs)
+            sync(app, days=days, full=full, specs=specs, pv_co2=pv_co2)
         finally:
             _sync_running = False
 
@@ -688,7 +735,7 @@ def start_sync(app, days=None, full=False, specs=None):
     return True
 
 
-def start_loop(app, interval_s=1800, specs=None):
+def start_loop(app, interval_s=1800, specs=None, pv_co2=None):
     """A quiet poll while the app runs.
 
     Half-hourly on purpose: the analyzer withholds a charge until it has been
@@ -705,7 +752,7 @@ def start_loop(app, interval_s=1800, specs=None):
                 with app.app_context():
                     on = configured()
                 if on:
-                    sync(app, specs=specs)
+                    sync(app, specs=specs, pv_co2=pv_co2)
             except Exception:
                 logger.debug('wallbox link loop', exc_info=True)
             time.sleep(max(300, int(interval_s)))

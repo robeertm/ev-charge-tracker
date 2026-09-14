@@ -399,6 +399,10 @@ class WallboxCharge(db.Model):
     # back would restore the numbers and silently keep the rest.
     prev_needs_review = db.Column(db.Boolean)
     prev_charge_type = db.Column(db.String(2))
+    # The grid intensity the entry carried before the measured mix replaced
+    # it. Kept for the undo — and as the base every recomputation starts from,
+    # so mixing never happens twice on top of itself.
+    prev_co2_g_per_kwh = db.Column(db.Integer)
     applied_at = db.Column(db.DateTime)
     # Somebody pressed "undo" on this reading. The catch-up pass must never
     # argue with that: an automatic rule that quietly re-does what a person

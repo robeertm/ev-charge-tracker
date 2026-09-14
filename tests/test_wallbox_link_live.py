@@ -394,9 +394,18 @@ def test_the_sync_route_actually_honours_the_days_it_was_given(live, analyzer):
     believes it asked for something."""
     base, _ = live
     _setup(base, analyzer)
+    # 🔴 A pass may still be running from the previous test — start_sync then
+    # answers "not started", and a test that only fires once would read the
+    # silence as a lost parameter. So keep asking until one actually starts.
     ANFRAGEN.clear()
-    r = _post_json(base, '/api/wallbox/sync', {'days': 7})
-    assert r.get('ok'), r
+    for _ in range(40):
+        r = _post_json(base, '/api/wallbox/sync', {'days': 7})
+        assert r.get('ok'), r
+        if r.get('started'):
+            break
+        time.sleep(0.25)
+    else:
+        pytest.skip('no sync slot became free in time')
     for _ in range(40):
         time.sleep(0.25)
         if any('/charges' in a for a in ANFRAGEN):

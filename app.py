@@ -279,6 +279,10 @@ def create_app(config_class=Config):
             if 'undone_at' not in wb_columns:
                 db.session.execute(text(
                     'ALTER TABLE wallbox_charges ADD COLUMN undone_at DATETIME'))
+            if 'prev_co2_g_per_kwh' not in wb_columns:
+                db.session.execute(text(
+                    'ALTER TABLE wallbox_charges ADD COLUMN '
+                    'prev_co2_g_per_kwh INTEGER'))
             db.session.commit()
         except Exception:
             pass  # fresh install — create_all() built them correctly already
@@ -529,7 +533,7 @@ def create_app(config_class=Config):
         # runs a thread that sleeps.
         try:
             from services import shelly_link as _wl
-            _wl.start_loop(app, specs=_wallbox_specs)
+            _wl.start_loop(app, specs=_wallbox_specs, pv_co2=_get_pv_co2)
             logger.info("Wallbox link: poll loop started")
         except Exception as _e:
             logger.warning(f"Wallbox link loop could not start: {_e}")
@@ -4333,7 +4337,8 @@ def register_routes(app):
                     'wallbox_backfill_days', _wl.DEFAULT_BACKFILL_DAYS))
                 flash(t('flash.wallbox_saved'), 'success')
                 if _wl.configured():
-                    _wl.start_sync(app, specs=_wallbox_specs)
+                    _wl.start_sync(app, specs=_wallbox_specs,
+                                   pv_co2=_get_pv_co2)
 
             # v2.29: legacy actions save_vehicle_api / test_vehicle_api /
             # delete_vehicle_api / sync_vehicle_now / sync_vehicle_force
@@ -4661,7 +4666,7 @@ def register_routes(app):
         except (TypeError, ValueError):
             return jsonify({'ok': False, 'error': 'days must be a number'}), 400
         started = wl.start_sync(app, days=tage, full=bool(data.get('full')),
-                                specs=_wallbox_specs)
+                                specs=_wallbox_specs, pv_co2=_get_pv_co2)
         return jsonify({'ok': True, 'started': started, 'running': wl.is_running()})
 
     @app.route('/api/wallbox/status')
@@ -4720,7 +4725,7 @@ def register_routes(app):
         if undo:
             done = wl.unapply_measurement(wc, c, bk, eff)
         else:
-            wl.apply_measurement(wc, c, bk, eff)
+            wl.apply_measurement(wc, c, bk, eff, _get_pv_co2)
             done = True
         db.session.commit()
         return jsonify({'ok': True, 'applied': wc.applied_at is not None,
@@ -4764,7 +4769,7 @@ def register_routes(app):
         c.wallbox_charge_id = wc.id
         if wl.settings()['apply_mode'] != 'never':
             bk, eff = _wallbox_specs(c.vehicle_id)
-            wl.apply_measurement(wc, c, bk, eff)
+            wl.apply_measurement(wc, c, bk, eff, _get_pv_co2)
         db.session.commit()
         return jsonify({'ok': True, 'state': wc.match_state, 'charge': c.to_dict()})
 
