@@ -1,5 +1,40 @@
 # Changelog
 
+## v3.0.129 (2026-09-14)
+
+### A charge at your own wallbox needs no checking
+
+A charge the app detects by itself is filed with a "please check" flag,
+because nobody has confirmed the numbers. At the owner's own wallbox
+somebody has: the house meter sat in the wire and recorded the whole
+charge. So a measured home charge no longer asks to be checked, and the
+note that asked is replaced by one that says where the numbers came
+from. A note somebody typed themselves is never touched.
+
+The meter now also fills in what the app has always had a category for
+and nobody ever ticked: where nine tenths or more of a charge came from
+the sun and the house battery, the entry is typed as a PV charge — the
+rest as AC. Only a **known** mix may do that. A house with no PV knows
+its mix exactly (all grid) even though it pays a flat tariff, while a
+house whose meters saw nothing knows nothing — and an unmeasured charge
+is not evidence of grid power.
+
+Every charge the meter measured now carries its mix as a thin bar in the
+history list, in the same three colours the charge curve uses: sun,
+battery, grid. What a percentage says for one charge, the bar says for
+the whole list at a glance.
+
+Two consequences worth knowing:
+
+- At home the meter now wins over a typed-in price as well. It is the
+  only real measurement of the two, and every adoption stays reversible
+  — the undo puts the numbers, the flag, the type and the note back.
+- Adoptions from earlier versions are brought along once, so older home
+  charges do not keep asking to be checked.
+
+Also: the sync endpoint honours the `days` it is given instead of
+silently dropping it.
+
 ## v3.0.128 (2026-09-14)
 
 ### A home without solar gets its charge curve too

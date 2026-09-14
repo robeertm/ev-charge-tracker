@@ -1592,5 +1592,6 @@
   "wb.vehicle_key_hint": "Nur ausfüllen, wenn es mehr als eine Wallbox gibt — dann ist „die“ Wallbox keine Antwort.",
   "flash.wallbox_saved": "Wallbox-Verbindung gespeichert.",
   "wb.curve_grid_only": "Alles Netzstrom — kein PV- oder Akku-Zähler",
-  "wb.curve_split_unknown": "Verlauf gemessen — die Quellen dahinter nicht"
+  "wb.curve_split_unknown": "Verlauf gemessen — die Quellen dahinter nicht",
+  "wb.mix_hint": "Quellen-Mischung dieser Ladung, am Hauszähler gemessen"
 }

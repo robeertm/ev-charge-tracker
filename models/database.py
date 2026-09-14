@@ -394,6 +394,11 @@ class WallboxCharge(db.Model):
     prev_kwh_loaded = db.Column(db.Float)
     prev_total_cost = db.Column(db.Float)
     prev_eur_per_kwh = db.Column(db.Float)
+    # A home charge also loses its "please check" flag and may be re-typed as
+    # PV, so both belong to the same undo. Without them, taking a measurement
+    # back would restore the numbers and silently keep the rest.
+    prev_needs_review = db.Column(db.Boolean)
+    prev_charge_type = db.Column(db.String(2))
     applied_at = db.Column(db.DateTime)
 
     fetched_at = db.Column(db.DateTime, default=datetime.now)
@@ -402,6 +407,20 @@ class WallboxCharge(db.Model):
     __table_args__ = (
         db.UniqueConstraint('device_key', 'source_id', name='uq_wallbox_charge'),
     )
+
+    @property
+    def split_known(self):
+        """Do we know where these kilowatt-hours came from?
+
+        🔴 NOT the same question as ``cost_model == 'source'``. That one says
+        how the PRICE was worked out. A house with no PV and no battery has no
+        split to measure and is billed at a flat tariff — and yet its mix is
+        known exactly: all of it came off the grid. Asking the wrong one of the
+        two hid the red bar on precisely the houses whose charge is all red.
+        """
+        return (self.energy_kwh is not None and self.energy_kwh > 0
+                and self.solar_kwh is not None and self.battery_kwh is not None
+                and self.grid_kwh is not None)
 
     @property
     def solar_share(self):
@@ -426,6 +445,7 @@ class WallboxCharge(db.Model):
             'cost_eur': self.cost_eur,
             'cost_model': self.cost_model,
             'measured': self.cost_model == 'source',
+            'split_known': self.split_known,
             'coverage': self.coverage,
             'solar_share': self.solar_share,
             'avg_power_w': self.avg_power_w,

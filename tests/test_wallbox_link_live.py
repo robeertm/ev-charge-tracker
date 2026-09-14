@@ -300,6 +300,24 @@ def test_the_history_page_shows_the_badge(live):
     assert 'wallbox_curve.js' in html
 
 
+def test_the_history_row_carries_the_source_colours(live):
+    """Robert: „die einträge bekommen die anteilsfarben oder so".
+
+    The stub's charge is 17.0 sun / 2.4 battery / 2.0 grid of 21.4 kWh, so all
+    three segments must be there — and in the same colours the curve uses,
+    because a colour that means sun in one place and something else two rows
+    down is worse than no colour.
+    """
+    base, _ = live
+    with urllib.request.urlopen(base + '/history', timeout=30) as r:
+        html = r.read().decode()
+    assert 'wb-mix' in html, 'no source bar in the history table'
+    for farbe in ('#fdd835', '#22c55e', '#ef4444'):
+        assert farbe in html, 'the %s segment is missing' % farbe
+    # …and the charge the meter measured is no longer flagged for checking.
+    assert 'table-danger' not in html, 'a measured home charge still asks to be checked'
+
+
 def test_the_curve_comes_through_the_server(live):
     base, data_dir = live
     con = _sqlite(data_dir)

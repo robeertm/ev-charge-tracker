@@ -1592,5 +1592,6 @@
   "wb.vehicle_key_hint": "Alleen invullen als er meer dan één wallbox is — dan is «de» wallbox geen antwoord.",
   "flash.wallbox_saved": "Wallbox-koppeling opgeslagen.",
   "wb.curve_grid_only": "Alles van het net — geen PV- of accumeter",
-  "wb.curve_split_unknown": "Verloop gemeten — de bronnen erachter niet"
+  "wb.curve_split_unknown": "Verloop gemeten — de bronnen erachter niet",
+  "wb.mix_hint": "Bronmix van deze lading, gemeten op de huismeter"
 }

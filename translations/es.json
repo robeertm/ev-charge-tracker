@@ -1592,5 +1592,6 @@
   "wb.vehicle_key_hint": "Rellénalo solo si hay más de una wallbox — entonces «la» wallbox no es una respuesta.",
   "flash.wallbox_saved": "Enlace de wallbox guardado.",
   "wb.curve_grid_only": "Todo de la red — sin medidor fotovoltaico ni de batería",
-  "wb.curve_split_unknown": "Curso medido — las fuentes detrás no"
+  "wb.curve_split_unknown": "Curso medido — las fuentes detrás no",
+  "wb.mix_hint": "Mezcla de fuentes de esta carga, medida en el contador"
 }

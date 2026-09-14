@@ -257,10 +257,18 @@ def test_10_over_midnight():
 
 
 def test_11_what_may_be_overwritten_and_what_may_not():
+    """v3.0.129 changed one line of this table on purpose.
+
+    "auto" used to leave a typed-in price alone, which sounds careful and
+    leaves the worse number standing exactly where a better one exists: at the
+    owner's own wallbox the meter sat in the wire. Robert: „zu hause/wallbox >
+    alles automatisch". Every adoption stays reversible, so nothing is lost —
+    and "never" still means never.
+    """
     print("== What may be overwritten, and what may not ==")
     for mode, typed, soll, name in (
         ('auto', None, True, "auto adopts an entry with no price"),
-        ('auto', 0.41, False, "auto leaves a price somebody typed alone"),
+        ('auto', 0.41, True, "auto now prefers the meter over a typed price"),
         ('always', 0.41, True, "always overwrites it"),
         ('never', None, False, "never changes anything"),
     ):
@@ -348,4 +356,181 @@ def test_15_the_settings_are_coerced_not_trusted():
     pruefe("and it counts as configured", L.configured(s), True)
     AppConfig.set(L.K_TOKEN, '')
     pruefe("without a token it does not", L.configured(), False)
+    ctx.pop()
+
+
+# ══════════════════════════════════════════════════════════════════════════
+# Zu Hause heisst: alles automatisch
+# ══════════════════════════════════════════════════════════════════════════
+
+def test_20_a_measured_home_charge_stops_asking_to_be_checked():
+    """Robert: „soll er nicht prüfen hinschreiben sondern es richtig eintragen".
+
+    The flag asks "is this entry right?". For a charge at the owner's own
+    wallbox the answer arrives from the wire, with a curve behind it — so the
+    question is answered, not still open.
+    """
+    print("== A measured home charge stops asking to be checked ==")
+    app, ctx = _app()
+    _config()
+    kia = _car('Kia')
+    c = _charge(kia, TAG, 12, 13, kwh=19.0, ctype='AC', needs_review=True)
+    c.notes = L._PRUEFNOTIZ_ZURUECK
+    db.session.commit()
+    L.store_charges(_payload(_reading('h1', MITTAG, kwh=20.5, solar=18.0,
+                                      battery=1.0, grid=1.5, cost=0.45)))
+    L.match_all()
+    c = Charge.query.get(c.id)
+    pruefe("the review flag is gone", c.needs_review, False)
+    pruefe("and the note no longer asks", c.notes, L._GEMESSEN_NOTIZ)
+    pruefe("92 % own power makes it a PV charge", c.charge_type, 'PV')
+
+    print("== ...and the undo puts the question back ==")
+    wc = WallboxCharge.query.filter_by(source_id='h1').first()
+    L.unapply_measurement(wc, c, kia.battery_kwh, 0.88)
+    db.session.commit()
+    c = Charge.query.get(c.id)
+    pruefe("flag back", c.needs_review, True)
+    pruefe("type back", c.charge_type, 'AC')
+    pruefe("note back", c.notes, L._PRUEFNOTIZ_ZURUECK)
+    pruefe("kWh back", c.kwh_loaded, 19.0)
+    ctx.pop()
+
+
+def test_21_the_type_follows_the_measured_mix_and_only_that():
+    print("== The type follows the measured mix — and only that ==")
+    app, ctx = _app()
+    _config()
+    kia = _car('Kia')
+
+    # (a) Mostly grid: a home charge, but not a PV one.
+    c1 = _charge(kia, TAG, 3, 4, kwh=10.0, ctype='AC')
+    L.store_charges(_payload(_reading('n1', datetime(TAG.year, TAG.month, TAG.day, 3),
+                                      kwh=10.0, solar=0.2, battery=0.3, grid=9.5,
+                                      cost=2.9)))
+    L.match_all()
+    pruefe("5 % own stays AC", Charge.query.get(c1.id).charge_type, 'AC')
+
+    # (b) Exactly at the threshold — 90 % counts as PV.
+    c2 = _charge(kia, TAG, 12, 13, kwh=10.0, ctype='AC')
+    L.store_charges(_payload(_reading('n2', MITTAG, kwh=10.0, solar=8.0,
+                                      battery=1.0, grid=1.0, cost=0.3)))
+    L.match_all()
+    pruefe("exactly 90 % is PV", Charge.query.get(c2.id).charge_type, 'PV')
+
+    # (c) 🔴 No supply measurement at all: the meter knows the kWh, nothing
+    #     about where they came from. Typing that as AC would turn "nobody
+    #     measured" into "it was grid power".
+    c3 = _charge(kia, TAG, 18, 19, kwh=10.0, ctype='PV', needs_review=True)
+    L.store_charges(_payload(_reading('n3', datetime(TAG.year, TAG.month, TAG.day, 18),
+                                      kwh=11.0, model='fixed', cost=3.3)))
+    L.match_all()
+    c3 = Charge.query.get(c3.id)
+    pruefe("an unmeasured split leaves the type alone", c3.charge_type, 'PV')
+    pruefe("but the measured kWh still count", c3.kwh_loaded, 11.0)
+    pruefe("and the entry is still confirmed", c3.needs_review, False)
+    wc3 = WallboxCharge.query.filter_by(source_id='n3').first()
+    pruefe("and it says the split is NOT known", wc3.split_known, False)
+
+    # (d) 🔴 The house with no PV and no battery: analyzer 16.86.0 reports its
+    #     mix as all grid, on a flat tariff. That is a KNOWN split, not a
+    #     missing one — asking cost_model here would have hidden the red bar
+    #     from exactly the houses whose charge is entirely red.
+    c4 = _charge(kia, TAG, 20, 21, kwh=9.0, ctype='PV', needs_review=True)
+    L.store_charges(_payload(_reading('n4', datetime(TAG.year, TAG.month, TAG.day, 20),
+                                      kwh=9.5, solar=0.0, battery=0.0, grid=9.5,
+                                      model='fixed', cost=2.87)))
+    L.match_all()
+    c4 = Charge.query.get(c4.id)
+    wc4 = WallboxCharge.query.filter_by(source_id='n4').first()
+    pruefe("a grid-only house knows its split", wc4.split_known, True)
+    pruefe("so the entry is typed AC, not left as PV", c4.charge_type, 'AC')
+    pruefe("and it no longer asks to be checked", c4.needs_review, False)
+    ctx.pop()
+
+
+def test_22_at_home_the_meter_wins_even_over_a_typed_price():
+    """„zu hause/wallbox > alles automatisch". The meter sat in the wire; the
+    entry holds what the car said about its own battery. Reversible, so
+    preferring the measurement costs nothing."""
+    print("== At home the meter wins, even over a typed price ==")
+    app, ctx = _app()
+    _config()
+    kia = _car('Kia')
+    c = _charge(kia, TAG, 12, 13, kwh=19.0, price=0.32)   # somebody typed this
+    L.store_charges(_payload(_reading('p1', MITTAG, kwh=20.5, solar=18.0,
+                                      battery=1.0, grid=1.5, cost=0.45)))
+    L.match_all()
+    c = Charge.query.get(c.id)
+    pruefe("the meter's kWh stand", c.kwh_loaded, 20.5)
+    pruefe("and its effective price", round(c.eur_per_kwh, 4), round(0.45 / 20.5, 4))
+
+    print("== ...but 'never' still means never ==")
+    app2, ctx2 = _app()
+    _config(apply_mode='never')
+    kia2 = _car('Kia')
+    c2 = _charge(kia2, TAG, 12, 13, kwh=19.0, price=0.32, needs_review=True)
+    L.store_charges(_payload(_reading('p2', MITTAG, kwh=20.5, solar=18.0,
+                                      battery=1.0, grid=1.5, cost=0.45)))
+    L.match_all()
+    c2 = Charge.query.get(c2.id)
+    pruefe("nothing was taken over", c2.kwh_loaded, 19.0)
+    pruefe("the flag stays, because nothing was confirmed", c2.needs_review, True)
+    pruefe("and the type stays", c2.charge_type, 'AC')
+    ctx2.pop()
+
+
+def test_23_a_note_somebody_typed_is_never_touched():
+    print("== A note somebody typed is never touched ==")
+    app, ctx = _app()
+    _config()
+    kia = _car('Kia')
+    c = _charge(kia, TAG, 12, 13, kwh=19.0, needs_review=True)
+    c.notes = 'Nachbar hat mitgeladen, bitte prüfen'
+    db.session.commit()
+    L.store_charges(_payload(_reading('t1', MITTAG, kwh=20.5, solar=18.0,
+                                      battery=1.0, grid=1.5, cost=0.45)))
+    L.match_all()
+    c = Charge.query.get(c.id)
+    pruefe("the note is still the owner's", c.notes, 'Nachbar hat mitgeladen, bitte prüfen')
+    pruefe("the flag is still cleared", c.needs_review, False)
+    ctx.pop()
+
+
+def test_24_an_adoption_from_before_the_rule_is_brought_along_once():
+    """A reading that was already taken over never passes the matcher again —
+    it only retries what is not matched. So without a one-off pass the new
+    rule would reach new charges only, and the owner would keep looking at
+    older home charges that still ask to be checked."""
+    print("== An adoption from before the rule is brought along — once ==")
+    app, ctx = _app()
+    _config()
+    kia = _car('Kia')
+    c = _charge(kia, TAG, 12, 13, kwh=19.0, ctype='AC', needs_review=True)
+    L.store_charges(_payload(_reading('o1', MITTAG, kwh=20.5, solar=19.0,
+                                      battery=0.5, grid=1.0, cost=0.3)))
+    L.match_all()
+    # Put the row back into the state a v3.0.128 installation would have it in:
+    # taken over, but nothing said about the flag or the type.
+    wc = WallboxCharge.query.filter_by(source_id='o1').first()
+    c = Charge.query.get(c.id)
+    c.needs_review = True
+    c.charge_type = 'AC'
+    wc.prev_needs_review = None
+    wc.prev_charge_type = None
+    db.session.commit()
+
+    n = L.ergaenze_alte_uebernahmen('auto')
+    c = Charge.query.get(c.id)
+    pruefe("one row was brought along", n, 1)
+    pruefe("it stops asking to be checked", c.needs_review, False)
+    pruefe("and is typed from its mix", c.charge_type, 'PV')
+    pruefe("the undo knows what it found", 
+           WallboxCharge.query.filter_by(source_id='o1').first().prev_needs_review, True)
+
+    print("== ...and only once ==")
+    pruefe("a second pass finds nothing", L.ergaenze_alte_uebernahmen('auto'), 0)
+
+    print("== ...and never behind 'never' ==")
+    pruefe("mode never does nothing at all", L.ergaenze_alte_uebernahmen('never'), 0)
     ctx.pop()

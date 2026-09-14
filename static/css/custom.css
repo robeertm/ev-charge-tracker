@@ -125,3 +125,19 @@ body {
 footer {
     font-size: 0.8rem;
 }
+
+/* Der Quellen-Mix einer zu Hause gemessenen Ladung — dieselben drei Farben
+   wie die Ladekurve (Sonne, Akku, Netz). Eine Zahl sagt „92 %"; der Streifen
+   sagt es über die ganze Liste hinweg auf einen Blick. */
+.wb-mix {
+    display: flex;
+    height: 4px;
+    margin-top: 3px;
+    border-radius: 2px;
+    overflow: hidden;
+    background: var(--bs-secondary-bg, #e9ecef);
+}
+
+.wb-mix > span {
+    height: 100%;
+}

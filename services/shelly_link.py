@@ -350,23 +350,66 @@ def match_one(wc, vehicles, tol_min):
     return 'matched', best[2], ''
 
 
+#: Above this share of sun + house battery a home charge is a PV charge. The
+#: app has had that category since long before the meter existed; what was
+#: missing was somebody to tick it. 90 % leaves room for the few minutes of
+#: grid a charge takes while a cloud passes without demoting the whole charge.
+PV_SCHWELLE = 0.90
+
+
 def _apply_wanted(mode, charge):
     """Should the meter's kWh and cost be taken over into the entry?
 
     ``never``  — annotate only; the entry keeps whatever it says.
-    ``always`` — the meter wins; it is the only real measurement of the two.
-    ``auto``   — the meter wins where nobody has said otherwise: an entry the
-                 app detected by itself and that nobody has confirmed, or one
-                 with no cost at all. A price somebody typed in is left alone,
-                 because overwriting it would silently discard a decision.
+    ``always`` / ``auto`` — the meter wins.
+
+    🔑 A charge at your own wallbox is the one case where there is nothing to
+    weigh up: the meter sat in the wire, the entry holds whatever the car
+    reported about its own battery, and the two are not equal — charge losses
+    alone are several percent. "auto" used to protect a typed-in price here,
+    which sounds careful but leaves the worse number standing in exactly the
+    place where a better one exists. Every adoption stays reversible (the old
+    values live on the reading), so nothing is lost by preferring the meter.
     """
-    if mode == 'never':
-        return False
-    if mode == 'always':
-        return True
-    if charge.needs_review:
-        return True
-    return charge.total_cost is None or charge.eur_per_kwh is None
+    return mode != 'never'
+
+
+def typ_aus_anteil(wc):
+    """'PV' or 'AC' for a measured home charge — or None when unmeasured.
+
+    Only a KNOWN split may re-type a charge. Where the analyzer reports
+    nothing (no meters in that house), the entry keeps the type it has: an
+    unmeasured charge is not evidence of grid power.
+
+    🔴 "Known" is not "cost_model == 'source'". That says how the price was
+    worked out; a house with no PV pays a flat tariff and still knows its mix
+    exactly — all grid. Asking the wrong one would have left those houses
+    without the very typing they benefit from.
+    """
+    if not wc.energy_kwh:
+        return None
+    if wc.solar_kwh is None or wc.battery_kwh is None or wc.grid_kwh is None:
+        return None
+    eigen = float(wc.solar_kwh or 0) + float(wc.battery_kwh or 0)
+    return 'PV' if (eigen / float(wc.energy_kwh)) >= PV_SCHWELLE else 'AC'
+
+
+#: The note the app writes onto a charge it detected by itself. A charge the
+#: meter has confirmed must not keep asking to be checked — so this exact text
+#: (and only this one) is replaced. Anything a person typed stays untouched.
+_GEMESSEN_NOTIZ = 'Automatisch erkannt \u00b7 an der Wallbox gemessen'
+_PRUEFNOTIZ_ZURUECK = 'Automatisch erkannt (keine App-Session) \u2014 bitte pr\u00fcfen'
+
+
+def _ist_pruefnotiz(text):
+    """Is this the app's own "please check" note, rather than a person's?
+
+    The app writes two of them (no app session / SoC jump), both ending in the
+    same words. Matching on those two ends — and not on a substring somewhere
+    in the middle — keeps a note somebody typed themselves out of reach.
+    """
+    t = (text or '').strip()
+    return t.startswith('Automatisch erkannt') and t.endswith('bitte pr\u00fcfen')
 
 
 def apply_measurement(wc, charge, battery_kwh=None, efficiency=None):
@@ -381,6 +424,8 @@ def apply_measurement(wc, charge, battery_kwh=None, efficiency=None):
         wc.prev_kwh_loaded = charge.kwh_loaded
         wc.prev_total_cost = charge.total_cost
         wc.prev_eur_per_kwh = charge.eur_per_kwh
+        wc.prev_needs_review = charge.needs_review
+        wc.prev_charge_type = charge.charge_type
     charge.kwh_loaded = round(float(wc.energy_kwh or 0), 3)
     # The per-kWh price becomes an *effective* one: with surplus charging the
     # sun and the battery cost nothing, so the mixed price of a charge is lower
@@ -392,7 +437,63 @@ def apply_measurement(wc, charge, battery_kwh=None, efficiency=None):
     # letting it do so keeps every derived figure consistent with the rest of
     # the app rather than introducing a second way of computing a total.
     charge.calculate_fields(battery_kwh, efficiency)
+
+    # 🔑 A charge the house meter has measured is not a charge that needs
+    # checking. The flag asks "is this entry right?" — and the answer just
+    # arrived from the wire, with a curve behind it. Leaving the red row
+    # standing would tell the owner to go and verify a number that is now
+    # better than anything they could type.
+    charge.needs_review = False
+    if _ist_pruefnotiz(charge.notes):
+        charge.notes = _GEMESSEN_NOTIZ
+
+    # The app has had a PV category since long before the meter existed; what
+    # was missing was somebody to tick it. Only a MEASURED split may do so —
+    # see typ_aus_anteil.
+    typ = typ_aus_anteil(wc)
+    if typ:
+        charge.charge_type = typ
+
     wc.applied_at = datetime.now()
+
+
+def ergaenze_alte_uebernahmen(mode):
+    """Bring adoptions from before the typing rule along — exactly once.
+
+    A reading that was already taken over does not come past the matcher again
+    (it only retries what is NOT matched), so without this the rule would
+    apply to new charges only and the owner would keep looking at older home
+    charges that still ask to be checked.
+
+    ``prev_needs_review IS NULL`` is what makes it once-only: the moment this
+    runs it records what it found, which is also what the undo needs.
+    """
+    if mode == 'never':
+        return 0
+    from models.database import db, Charge, WallboxCharge
+    offen = (WallboxCharge.query
+             .filter(WallboxCharge.applied_at.isnot(None),
+                     WallboxCharge.charge_id.isnot(None),
+                     WallboxCharge.prev_needs_review.is_(None))
+             .all())
+    n = 0
+    for wc in offen:
+        charge = Charge.query.get(wc.charge_id)
+        if charge is None:
+            continue
+        wc.prev_needs_review = bool(charge.needs_review)
+        wc.prev_charge_type = charge.charge_type
+        charge.needs_review = False
+        if _ist_pruefnotiz(charge.notes):
+            charge.notes = _GEMESSEN_NOTIZ
+        typ = typ_aus_anteil(wc)
+        if typ:
+            charge.charge_type = typ
+        n += 1
+    if n:
+        db.session.commit()
+        logger.info('Wallbox link: %d earlier adoption(s) re-typed', n)
+    return n
 
 
 def unapply_measurement(wc, charge, battery_kwh=None, efficiency=None):
@@ -402,9 +503,19 @@ def unapply_measurement(wc, charge, battery_kwh=None, efficiency=None):
     charge.kwh_loaded = wc.prev_kwh_loaded
     charge.eur_per_kwh = wc.prev_eur_per_kwh
     charge.total_cost = wc.prev_total_cost
+    # Undo is not undo if it puts back two of four things. The review flag and
+    # the type were changed by the adoption, so they come back with it — and
+    # the note goes back to asking, because that is what the entry said.
+    if wc.prev_needs_review is not None:
+        charge.needs_review = bool(wc.prev_needs_review)
+        if charge.needs_review and charge.notes == _GEMESSEN_NOTIZ:
+            charge.notes = _PRUEFNOTIZ_ZURUECK
+    if wc.prev_charge_type is not None:
+        charge.charge_type = wc.prev_charge_type
     charge.calculate_fields(battery_kwh, efficiency)
     wc.applied_at = None
     wc.prev_kwh_loaded = wc.prev_total_cost = wc.prev_eur_per_kwh = None
+    wc.prev_needs_review = wc.prev_charge_type = None
     return True
 
 
@@ -477,6 +588,7 @@ def sync(app, days=None, full=False, specs=None):
         cfg = settings()
         res = {'ok': False, 'ts': int(time.time()), 'new': 0, 'updated': 0,
                'matched': 0, 'ambiguous': 0, 'unmatched': 0, 'applied': 0,
+               'retyped': 0,
                'error': None}
         if not configured(cfg):
             res['error'] = 'not configured'
@@ -500,11 +612,13 @@ def sync(app, days=None, full=False, specs=None):
                 payload = fetch_charges(cfg, days=int(days))
             neu, upd = store_charges(payload)
             tally = match_all(cfg, dev, specs=specs)
+            tally['retyped'] = ergaenze_alte_uebernahmen(cfg['apply_mode'])
             res.update({'ok': True, 'new': neu, 'updated': upd,
                         'pending_settle': int(payload.get('pending_settle') or 0),
                         'wallbox': (payload.get('wallbox') or {}).get('name') or dev})
             res.update({k: tally.get(k, 0)
-                        for k in ('matched', 'ambiguous', 'unmatched', 'applied')})
+                        for k in ('matched', 'ambiguous', 'unmatched',
+                                  'applied', 'retyped')})
             AppConfig.set(K_LAST_TS, res['ts'])
         except LinkError as e:
             res['error'] = str(e)

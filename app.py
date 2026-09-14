@@ -267,6 +267,15 @@ def create_app(config_class=Config):
             if 'wallbox_device_key' not in veh_columns:
                 db.session.execute(text(
                     'ALTER TABLE vehicles ADD COLUMN wallbox_device_key VARCHAR(64)'))
+            # v3.0.129: the undo of an adopted measurement also has to put the
+            # review flag and the charge type back.
+            wb_columns = [c['name'] for c in inspector.get_columns('wallbox_charges')]
+            if 'prev_needs_review' not in wb_columns:
+                db.session.execute(text(
+                    'ALTER TABLE wallbox_charges ADD COLUMN prev_needs_review BOOLEAN'))
+            if 'prev_charge_type' not in wb_columns:
+                db.session.execute(text(
+                    'ALTER TABLE wallbox_charges ADD COLUMN prev_charge_type VARCHAR(2)'))
             db.session.commit()
         except Exception:
             pass  # fresh install — create_all() built them correctly already

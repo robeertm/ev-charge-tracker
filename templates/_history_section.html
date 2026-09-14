@@ -153,7 +153,26 @@
                     {% endif %}
                 </td>
                 <td><span class="badge bg-{{ 'success' if c.charge_type == 'AC' else ('info' if c.charge_type == 'PV' else 'warning') }}">{{ c.charge_type }}</span></td>
-                <td class="text-end">{{ "%.1f"|format(c.kwh_loaded or 0) }}</td>
+                <td class="text-end">
+                    {{ "%.1f"|format(c.kwh_loaded or 0) }}
+                    {% if _wb and _wb.split_known %}
+                    {# Die Mischung, die der Hauszähler aufgezeichnet hat — in
+                       den drei Farben der Ladekurve. Nur wo die Aufteilung
+                       BEKANNT ist: ohne Quellenmessung gibt es keinen Streifen
+                       statt eines roten, der wie „alles Netz" aussähe. Ein Haus
+                       ohne PV weiß seine Mischung übrigens sehr wohl — sie ist
+                       ganz rot. #}
+                    {% set _e = _wb.energy_kwh %}
+                    {% set _ss = (_wb.solar_kwh or 0) / _e * 100 %}
+                    {% set _bs = (_wb.battery_kwh or 0) / _e * 100 %}
+                    {% set _gs = (_wb.grid_kwh or 0) / _e * 100 %}
+                    <div class="wb-mix" title="{{ t('wb.mix_hint') }} — {{ t('wb.solar') }} {{ '%.2f'|format(_wb.solar_kwh or 0) }} kWh · {{ t('wb.battery') }} {{ '%.2f'|format(_wb.battery_kwh or 0) }} kWh · {{ t('wb.grid') }} {{ '%.2f'|format(_wb.grid_kwh or 0) }} kWh">
+                        {% if _ss > 0.4 %}<span style="width: {{ '%.1f'|format(_ss) }}%; background: #fdd835"></span>{% endif %}
+                        {% if _bs > 0.4 %}<span style="width: {{ '%.1f'|format(_bs) }}%; background: #22c55e"></span>{% endif %}
+                        {% if _gs > 0.4 %}<span style="width: {{ '%.1f'|format(_gs) }}%; background: #ef4444"></span>{% endif %}
+                    </div>
+                    {% endif %}
+                </td>
                 <td class="text-end">{{ "%.2f"|format(c.eur_per_kwh or 0) }}</td>
                 <td class="text-end fw-bold">€{{ "%.2f"|format(c.total_cost or 0) }}</td>
                 <td class="text-end d-none d-md-table-cell rowStop">
