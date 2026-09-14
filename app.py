@@ -4639,7 +4639,16 @@ def register_routes(app):
         data = request.get_json(silent=True) or {}
         if not wl.configured():
             return jsonify({'ok': False, 'error': 'not configured'}), 200
-        started = wl.start_sync(app, full=bool(data.get('full')),
+        # `days` used to be accepted by the caller and then silently dropped
+        # here, so a request for a week got whatever the incremental path
+        # decided. A parameter that is read but ignored is worse than one that
+        # does not exist: the caller believes it asked for something.
+        tage = data.get('days')
+        try:
+            tage = max(1, min(wl.MAX_DAYS, int(tage))) if tage is not None else None
+        except (TypeError, ValueError):
+            return jsonify({'ok': False, 'error': 'days must be a number'}), 400
+        started = wl.start_sync(app, days=tage, full=bool(data.get('full')),
                                 specs=_wallbox_specs)
         return jsonify({'ok': True, 'started': started, 'running': wl.is_running()})
 

@@ -53,6 +53,11 @@ def _curve():
     }
 
 
+# What the stub was actually asked for. A test that only checks the answer
+# cannot see a parameter that was dropped on the way out.
+ANFRAGEN = []
+
+
 class _Analyzer(BaseHTTPRequestHandler):
     """A stand-in for the energy analyzer — including its refusals."""
 
@@ -74,6 +79,7 @@ class _Analyzer(BaseHTTPRequestHandler):
             self.send_response(401)
             self.end_headers()
             return
+        ANFRAGEN.append(self.path)
         path = self.path.split('?')[0]
         if path.endswith('/info'):
             return self._json({'ok': True, 'data': {
@@ -361,3 +367,31 @@ def test_deleting_a_charge_releases_its_reading(live, analyzer):
             break
         time.sleep(0.5)
     assert _get(base, '/api/wallbox/status')['last']['matched'] == 1
+
+
+def test_the_sync_route_actually_honours_the_days_it_was_given(live, analyzer):
+    """`days` was read off the request and then dropped: the caller asked for a
+    week and the incremental path decided something else. A parameter that is
+    read and ignored is worse than one that does not exist — the caller
+    believes it asked for something."""
+    base, _ = live
+    _setup(base, analyzer)
+    ANFRAGEN.clear()
+    r = _post_json(base, '/api/wallbox/sync', {'days': 7})
+    assert r.get('ok'), r
+    for _ in range(40):
+        time.sleep(0.25)
+        if any('/charges' in a for a in ANFRAGEN):
+            break
+    gefragt = [a for a in ANFRAGEN if '/charges' in a]
+    assert gefragt, 'the analyzer was never asked for charges at all'
+    assert any('days=7' in a for a in gefragt), gefragt
+    print("OK  the sync route passes days through: %s" % gefragt[-1])
+
+    # Nonsense is refused, not rounded into something plausible.
+    try:
+        r = _post_json(base, '/api/wallbox/sync', {'days': 'viele'})
+        raise AssertionError('a non-numeric days was accepted: %r' % r)
+    except urllib.error.HTTPError as e:
+        assert e.code == 400, e.code
+    print("OK  a non-numeric days is refused with 400")
