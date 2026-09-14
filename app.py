@@ -276,6 +276,9 @@ def create_app(config_class=Config):
             if 'prev_charge_type' not in wb_columns:
                 db.session.execute(text(
                     'ALTER TABLE wallbox_charges ADD COLUMN prev_charge_type VARCHAR(2)'))
+            if 'undone_at' not in wb_columns:
+                db.session.execute(text(
+                    'ALTER TABLE wallbox_charges ADD COLUMN undone_at DATETIME'))
             db.session.commit()
         except Exception:
             pass  # fresh install — create_all() built them correctly already

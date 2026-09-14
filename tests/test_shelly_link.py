@@ -520,7 +520,7 @@ def test_24_an_adoption_from_before_the_rule_is_brought_along_once():
     wc.prev_charge_type = None
     db.session.commit()
 
-    n = L.ergaenze_alte_uebernahmen('auto')
+    n = L.hole_versaeumtes_nach('auto')['retyped']
     c = Charge.query.get(c.id)
     pruefe("one row was brought along", n, 1)
     pruefe("it stops asking to be checked", c.needs_review, False)
@@ -529,8 +529,51 @@ def test_24_an_adoption_from_before_the_rule_is_brought_along_once():
            WallboxCharge.query.filter_by(source_id='o1').first().prev_needs_review, True)
 
     print("== ...and only once ==")
-    pruefe("a second pass finds nothing", L.ergaenze_alte_uebernahmen('auto'), 0)
+    pruefe("a second pass finds nothing",
+           L.hole_versaeumtes_nach('auto')['retyped'], 0)
 
     print("== ...and never behind 'never' ==")
-    pruefe("mode never does nothing at all", L.ergaenze_alte_uebernahmen('never'), 0)
+    pruefe("mode never does nothing at all",
+           L.hole_versaeumtes_nach('never'), {'applied': 0, 'retyped': 0})
+    ctx.pop()
+
+
+def test_25_a_match_the_old_rule_declined_is_settled_later():
+    """The matcher retries only what is NOT matched — so a reading it filed
+    but did not adopt (mode 'never', or the old 'auto' sparing a typed price)
+    was stuck there forever, even after the setting changed."""
+    print("== A match the rule of the day declined is settled later ==")
+    app, ctx = _app()
+    _config(apply_mode='never')
+    kia = _car('Kia')
+    c = _charge(kia, TAG, 12, 13, kwh=19.0, price=0.32, ctype='AC', needs_review=True)
+    L.store_charges(_payload(_reading('s1', MITTAG, kwh=20.5, solar=19.5,
+                                      battery=0.5, grid=0.5, cost=0.15)))
+    L.match_all()
+    pruefe("filed but not adopted", Charge.query.get(c.id).kwh_loaded, 19.0)
+
+    # The owner switches the setting. Nothing new arrives from the analyzer.
+    _config(apply_mode='auto')
+    nach = L.hole_versaeumtes_nach('auto')
+    c = Charge.query.get(c.id)
+    pruefe("the measurement is taken over now", nach['applied'], 1)
+    pruefe("with the meter's kWh", c.kwh_loaded, 20.5)
+    pruefe("and the entry is typed and confirmed",
+           (c.charge_type, c.needs_review), ('PV', False))
+
+    print("== ...but an undo is a decision, not a gap ==")
+    wc = WallboxCharge.query.filter_by(source_id='s1').first()
+    L.unapply_measurement(wc, c, kia.battery_kwh, 0.88)
+    db.session.commit()
+    nach2 = L.hole_versaeumtes_nach('auto')
+    c = Charge.query.get(c.id)
+    pruefe("the catch-up leaves it alone", nach2['applied'], 0)
+    pruefe("and what the owner restored stands", c.kwh_loaded, 19.0)
+
+    print("== ...until they take it over themselves again ==")
+    wc = WallboxCharge.query.filter_by(source_id='s1').first()
+    L.apply_measurement(wc, c, kia.battery_kwh, 0.88)
+    db.session.commit()
+    pruefe("the undo marker is cleared",
+           WallboxCharge.query.filter_by(source_id='s1').first().undone_at, None)
     ctx.pop()

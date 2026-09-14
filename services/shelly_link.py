@@ -455,45 +455,61 @@ def apply_measurement(wc, charge, battery_kwh=None, efficiency=None):
         charge.charge_type = typ
 
     wc.applied_at = datetime.now()
+    wc.undone_at = None          # taking it over again settles the argument
 
 
-def ergaenze_alte_uebernahmen(mode):
-    """Bring adoptions from before the typing rule along — exactly once.
+def hole_versaeumtes_nach(mode, specs=None):
+    """Settle matched readings the matcher will never look at again.
 
-    A reading that was already taken over does not come past the matcher again
-    (it only retries what is NOT matched), so without this the rule would
-    apply to new charges only and the owner would keep looking at older home
-    charges that still ask to be checked.
+    ``match_all`` deliberately retries only what is NOT matched — a settled
+    match should not be re-decided on every pass. The price is that two kinds
+    of reading get stuck once they are matched:
 
-    ``prev_needs_review IS NULL`` is what makes it once-only: the moment this
-    runs it records what it found, which is also what the undo needs.
+    * one the rule of the day declined (``never``, or the old ``auto`` that
+      spared a typed-in price). Changing the setting afterwards, or changing
+      the rule as v3.0.129 does, would otherwise reach new charges only;
+    * one taken over before v3.0.129, which is filed but still asks to be
+      checked and is still typed by hand.
+
+    Both are settled here, once each: the first gets the measurement, the
+    second gets the flag and the type. 🔴 A reading somebody has explicitly
+    undone is left alone — an automatism that re-does what a person just undid
+    is not an automatism, it is a fight.
     """
     if mode == 'never':
-        return 0
+        return {'applied': 0, 'retyped': 0}
     from models.database import db, Charge, WallboxCharge
-    offen = (WallboxCharge.query
-             .filter(WallboxCharge.applied_at.isnot(None),
-                     WallboxCharge.charge_id.isnot(None),
-                     WallboxCharge.prev_needs_review.is_(None))
-             .all())
-    n = 0
-    for wc in offen:
+    rows = (WallboxCharge.query
+            .filter(WallboxCharge.match_state == 'matched',
+                    WallboxCharge.charge_id.isnot(None),
+                    WallboxCharge.undone_at.is_(None))
+            .all())
+    tally = {'applied': 0, 'retyped': 0}
+    for wc in rows:
         charge = Charge.query.get(wc.charge_id)
         if charge is None:
             continue
-        wc.prev_needs_review = bool(charge.needs_review)
-        wc.prev_charge_type = charge.charge_type
-        charge.needs_review = False
-        if _ist_pruefnotiz(charge.notes):
-            charge.notes = _GEMESSEN_NOTIZ
-        typ = typ_aus_anteil(wc)
-        if typ:
-            charge.charge_type = typ
-        n += 1
-    if n:
+        if wc.applied_at is None:
+            bk, eff = (specs or _default_specs)(charge.vehicle_id)
+            apply_measurement(wc, charge, bk, eff)
+            tally['applied'] += 1
+        elif wc.prev_needs_review is None:
+            # Filed before the typing rule existed: record what we found (the
+            # undo needs it) and bring the entry along.
+            wc.prev_needs_review = bool(charge.needs_review)
+            wc.prev_charge_type = charge.charge_type
+            charge.needs_review = False
+            if _ist_pruefnotiz(charge.notes):
+                charge.notes = _GEMESSEN_NOTIZ
+            typ = typ_aus_anteil(wc)
+            if typ:
+                charge.charge_type = typ
+            tally['retyped'] += 1
+    if tally['applied'] or tally['retyped']:
         db.session.commit()
-        logger.info('Wallbox link: %d earlier adoption(s) re-typed', n)
-    return n
+        logger.info('Wallbox link: caught up %d adoption(s), %d re-typed',
+                    tally['applied'], tally['retyped'])
+    return tally
 
 
 def unapply_measurement(wc, charge, battery_kwh=None, efficiency=None):
@@ -514,6 +530,7 @@ def unapply_measurement(wc, charge, battery_kwh=None, efficiency=None):
         charge.charge_type = wc.prev_charge_type
     charge.calculate_fields(battery_kwh, efficiency)
     wc.applied_at = None
+    wc.undone_at = datetime.now()
     wc.prev_kwh_loaded = wc.prev_total_cost = wc.prev_eur_per_kwh = None
     wc.prev_needs_review = wc.prev_charge_type = None
     return True
@@ -612,7 +629,9 @@ def sync(app, days=None, full=False, specs=None):
                 payload = fetch_charges(cfg, days=int(days))
             neu, upd = store_charges(payload)
             tally = match_all(cfg, dev, specs=specs)
-            tally['retyped'] = ergaenze_alte_uebernahmen(cfg['apply_mode'])
+            nach = hole_versaeumtes_nach(cfg['apply_mode'], specs=specs)
+            tally['applied'] = tally.get('applied', 0) + nach['applied']
+            tally['retyped'] = nach['retyped']
             res.update({'ok': True, 'new': neu, 'updated': upd,
                         'pending_settle': int(payload.get('pending_settle') or 0),
                         'wallbox': (payload.get('wallbox') or {}).get('name') or dev})

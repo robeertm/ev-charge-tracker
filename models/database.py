@@ -400,6 +400,10 @@ class WallboxCharge(db.Model):
     prev_needs_review = db.Column(db.Boolean)
     prev_charge_type = db.Column(db.String(2))
     applied_at = db.Column(db.DateTime)
+    # Somebody pressed "undo" on this reading. The catch-up pass must never
+    # argue with that: an automatic rule that quietly re-does what a person
+    # has just undone is not an automatism, it is a fight.
+    undone_at = db.Column(db.DateTime)
 
     fetched_at = db.Column(db.DateTime, default=datetime.now)
     matched_at = db.Column(db.DateTime)
@@ -456,6 +460,7 @@ class WallboxCharge(db.Model):
             'match_state': self.match_state,
             'match_note': self.match_note,
             'applied': self.applied_at is not None,
+            'undone': self.undone_at is not None,
             'fetched_at': self.fetched_at.isoformat() if self.fetched_at else None,
         }
 
