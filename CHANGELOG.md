@@ -1,5 +1,24 @@
 # Changelog
 
+## v3.0.132 (2026-09-16)
+
+### A home charge that ended just before a poll is no longer lost
+
+The routine poll of the wallbox link asked the analyzer for "everything
+since my last poll". The analyzer withholds a charge until it has been
+over for its settle window (20 minutes). Put together, that lost real
+charges: a charge that ended a minute before a poll was withheld there,
+and the next poll asked "since that poll" — the charge, now settled,
+had ended before it, and was never offered again. At a 30-minute poll,
+two charges in three went that way; only the initial backfill ever
+delivered anything. Found on a 6.2 kWh PV-surplus charge that the car's
+own cloud had reported too thinly to be detected on its own.
+
+The poll now reaches back over the settle window plus an hour. Filing
+is by the analyzer's id, so the overlap costs nothing and never
+duplicates. Works with analyzers before 16.88.0 too; that version
+closes the same gap from its side.
+
 ## v3.0.131 (2026-09-14)
 
 ### The CO2 correction reaches the entries that were already filed

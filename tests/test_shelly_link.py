@@ -706,3 +706,56 @@ def test_28_an_entry_that_was_already_filed_still_gets_its_co2_fixed():
     pruefe("a second pass has nothing to do",
            L.hole_versaeumtes_nach('auto', pv_co2=40)['co2'], 0)
     ctx.pop()
+
+
+def test_29_a_routine_poll_reaches_back_over_the_settle_window():
+    """The gap that swallowed a real charge (2026-09-15, 6.2 kWh, PV surplus).
+
+    The analyzer withholds a charge until it has been over for its settle
+    window. A charge that ended a minute before our poll is withheld there;
+    if the next poll asks "since that poll", the charge — now settled, ended
+    before it — is never offered again. So a routine poll asks since the last
+    poll MINUS the settle window (and an hour on top); filing is by id, the
+    overlap costs nothing.
+    """
+    print("== A routine poll reaches back over the settle window ==")
+    import time as _t
+    # The pure rule first, from both sides.
+    pruefe("the settle window and the grace hour are subtracted",
+           L.since_for(10_000_000, {'settle_minutes': 20}),
+           10_000_000 - 20 * 60 - L.SINCE_OVERLAP_GRACE_S)
+    pruefe("an analyzer that names no settle gets the default one",
+           L.since_for(10_000_000, {}), 10_000_000 - L.DEFAULT_SETTLE_MIN * 60 - L.SINCE_OVERLAP_GRACE_S)
+    pruefe("nonsense in the settle field falls back too",
+           L.since_for(10_000_000, {'settle_minutes': 'soon'}),
+           10_000_000 - L.DEFAULT_SETTLE_MIN * 60 - L.SINCE_OVERLAP_GRACE_S)
+    pruefe("never before the epoch", L.since_for(100, {'settle_minutes': 20}), 0)
+
+    # Then the poll itself: what does sync() actually ask the analyzer?
+    app, ctx = _app()
+    _config()
+    _car('Kia')
+    letzter = int(_t.time()) - 1800                     # our last poll, half an hour ago
+    AppConfig.set(L.K_LAST_TS, str(letzter))
+    AppConfig.set(L.K_BACKFILL, '90')
+    gefragt = []
+    echt = L._get
+
+    def _stub(cfg, route, params=None, timeout=25):
+        gefragt.append((route, dict(params or {})))
+        if route == 'info':
+            return {'wallbox': {'device_key': 'wallbox', 'name': 'Wallbox'},
+                    'settle_minutes': 20}
+        return {'wallbox': {'device_key': 'wallbox', 'name': 'Wallbox'},
+                'charges': [], 'pending_settle': 0}
+    L._get = _stub
+    try:
+        res = L.sync(app)
+    finally:
+        L._get = echt
+    pruefe("the pass ran", res['ok'], True)
+    frage = dict(gefragt)['charges']
+    pruefe("a routine poll asks with since, not days", 'since' in frage and 'days' not in frage, True)
+    pruefe("and since lies the settle window plus an hour behind the last poll",
+           frage['since'], letzter - 20 * 60 - L.SINCE_OVERLAP_GRACE_S)
+    ctx.pop()

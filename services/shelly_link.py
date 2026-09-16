@@ -59,6 +59,32 @@ DEFAULT_TOLERANCE_MIN = 90
 AMBIGUOUS_WITHIN_S = 30 * 60
 
 DEFAULT_BACKFILL_DAYS = 90
+
+#: How far behind the last poll a routine poll asks. The analyzer withholds a
+#: charge until it has been over for its settle window; a charge that was still
+#: settling on our last poll ended less than that before it — asking "since
+#: that poll" would skip it for good. Filing is by id, so an overlap costs
+#: nothing. The hour on top is for a session the analyzer's log closes late.
+SINCE_OVERLAP_GRACE_S = 3600
+DEFAULT_SETTLE_MIN = 20
+
+
+def since_for(last_ts, info=None):
+    """The ``since`` a routine poll should ask with, given our last poll.
+
+    🔴 Not ``last_ts`` itself. That lost a real charge (2026-09-15): it ended
+    a minute before a poll, was withheld as "still settling", and the next
+    poll asked since that first poll — the charge, now settled, ended before
+    it. At a 30-minute poll and a 20-minute settle two charges in three went
+    that way; only the backfill ever delivered anything.
+    """
+    try:
+        settle_min = int(float((info or {}).get('settle_minutes')))
+    except (TypeError, ValueError, AttributeError):
+        settle_min = DEFAULT_SETTLE_MIN
+    if settle_min < 0:
+        settle_min = DEFAULT_SETTLE_MIN
+    return max(0, int(last_ts) - settle_min * 60 - SINCE_OVERLAP_GRACE_S)
 # What the analyzer's link will hand out in one request.
 MAX_DAYS = 400
 
@@ -694,7 +720,7 @@ def sync(app, days=None, full=False, specs=None, pv_co2=None):
                 if full or not last_ts or (time.time() - last_ts) > cfg['backfill_days'] * 86400:
                     payload = fetch_charges(cfg, days=cfg['backfill_days'])
                 else:
-                    payload = fetch_charges(cfg, since_ts=last_ts)
+                    payload = fetch_charges(cfg, since_ts=since_for(last_ts, info))
             else:
                 payload = fetch_charges(cfg, days=int(days))
             neu, upd = store_charges(payload)
