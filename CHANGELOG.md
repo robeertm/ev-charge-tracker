@@ -2062,7 +2062,7 @@ Two-layer fix:
 
 Threads are now named (`sync-loop`, `sync-nightly`, `sync-watchdog`, plus `sync-loop-respawn-N` after a watchdog trip) so `ps H` / `top -H` reads clearly.
 
-Mike (Skoda) already had this coverage via v3.0.59's MySkoda `ClientTimeout` + `asyncio.wait_for`; the new watchdog benefits him too as a generic safety net.
+A Skoda installation already had this coverage via v3.0.59's MySkoda `ClientTimeout` + `asyncio.wait_for`; the new watchdog benefits it too as a generic safety net.
 
 ## v3.0.66 (2026-06-14)
 
