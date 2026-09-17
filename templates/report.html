@@ -407,6 +407,11 @@
         return Array.isArray(arr) && arr.some(v => Number(v) > 0);
     }
 
+    function fmtDateShort(iso) {
+        if (!iso) return '';
+        const d = new Date(iso + 'T00:00:00');
+        return isNaN(d) ? iso : d.toLocaleDateString(undefined, {day: '2-digit', month: '2-digit', year: '2-digit'});
+    }
     function fmtNum(n, d=0) {
         if (n == null) return '–';
         return Number(n).toLocaleString('de-DE', {minimumFractionDigits: d, maximumFractionDigits: d});
@@ -417,7 +422,12 @@
         document.getElementById('kpiKwh').textContent = fmtNum(s.total_kwh, 1) + ' kWh';
         document.getElementById('kpiKwhSub').textContent = s.count_charges + ' × · Ø ' + fmtNum(s.avg_eur_per_kwh, 3).replace('.', ',') + ' €/kWh';
         document.getElementById('kpiCost').textContent = '€' + fmtNum(s.total_cost, 2);
-        document.getElementById('kpiCostSub').textContent = s.avg_eur_per_100km > 0 ? fmtNum(s.avg_eur_per_100km, 2) + ' €/100km' : '';
+        // v3.0.133: the ratio is formed only over the days that have kilometre
+        // data; when that is a sub-span of the range, say so (dates only, language-neutral).
+        const _rf = s.km_basis_from, _rt = s.km_basis_to, _rg = (data.range || {});
+        const _ratioSpan = (s.avg_eur_per_100km > 0 && (_rf !== _rg.start || _rt !== _rg.end))
+            ? ' · ' + fmtDateShort(_rf) + '–' + fmtDateShort(_rt) : '';
+        document.getElementById('kpiCostSub').textContent = s.avg_eur_per_100km > 0 ? fmtNum(s.avg_eur_per_100km, 2) + ' €/100km' + _ratioSpan : '';
         document.getElementById('kpiKm').textContent = fmtNum(s.total_km, 0) + ' km';
         document.getElementById('kpiKmSub').textContent = s.count_trips + ' ' + T.trips + (s.total_km > 0 ? ' · Ø ' + fmtNum(s.avg_efficiency_kwh_per_100km, 1) + ' kWh/100km' : '');
         document.getElementById('kpiCo2Saved').textContent = fmtNum(s.co2_saved_kg, 1) + ' kg';

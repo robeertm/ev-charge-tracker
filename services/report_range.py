@@ -170,27 +170,77 @@ def _safe(v, default=0):
     return default if v is None else v
 
 
-def _odometer_km(charges, start: date, vehicle_id: int | None):
-    """Kilometres driven in the window, read off the charge odometers.
+def _km_basis(charges, trips, start: date, end: date, vehicle_id: int | None):
+    """Kilometres for the ratio figures (EUR/100 km, kWh/100 km, fuel-car
+    comparison) — and the sub-window they are valid for.
 
-    Returns ``(km, source)`` with source ``'odometer'``; ``(0, 'none')``
-    when fewer than one usable reading exists. The window's starting
-    point is the last odometer recorded BEFORE ``start`` (the car was
-    already there when the window opened); if there is none, the lowest
-    reading inside the window. Readings of 0/None are ignored — a
-    charge entered without a mileage must not pull the span to zero.
+    Cost and kilometres must come from the same days. Kilometre data
+    (odometer on charges, odometer from vehicle syncs, GPS trips) usually
+    starts later than the charging history, so the ratio is formed only
+    over the days that have both: from the first kilometre reading in the
+    window (or the last one before it, if the car was already tracked) to
+    the last reading. Charges outside that span still count in the
+    totals, not in the ratios.
+
+    Returns ``(km, source, basis_from, basis_to)``; ``basis_to`` is the
+    window's end (see below), ``km`` is 0 and ``source`` is ``'none'``
+    when nothing usable exists.
     """
-    inside = [c.odometer for c in charges if c.odometer]
-    if not inside:
-        return 0.0, 'none'
-    prev_q = Charge.query.filter(Charge.date < start, Charge.odometer.isnot(None),
-                                 Charge.odometer > 0)
+    readings = []  # (date, km)
+    for c in charges:
+        if c.odometer:
+            readings.append((c.date, int(c.odometer)))
+    try:
+        from models.database import VehicleSync
+        sq = VehicleSync.query.filter(VehicleSync.odometer_km.isnot(None),
+                                      VehicleSync.odometer_km > 0,
+                                      VehicleSync.timestamp >= datetime.combine(start, datetime.min.time()),
+                                      VehicleSync.timestamp <= datetime.combine(end, datetime.max.time()))
+        if vehicle_id is not None:
+            sq = sq.filter(VehicleSync.vehicle_id == vehicle_id)
+        for r in sq.order_by(VehicleSync.timestamp.asc()).all():
+            readings.append((r.timestamp.date(), int(r.odometer_km)))
+        # anchor: last reading before the window
+        aq = VehicleSync.query.filter(VehicleSync.odometer_km.isnot(None), VehicleSync.odometer_km > 0,
+                                      VehicleSync.timestamp < datetime.combine(start, datetime.min.time()))
+        if vehicle_id is not None:
+            aq = aq.filter(VehicleSync.vehicle_id == vehicle_id)
+        anchor_sync = aq.order_by(VehicleSync.timestamp.desc()).first()
+    except Exception:
+        anchor_sync = None
+    pq = Charge.query.filter(Charge.date < start, Charge.odometer.isnot(None), Charge.odometer > 0)
     if vehicle_id is not None:
-        prev_q = prev_q.filter(Charge.vehicle_id == vehicle_id)
-    prev = prev_q.order_by(Charge.date.desc(), Charge.id.desc()).first()
-    base = prev.odometer if prev is not None else min(inside)
-    km = max(inside) - base
-    return (float(km), 'odometer') if km > 0 else (0.0, 'none')
+        pq = pq.filter(Charge.vehicle_id == vehicle_id)
+    anchor_charge = pq.order_by(Charge.date.desc(), Charge.id.desc()).first()
+    anchors = []
+    if anchor_charge is not None:
+        anchors.append((anchor_charge.date, int(anchor_charge.odometer)))
+    if anchor_sync is not None:
+        anchors.append((anchor_sync.timestamp.date(), int(anchor_sync.odometer_km)))
+    # The span always runs to the window's end: charging after the last
+    # reading pays for driving that follows it, and the last reading is
+    # rarely more than a day or two old. What matters is the START — the
+    # days before any kilometre data exist must stay out of the ratio.
+    if readings:
+        readings.sort()
+        last_d = max(d for d, _ in readings)
+        last_km = max(km for d, km in readings if d == last_d)
+        if anchors:
+            basis_from, base_km = start, max(anchors)[1]
+        else:
+            basis_from, base_km = readings[0][0], min(km for _, km in readings)
+        km = last_km - base_km
+        if km > 0:
+            return float(km), 'odometer', basis_from, end
+    if trips:
+        tk = sum(_safe(t.distance_km) for t in trips)
+        if tk > 0:
+            bq = VehicleTrip.query.filter(VehicleTrip.trip_date < start)
+            if vehicle_id is not None:
+                bq = bq.filter(VehicleTrip.vehicle_id == vehicle_id)
+            basis_from = start if bq.first() is not None else trips[0].trip_date
+            return float(tk), 'trips', basis_from, end
+    return 0.0, 'none', start, end
 
 
 def build_report(start: date, end: date, lang: str = 'de',
@@ -280,12 +330,12 @@ def build_report(start: date, end: date, lang: str = 'de',
     # highest reading inside the window minus the last reading before it
     # (or the first inside it). Trip km remain for the trip plots and are
     # the fallback when no odometer was ever recorded.
-    odo_km, km_source = _odometer_km(charges, start, vehicle_id)
-    if odo_km > 0:
-        total_km = odo_km
-    else:
-        total_km = trip_km
-        km_source = 'trips' if trip_km > 0 else 'none'
+    total_km, km_source, km_from, km_to = _km_basis(charges, trips, start, end, vehicle_id)
+    # Ratios only over the days that have kilometre data (see _km_basis).
+    ratio_charges = [c for c in charges if km_from <= c.date <= km_to] if total_km > 0 else []
+    ratio_cost = sum(_safe(c.total_cost) for c in ratio_charges)
+    ratio_kwh = sum(_safe(c.kwh_loaded) for c in ratio_charges)
+    ratio_co2_kg = sum(_safe(c.co2_kg) for c in ratio_charges)
     total_loss = sum(_safe(c.loss_kwh) for c in charges)
     total_extras_start = sum(_safe(getattr(c, 'start_fee_eur', None)) for c in charges)
     total_extras_block = sum(_safe(getattr(c, 'blocking_fee_eur', None)) for c in charges)
@@ -317,11 +367,11 @@ def build_report(start: date, end: date, lang: str = 'de',
         ice_cost_per_100km = 11.55
 
     ice_co2_kg = total_km * fossil_co2_per_km / 1000
-    co2_saved_kg = max(ice_co2_kg - total_co2_kg, 0)
+    co2_saved_kg = max(ice_co2_kg - ratio_co2_kg, 0)
     ice_cost = total_km * ice_cost_per_100km / 100
-    cost_saved_eur = max(ice_cost - total_cost, 0)
+    cost_saved_eur = max(ice_cost - ratio_cost, 0)
 
-    avg_efficiency = (total_kwh / total_km * 100) if total_km > 0 else 0
+    avg_efficiency = (ratio_kwh / total_km * 100) if total_km > 0 else 0
 
     # ── Charge type split (AC/DC/PV) ───────────────────────────────
     type_totals = Counter()
@@ -500,6 +550,10 @@ def build_report(start: date, end: date, lang: str = 'de',
             'total_co2_kg': round(total_co2_kg, 1),
             'total_km': round(total_km, 1),
             'km_source': km_source,          # 'odometer' | 'trips' | 'none'
+            'km_basis_from': km_from.isoformat(),   # the days the ratios are formed over
+            'km_basis_to': km_to.isoformat(),
+            'ratio_cost': round(ratio_cost, 2),     # cost of the charges inside that span
+            'ratio_kwh': round(ratio_kwh, 1),
             'trip_km': round(trip_km, 1),    # GPS trips in the window (the plots' basis)
             'total_drive_min': total_drive_min,
             'total_loss_kwh': round(total_loss, 2),
@@ -512,7 +566,7 @@ def build_report(start: date, end: date, lang: str = 'de',
             'count_trips': count_trips,
             'avg_efficiency_kwh_per_100km': round(avg_efficiency, 2),
             'avg_eur_per_kwh': round(total_cost / total_kwh, 4) if total_kwh > 0 else 0,
-            'avg_eur_per_100km': round(total_cost / total_km * 100, 2) if total_km > 0 else 0,
+            'avg_eur_per_100km': round(ratio_cost / total_km * 100, 2) if total_km > 0 else 0,
             'ice_co2_kg': round(ice_co2_kg, 1),
             'co2_saved_kg': round(co2_saved_kg, 1),
             'ice_cost_eur': round(ice_cost, 2),

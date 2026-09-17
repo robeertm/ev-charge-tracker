@@ -1,5 +1,24 @@
 # Changelog
 
+## v3.0.134 (2026-09-17)
+
+### Report: the ratios are formed only over the days that have kilometre data
+
+v3.0.133 moved the report's kilometres from GPS trips to the charge
+odometers — right for an installation that always entered a mileage,
+still wrong for one that did not: two years of charges with mileage on
+the last three months read 22 EUR/100 km and 134 kWh/100 km, because
+the whole cost was divided by three months of kilometres.
+
+Cost per 100 km, kWh per 100 km and the fuel-car comparison now use
+only the charges inside the span that has kilometre data: from the
+first odometer reading (charge or vehicle sync) or GPS trip in the
+range — or the range's start, if the car was already tracked before it
+— to the range's end. Totals (kWh, cost, CO2) still count every charge.
+When that span is shorter than the chosen range, the cost KPI shows the
+dates it refers to. The summary carries ``km_basis_from``,
+``km_basis_to``, ``ratio_cost`` and ``ratio_kwh``.
+
 ## v3.0.133 (2026-09-17)
 
 ### Report: cost per 100 km now divides cost and kilometres from the same span
