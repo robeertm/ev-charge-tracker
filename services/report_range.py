@@ -170,6 +170,29 @@ def _safe(v, default=0):
     return default if v is None else v
 
 
+def _odometer_km(charges, start: date, vehicle_id: int | None):
+    """Kilometres driven in the window, read off the charge odometers.
+
+    Returns ``(km, source)`` with source ``'odometer'``; ``(0, 'none')``
+    when fewer than one usable reading exists. The window's starting
+    point is the last odometer recorded BEFORE ``start`` (the car was
+    already there when the window opened); if there is none, the lowest
+    reading inside the window. Readings of 0/None are ignored — a
+    charge entered without a mileage must not pull the span to zero.
+    """
+    inside = [c.odometer for c in charges if c.odometer]
+    if not inside:
+        return 0.0, 'none'
+    prev_q = Charge.query.filter(Charge.date < start, Charge.odometer.isnot(None),
+                                 Charge.odometer > 0)
+    if vehicle_id is not None:
+        prev_q = prev_q.filter(Charge.vehicle_id == vehicle_id)
+    prev = prev_q.order_by(Charge.date.desc(), Charge.id.desc()).first()
+    base = prev.odometer if prev is not None else min(inside)
+    km = max(inside) - base
+    return (float(km), 'odometer') if km > 0 else (0.0, 'none')
+
+
 def build_report(start: date, end: date, lang: str = 'de',
                  vehicle_id: int | None = None) -> dict:
     """The heavy lifter — queries Charge + VehicleTrip + ParkingEvent for
@@ -244,8 +267,25 @@ def build_report(start: date, end: date, lang: str = 'de',
     total_kwh = sum(_safe(c.kwh_loaded) for c in charges)
     total_cost = sum(_safe(c.total_cost) for c in charges)
     total_co2_kg = sum(_safe(c.co2_kg) for c in charges)
-    total_km = sum(_safe(t.distance_km) for t in trips)
+    trip_km = sum(_safe(t.distance_km) for t in trips)
     total_drive_min = sum(_safe(t.drive_minutes) for t in trips)
+    # v3.0.133: the money and efficiency figures (EUR/100 km, kWh/100 km,
+    # ICE comparison) divide the window's charging cost by the window's
+    # kilometres. Those kilometres used to be the sum of GPS trips — but
+    # trips only exist from the day the vehicle connector started logging,
+    # while charges reach back to the first entry. Over "all time" that
+    # divided years of cost by weeks of driving (75 EUR/100 km on a real
+    # installation). The odometer on the charges spans the same time as
+    # the charges themselves, so the dashboard's basis is used here too:
+    # highest reading inside the window minus the last reading before it
+    # (or the first inside it). Trip km remain for the trip plots and are
+    # the fallback when no odometer was ever recorded.
+    odo_km, km_source = _odometer_km(charges, start, vehicle_id)
+    if odo_km > 0:
+        total_km = odo_km
+    else:
+        total_km = trip_km
+        km_source = 'trips' if trip_km > 0 else 'none'
     total_loss = sum(_safe(c.loss_kwh) for c in charges)
     total_extras_start = sum(_safe(getattr(c, 'start_fee_eur', None)) for c in charges)
     total_extras_block = sum(_safe(getattr(c, 'blocking_fee_eur', None)) for c in charges)
@@ -459,6 +499,8 @@ def build_report(start: date, end: date, lang: str = 'de',
             'total_cost': round(total_cost, 2),
             'total_co2_kg': round(total_co2_kg, 1),
             'total_km': round(total_km, 1),
+            'km_source': km_source,          # 'odometer' | 'trips' | 'none'
+            'trip_km': round(trip_km, 1),    # GPS trips in the window (the plots' basis)
             'total_drive_min': total_drive_min,
             'total_loss_kwh': round(total_loss, 2),
             'avg_loss_pct': round(total_loss / total_kwh * 100, 2) if total_kwh > 0 else 0,

@@ -1,5 +1,25 @@
 # Changelog
 
+## v3.0.133 (2026-09-17)
+
+### Report: cost per 100 km now divides cost and kilometres from the same span
+
+Picking "all time" in the report could show a cost per 100 km several
+times the dashboard figure (75 EUR/100 km on a real installation). The
+report summed the cost of every charge since the first entry, but took
+its kilometres from GPS trips — and trips only exist from the day the
+vehicle connector started logging. Years of cost were divided by weeks
+of driving. The same mismatch, smaller, affected every range that
+reaches back before the first trip: kWh/100 km, the fuel-car comparison
+and the savings figures all used the same kilometres.
+
+Kilometres for those figures now come from the odometer on the charges,
+exactly as on the dashboard: highest reading in the window minus the
+last reading before it (or the first inside it). GPS trips keep feeding
+the trip plots, and remain the basis only where no odometer was ever
+recorded. The summary reports which basis was used (``km_source``) and
+the trip kilometres separately (``trip_km``).
+
 ## v3.0.132 (2026-09-16)
 
 ### A home charge that ended just before a poll is no longer lost
