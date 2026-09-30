@@ -1594,5 +1594,9 @@
   "wb.curve_grid_only": "Alles van het net — geen PV- of accumeter",
   "wb.curve_split_unknown": "Verloop gemeten — de bronnen erachter niet",
   "wb.mix_hint": "Bronmix van deze lading, gemeten op de huismeter",
-  "set.companion": "Meet met Shelly-meters wat er echt door het huis loopt en geeft deze app de gemeten kWh van elke laadbeurt, verdeeld over zon, accu en net. Gratis, zelf gehost, van dezelfde maker."
+  "set.companion": "Meet met Shelly-meters wat er echt door het huis loopt en geeft deze app de gemeten kWh van elke laadbeurt, verdeeld over zon, accu en net. Gratis, zelf gehost, van dezelfde maker.",
+  "wb.state_conflict": "spreekt de accu tegen",
+  "wb.discard": "Weggooien",
+  "wb.discard_ask": "Deze meting echt weggooien? Een lading die erop steunt blijft ongemoeid — alleen een meting zonder gekoppelde lading kan weg.",
+  "wb.discard_refused": "Op deze meting steunt een lading. Koppel hem eerst los en gooi hem dan weg."
 }

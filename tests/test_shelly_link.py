@@ -67,10 +67,17 @@ def _car(name, key='', enabled=True, battery=64.0):
 
 def _charge(vehicle, d, h_from, h_to, kwh=20.0, ctype='AC', price=None,
             needs_review=False):
+    # 🔑 The SoC window follows the energy instead of being a fixed 20→70.
+    # The link compares the two now — a meter cannot have delivered less than
+    # the battery demonstrably gained — and a fixture claiming half of a 64 kWh
+    # battery went in on 20 kWh describes a car that cannot exist. Every match
+    # in this file would then be refused, and the refusal would be right.
+    gewinn = max(1, min(79, int(round((kwh or 0) * 0.9
+                                      / (vehicle.battery_kwh or 64.0) * 100))))
     c = Charge(vehicle_id=vehicle.id, date=d, charge_hour=h_from,
                charge_end_hour=h_to, kwh_loaded=kwh, charge_type=ctype,
                eur_per_kwh=price, needs_review=needs_review,
-               soc_from=20, soc_to=70)
+               soc_from=20, soc_to=20 + gewinn)
     c.calculate_fields(vehicle.battery_kwh, 0.88)
     db.session.add(c)
     db.session.commit()
@@ -758,4 +765,167 @@ def test_29_a_routine_poll_reaches_back_over_the_settle_window():
     pruefe("a routine poll asks with since, not days", 'since' in frage and 'days' not in frage, True)
     pruefe("and since lies the settle window plus an hour behind the last poll",
            frage['since'], letzter - 20 * 60 - L.SINCE_OVERLAP_GRACE_S)
+    ctx.pop()
+
+
+def test_30_a_reading_smaller_than_the_battery_gained_is_not_taken_over():
+    """The meter cannot have delivered less than the battery gained.
+
+    Real case, 2026-09-27: a 34.8 kWh charge came back as 16.3 kWh because the
+    analyzer answered while its middle minutes were still on their way into its
+    database — a hole in a long charge reads as two sessions with a pause, and
+    only the covered parts get counted. It was taken over, halving the charge,
+    and afterwards nothing looked wrong: the entry simply said "measured".
+    """
+    print("== A reading below the SoC gain is incomplete, not low ==")
+    app, ctx = _app()
+    _config()
+    kia = _car('Kia', battery=64.0)
+    # 20 → 79 % of 64 kWh = 37.8 kWh into the battery.
+    c = _charge(kia, TAG, 12, 17, kwh=37.0, needs_review=True)
+    L.store_charges(_payload(_reading('g1', MITTAG, hours=5, kwh=16.3,
+                                      solar=15.0, battery=1.0, grid=0.3,
+                                      cost=0.08)))
+    t = L.match_all()
+    pruefe("it is not counted as matched", t['matched'], 0)
+    pruefe("it is held back for a person", t['conflict'], 1)
+    wc = WallboxCharge.query.filter_by(source_id='g1').first()
+    pruefe("and it names the entry it belongs to", wc.charge_id, c.id)
+    pruefe("the entry keeps its own figure", Charge.query.get(c.id).kwh_loaded, 37.0)
+    pruefe("the entry is not claimed as measured",
+           Charge.query.get(c.id).wallbox_charge_id, None)
+    pruefe("nothing was adopted", wc.applied_at, None)
+    pruefe("and the reason is on the record", 'incomplete' in (wc.match_note or ''), True)
+
+    print("== It stays open, so a complete answer later still lands ==")
+    L.store_charges(_payload(_reading('g2', MITTAG, hours=5, kwh=37.9,
+                                      solar=35.0, battery=2.5, grid=0.4,
+                                      cost=0.10)))
+    t = L.match_all()
+    pruefe("the complete one is taken", t['matched'], 1)
+    pruefe("and it reaches the entry", Charge.query.get(c.id).kwh_loaded, 37.9)
+    ctx.pop()
+
+
+def test_31_an_honest_reading_under_its_soc_gain_is_still_taken():
+    """The guard must not eat the ordinary case.
+
+    Measured over 32 real charges of one car, metered energy ÷ SoC gain ran
+    from 0.88 to 2.28. The low end is a car whose usable capacity is a little
+    under what is configured — not a broken reading — and it has to pass.
+    """
+    print("== 0.88 of the SoC gain is a charge, not a contradiction ==")
+    app, ctx = _app()
+    _config()
+    kia = _car('Kia', battery=64.0)
+    c = _charge(kia, TAG, 12, 14, kwh=20.0, needs_review=True)
+    netto = (Charge.query.get(c.id).soc_to - Charge.query.get(c.id).soc_from) / 100.0 * 64.0
+    L.store_charges(_payload(_reading('h1', MITTAG, kwh=round(netto * 0.88, 3),
+                                      solar=10.0, battery=1.0, grid=1.0,
+                                      cost=0.30)))
+    t = L.match_all()
+    pruefe("it is matched", t['matched'], 1)
+    pruefe("and nothing was held back", t['conflict'], 0)
+
+    print("== And a charge that barely moves the dial is not suspicious either ==")
+    c2 = _charge(kia, TAG, 18, 20, kwh=3.0, needs_review=True)
+    L.store_charges(_payload(_reading('h2', MITTAG.replace(hour=18), kwh=6.6,
+                                      solar=6.0, battery=0.3, grid=0.3, cost=0.05)))
+    t = L.match_all()
+    pruefe("a high ratio is never a gate", t['matched'], 1)
+    pruefe("still nothing held back", t['conflict'], 0)
+    pruefe("and it reached the entry", Charge.query.get(c2.id).kwh_loaded, 6.6)
+    ctx.pop()
+
+
+def test_32_without_a_soc_window_the_guard_says_nothing():
+    """No evidence is not an objection.
+
+    An entry somebody typed without a state of charge — or one carried back by
+    hand, where the start was never measured — has nothing to contradict. The
+    meter is then the only number there is and must not be refused.
+    """
+    print("== No SoC window, no opinion ==")
+    app, ctx = _app()
+    _config()
+    kia = _car('Kia')
+    c = _charge(kia, TAG, 12, 14, kwh=None, needs_review=True)
+    c.soc_from = c.soc_to = c.soc_charged = None
+    db.session.commit()
+    L.store_charges(_payload(_reading('i1', MITTAG, kwh=8.4, solar=8.0,
+                                      battery=0.2, grid=0.2, cost=0.05)))
+    t = L.match_all()
+    pruefe("it is matched", t['matched'], 1)
+    pruefe("nothing held back", t['conflict'], 0)
+    pruefe("and the meter's figure is the entry's", Charge.query.get(c.id).kwh_loaded, 8.4)
+    ctx.pop()
+
+
+def test_33_the_same_charge_offered_again_does_not_become_a_second_reading():
+    """The id moves while the analyzer's data is still settling.
+
+    ``md5(device:start:end)`` was taken to be stable once a charge was over.
+    It is not: a charge whose first minutes have not reached the analyzer's
+    database yet comes back with a LATER start, a different id, and so a second
+    row. Measured: one charge offered five times, its start creeping forward by
+    exactly the poll interval, until 14 of 27 open readings were ghosts.
+    """
+    print("== One charge, several answers, one reading ==")
+    app, ctx = _app()
+    _config()
+    _car('Kia')
+    # The end is what identifies the charge, so it is pinned to the second
+    # here — a fixture whose ends differ by a rounding step would be testing
+    # two charges and passing for the wrong reason.
+    ende = int((MITTAG + timedelta(hours=3)).timestamp())
+
+    def _antwort(sid, start_ts, kwh, sonne):
+        return {'id': sid, 'device_key': 'wallbox', 'start_ts': start_ts,
+                'end_ts': ende, 'energy_kwh': kwh, 'solar_kwh': sonne,
+                'battery_kwh': 0.5, 'grid_kwh': 0.3, 'cost_eur': 0.09,
+                'cost_model': 'source', 'coverage': 1.0,
+                'avg_power_w': 6000.0, 'peak_power_w': 6400.0,
+                'session_count': 1}
+
+    anfang = int(MITTAG.timestamp())
+    L.store_charges(_payload(_antwort('j1', anfang, 18.0, 17.0)))
+    L.store_charges(_payload(_antwort('j2', anfang + 1800, 15.0, 14.2)))
+    pruefe("the ghost adds nothing", WallboxCharge.query.count(), 1)
+    wc = WallboxCharge.query.first()
+    pruefe("the fuller view is kept", wc.energy_kwh, 18.0)
+    pruefe("with its own start", wc.start_ts, anfang)
+
+    print("== And an answer that saw more of it takes the row over ==")
+    # The 2026-09-27 shape: same window to the minute, right kilowatt-hours.
+    L.store_charges(_payload(_antwort('j3', anfang - 60, 22.0, 20.8)))
+    pruefe("still one reading", WallboxCharge.query.count(), 1)
+    wc = WallboxCharge.query.first()
+    pruefe("now the fuller one", wc.energy_kwh, 22.0)
+    pruefe("and it carries the new id", wc.source_id, 'j3')
+    ctx.pop()
+
+
+def test_34_a_reading_a_charge_is_built_on_is_never_folded_away():
+    """Someone's evidence must not be rewritten by a later fetch.
+
+    A matched reading holds the entry's kWh, its cost and the values that make
+    the adoption undoable. A fetch that quietly folded a second answer into it
+    would move the entry's numbers with nobody asking.
+    """
+    print("== A matched reading is left alone ==")
+    app, ctx = _app()
+    _config()
+    kia = _car('Kia')
+    c = _charge(kia, TAG, 12, 15, kwh=18.0, needs_review=True)
+    L.store_charges(_payload(_reading('k1', MITTAG, hours=3, kwh=18.5, solar=17.0,
+                                      battery=1.0, grid=0.5, cost=0.12)))
+    pruefe("it is matched", L.match_all()['matched'], 1)
+    L.store_charges(_payload(_reading('k2', MITTAG + timedelta(minutes=30),
+                                      hours=2.5, kwh=12.0, solar=11.0,
+                                      battery=0.6, grid=0.4, cost=0.08)))
+    pruefe("the later answer is filed on its own", WallboxCharge.query.count(), 2)
+    wc = WallboxCharge.query.filter_by(source_id='k1').first()
+    pruefe("the matched one is untouched", wc.energy_kwh, 18.5)
+    pruefe("and the entry still says what it was given",
+           Charge.query.get(c.id).kwh_loaded, 18.5)
     ctx.pop()

@@ -209,9 +209,27 @@ def fetch_curve(cfg, start_ts, end_ts):
 def store_charges(payload):
     """Upsert the fetched charges. Returns (new, updated).
 
-    Idempotent by ``(device_key, source_id)``: the analyzer only hands out
-    charges that are over, so their ids no longer move and a re-poll of the same
-    window finds the same rows instead of duplicating them.
+    Idempotent by ``(device_key, source_id)`` — and, because that is not
+    enough, by the charge's end as well.
+
+    🔴 The id is ``md5(device:start:end)``, and this used to say it stops moving
+    once a charge is over. It does not. The analyzer answers out of the samples
+    it has: a charge whose first minutes have not reached its database yet comes
+    back with a LATER start, which is a different id, which is a second row for
+    one physical charge. Measured on a real installation — one charge offered
+    five times, its start creeping forward by exactly the poll interval each
+    time, until 14 of 27 open readings were ghosts of four real charges.
+
+    A meter cannot end two sessions on one device in the same second, so a row
+    with the same device and the same end IS this charge. Of two answers about
+    it, keep the one reporting MORE energy: an incomplete answer always loses
+    some — a truncated head, or a hole in the middle that reads as a pause —
+    and never invents any. Deciding on the start instead would have thrown away
+    the very case this exists for, where a charge came back with the right
+    window and half the kilowatt-hours.
+
+    Only for readings no charge entry is built on yet: a matched reading is
+    somebody's evidence, and a fetch must not rewrite it underneath them.
     """
     from models.database import db, WallboxCharge
     key_default = str((payload.get('wallbox') or {}).get('device_key') or '')
@@ -221,7 +239,30 @@ def store_charges(payload):
         if not sid:
             continue
         dev = str(c.get('device_key') or key_default)
+        anfang = int(c.get('start_ts') or 0)
+        ende = int(c.get('end_ts') or 0)
         row = WallboxCharge.query.filter_by(device_key=dev, source_id=sid).first()
+        if row is None and ende > 0:
+            zwilling = (WallboxCharge.query
+                        .filter(WallboxCharge.device_key == dev,
+                                WallboxCharge.end_ts == ende,
+                                WallboxCharge.match_state != 'matched')
+                        .order_by(WallboxCharge.start_ts.asc())
+                        .first())
+            if zwilling is not None:
+                if _f(c.get('energy_kwh')) is None or (
+                        float(c.get('energy_kwh') or 0)
+                        <= float(zwilling.energy_kwh or 0)):
+                    # The view we already hold saw at least as much: this one
+                    # carries nothing new. Note that we looked.
+                    zwilling.fetched_at = datetime.now()
+                    upd += 1
+                    continue
+                # This one saw more of the same charge. It takes over the row
+                # that is already there, so nothing pointing at it is
+                # orphaned. Counted once, below.
+                row = zwilling
+                row.source_id = sid
         if row is None:
             row = WallboxCharge(device_key=dev, source_id=sid,
                                 match_state='unmatched')
@@ -229,8 +270,8 @@ def store_charges(payload):
             neu += 1
         else:
             upd += 1
-        row.start_ts = int(c.get('start_ts') or 0)
-        row.end_ts = int(c.get('end_ts') or 0)
+        row.start_ts = anfang
+        row.end_ts = ende
         row.energy_kwh = _f(c.get('energy_kwh'))
         # Passed through exactly as sent — the analyzer sends null where nothing
         # was measured, and turning that into 0.0 here would invent a fact.
@@ -398,6 +439,49 @@ def _apply_wanted(mode, charge):
     values live on the reading), so nothing is lost by preferring the meter.
     """
     return mode != 'never'
+
+
+#: Smallest share of the battery's own SoC gain a reading may report before it
+#: is treated as incomplete rather than low.
+#:
+#: 🔑 A meter in the wall cannot have delivered LESS energy than the battery
+#: demonstrably gained: everything it counted went through the charger, and a
+#: charger loses energy rather than making it. So a reading below the SoC gain
+#: is not a small charge, it is a PARTIAL ANSWER — the log computes sessions
+#: out of the samples it has, and while a long charge is still moving from the
+#: live buffer into the database, a hole in the middle reads as two sessions
+#: with a pause and only the covered parts get counted. Taking that over
+#: silently halves a charge, and nothing in the entry looks wrong afterwards.
+#:
+#: The comparison needs room: SoC resolution is one percent, usable capacity is
+#: an estimate and the BMS recalibrates. Measured over 32 real charges of one
+#: car, metered energy ÷ SoC gain ran from 0.88 to 2.28 (median 1.11) — while
+#: the two readings that were provably incomplete sat at 0.59 and 0.48. 0.75
+#: has clear air on both sides.
+#:
+#: 🔴 Only the LOW side is a gate. A high ratio is ordinary — a charge that
+#: tops off an almost full battery moves the SoC hardly at all — and must never
+#: block anything.
+MIN_SHARE_OF_SOC_GAIN = 0.75
+
+
+def contradicts_the_battery(wc, charge, battery_kwh):
+    """Why this reading must not be taken over, or ``None`` when it may.
+
+    Silent about everything it cannot judge: no SoC window, no capacity or no
+    energy means no evidence, and no evidence is not an objection.
+    """
+    gain = charge.soc_charged
+    if gain is None and charge.soc_from is not None and charge.soc_to is not None:
+        gain = charge.soc_to - charge.soc_from
+    if not gain or gain <= 0 or not battery_kwh or not wc.energy_kwh:
+        return None
+    net = float(gain) / 100.0 * float(battery_kwh)
+    share = float(wc.energy_kwh) / net if net > 0 else None
+    if share is None or share >= MIN_SHARE_OF_SOC_GAIN:
+        return None
+    return ('meter reports %.3f kWh but the battery gained %d %% = %.2f kWh — '
+            'the reading looks incomplete, not low' % (wc.energy_kwh, gain, net))
 
 
 def typ_aus_anteil(wc):
@@ -660,7 +744,8 @@ def match_all(cfg=None, device_key='', specs=None, pv_co2=None):
     from models.database import db, WallboxCharge
     cfg = cfg or settings()
     vehicles = linked_vehicles(device_key)
-    tally = {'matched': 0, 'ambiguous': 0, 'unmatched': 0, 'applied': 0}
+    tally = {'matched': 0, 'ambiguous': 0, 'unmatched': 0, 'applied': 0,
+             'conflict': 0}
     open_rows = (WallboxCharge.query
                  .filter(WallboxCharge.match_state != 'matched')
                  .order_by(WallboxCharge.start_ts.asc())
@@ -671,6 +756,23 @@ def match_all(cfg=None, device_key='', specs=None, pv_co2=None):
         wc.match_note = note[:200] if note else None
         wc.matched_at = datetime.now()
         if state == 'matched' and charge is not None:
+            bk, eff = (specs or _default_specs)(charge.vehicle_id)
+            einwand = contradicts_the_battery(wc, charge, bk)
+            if einwand:
+                # 🔴 Found the right entry and still writes nothing. The
+                # reading claims less energy than the battery gained, so it
+                # cannot be the whole charge — and half a charge taken over
+                # silently is worse than none, because afterwards the entry
+                # looks measured. It stays open, names the entry it belongs
+                # to and says why, and every later pass tries again: the log
+                # usually answers completely once its samples have settled.
+                state = 'conflict'
+                wc.match_state = state
+                wc.match_note = einwand[:200]
+                wc.charge_id = charge.id
+                wc.vehicle_id = charge.vehicle_id
+                tally[state] = tally.get(state, 0) + 1
+                continue
             wc.charge_id = charge.id
             wc.vehicle_id = charge.vehicle_id
             cs, _ = charge_window(charge)
@@ -678,7 +780,6 @@ def match_all(cfg=None, device_key='', specs=None, pv_co2=None):
                                        .total_seconds()))
             charge.wallbox_charge_id = wc.id
             if _apply_wanted(cfg['apply_mode'], charge):
-                bk, eff = (specs or _default_specs)(charge.vehicle_id)
                 apply_measurement(wc, charge, bk, eff, pv_co2)
                 tally['applied'] += 1
         else:
@@ -701,7 +802,7 @@ def sync(app, days=None, full=False, specs=None, pv_co2=None):
         cfg = settings()
         res = {'ok': False, 'ts': int(time.time()), 'new': 0, 'updated': 0,
                'matched': 0, 'ambiguous': 0, 'unmatched': 0, 'applied': 0,
-               'retyped': 0, 'co2': 0,
+               'conflict': 0, 'retyped': 0, 'co2': 0,
                'error': None}
         if not configured(cfg):
             res['error'] = 'not configured'
@@ -735,7 +836,7 @@ def sync(app, days=None, full=False, specs=None, pv_co2=None):
                         'wallbox': (payload.get('wallbox') or {}).get('name') or dev})
             res.update({k: tally.get(k, 0)
                         for k in ('matched', 'ambiguous', 'unmatched',
-                                  'applied', 'retyped', 'co2')})
+                                  'conflict', 'applied', 'retyped', 'co2')})
             AppConfig.set(K_LAST_TS, res['ts'])
         except LinkError as e:
             res['error'] = str(e)

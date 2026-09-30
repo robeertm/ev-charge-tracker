@@ -1,5 +1,57 @@
 # Changelog
 
+## v3.0.135 (2026-09-30)
+
+### Two detectors handed one charge to each other, and half an answer from the meter was taken as the truth
+
+Three faults that fed each other, all of them silent. A car charges at
+home between two cloud syncs; its brand's cloud keeps reporting
+``is_charging`` for hours after the charge has ended; and the house's
+energy analyzer is asked for the charge while its own data is still
+settling.
+
+**A drive inside the primary detector's window is now taken off the
+start.** The detector owns every window in which the car reported
+charging, and it read the state of charge from the last sync before
+that window — which may be from before the car drove home. A real case:
+parked at 92 %, 23 km home, 6.9 kWh charged, next sync 94 %. A gain of
+2 % against a 3 % threshold, so the charge was dropped while the meter
+had it to the watt-hour. The SoC-rise fallback has subtracted the drive
+since v3.0.47; the primary detector now does the same, with the same
+constant.
+
+**The fallback's charging guard no longer fires beyond the rise it is
+measuring.** Walking back to the SoC valley, it bailed on any charging
+row it met — including one whose state of charge was above the running
+minimum, which merely ends the walk and belongs to a different charge.
+One stale charging row therefore cost the *next* day's charge as well.
+The guard now runs only over the rows the walk actually crosses, which
+is what its comment always said.
+
+**A reading smaller than the battery's own gain is no longer adopted.**
+A meter cannot have delivered less energy than the battery demonstrably
+gained, so such a reading is not a small charge but an incomplete
+answer: while a long charge is still moving into the analyzer's
+database, a hole in the middle reads as two sessions with a pause and
+only the covered parts are counted. Two charges had been halved that
+way (34.8 kWh filed as 16.3, 32.7 as 18.4) with nothing to see
+afterwards. The reading is now held as ``conflict``, names the entry it
+belongs to and says why, and every later pass tries again — the
+analyzer usually answers completely once its samples have settled.
+Below 0.75 of the SoC gain; measured over 32 real charges the honest
+ratio never fell under 0.88, and a high ratio is never a gate.
+
+**One charge no longer becomes several readings.** The analyzer's id is
+derived from the charge's window, and that window moves while its data
+is settling: the same charge came back with a later start on every
+poll, 14 ghosts among 27 open readings. Of two answers about the same
+device and the same end, the one reporting more energy is kept — an
+incomplete answer loses energy, it never invents any.
+
+**New:** ``POST /api/wallbox/discard`` and a button beside each open
+reading, for the ghosts an older installation already has on file. It
+refuses a reading a charge entry is built on: detach it first.
+
 ## v3.0.134 (2026-09-17)
 
 ### Report: the ratios are formed only over the days that have kilometre data

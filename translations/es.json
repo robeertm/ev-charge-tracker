@@ -1594,5 +1594,9 @@
   "wb.curve_grid_only": "Todo de la red — sin medidor fotovoltaico ni de batería",
   "wb.curve_split_unknown": "Curso medido — las fuentes detrás no",
   "wb.mix_hint": "Mezcla de fuentes de esta carga, medida en el contador",
-  "set.companion": "Mide con contadores Shelly lo que realmente circula en la casa y entrega a esta aplicación los kWh medidos de cada carga, con el reparto entre sol, batería y red. Gratuito, autoalojado, del mismo autor."
+  "set.companion": "Mide con contadores Shelly lo que realmente circula en la casa y entrega a esta aplicación los kWh medidos de cada carga, con el reparto entre sol, batería y red. Gratuito, autoalojado, del mismo autor.",
+  "wb.state_conflict": "contradice la batería",
+  "wb.discard": "Descartar",
+  "wb.discard_ask": "¿Descartar realmente esta medición? Una carga basada en ella no se toca: solo se descarta una medición sin carga asignada.",
+  "wb.discard_refused": "Una carga se basa en esta medición. Sepárala primero y después descártala."
 }

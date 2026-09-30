@@ -805,7 +805,7 @@
                         <span>{{ t('wb.n_new') }}: <strong>{{ wallbox.last.new }}</strong></span>
                         <span>{{ t('wb.n_matched') }}: <strong>{{ wallbox.counts.matched or 0 }}</strong></span>
                         <span>{{ t('wb.n_open') }}:
-                              <strong>{{ (wallbox.counts.unmatched or 0) + (wallbox.counts.ambiguous or 0) }}</strong></span>
+                              <strong>{{ (wallbox.counts.unmatched or 0) + (wallbox.counts.ambiguous or 0) + (wallbox.counts.conflict or 0) }}</strong></span>
                     </div>
                     {% endif %}
                 </div>
@@ -829,7 +829,7 @@
                             <td class="text-nowrap"><span class="wbWhen" data-ts="{{ o.start_ts }}">{{ o.start_ts }}</span></td>
                             <td class="text-end">{{ "%.2f"|format(o.energy_kwh or 0) }}</td>
                             <td>
-                                <span class="badge {{ 'bg-warning text-dark' if o.match_state == 'ambiguous' else 'bg-secondary' }}">
+                                <span class="badge {{ 'bg-danger' if o.match_state == 'conflict' else ('bg-warning text-dark' if o.match_state == 'ambiguous' else 'bg-secondary') }}">
                                     {{ t('wb.state_' ~ o.match_state) }}
                                 </span>
                                 <span class="text-muted small d-block">{{ o.match_note or '' }}</span>
@@ -837,6 +837,8 @@
                             <td class="text-end">
                                 <button type="button" class="btn btn-outline-primary btn-sm wbAssign"
                                         data-reading="{{ o.id }}">{{ t('wb.assign') }}</button>
+                                <button type="button" class="btn btn-outline-secondary btn-sm wbDiscard"
+                                        data-reading="{{ o.id }}">{{ t('wb.discard') }}</button>
                             </td>
                         </tr>
                         {% endfor %}
@@ -4252,6 +4254,8 @@
         assign:    {{ t('wb.assign_pick')|tojson }},
         none:      {{ t('wb.assign_none')|tojson }},
         detach:    {{ t('wb.detach')|tojson }},
+        drop_ask:  {{ t('wb.discard_ask')|tojson }},
+        drop_no:   {{ t('wb.discard_refused')|tojson }},
         notcfg:    {{ t('wb.not_configured')|tojson }}
     };
     function esc(x) {
@@ -4361,6 +4365,27 @@
             body: JSON.stringify({reading_id: b.dataset.reading,
                                   charge_id: b.dataset.charge || null})
         });
+        location.reload();
+    });
+
+    /* Throwing one away. Only ever offered for a reading no entry is built
+       on — the server refuses a matched one as well, because a check that
+       lives only in the page is not a check. */
+    document.addEventListener('click', async function (e) {
+        var b = e.target.closest ? e.target.closest('.wbDiscard') : null;
+        if (!b) return;
+        if (!window.confirm(T.drop_ask)) return;
+        try {
+            var r = await fetch('/api/wallbox/discard', {
+                method: 'POST', headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({reading_id: b.dataset.reading})
+            });
+            var d = await r.json();
+            if (!d.ok) { box(esc(d.error || T.drop_no), 'warning'); return; }
+        } catch (err) {
+            box(esc(err.message), 'danger');
+            return;
+        }
         location.reload();
     });
 })();

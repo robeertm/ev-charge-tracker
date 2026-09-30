@@ -1594,5 +1594,9 @@
   "wb.curve_grid_only": "Alles Netzstrom — kein PV- oder Akku-Zähler",
   "wb.curve_split_unknown": "Verlauf gemessen — die Quellen dahinter nicht",
   "wb.mix_hint": "Quellen-Mischung dieser Ladung, am Hauszähler gemessen",
-  "set.companion": "Misst mit Shelly-Zählern, was im Haus wirklich fließt — und liefert dieser App die gemessenen kWh jeder Wallbox-Ladung samt Aufteilung in Sonne, Akku und Netz. Kostenlos, selbst gehostet, vom selben Autor."
+  "set.companion": "Misst mit Shelly-Zählern, was im Haus wirklich fließt — und liefert dieser App die gemessenen kWh jeder Wallbox-Ladung samt Aufteilung in Sonne, Akku und Netz. Kostenlos, selbst gehostet, vom selben Autor.",
+  "wb.state_conflict": "widerspricht dem Akku",
+  "wb.discard": "Verwerfen",
+  "wb.discard_ask": "Diese Messung wirklich verwerfen? Eine Ladung, die darauf beruht, bleibt unberührt — verworfen wird nur, was keiner Ladung zugeordnet ist.",
+  "wb.discard_refused": "Auf dieser Messung beruht eine Ladung. Erst abhängen, dann verwerfen."
 }

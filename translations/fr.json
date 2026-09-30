@@ -1594,5 +1594,9 @@
   "wb.curve_grid_only": "Tout du réseau — aucun compteur PV ni batterie",
   "wb.curve_split_unknown": "Déroulé mesuré — les sources derrière ne le sont pas",
   "wb.mix_hint": "Mélange des sources de cette charge, mesuré au compteur",
-  "set.companion": "Mesure avec des compteurs Shelly ce qui circule vraiment dans la maison et fournit à cette application les kWh mesurés de chaque charge, répartis entre soleil, batterie et réseau. Gratuit, auto-hébergé, du même auteur."
+  "set.companion": "Mesure avec des compteurs Shelly ce qui circule vraiment dans la maison et fournit à cette application les kWh mesurés de chaque charge, répartis entre soleil, batterie et réseau. Gratuit, auto-hébergé, du même auteur.",
+  "wb.state_conflict": "contredit la batterie",
+  "wb.discard": "Écarter",
+  "wb.discard_ask": "Vraiment écarter cette mesure ? Une charge qui en dépend reste intacte : seule une mesure sans charge associée peut partir.",
+  "wb.discard_refused": "Une charge repose sur cette mesure. Détachez-la d’abord, puis écartez-la."
 }

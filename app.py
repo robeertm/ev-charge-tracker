@@ -1023,7 +1023,7 @@ def _wallbox_settings_ctx():
                  .order_by(WallboxCharge.start_ts.desc())
                  .limit(25).all())
         counts = {st: WallboxCharge.query.filter_by(match_state=st).count()
-                  for st in ('matched', 'unmatched', 'ambiguous')}
+                  for st in ('matched', 'unmatched', 'ambiguous', 'conflict')}
         bound = [{'id': v.id, 'name': v.name,
                   'device_key': v.wallbox_device_key or '',
                   'linked': bool(v.wallbox_link_enabled)}
@@ -1636,6 +1636,37 @@ def _detect_auto_charge(end_sync):
             f"(from={soc_from}, to={soc_to}, end_sync={end_sync.timestamp})"
         )
         return
+    # v3.0.135: the pre-charge row is the last sync BEFORE the charging
+    # run — and the car may well have DRIVEN in between, which makes
+    # its SoC the value before the drive, not before the charge. Real
+    # case, 2026-09-28: parked at 92 % at 15:02, drove 23 km
+    # home, charged 6.9 kWh at the wallbox, next sync 94 %. Gain 2 %,
+    # under the 3 % threshold, whole charge dropped — while the meter
+    # had it to the watt-hour. Subtracting the drive is not a new idea
+    # here: the SoC-rise fallback has done exactly this since v3.0.47
+    # with the same constant. Only the primary detector, which OWNS the
+    # window whenever an is_charging row exists, never learnt it — so
+    # for a car that drives home and then tops up, nobody was left.
+    # Guarded to the pre-charge row: when the stale-echo rule above
+    # already fell back to the first charging sample, that sample is
+    # from during the charge and no drive can lie in front of it.
+    if (pre_charge_row is not None and _pre_soc is not None
+            and soc_from == _pre_soc
+            and pre_charge_row.odometer_km is not None
+            and start_row.odometer_km is not None):
+        _km_before = start_row.odometer_km - pre_charge_row.odometer_km
+        _bk_pre = _get_battery_kwh(vehicle_id=vid)
+        if _km_before > 0 and _bk_pre > 0:
+            _drive_pct = (_km_before * _AUTO_CHARGE_SOCRISE_KWH_PER_100KM
+                          / 100.0 / _bk_pre * 100.0)
+            _corrected = max(0, int(round(soc_from - _drive_pct)))
+            if _corrected < soc_from:
+                logger.info(
+                    f"Auto-charge: {_km_before} km driven between the "
+                    f"pre-charge sync and the charging run — start SoC "
+                    f"{soc_from}% -> {_corrected}%"
+                )
+                soc_from = _corrected
     if (soc_to - soc_from) < _AUTO_CHARGE_MIN_SOC_GAIN:
         logger.info(
             f"Auto-charge skipped: SoC gain {soc_to - soc_from}% below "
@@ -1893,15 +1924,26 @@ def _detect_auto_charge_from_soc_rise(end_sync):
     valley = end_sync
     min_soc = end_sync.soc_percent
     for s in recent[1:]:
+        # v3.0.135: the charging guard below belongs to the stretch this
+        # walk-back actually crosses. A row whose SoC is ABOVE the running
+        # minimum is the *previous* session's peak: it ends the walk-back
+        # and is no part of the rise being measured, so asking whether it
+        # was charging is asking about a different charge. Testing it
+        # first cost one installation two charges on 2026-09-28/29 — its
+        # cloud kept reporting is_charging for eight hours after a charge
+        # had ended, and that stale row sat one step beyond the valley of
+        # the NEXT day's rise. The detector bailed before it ever got to
+        # compute 12 % against its 8 % threshold. The comment above has
+        # always said "between end_sync and the valley candidate"; the
+        # code stopped one row short of meaning it.
+        if s.soc_percent is not None and s.soc_percent > min_soc:
+            break
         if s.is_charging:
             return
         if s.soc_percent is None:
             continue
-        if s.soc_percent <= min_soc:
-            min_soc = s.soc_percent
-            valley = s
-        else:
-            break
+        min_soc = s.soc_percent
+        valley = s
     if valley.id == end_sync.id:
         return  # nothing below us in the window — no rise to attribute
 
@@ -4772,6 +4814,38 @@ def register_routes(app):
             wl.apply_measurement(wc, c, bk, eff, _get_pv_co2)
         db.session.commit()
         return jsonify({'ok': True, 'state': wc.match_state, 'charge': c.to_dict()})
+
+    @app.route('/api/wallbox/discard', methods=['POST'])
+    def api_wallbox_discard():
+        """Throw away a reading nobody can use.
+
+        🔴 Only one that no charge entry is built on. A matched reading is that
+        entry's evidence — its kWh, its cost, its curve and the values needed to
+        undo the adoption all live here. Deleting it would leave an entry
+        claiming to be measured with nothing behind it, so this refuses and says
+        so; detaching first (assign with no charge) is the way.
+
+        What this is for: the ghosts a still-settling analyzer produces — the
+        same charge offered again with a later start, which store_charges now
+        folds away, but which older installations already have on file.
+        """
+        from models.database import db, WallboxCharge
+        data = request.get_json(silent=True) or {}
+        wc = WallboxCharge.query.get_or_404(int(data.get('reading_id') or 0))
+        if wc.match_state == 'matched':
+            return jsonify({
+                'ok': False,
+                'error': 'that reading is what a charge entry is measured on — '
+                         'detach it first'}), 200
+        beschreibung = {'id': wc.id, 'start_ts': wc.start_ts,
+                        'end_ts': wc.end_ts, 'energy_kwh': wc.energy_kwh,
+                        'state': wc.match_state}
+        db.session.delete(wc)
+        db.session.commit()
+        logger.info('Wallbox link: reading %s discarded (%s, %s kWh)',
+                    beschreibung['id'], beschreibung['state'],
+                    beschreibung['energy_kwh'])
+        return jsonify({'ok': True, 'discarded': beschreibung})
 
     @app.route('/api/wallbox/candidates/<int:reading_id>')
     def api_wallbox_candidates(reading_id):

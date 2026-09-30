@@ -1594,5 +1594,9 @@
   "wb.curve_grid_only": "Tutto dalla rete — nessun contatore FV o batteria",
   "wb.curve_split_unknown": "Andamento misurato — le sorgenti dietro no",
   "wb.mix_hint": "Mix delle sorgenti di questa ricarica, misurato al contatore",
-  "set.companion": "Misura con contatori Shelly ciò che scorre davvero in casa e fornisce a questa app i kWh misurati di ogni ricarica, divisi tra sole, batteria e rete. Gratuito, self-hosted, dello stesso autore."
+  "set.companion": "Misura con contatori Shelly ciò che scorre davvero in casa e fornisce a questa app i kWh misurati di ogni ricarica, divisi tra sole, batteria e rete. Gratuito, self-hosted, dello stesso autore.",
+  "wb.state_conflict": "contraddice la batteria",
+  "wb.discard": "Scarta",
+  "wb.discard_ask": "Scartare davvero questa misura? Una ricarica basata su di essa resta intatta: si scarta solo una misura senza ricarica associata.",
+  "wb.discard_refused": "Una ricarica si basa su questa misura. Prima staccala, poi scartala."
 }
