@@ -903,6 +903,31 @@ def beleg_fuer_dieses_auto(wc, vehicle, tol_min):
             % (vor.soc_percent, nach.soc_percent))
 
 
+def _schon_gebucht(wc, vehicle, tol_min):
+    """The charge entry this window already belongs to, if there is one.
+
+    Deliberately WITHOUT the gates `_candidates` applies: there the question is
+    which entry a reading may be attached to, so an entry already carrying a
+    different reading is no candidate. Here the question is whether a charge
+    exists at all — and that one counts most of all.
+    """
+    from models.database import Charge
+    ws = datetime.fromtimestamp(int(wc.start_ts))
+    we = datetime.fromtimestamp(int(wc.end_ts))
+    tol = timedelta(minutes=int(tol_min or 90))
+    lo = (ws - timedelta(days=1)).date()
+    hi = (we + timedelta(days=1)).date()
+    for c in (Charge.query
+              .filter(Charge.vehicle_id == vehicle.id)
+              .filter(Charge.date >= lo, Charge.date <= hi).all()):
+        cs, ce = charge_window(c)
+        if cs is None:
+            continue
+        if _overlaps(cs, ce, ws, we, tol):
+            return c
+    return None
+
+
 def aus_der_messung_anlegen(wc, vehicles, cfg, specs=None):
     """Make this reading its own charge entry. Returns ``(charge, reason)``.
 
@@ -945,6 +970,23 @@ def aus_der_messung_anlegen(wc, vehicles, cfg, specs=None):
     beleg = beleg_fuer_dieses_auto(wc, v, cfg.get('tolerance_min'))
     if not beleg:
         return None, 'nothing shows that this car was the one charging'
+
+    # 🔴 Is this window already filed? `match_one` said no, but it asks a
+    #    narrower question: it skips a charge that is tied to ANOTHER reading,
+    #    because a reading and an entry are one to one. For creating, that is
+    #    the wrong question — the question here is whether a charge exists at
+    #    all, and one that already carries a different reading is exactly the
+    #    case that matters.
+    #    Found the hard way on a live system: a full re-fetch answered about
+    #    two charges again with a window shifted by minutes, so neither the
+    #    reading nor the entry matched, and this function filed a SECOND
+    #    charge for a day that already had one. Both had to be deleted by
+    #    hand. The analyzer's idea of a window moves while its samples settle;
+    #    an entry's does not.
+    ueberlappt = _schon_gebucht(wc, v, cfg.get('tolerance_min'))
+    if ueberlappt is not None:
+        return None, ('a charge is already filed for this window (entry %s)'
+                      % ueberlappt.id)
 
     # The state of charge it ENDED at — but only when the car demonstrably
     # did not move in between, otherwise that reading is from after a drive.

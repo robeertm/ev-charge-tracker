@@ -1,5 +1,30 @@
 # Changelog
 
+## v3.0.139 (2026-10-01)
+
+### Before filing a charge, ask whether one is already filed
+
+The rule added in v3.0.136 — a meter reading nobody claims files the charge
+itself — had a hole that only a full re-fetch could open, and it opened it on a
+live system: two charges were filed a second time for days that already had one.
+
+The analyzer's idea of a window moves while its samples settle. On a full fetch
+it answered about two older charges again, each shifted by a few minutes and
+carrying slightly different kilowatt-hours. Neither reading matched: an entry
+already tied to a *different* reading is no candidate, because a reading and an
+entry are one to one. So both came out unmatched — and the new rule did what it
+was built to do and filed them.
+
+`match_one` answers "which entry may this reading be attached to". Before
+filing, the question is a different one: **does a charge exist here at all?** —
+and an entry that already carries another reading is exactly the case that
+matters. That question is now asked, without the gates the matcher applies, and
+a reading whose window is already covered names the entry it belongs to instead
+of becoming a second one.
+
+A real second charge on the same day — morning and evening — is untouched; only
+an *overlapping* window counts as already filed.
+
 ## v3.0.138 (2026-10-01)
 
 ### Thrown away stays thrown away — and a charge offered twice stays one charge

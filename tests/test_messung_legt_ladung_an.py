@@ -327,3 +327,46 @@ def test_13_eine_vorhandene_ladung_gewinnt():
     pruefe("zugeordnet", tally.get('matched'), 1)
     pruefe("es bleibt bei einer Ladung", Charge.query.count(), 1)
     ctx.pop()
+
+
+def test_14_ein_zweites_mal_fuer_denselben_tag_wird_nicht_angelegt():
+    """🔴 Found on a live system, not here: a full re-fetch answered about a
+    charge again with a window shifted by minutes. The reading no longer
+    matched (an entry already tied to ANOTHER reading is no candidate), so it
+    came out unmatched — and this rule filed a SECOND charge for a day that
+    already had one. Two had to be deleted by hand.
+
+    `match_one` asks which entry a reading may be attached to. Before filing,
+    the question is a different one: does a charge exist at all?
+    """
+    print("== Dieselbe Ladung noch einmal, leicht verschobenes Fenster ==")
+    app, ctx, v, wc = _der_echte_fall()
+    L.match_all(device_key='wallbox')
+    pruefe("eine Ladung da", Charge.query.count(), 1)
+    erste = Charge.query.one()
+    pruefe("sie haengt an der ersten Messung", erste.wallbox_charge_id, wc.id)
+
+    # Der Analyzer antwortet noch einmal: vier Minuten spaeter los, weniger kWh.
+    zweite = _messung(_t(15, 44), 89, 4.563, solar=3.6, sid='m2')
+    tally = L.match_all(device_key='wallbox')
+    pruefe("nichts angelegt", tally.get('created', 0) or 0, 0)
+    pruefe("es bleibt bei einer Ladung", Charge.query.count(), 1)
+    pruefe("und der Grund nennt den Eintrag",
+           'already filed' in (zweite.match_note or ''), True)
+    ctx.pop()
+
+
+def test_15_aber_eine_echte_zweite_ladung_am_selben_tag_darf():
+    """Gegenprobe: zwei Ladungen an einem Tag sind normal — morgens und
+    abends. Nur ein ueberlappendes Fenster ist eine Doppelung."""
+    print("== Zweite Ladung am selben Tag, anderes Fenster ==")
+    app, ctx, v, wc = _der_echte_fall()
+    L.match_all(device_key='wallbox')
+    pruefe("eine Ladung da", Charge.query.count(), 1)
+    _sync(v, _t(21, 30), 87, 34309, laedt=True)
+    _sync(v, _t(23, 50), 93, 34309)
+    _messung(_t(21, 20), 120, 5.2, solar=0.0, sid='m3')
+    tally = L.match_all(device_key='wallbox')
+    pruefe("angelegt", tally.get('created'), 1)
+    pruefe("jetzt zwei Ladungen", Charge.query.count(), 2)
+    ctx.pop()
