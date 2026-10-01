@@ -1,5 +1,19 @@
 # Changelog
 
+## v3.0.137 (2026-10-01)
+
+### A charge the meter filed gets its grid intensity too
+
+The entry filed in v3.0.136 arrived without a CO2 figure, and on a live system
+that is not a small gap: every other charge carries one, so the row looks
+complete while a column is quietly empty. The car-side detector fetches the
+grid intensity for its own window; the self-healing backfill otherwise only
+runs at boot, so a meter-filed charge would have waited for the next restart.
+The link now kicks that backfill when it has filed something — rate limited,
+and a no-op when nothing is missing, exactly the call the other sync paths
+already make. The counter for filed charges also reaches the result the
+settings page reads.
+
 ## v3.0.136 (2026-10-01)
 
 ### A meter reading nobody claims now files the charge itself

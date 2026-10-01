@@ -1048,7 +1048,21 @@ def sync(app, days=None, full=False, specs=None, pv_co2=None):
                         'wallbox': (payload.get('wallbox') or {}).get('name') or dev})
             res.update({k: tally.get(k, 0)
                         for k in ('matched', 'ambiguous', 'unmatched',
-                                  'conflict', 'applied', 'retyped', 'co2')})
+                                  'conflict', 'applied', 'retyped', 'co2',
+                                  'created')})
+            # 🔴 A charge this link filed itself has no grid intensity yet.
+            # The car-side detector fetches one for its own window; the
+            # self-healing backfill otherwise only runs at boot — so a
+            # meter-filed charge would sit without CO2 until the next
+            # restart, which is exactly the kind of half-filled row that
+            # looks complete. Rate limited and a no-op when nothing is
+            # missing, same call the sync paths already make.
+            if tally.get('created'):
+                try:
+                    from services.co2_backfill import start_backfill
+                    start_backfill(app)
+                except Exception as e:      # noqa: BLE001
+                    logger.warning('CO2 backfill could not be kicked: %s', e)
             AppConfig.set(K_LAST_TS, res['ts'])
         except LinkError as e:
             res['error'] = str(e)
