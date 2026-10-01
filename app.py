@@ -4840,6 +4840,12 @@ def register_routes(app):
         beschreibung = {'id': wc.id, 'start_ts': wc.start_ts,
                         'end_ts': wc.end_ts, 'energy_kwh': wc.energy_kwh,
                         'state': wc.match_state}
+        # 🔴 Remember it BEFORE deleting. store_charges finds a reading by
+        # (device_key, source_id) — with the row gone, the next fetch that
+        # covers this window files it again as new, and the clean-up quietly
+        # undoes itself the first time somebody runs a full sync.
+        from services.shelly_link import merke_verworfen
+        merke_verworfen(wc)
         db.session.delete(wc)
         db.session.commit()
         logger.info('Wallbox link: reading %s discarded (%s, %s kWh)',

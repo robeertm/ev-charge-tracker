@@ -911,6 +911,18 @@ def test_34_a_reading_a_charge_is_built_on_is_never_folded_away():
     A matched reading holds the entry's kWh, its cost and the values that make
     the adoption undoable. A fetch that quietly folded a second answer into it
     would move the entry's numbers with nobody asking.
+
+    🔴 v3.0.138 changed what happens to that second answer. It used to be filed
+    as a reading of its own, which is how open lists filled up with rows nobody
+    could ever use: the charge is settled, and an answer carrying LESS energy is
+    the same charge seen incompletely. That is exactly the criterion a clean-up
+    had to apply by hand twice — *an open reading is superfluous once its window
+    is covered by a matched one*. It is in the code now, so the list stays
+    clean on its own. The matched reading is still left completely alone, which
+    was and remains the point of this test; see
+    test_07_aber_eine_VOLLSTAENDIGERE_antwort_darf_herein for the other half,
+    where an answer with MORE energy does get in, because that is how an
+    incomplete reading gets corrected.
     """
     print("== A matched reading is left alone ==")
     app, ctx = _app()
@@ -923,9 +935,10 @@ def test_34_a_reading_a_charge_is_built_on_is_never_folded_away():
     L.store_charges(_payload(_reading('k2', MITTAG + timedelta(minutes=30),
                                       hours=2.5, kwh=12.0, solar=11.0,
                                       battery=0.6, grid=0.4, cost=0.08)))
-    pruefe("the later answer is filed on its own", WallboxCharge.query.count(), 2)
+    pruefe("the lesser answer is not filed beside it", WallboxCharge.query.count(), 1)
     wc = WallboxCharge.query.filter_by(source_id='k1').first()
     pruefe("the matched one is untouched", wc.energy_kwh, 18.5)
+    pruefe("it still carries its own id", wc.source_id, 'k1')
     pruefe("and the entry still says what it was given",
            Charge.query.get(c.id).kwh_loaded, 18.5)
     ctx.pop()

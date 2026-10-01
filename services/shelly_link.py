@@ -230,10 +230,19 @@ def store_charges(payload):
 
     Only for readings no charge entry is built on yet: a matched reading is
     somebody's evidence, and a fetch must not rewrite it underneath them.
+
+    🔴 And two kinds of row never come back at all:
+
+    * one somebody **discarded** — deleting it leaves nothing to recognise it
+      by, so a full fetch would file it again and quietly undo the clean-up;
+    * one whose charge is already **matched** and that brings no more energy —
+      that is the same physical charge offered again, i.e. a ghost. One that
+      brings MORE energy is let in, because that is how an incomplete reading
+      gets corrected (see MIN_SHARE_OF_SOC_GAIN).
     """
-    from models.database import db, WallboxCharge
+    from models.database import db, DiscardedReading, WallboxCharge
     key_default = str((payload.get('wallbox') or {}).get('device_key') or '')
-    neu = upd = 0
+    neu = upd = weg = 0
     for c in payload.get('charges') or []:
         sid = str(c.get('id') or '').strip()
         if not sid:
@@ -241,8 +250,27 @@ def store_charges(payload):
         dev = str(c.get('device_key') or key_default)
         anfang = int(c.get('start_ts') or 0)
         ende = int(c.get('end_ts') or 0)
+        if _ist_verworfen(dev, sid, ende):
+            weg += 1
+            continue
         row = WallboxCharge.query.filter_by(device_key=dev, source_id=sid).first()
         if row is None and ende > 0:
+            # A reading already carrying a charge entry counts as a twin too —
+            # the charge is filed, and an answer with no more energy in it is
+            # the same charge said twice. Before this, those slipped past the
+            # filter below and became ghosts beside a settled entry.
+            fest = (WallboxCharge.query
+                    .filter(WallboxCharge.device_key == dev,
+                            WallboxCharge.end_ts == ende,
+                            WallboxCharge.match_state == 'matched')
+                    .order_by(WallboxCharge.start_ts.asc())
+                    .first())
+            if fest is not None and (
+                    _f(c.get('energy_kwh')) is None
+                    or float(c.get('energy_kwh') or 0) <= float(fest.energy_kwh or 0)):
+                fest.fetched_at = datetime.now()
+                upd += 1
+                continue
             zwilling = (WallboxCharge.query
                         .filter(WallboxCharge.device_key == dev,
                                 WallboxCharge.end_ts == ende,
@@ -286,7 +314,38 @@ def store_charges(payload):
         row.session_count = int(c.get('session_count') or 1)
         row.fetched_at = datetime.now()
     db.session.commit()
+    if weg:
+        logger.info('Wallbox link: %d discarded reading(s) offered again, '
+                    'left out', weg)
     return neu, upd
+
+
+def _ist_verworfen(device_key, source_id, end_ts):
+    """Was this reading thrown away before?
+
+    By id, and by its end as well: the analyzer offers one charge again with a
+    later start while its samples settle, which changes the id — and a meter
+    cannot end two sessions on one device in the same second.
+    """
+    from models.database import DiscardedReading
+    q = DiscardedReading.query.filter(DiscardedReading.device_key == device_key)
+    if q.filter(DiscardedReading.source_id == source_id).first() is not None:
+        return True
+    if end_ts and q.filter(DiscardedReading.end_ts == end_ts).first() is not None:
+        return True
+    return False
+
+
+def merke_verworfen(wc):
+    """Keep the record of a reading about to be deleted."""
+    from models.database import db, DiscardedReading
+    if _ist_verworfen(wc.device_key, wc.source_id, wc.end_ts):
+        return None
+    d = DiscardedReading(device_key=wc.device_key, source_id=wc.source_id,
+                         start_ts=wc.start_ts, end_ts=wc.end_ts,
+                         energy_kwh=wc.energy_kwh)
+    db.session.add(d)
+    return d
 
 
 def _f(v):

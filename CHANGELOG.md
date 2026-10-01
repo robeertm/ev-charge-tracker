@@ -1,5 +1,38 @@
 # Changelog
 
+## v3.0.138 (2026-10-01)
+
+### Thrown away stays thrown away — and a charge offered twice stays one charge
+
+Discarding a reading deleted the row and nothing else. `store_charges` finds a
+reading by `(device_key, source_id)`, so with the row gone the next fetch that
+covers the window files it again as new. A routine sync only asks for what is
+new and never noticed — but a *full* one (the backfill window, or the first
+sync after a long outage) walks months, and every reading anybody ever cleaned
+up would come back at once, with nothing to say why.
+
+A discarded reading is now remembered in its own small table: device, id, start,
+end, energy and when it went. A fetch leaves those out and logs how many it left
+out, so "nothing new" is never confused with "something was quietly dropped".
+The end is kept alongside the id because the analyzer offers one charge again
+with a later start while its samples settle — a different id for the same
+charge — and a meter cannot end two sessions on one device in the same second.
+Nothing is lost by remembering: the rows *are* the record of what was thrown
+away, and deleting one lets its reading back in.
+
+**A second answer about a charge that is already filed is no longer filed
+beside it.** That is where open lists came from: the entry is settled, and an
+answer carrying *less* energy is the same charge seen incompletely — it can
+never be used for anything. It is the same criterion a clean-up had to apply by
+hand twice ("an open reading is superfluous once its window is covered by a
+matched one"); it belongs in the code, not in somebody's afternoon.
+
+🔴 One half of that rule must stay open, and does: an answer carrying **more**
+energy than the matched reading is still filed on its own. That is exactly how
+an incomplete reading gets corrected — see v3.0.135, where a matched reading
+held half a charge and the complete answer arrived later. The matched reading
+itself is never rewritten by a fetch, which was and remains the point.
+
 ## v3.0.137 (2026-10-01)
 
 ### A charge the meter filed gets its grid intensity too

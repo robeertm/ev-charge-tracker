@@ -773,3 +773,44 @@ class ObdReading(db.Model):
             'cell_voltages': _arr(self.cell_voltages_json),
             'cell_temps': _arr(self.cell_temps_json),
         }
+
+
+class DiscardedReading(db.Model):
+    """A wallbox reading somebody threw away, remembered so it stays away.
+
+    🔴 Discarding used to delete the row and nothing else — and ``store_charges``
+    finds a charge by ``(device_key, source_id)``, so with the row gone the very
+    next fetch that covers the window files it again as new. A routine sync only
+    asks for what is new and never noticed; a *full* one (the backfill window,
+    or the first sync after a long outage) brings every discarded reading back
+    at once. Ten readings cleaned up by hand on 2026-10-01 would have reappeared
+    the first time somebody pressed the big button.
+
+    The end is kept alongside the id because a meter cannot end two sessions on
+    one device in the same second: that is what identifies the charge even when
+    the analyzer offers it again with a later start and therefore a different id.
+
+    Nothing is lost by remembering — the rows here are the record of what was
+    thrown away, and a reading can be let back in by deleting its entry.
+    """
+    __tablename__ = 'discarded_readings'
+
+    id = db.Column(db.Integer, primary_key=True)
+    device_key = db.Column(db.String(64), index=True)
+    source_id = db.Column(db.String(64), index=True)
+    end_ts = db.Column(db.Integer, index=True)
+    start_ts = db.Column(db.Integer)
+    energy_kwh = db.Column(db.Float)
+    discarded_at = db.Column(db.DateTime, default=datetime.now)
+
+    def to_dict(self):
+        return {
+            'id': self.id,
+            'device_key': self.device_key,
+            'source_id': self.source_id,
+            'start_ts': self.start_ts,
+            'end_ts': self.end_ts,
+            'energy_kwh': self.energy_kwh,
+            'discarded_at': (self.discarded_at.isoformat()
+                             if self.discarded_at else None),
+        }
