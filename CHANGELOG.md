@@ -1,5 +1,67 @@
 # Changelog
 
+## v3.0.136 (2026-10-01)
+
+### A meter reading nobody claims now files the charge itself
+
+Until now the wallbox link could only ever *decorate* an entry the car-side
+detector had already found. So every weakness of that detector cost a whole
+charge — while the measurement sat right next to it holding exactly what was
+missing. Three times in four days, each time a different weakness: the drive
+home was not subtracted from the starting state of charge; a stale charging
+flag aborted the fallback detector; and finally the only sync before the
+charging flag was already an hour *inside* the charge.
+
+That last one is worth spelling out, because no threshold would have caught
+it. The car reported at 07:02 and then not again until 16:40 — by which time
+the wallbox had been delivering for an hour. The reading taken as "the state
+of charge before the charge" was really a state of charge *during* it: 85 %,
+rising to 87 % by the end. A two-percent gain, under the three-percent
+threshold, charge dropped — while the meter had 4.956 kWh to the watt-hour.
+
+Patching the fourth weakness the same way would be a treadmill, so the meter
+now gets to file the charge itself. It may do so only where the car can be
+**shown** to have been the one charging, by one of two independent routes:
+
+* the car itself reported `is_charging` inside the window; or
+* the car stood at home across the whole window — same odometer on both
+  sides — and its battery was fuller afterwards. A battery that gains while
+  the car does not move was charging; there is no other way for it to gain.
+
+The silent half matters more than the loud one. Two of one wallbox's readings
+belong to a visitor's car and look exactly like a big home charge: through the
+first the house car sat at 100 % and never moved, and over the second it *lost*
+charge. Neither route fires for them. Filing those would have moved a
+stranger's kilowatt-hours into somebody's running costs, and nothing afterwards
+would have looked wrong.
+
+Four more gates, each one quotable:
+
+* **Large enough to be a charge at all.** The car-side detector draws that
+  line at a three-percent gain; at the wall the same gain is that share of the
+  battery plus the charge losses — the same bar, measured instead of inferred.
+  On one wallbox it lands at 1.89 kWh and separates eight short plug-ins
+  (0.33 … 1.74 kWh, nobody ever called them charges) from every reading ever
+  matched to one (4.16 kWh and up).
+* **The car side goes first.** Its trigger is the sync reporting
+  `is_charging=0` after a charge; until that sync exists the entry may still
+  arrive from the car, and the day would end up with two.
+* **One car per box.** Where more than one car is linked, nothing is guessed —
+  as everywhere else in this link.
+* **"Annotate only" means annotate only.** A link that may not take a number
+  over must not create a whole entry either.
+
+The entry it files carries the measured kilowatt-hours, the time window, the
+place and the state of charge the car *ended* at — and leaves the starting one
+**empty**, because nobody measured it. An opaque charge is a shape this app has
+always supported, and an invented pair of bounds would poison the SoC
+statistics and the efficiency base for good. It is also what keeps the car-side
+detectors away from it: both bail out on a same-day charge without bounds, so
+the same charge cannot be filed twice.
+
+Readings that are *not* filed now say why, next to the reading, instead of only
+saying that nobody claimed them.
+
 ## v3.0.135 (2026-09-30)
 
 ### Two detectors handed one charge to each other, and half an answer from the meter was taken as the truth

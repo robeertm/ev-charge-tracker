@@ -733,6 +733,204 @@ def _default_specs(vehicle_id):
     return bk, 0.88
 
 
+# ══════════════════════════════════════════════════════════════════════════
+# A reading nobody claims can become the charge itself
+# ══════════════════════════════════════════════════════════════════════════
+
+#: 🔑 The meter is the one witness the brand's cloud cannot mislead. Until
+#: now it could only ever DECORATE an entry the car-side detector had
+#: already found — so every weakness of that detector cost a whole charge,
+#: while the measurement sat next to it holding exactly what was missing.
+#: Three times in four days, each time a different weakness:
+#:
+#:   28.09.  the drive home was not subtracted from the starting SoC
+#:   29.09.  a stale charging flag aborted the fallback detector
+#:   30.09.  the only sync before the charging flag was already an HOUR
+#:           INSIDE the charge — no sync at all between 07:02 and 16:40 —
+#:           so the "SoC before the charge" was in truth a SoC during it:
+#:           85 -> 87, a 2 % gain, under the 3 % threshold, whole charge
+#:           dropped, while the meter had 4.956 kWh to the watt-hour.
+#:
+#: Patching the fourth weakness the same way would be a treadmill. So the
+#: meter may file the charge itself where the car can be SHOWN to have been
+#: charging — and stays silent where it cannot.
+#:
+#: 🔴 Silent is the important half. Two of this wallbox's readings belong to
+#: a visitor's car (26.07. 13.2 kWh, 31.07. 31.9 kWh) and look exactly like
+#: a big home charge. Neither route below fires for them.
+
+#: The note a charge carries that the meter filed on its own. It says where
+#: the number came from; the kilowatt-hours are measured, so nothing here
+#: asks to be checked.
+_AUS_MESSUNG_NOTIZ = ('Aus der Wallbox-Messung angelegt \u00b7 '
+                      'Ladestand nicht erfasst')
+
+
+def _steht_zuhause(sync):
+    """Was the car at its own place when this sync was taken?
+
+    Uses the app's own answer to that question — the same 200 m around the
+    saved home that the trip list and the car-side detector use. A second
+    radius of my own would be a second truth.
+    """
+    if sync is None or sync.location_lat is None or sync.location_lon is None:
+        return False
+    from services.trips_service import _classify_location
+    return _classify_location(sync.location_lat, sync.location_lon)[0] == 'home'
+
+
+def _letzter_sync(vehicle_id, bis):
+    from models.database import VehicleSync
+    return (VehicleSync.query
+            .filter(VehicleSync.vehicle_id == vehicle_id,
+                    VehicleSync.timestamp <= bis)
+            .order_by(VehicleSync.timestamp.desc()).first())
+
+
+def _erster_sync(vehicle_id, ab):
+    from models.database import VehicleSync
+    return (VehicleSync.query
+            .filter(VehicleSync.vehicle_id == vehicle_id,
+                    VehicleSync.timestamp > ab)
+            .order_by(VehicleSync.timestamp.asc()).first())
+
+
+def beleg_fuer_dieses_auto(wc, vehicle, tol_min):
+    """Proof that THIS car was the one drawing — or ``None``.
+
+    Two independent routes, either is enough, neither is a guess:
+
+    A  the car itself reported ``is_charging`` inside the window;
+    B  the car stood at home across the whole window — same odometer on
+       both sides — and its battery was fuller afterwards. A battery that
+       gains while the car does not move was charging; there is no other
+       way for it to gain.
+
+    Measured over all 45 readings of one wallbox, the two that provably
+    belong to a visitor are refused by both: through the first the house car
+    sat at 100 % and never moved, and over the second it LOST charge.
+    """
+    from models.database import VehicleSync
+    ws = datetime.fromtimestamp(int(wc.start_ts))
+    we = datetime.fromtimestamp(int(wc.end_ts))
+    tol = timedelta(minutes=int(tol_min or 90))
+    im_fenster = (VehicleSync.query
+                  .filter(VehicleSync.vehicle_id == vehicle.id,
+                          VehicleSync.timestamp >= ws,
+                          VehicleSync.timestamp <= we)
+                  .order_by(VehicleSync.timestamp.asc()).all())
+    if any(s.is_charging for s in im_fenster):
+        return 'the car reported charging inside this window'
+
+    vor = (VehicleSync.query
+           .filter(VehicleSync.vehicle_id == vehicle.id,
+                   VehicleSync.timestamp >= ws - tol,
+                   VehicleSync.timestamp <= ws)
+           .order_by(VehicleSync.timestamp.desc()).first())
+    nach = (VehicleSync.query
+            .filter(VehicleSync.vehicle_id == vehicle.id,
+                    VehicleSync.timestamp >= we,
+                    VehicleSync.timestamp <= we + tol)
+            .order_by(VehicleSync.timestamp.asc()).first())
+    if not _steht_zuhause(vor) or not _steht_zuhause(nach):
+        return None
+    if (vor.odometer_km is not None and nach.odometer_km is not None
+            and nach.odometer_km != vor.odometer_km):
+        return None
+    if (vor.soc_percent is None or nach.soc_percent is None
+            or nach.soc_percent <= vor.soc_percent):
+        return None
+    return ('the car stood at home and its battery gained %s -> %s %%'
+            % (vor.soc_percent, nach.soc_percent))
+
+
+def aus_der_messung_anlegen(wc, vehicles, cfg, specs=None):
+    """Make this reading its own charge entry. Returns ``(charge, reason)``.
+
+    ``charge`` is ``None`` when nothing was filed; ``reason`` then says why,
+    in words worth putting in front of the owner.
+    """
+    from models.database import db, Charge, AppConfig
+    # Imported here on purpose: the threshold belongs to the car-side
+    # detector and must stay ONE number. A copy in this file would drift.
+    from app import _AUTO_CHARGE_MIN_SOC_GAIN
+
+    if len(vehicles) != 1:
+        return None, 'more than one car is linked to this wallbox'
+    v = vehicles[0]
+    bk, eff = (specs or _default_specs)(v.id)
+    energie = float(wc.energy_kwh or 0.0)
+    if energie <= 0 or not bk:
+        return None, 'nothing measured'
+
+    # As large as the smallest thing this app calls a charge. The car-side
+    # detector draws that line at a SoC gain of _AUTO_CHARGE_MIN_SOC_GAIN;
+    # at the wall the same gain is that share of the battery plus the charge
+    # losses. Same bar, measured instead of inferred — on one wallbox it
+    # lands at 1.89 kWh and separates eight short plug-ins (0.33 … 1.74 kWh,
+    # nobody ever called them charges) from every reading ever matched to
+    # one (4.16 kWh and up).
+    mindest = _AUTO_CHARGE_MIN_SOC_GAIN / 100.0 * float(bk) / float(eff or 1.0)
+    if energie < mindest:
+        return None, ('%.3f kWh is under what counts as a charge here (%.2f kWh)'
+                      % (energie, mindest))
+
+    we = datetime.fromtimestamp(int(wc.end_ts))
+    # 🔴 The car side has to have had its turn first. Its trigger is the sync
+    # that reports is_charging=0 after a charge — before that arrives it may
+    # still file the entry itself, and the day would end up with two.
+    danach = _erster_sync(v.id, we)
+    if danach is None:
+        return None, 'no sync after this window yet — the car side may still file it'
+
+    beleg = beleg_fuer_dieses_auto(wc, v, cfg.get('tolerance_min'))
+    if not beleg:
+        return None, 'nothing shows that this car was the one charging'
+
+    # The state of charge it ENDED at — but only when the car demonstrably
+    # did not move in between, otherwise that reading is from after a drive.
+    bezug = _letzter_sync(v.id, we)
+    soc_to = None
+    if (danach.soc_percent is not None and _steht_zuhause(danach)
+            and bezug is not None and bezug.odometer_km is not None
+            and danach.odometer_km == bezug.odometer_km):
+        soc_to = danach.soc_percent
+
+    ws = datetime.fromtimestamp(int(wc.start_ts))
+    heim = AppConfig.get('home_label', 'Home') or 'Home'
+    _lat = AppConfig.get('home_lat', '')
+    _lon = AppConfig.get('home_lon', '')
+    c = Charge(
+        vehicle_id=v.id,
+        date=ws.date(),
+        charge_hour=ws.hour,
+        charge_end_hour=we.hour,
+        odometer=(bezug.odometer_km if bezug is not None else None),
+        kwh_loaded=round(energie, 3),
+        charge_type='AC',
+        # 🔴 Left empty on purpose. The whole reason this entry exists is
+        # that nobody measured the state of charge before the charge — the
+        # app supports an opaque charge, and an invented pair of bounds
+        # would poison the SoC statistics and the efficiency base for good.
+        soc_from=None,
+        soc_to=soc_to,
+        location_lat=(float(_lat) if _lat not in (None, '') else None),
+        location_lon=(float(_lon) if _lon not in (None, '') else None),
+        location_name=heim,
+        operator=heim,
+        notes=_AUS_MESSUNG_NOTIZ,
+        needs_review=True,
+    )
+    db.session.add(c)
+    db.session.flush()            # the id is needed to tie the reading to it
+    logger.info(
+        "Wallbox link: filed charge %s from reading %s (%.3f kWh, %s - %s) — %s"
+        % (c.id, wc.id, energie, ws.strftime('%Y-%m-%d %H:%M'),
+           we.strftime('%H:%M'), beleg)
+    )
+    return c, beleg
+
+
 def match_all(cfg=None, device_key='', specs=None, pv_co2=None):
     """Re-decide every reading that is not settled yet. Returns a tally.
 
@@ -745,13 +943,27 @@ def match_all(cfg=None, device_key='', specs=None, pv_co2=None):
     cfg = cfg or settings()
     vehicles = linked_vehicles(device_key)
     tally = {'matched': 0, 'ambiguous': 0, 'unmatched': 0, 'applied': 0,
-             'conflict': 0}
+             'conflict': 0, 'created': 0}
     open_rows = (WallboxCharge.query
                  .filter(WallboxCharge.match_state != 'matched')
                  .order_by(WallboxCharge.start_ts.asc())
                  .all())
     for wc in open_rows:
         state, charge, note = match_one(wc, vehicles, cfg['tolerance_min'])
+        # Nobody claimed it. Before it is written off as open, the meter gets
+        # to file the charge itself — see aus_der_messung_anlegen. Bound to
+        # the same switch that governs taking numbers over: on "annotate
+        # only" the link may not create entries either.
+        if state == 'unmatched' and _apply_wanted(cfg['apply_mode'], None):
+            neu, grund = aus_der_messung_anlegen(wc, vehicles, cfg, specs)
+            if neu is not None:
+                state, charge, note = 'matched', neu, ''
+                tally['created'] += 1
+            elif grund:
+                # 🔴 Why it was NOT filed belongs in front of the owner. An
+                # open reading with no reason beside it is the thing nobody
+                # can act on.
+                note = '%s; not filed: %s' % (note, grund)
         wc.match_state = state
         wc.match_note = note[:200] if note else None
         wc.matched_at = datetime.now()
