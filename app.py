@@ -538,6 +538,24 @@ def create_app(config_class=Config):
         except Exception as _e:
             logger.warning(f"Wallbox link loop could not start: {_e}")
 
+        # Did we come up on a different version than last time? That is
+        # the only honest moment to say 'update installed': a container
+        # that swapped its image left no process behind to report it.
+        try:
+            from services import notify_service
+            _zustand = notify_service._state()
+            _vorher = _zustand.get('running_version')
+            if _vorher and _vorher != Config.APP_VERSION:
+                notify_service.notify(
+                    'update',
+                    f"Now running {Config.APP_VERSION} (was {_vorher}).",
+                    title='EV: update installed')
+            if _vorher != Config.APP_VERSION:
+                _zustand['running_version'] = Config.APP_VERSION
+                notify_service._state_write(_zustand)
+        except Exception as _e:
+            logger.debug(f"version notice not sent: {_e}")
+
         if AppConfig.get('regen_scale_fix_v1', '') != 'done':
             db.session.execute(text(
                 'UPDATE vehicle_syncs SET total_regenerated_kwh = total_regenerated_kwh / 10.0 '
@@ -1564,6 +1582,33 @@ _AUTO_CHARGE_MERGE_WINDOW_MIN = 90    # minutes
 _CHARGE_KWH_HARD_CAP_MULTIPLIER = 1.3
 
 
+def _push_charge_notice(c, how):
+    """Tell the owner a charge was filed, if they asked to be told.
+
+    🔴 Only AUTOMATIC charges get a push. A charge the user just typed
+    into the form needs no notification about itself — they were there.
+
+    Never raises: this runs inside the sync path, and a dead push server
+    must not cost a charge record.
+    """
+    try:
+        from services import notify_service
+        teile = []
+        if c.soc_from is not None and c.soc_to is not None:
+            teile.append(f"{c.soc_from}\u2009\u2192\u2009{c.soc_to}\u202f%")
+        if c.kwh_loaded:
+            teile.append(f"{c.kwh_loaded:.1f}\u202fkWh")
+        if c.location_name:
+            teile.append(str(c.location_name))
+        notify_service.notify(
+            'charge',
+            " \u00b7 ".join(teile) or f"id={c.id}",
+            title=f"EV: {how}",
+        )
+    except Exception as e:
+        logger.debug(f"charge notice not sent: {e}")
+
+
 def _detect_auto_charge(end_sync):
     """Reconstruct a charge from the just-closed is_charging window and
     insert it flagged needs_review, unless the user already logged one
@@ -1838,6 +1883,7 @@ def _detect_auto_charge(end_sync):
         f"Auto-detected charge id={c.id}: {charge_type} {soc_from}->{soc_to}% "
         f"{gross}kWh @ {loc_name or 'unknown'} (needs_review)"
     )
+    _push_charge_notice(c, 'charge detected')
 
 
 # Higher than _AUTO_CHARGE_MIN_SOC_GAIN because the SoC-rise path has no
@@ -2087,6 +2133,7 @@ def _detect_auto_charge_from_soc_rise(end_sync):
         f"{soc_from}->{soc_to}% {gross}kWh @ {loc_name or 'unknown'} "
         f"(gap={gap_hours:.1f}h, needs_review)"
     )
+    _push_charge_notice(c, 'charge detected')
 
 
 def register_routes(app):
@@ -2741,22 +2788,38 @@ def register_routes(app):
                 pass
             return jsonify({'error': t('err.import_failed', error=str(e))}), 500
 
-    # ── Notify settings (ntfy.sh reboot alerts) ──────────────────
-    # Config lives outside the encrypted volume at /var/lib/ev-tracker/notify.json
-    # so the unlock-web helper can read it before LUKS is opened.
+    # ── Notify settings (ntfy and Telegram) ──────────────────────
+    # Config lives in a file rather than the database because this
+    # started as the LUKS-unlock alert, which has to be readable before
+    # the database is. See services/notify_service.py.
     @app.route('/api/settings/notify', methods=['GET', 'POST'])
     def api_settings_notify():
         from services import notify_service
         if request.method == 'GET':
             cfg = notify_service.load()
+            # 🔴 The bot token never leaves the server. Anyone who can
+            # open the settings page could otherwise read it out of the
+            # response and post as that bot. The page only needs to know
+            # whether one is stored.
+            cfg.pop('telegram_token', None)
+            cfg['telegram_token_set'] = bool(notify_service.load().get('telegram_token'))
             return jsonify({'ok': True, **cfg})
         data = request.get_json(silent=True) or {}
+        fields = {
+            'enabled': data.get('enabled', False),
+            'topic': data.get('topic', ''),
+            'server': data.get('server', ''),
+            'telegram_enabled': data.get('telegram_enabled', False),
+            'telegram_chat_id': data.get('telegram_chat_id', ''),
+        }
+        # An empty token field means "keep what is stored" — the page
+        # cannot show the token, so it cannot send it back either.
+        if (data.get('telegram_token') or '').strip():
+            fields['telegram_token'] = data['telegram_token']
+        if isinstance(data.get('events'), dict):
+            fields['events'] = data['events']
         try:
-            path = notify_service.save(
-                enabled=data.get('enabled', False),
-                topic=data.get('topic', ''),
-                server=data.get('server', ''),
-            )
+            path = notify_service.save(**fields)
             return jsonify({'ok': True, 'path': str(path)})
         except Exception as e:
             logger.error(f"Notify save failed: {e}")
@@ -2792,18 +2855,37 @@ def register_routes(app):
 
     @app.route('/api/settings/notify/test', methods=['POST'])
     def api_settings_notify_test():
+        """Send one test message through the channel the user is editing.
+
+        🔑 It tests the values currently in the form, not the stored
+        ones — otherwise "Test" would pass on yesterday's settings and
+        the user would save a broken token believing it works. The one
+        exception is the Telegram token: the page never receives it, so
+        an empty field falls back to what is stored.
+        """
         from services import notify_service
         data = request.get_json(silent=True) or {}
-        topic = (data.get('topic') or '').strip()
-        server = (data.get('server') or '').strip() or 'https://ntfy.sh'
-        if not topic:
-            return jsonify({'error': t('err.topic_missing')}), 400
-        ok, info = notify_service.send(
-            topic=topic,
-            server=server,
-            message='Test: EV Charge Tracker Benachrichtigung funktioniert.',
-            title='EV Charge Tracker',
-        )
+        channel = (data.get('channel') or 'ntfy').strip()
+        message = t('msg.notify_test_body')
+        title = 'EV Charge Tracker'
+
+        if channel == 'telegram':
+            token = (data.get('telegram_token') or '').strip()
+            if not token:
+                token = notify_service.load().get('telegram_token', '')
+            chat_id = (data.get('telegram_chat_id') or '').strip()
+            if not token:
+                return jsonify({'error': t('err.telegram_token_missing')}), 400
+            if not chat_id:
+                return jsonify({'error': t('err.telegram_chat_missing')}), 400
+            ok, info = notify_service.send_telegram(token, chat_id, message, title)
+        else:
+            topic = (data.get('topic') or '').strip()
+            server = (data.get('server') or '').strip() or 'https://ntfy.sh'
+            if not topic:
+                return jsonify({'error': t('err.topic_missing')}), 400
+            ok, info = notify_service.send(topic, server, message, title)
+
         if ok:
             return jsonify({'ok': True})
         return jsonify({'error': info}), 502
@@ -5714,6 +5796,20 @@ def register_routes(app):
         """Check GitHub for a strictly newer release."""
         from updater import check_for_update, updates_by_image
         new_version, zip_url = check_for_update()
+        if new_version:
+            # Keyed on the version, so a new release speaks up once and
+            # then stays quiet — and a week later reminds you at most
+            # once more. This endpoint is polled by the dashboard, so
+            # without the key it would notify on every page load.
+            try:
+                from services import notify_service
+                notify_service.notify_once(
+                    'update', f'available:{new_version}',
+                    f"Version {new_version} is available (this install runs {Config.APP_VERSION}).",
+                    title='EV: update available',
+                    repeat_after_s=7 * 24 * 3600)
+            except Exception:
+                logger.debug('update notice not sent', exc_info=True)
         # A container install still learns that a new version exists and
         # still gets the release notes — it just cannot install it by
         # swapping files, so the page must offer the right next step
@@ -7412,7 +7508,11 @@ if __name__ == '__main__':
                 ssl_context = None
 
     print(f"\n⚡ EV Charge Tracker v{Config.APP_VERSION}")
-    print(f"🚗 {Config.CAR_MODEL}")
+    # 🔴 No car line here. It printed `Config.CAR_MODEL`, a constant — so
+    # every install on earth announced the same car on startup, whatever
+    # was actually configured. Every other place reads
+    # `AppConfig.get('car_model', ...)`; this one could not, because it
+    # runs before an app context exists. A wrong name is worse than none.
     print(f"🌐 {scheme}://localhost:{Config.APP_PORT}")
     print(f"📱 Vom Smartphone: {scheme}://<deine-ip>:{Config.APP_PORT}\n")
     # debug=False — the auto-reloader passes a listening socket via the

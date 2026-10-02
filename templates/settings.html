@@ -2361,6 +2361,36 @@
                     {{ t('set.notify_howto') }}
                 </div>
                 <div id="notify-form">
+                    <!-- What gets sent. Above the channels on purpose: it is
+                         the question the owner actually has an opinion about,
+                         and it applies to both channels at once. -->
+                    <div class="mb-4">
+                        <div class="fw-semibold small mb-2">{{ t('set.notify_events_title') }}</div>
+                        <div class="form-check form-switch">
+                            <input class="form-check-input" type="checkbox" id="notify-ev-charge">
+                            <label class="form-check-label" for="notify-ev-charge">
+                                {{ t('set.notify_event_charge') }}
+                                <span class="form-text d-block">{{ t('set.notify_event_charge_hint') }}</span>
+                            </label>
+                        </div>
+                        <div class="form-check form-switch">
+                            <input class="form-check-input" type="checkbox" id="notify-ev-trouble">
+                            <label class="form-check-label" for="notify-ev-trouble">
+                                {{ t('set.notify_event_trouble') }}
+                                <span class="form-text d-block">{{ t('set.notify_event_trouble_hint') }}</span>
+                            </label>
+                        </div>
+                        <div class="form-check form-switch">
+                            <input class="form-check-input" type="checkbox" id="notify-ev-update">
+                            <label class="form-check-label" for="notify-ev-update">
+                                {{ t('set.notify_event_update') }}
+                                <span class="form-text d-block">{{ t('set.notify_event_update_hint') }}</span>
+                            </label>
+                        </div>
+                    </div>
+
+                    <!-- ── ntfy ──────────────────────────────────────── -->
+                    <div class="fw-semibold small mb-2">{{ t('set.notify_ntfy_section') }}</div>
                     <div class="form-check form-switch mb-3">
                         <input class="form-check-input" type="checkbox" id="notify-enabled">
                         <label class="form-check-label" for="notify-enabled">
@@ -2379,12 +2409,50 @@
                                placeholder="https://ntfy.sh" autocomplete="off">
                         <div class="form-text">{{ t('set.notify_server_hint') }}</div>
                     </div>
+                    <div class="d-flex gap-2 align-items-center flex-wrap mb-4">
+                        <button type="button" class="btn btn-outline-secondary btn-sm" id="notify-test-btn">
+                            <i class="bi bi-send"></i> {{ t('set.notify_test_btn') }}
+                        </button>
+                    </div>
+
+                    <!-- ── Telegram ──────────────────────────────────── -->
+                    <div class="fw-semibold small mb-2">{{ t('set.notify_telegram_section') }}</div>
+                    <div class="alert alert-info small mb-3">
+                        <i class="bi bi-info-circle"></i>
+                        {{ t('set.notify_telegram_howto') }}
+                    </div>
+                    <div class="form-check form-switch mb-3">
+                        <input class="form-check-input" type="checkbox" id="notify-tg-enabled">
+                        <label class="form-check-label" for="notify-tg-enabled">
+                            {{ t('set.notify_telegram_enabled_label') }}
+                        </label>
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label small">{{ t('set.notify_telegram_token_label') }}</label>
+                        <input type="password" class="form-control" id="notify-tg-token"
+                               placeholder="123456789:AA…" autocomplete="off">
+                        <div class="form-text">
+                            {{ t('set.notify_telegram_token_hint') }}
+                            <span id="notify-tg-stored" class="text-success d-none">
+                                {{ t('set.notify_telegram_token_stored') }}
+                            </span>
+                        </div>
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label small">{{ t('set.notify_telegram_chat_label') }}</label>
+                        <input type="text" class="form-control" id="notify-tg-chat"
+                               placeholder="123456789" autocomplete="off">
+                        <div class="form-text">{{ t('set.notify_telegram_chat_hint') }}</div>
+                    </div>
+                    <div class="d-flex gap-2 align-items-center flex-wrap mb-4">
+                        <button type="button" class="btn btn-outline-secondary btn-sm" id="notify-tg-test-btn">
+                            <i class="bi bi-send"></i> {{ t('set.notify_test_btn') }}
+                        </button>
+                    </div>
+
                     <div class="d-flex gap-2 align-items-center flex-wrap">
                         <button type="button" class="btn btn-primary" id="notify-save-btn">
                             <i class="bi bi-save"></i> {{ t('set.notify_save_btn') }}
-                        </button>
-                        <button type="button" class="btn btn-outline-secondary" id="notify-test-btn">
-                            <i class="bi bi-send"></i> {{ t('set.notify_test_btn') }}
                         </button>
                         <span id="notify-result" class="small"></span>
                     </div>
@@ -4027,28 +4095,39 @@
 })();
 </script>
 
-<!-- Notify (ntfy.sh) — isolated script block so earlier JS errors
-     in the main block cannot break it. Simple inline handlers,
-     no IIFE, no form element. -->
+<!-- Notify (ntfy + Telegram) — isolated script block so earlier JS
+     errors in the main block cannot break it. Plain functions, no
+     arrow syntax, no form element. -->
 <script>
 (function initNotifyCard() {
     console.log('[notify] init start');
     var container = document.getElementById('notify-form');
     if (!container) { console.log('[notify] no container'); return; }
-    var cbEnabled = document.getElementById('notify-enabled');
-    var inTopic   = document.getElementById('notify-topic');
-    var inServer  = document.getElementById('notify-server');
-    var result    = document.getElementById('notify-result');
-    var btnSave   = document.getElementById('notify-save-btn');
-    var btnTest   = document.getElementById('notify-test-btn');
-    if (!btnSave || !btnTest) { console.log('[notify] buttons missing'); return; }
+
+    function el(id) { return document.getElementById(id); }
+    var cbEnabled  = el('notify-enabled');
+    var inTopic    = el('notify-topic');
+    var inServer   = el('notify-server');
+    var cbTg       = el('notify-tg-enabled');
+    var inTgToken  = el('notify-tg-token');
+    var inTgChat   = el('notify-tg-chat');
+    var tgStored   = el('notify-tg-stored');
+    var evCharge   = el('notify-ev-charge');
+    var evTrouble  = el('notify-ev-trouble');
+    var evUpdate   = el('notify-ev-update');
+    var result     = el('notify-result');
+    var btnSave    = el('notify-save-btn');
+    var btnTest    = el('notify-test-btn');
+    var btnTgTest  = el('notify-tg-test-btn');
+    if (!btnSave) { console.log('[notify] save button missing'); return; }
 
     var T = {
         saved:     {{ t('set.notify_saved') | tojson }},
         test_ok:   {{ t('set.notify_test_ok') | tojson }},
         test_fail: {{ t('set.notify_test_fail') | tojson }},
         network:   {{ t('set.notify_err_network') | tojson }},
-        no_topic:  {{ t('set.notify_err_no_topic') | tojson }}
+        no_topic:  {{ t('set.notify_err_no_topic') | tojson }},
+        no_chat:   {{ t('err.telegram_chat_missing') | tojson }}
     };
 
     function showMsg(msg, cls) {
@@ -4056,66 +4135,105 @@
         result.className = 'small ' + (cls || '');
     }
 
-    // Load current config
     fetch('/api/settings/notify', {credentials: 'same-origin'})
         .then(function(r) { return r.json(); })
         .then(function(data) {
-            if (data && data.ok) {
-                cbEnabled.checked = !!data.enabled;
-                inTopic.value = data.topic || '';
-                inServer.value = data.server || 'https://ntfy.sh';
-                console.log('[notify] loaded', data);
+            if (!data || !data.ok) { return; }
+            cbEnabled.checked = !!data.enabled;
+            inTopic.value  = data.topic || '';
+            inServer.value = data.server || 'https://ntfy.sh';
+            cbTg.checked   = !!data.telegram_enabled;
+            inTgChat.value = data.telegram_chat_id || '';
+            // The token is never sent to the page — only whether one exists.
+            if (data.telegram_token_set && tgStored) {
+                tgStored.classList.remove('d-none');
             }
+            var ev = data.events || {};
+            evCharge.checked  = ev.charge  !== false;
+            evTrouble.checked = ev.trouble !== false;
+            evUpdate.checked  = ev.update  !== false;
+            console.log('[notify] loaded');
         })
         .catch(function(err) { console.log('[notify] load err', err); });
 
+    function nutzlast() {
+        var body = {
+            enabled: cbEnabled.checked,
+            topic:   inTopic.value,
+            server:  inServer.value,
+            telegram_enabled: cbTg.checked,
+            telegram_chat_id: inTgChat.value,
+            events: {
+                charge:  evCharge.checked,
+                trouble: evTrouble.checked,
+                update:  evUpdate.checked
+            }
+        };
+        // Empty token field means "keep the stored one" — see the route.
+        if (inTgToken.value.trim()) { body.telegram_token = inTgToken.value.trim(); }
+        return body;
+    }
+
     btnSave.addEventListener('click', function() {
-        console.log('[notify] save click');
         showMsg('', '');
         btnSave.disabled = true;
         fetch('/api/settings/notify', {
             method: 'POST',
             credentials: 'same-origin',
             headers: {'Content-Type': 'application/json'},
-            body: JSON.stringify({
-                enabled: cbEnabled.checked,
-                topic:   inTopic.value,
-                server:  inServer.value
-            })
+            body: JSON.stringify(nutzlast())
         })
         .then(function(r) { return r.json().then(function(d) { return {ok: r.ok, data: d}; }); })
         .then(function(res) {
-            if (res.ok && res.data.ok) showMsg(T.saved, 'text-success');
-            else showMsg((res.data && res.data.error) || 'Fehler', 'text-danger');
+            if (res.ok && res.data.ok) {
+                showMsg(T.saved, 'text-success');
+                if (inTgToken.value.trim() && tgStored) {
+                    tgStored.classList.remove('d-none');
+                    inTgToken.value = '';
+                }
+            } else {
+                showMsg((res.data && res.data.error) || T.test_fail, 'text-danger');
+            }
         })
-        .catch(function(err) {
-            showMsg(T.network + ': ' + err.message, 'text-danger');
-        })
+        .catch(function(err) { showMsg(T.network + ': ' + err.message, 'text-danger'); })
         .then(function() { btnSave.disabled = false; });
     });
 
-    btnTest.addEventListener('click', function() {
-        console.log('[notify] test click');
+    function testen(knopf, body, fehlendText) {
+        if (fehlendText) { showMsg(fehlendText, 'text-danger'); return; }
         showMsg('', '');
-        var topic = inTopic.value.trim();
-        if (!topic) { showMsg(T.no_topic, 'text-danger'); return; }
-        btnTest.disabled = true;
+        knopf.disabled = true;
         fetch('/api/settings/notify/test', {
             method: 'POST',
             credentials: 'same-origin',
             headers: {'Content-Type': 'application/json'},
-            body: JSON.stringify({topic: topic, server: inServer.value})
+            body: JSON.stringify(body)
         })
         .then(function(r) { return r.json().then(function(d) { return {ok: r.ok, data: d}; }); })
         .then(function(res) {
             if (res.ok && res.data.ok) showMsg(T.test_ok, 'text-success');
             else showMsg(T.test_fail + ': ' + ((res.data && res.data.error) || ''), 'text-danger');
         })
-        .catch(function(err) {
-            showMsg(T.network + ': ' + err.message, 'text-danger');
-        })
-        .then(function() { btnTest.disabled = false; });
-    });
+        .catch(function(err) { showMsg(T.network + ': ' + err.message, 'text-danger'); })
+        .then(function() { knopf.disabled = false; });
+    }
+
+    if (btnTest) {
+        btnTest.addEventListener('click', function() {
+            testen(btnTest,
+                   {channel: 'ntfy', topic: inTopic.value.trim(), server: inServer.value},
+                   inTopic.value.trim() ? null : T.no_topic);
+        });
+    }
+    if (btnTgTest) {
+        btnTgTest.addEventListener('click', function() {
+            testen(btnTgTest,
+                   {channel: 'telegram',
+                    telegram_token: inTgToken.value.trim(),
+                    telegram_chat_id: inTgChat.value.trim()},
+                   inTgChat.value.trim() ? null : T.no_chat);
+        });
+    }
 
     console.log('[notify] handlers attached');
 })();

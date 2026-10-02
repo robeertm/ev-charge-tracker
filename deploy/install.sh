@@ -229,7 +229,6 @@ $SERVICE_USER ALL=(root) NOPASSWD: /bin/systemctl restart ev-tracker.service
 $SERVICE_USER ALL=(root) NOPASSWD: /usr/bin/unattended-upgrade -v
 $SERVICE_USER ALL=(root) NOPASSWD: /usr/bin/unattended-upgrade --dry-run -v
 $SERVICE_USER ALL=(root) NOPASSWD: /sbin/shutdown -r now
-$SERVICE_USER ALL=(root) NOPASSWD: /usr/sbin/chpasswd
 EOF
     chmod 440 "$SUDOERS_PATH"
 fi

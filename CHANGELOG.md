@@ -1,5 +1,69 @@
 # Changelog
 
+## v3.0.140 (2026-10-02)
+
+### Notifications: Telegram alongside ntfy, and something worth saying
+
+Notifications existed for exactly one purpose: a push when the machine came
+up waiting for a disk passphrase. That is a message almost nobody needed and
+nobody could switch off, and it was the only one the app ever sent.
+
+There are now two channels and three kinds of event, each switchable on its
+own:
+
+- **Charges** — a charge was detected and filed. Both automatic paths report
+  it; a charge typed into the form does not, because whoever typed it was
+  already there.
+- **Trouble** — the vehicle API stopped answering. Reported after three
+  failed syncs in a row, not after the first: one failed call is a car
+  asleep or a flaky network. One message per outage, and one when it comes
+  back.
+- **Updates** — a new version is available, or one is now running. The
+  second is detected by comparing the running version against the last one
+  seen at startup, which is the only way a container that swapped its whole
+  image can report its own update.
+
+**ntfy stays.** It needs no account and no bot — for a fresh install that is
+the lowest hurdle there is. Telegram needs one chat with @BotFather but gives
+a real inbox that stays searchable on every device. Pick either, or both.
+
+**The bot token never leaves the server.** The settings page is told whether
+a token is stored, never what it is, and an empty token field on save means
+"keep the stored one". Anyone who can open the settings page could otherwise
+read the token out of the response and post as that bot.
+
+The config file keeps its three original keys, so an install that upgrades
+into this version keeps its ntfy settings, and a file written before this
+change loads with sensible defaults instead of an error.
+
+### Removed a root privilege nothing was using
+
+`deploy/install.sh` installed this sudoers rule on every native install:
+
+```
+<service user> ALL=(root) NOPASSWD: /usr/sbin/chpasswd
+```
+
+The comment said "password change for the web-login user". That stopped
+being true in v2.14, when the web login moved into the app's own database as
+a hash and the wizard stopped touching unix accounts. The rule stayed behind,
+and it granted far more than its comment claimed: `chpasswd` reads
+`user:password` pairs from standard input and takes no argument that could be
+restricted, so the account running the web app could set **root's** password.
+Nothing in the code has called it for over a year.
+
+New installs no longer get the rule. An existing install keeps it until the
+installer runs again — `sudo -l` as the service user shows whether it is
+still there.
+
+### The startup banner no longer announces someone else's car
+
+It printed `Config.CAR_MODEL`, a constant, so every install on earth
+announced the same car model on startup regardless of what was configured.
+Every other place in the app reads the configured value and falls back to the
+constant; this one could not, because it runs before an application context
+exists. The line is gone — no name is better than a wrong one.
+
 ## v3.0.139 (2026-10-01)
 
 ### Before filing a charge, ask whether one is already filed

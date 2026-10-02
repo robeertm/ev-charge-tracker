@@ -653,6 +653,55 @@ def _maybe_daily_trip_reconcile(app) -> None:
         logger.warning(f"Daily trip reconcile failed: {e}")
 
 
+#: Consecutive failed syncs before anyone is told. One failed call is
+#: weather — a car asleep, a flaky mobile network, a vendor hiccup. Three
+#: in a row is news. The loop runs every 10 min in the active window, so
+#: this is roughly half an hour of quiet before the first message.
+_TROUBLE_AFTER = 3
+_fehlschlaege = 0
+
+
+def _melde_stoerung(fehler):
+    """Report a run of failed syncs — once, not once per tick.
+
+    🔴 Never raises. This sits in the except branch of the loop that keeps
+    the whole app fed; an error here would turn a vendor outage into a
+    dead sync thread.
+    """
+    global _fehlschlaege
+    _fehlschlaege += 1
+    if _fehlschlaege != _TROUBLE_AFTER:
+        return
+    try:
+        from services import notify_service
+        notify_service.notify_once(
+            'trouble', 'vehicle_sync',
+            f"The vehicle API has not answered {_fehlschlaege} times in a row. "
+            f"Last error: {str(fehler)[:160]}",
+            title='EV: vehicle not reachable',
+        )
+    except Exception as e:
+        logger.debug(f"trouble notice not sent: {e}")
+
+
+def _melde_erholung():
+    """A sync worked again — forget the outage so the next one is reported."""
+    global _fehlschlaege
+    if not _fehlschlaege:
+        return
+    war = _fehlschlaege
+    _fehlschlaege = 0
+    try:
+        from services import notify_service
+        notify_service.notify_clear('vehicle_sync')
+        if war >= _TROUBLE_AFTER:
+            notify_service.notify(
+                'trouble', 'The vehicle API is answering again.',
+                title='EV: back to normal')
+    except Exception as e:
+        logger.debug(f"recovery notice not sent: {e}")
+
+
 def _sync_loop(app):
     """Background loop that syncs at configured interval.
 
@@ -671,9 +720,11 @@ def _sync_loop(app):
             try:
                 _do_sync(app)
                 _last_bg_loop_outcome = 'sync'
+                _melde_erholung()
             except Exception as e:
                 logger.error(f"Vehicle sync error: {e}")
                 _last_bg_loop_outcome = 'error'
+                _melde_stoerung(e)
             # Daily trip reconcile no longer rides on the sync tick —
             # it has a dedicated 03:00 thread (_nightly_maintenance_loop)
             # so it fires at a predictable time instead of "whenever the

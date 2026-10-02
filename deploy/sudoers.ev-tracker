@@ -12,5 +12,12 @@
 # Reboot button in the web UI.
 @@SERVICE_USER@@ ALL=(root) NOPASSWD: /sbin/shutdown -r now
 
-# Password change for the web-login user (not the OS user).
-@@SERVICE_USER@@ ALL=(root) NOPASSWD: /usr/sbin/chpasswd
+# 🔴 REMOVED in v3.0.140: `NOPASSWD: /usr/sbin/chpasswd`.
+# It was here for a setup step that has not existed since v2.14 — the web
+# login lives in the app's own database, hashed, and the wizard never
+# touches a unix account. The rule stayed behind and granted far more than
+# its comment claimed: `chpasswd` reads `user:password` pairs from stdin
+# and takes no argument that could be restricted, so the service account
+# running the web app could set *root's* password. Nothing calls it.
+# Existing installs keep the stale rule until the installer runs again;
+# `sudo -l` as the service user shows whether it is still there.
