@@ -37,6 +37,26 @@
 {% endblock %}
 
 {% block content %}
+{#
+  🔴 EINE QUELLE FÜR BEIDES — Navigation UND Karten.
+  Vorher stand die Reihenfolge hier und die Sichtbarkeit noch einmal an
+  jeder Karte, und beides lief auseinander: `ssl` stand UNBEDINGT in
+  dieser Liste, die Karte war bedingt — auf beiden Container-Instanzen
+  gemessen, der Eintrag in der Seitenleiste zeigte ins Leere. Umgekehrt
+  fehlte `syncaudit` in der Liste, obwohl es die Karte gibt.
+
+  `zeigen` entscheidet jetzt einmal; die Navigation filtert damit, und
+  jede bedingte Karte unten fragt dieselbe Variable. Was hier nicht
+  steht, wird immer gezeigt.
+  Bewacht von `tests/test_settings_sections.py`.
+#}
+{% set zeigen = {
+    'remote':     (remote_vehicles | default(false)) | bool,
+    'ssl':        (caps.own_tls | default(false)) | bool,
+    'luks':       (luks_in_use | default(false)) | bool,
+    'autounlock': (luks_in_use | default(false)) | bool,
+    'sysupd':     (caps.system_update | default(false)) | bool,
+} %}
 {% set settings_sections = [
     ('language',  'bi-translate',   t('set.language')),
     ('fleet',     'bi-collection',  t('set.fleet_title')),
@@ -45,18 +65,15 @@
     ('pv',        'bi-sun',         t('set.pv_title')),
     ('wallbox',   'bi-ev-station',  t('wb.title')),
     ('api',       'bi-arrow-repeat', t('set.sync_title')),
-] + ([
     ('remote',    'bi-broadcast-pin', t('skoda.remote_title')),
-] if remote_vehicles else []) + [
     ('entsoe',    'bi-cloud',       t('set.entsoe_title')),
     ('operators', 'bi-building',    t('set.operators_title')),
+    ('syncaudit', 'bi-clipboard-check', t('audit.title')),
     ('database',  'bi-database',    t('set.db_title')),
     ('ssl',       'bi-shield-lock', t('set.ssl_title')),
     ('auth',      'bi-shield-lock', t('set.auth_title')),
-] + ([
     ('luks',      'bi-key',         t('set.luks_title')),
     ('autounlock', 'bi-unlock',     t('set.autounlock_title')),
-] if luks_in_use else []) + [
     ('notify',    'bi-bell',        t('set.notify_title')),
     ('sysupd',    'bi-arrow-up-circle', t('set.sysupd_title')),
     ('backup',    'bi-archive',     t('set.backup_title')),
@@ -67,9 +84,11 @@
     <nav class="settings-sidebar" id="settingsNav" aria-label="{{ t('set.title') }}">
         <h6>{{ t('set.nav_group_general') }}</h6>
         {% for sid, icon, label in settings_sections %}
+        {% if zeigen.get(sid, True) %}
         <a class="nav-link" href="#sec-{{ sid }}" data-section="sec-{{ sid }}">
             <i class="bi {{ icon }}"></i><span>{{ label }}</span>
         </a>
+        {% endif %}
         {% endfor %}
     </nav>
     <div class="settings-main">
@@ -948,9 +967,19 @@
                             <strong><i class="bi bi-shield-lock"></i> {{ t('set.api_token_required') }}</strong><br>
                             {{ t('set.api_token_desc') }}
                             <div class="mt-2 d-flex gap-2 align-items-center flex-wrap">
+                                {# 🔴 Die Frage ist der BROWSER, nicht das
+                                   Python-Paket: `token_fetch` installiert
+                                   Selenium bei Bedarf selbst — im Container
+                                   in eine Schicht, die der naechste
+                                   Abbildwechsel wegwirft, und scheitert
+                                   danach trotzdem, weil nichts zu steuern
+                                   da ist. Der Weg „Token aus URL holen"
+                                   daneben braucht keinen Browser und bleibt. #}
+                                {% if caps.browser_token %}
                                 <button type="button" class="btn btn-warning btn-sm" id="btnFetchToken">
                                     <i class="bi bi-key"></i> {{ t('set.api_fetch_token') }}
                                 </button>
+                                {% endif %}
                                 <a href="#" target="evnovnc" rel="noopener" id="tokenOpenNovnc"
                                    class="btn btn-primary btn-sm" style="display:none">
                                     <i class="bi bi-box-arrow-up-right"></i> {{ t('wiz.open_login_window') }}
@@ -1497,7 +1526,7 @@
         </div>
 
         <!-- ENTSO-E API -->
-        {% if remote_vehicles %}
+        {% if zeigen['remote'] %}
         <!-- Fernsteuerung -->
         <div class="card mb-4 settings-card" id="sec-remote">
             <div class="card-header"><i class="bi bi-broadcast-pin"></i> {{ t('skoda.remote_title') }}</div>
@@ -2033,7 +2062,7 @@
         <!-- HTTPS / Sicherheit — hidden when the client is reaching us via Tailscale,
              since the VPN already provides transport encryption and HTTPS with a
              self-signed cert is just an extra trust prompt for no benefit. -->
-        {% if not hide_ssl_card %}
+        {% if zeigen['ssl'] %}
         <div class="card mb-4 settings-card" id="sec-ssl">
             <div class="card-header bg-white fw-bold">
                 <i class="bi bi-shield-lock"></i> {{ t('set.ssl_title') }}
@@ -2158,7 +2187,7 @@
             </div>
         </div>
 
-        {% if luks_in_use %}
+        {% if zeigen['luks'] %}
         <!-- LUKS Passphrase ändern (v3.0.4) — only on encrypted installs -->
         <div class="card mb-4 settings-card" id="sec-luks">
             <div class="card-header bg-white fw-bold">
@@ -2245,6 +2274,7 @@
         </div>
 
         <!-- LUKS Auto-Unlock (v3.0.3) -->
+        {% if zeigen['autounlock'] %}
         <div class="card mb-4 settings-card" id="sec-autounlock">
             <div class="card-header bg-white fw-bold">
                 <i class="bi bi-unlock"></i> {{ t('set.autounlock_title') }}
@@ -2347,6 +2377,7 @@
                 </script>
             </div>
         </div>
+        {% endif %}
         {% endif %}
 
         <!-- Benachrichtigungen (ntfy.sh Reboot-Alerts) -->
@@ -2461,6 +2492,7 @@
         </div>
 
         <!-- System-Updates (Debian Security-Only) -->
+        {% if zeigen['sysupd'] %}
         <div class="card mb-4 settings-card" id="sec-sysupd">
             <div class="card-header bg-white fw-bold">
                 <i class="bi bi-arrow-up-circle"></i> {{ t('set.sysupd_title') }}
@@ -2484,10 +2516,14 @@
                     <button type="button" class="btn btn-outline-secondary" id="sysupd-refresh-btn">
                         <i class="bi bi-arrow-clockwise"></i> {{ t('set.sysupd_refresh_btn') }}
                     </button>
+                    {# Nur wo es etwas zum Neustarten gibt: ein Container
+                       hat weder `shutdown` noch ein init, das zuhoerte. #}
+                    {% if caps.reboot_host %}
                     <button type="button" class="btn btn-outline-danger" id="sysupd-reboot-btn" style="display:none;"
                             data-confirm-msg="{{ t('set.sysupd_reboot_confirm') }}">
                         <i class="bi bi-arrow-repeat"></i> {{ t('set.sysupd_reboot_btn') }}
                     </button>
+                    {% endif %}
                     <span id="sysupd-msg" class="small"></span>
                 </div>
 
@@ -2497,6 +2533,7 @@
                 </div>
             </div>
         </div>
+        {% endif %}
 
         <!-- Backup & Wiederherstellung -->
         <div class="card mb-4 settings-card" id="sec-backup">

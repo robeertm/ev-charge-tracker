@@ -4606,19 +4606,20 @@ def register_routes(app):
         from services.stats_service import get_recup_rate_kwh_per_km
         measured_recup, measured_recup_source = get_recup_rate_kwh_per_km()
 
-        # Hide the HTTPS card when the client is reaching us via Tailscale.
-        # Tailscale CGNAT range is 100.64.0.0/10 — seeing a remote_addr in there
-        # means the request came over WireGuard and already has transport
-        # encryption; a self-signed HTTPS layer on top is just noise.
-        hide_ssl_card = False
-        try:
-            from ipaddress import ip_address, ip_network
-            ts_net = ip_network('100.64.0.0/10')
-            client_ip = (request.headers.get('X-Forwarded-For') or request.remote_addr or '').split(',')[0].strip()
-            if client_ip and ip_address(client_ip) in ts_net:
-                hide_ssl_card = True
-        except (ValueError, TypeError):
-            pass
+        # What can this installation actually do? The cards below are
+        # shown by capability, not by guesswork about the kind of host —
+        # the same way the LUKS cards have been gated since v3.0.94.
+        #
+        # 🔴 The HTTPS card used to be hidden when the CLIENT's address
+        # was in the Tailscale range (100.64.0.0/10). That asked the
+        # wrong side: the same install showed the card to a LAN browser
+        # and hid it from a tailnet one, and in a container — where
+        # `tailscale serve` terminates TLS and the app never does — the
+        # request arrives from a Docker address, so the card came back
+        # for everyone. Now it is shown only where the app serves its
+        # own certificate, which is the thing the card manages.
+        from services import platform_service
+        caps = platform_service.capabilities(request.headers)
 
         # LUKS is optional now — only surface the LUKS "change passphrase"
         # and "auto-unlock" cards (and their nav entries) when the data
@@ -4735,7 +4736,7 @@ def register_routes(app):
                                co2_missing=Charge.query.filter(_missing_co2_filter(Charge)).count(),
                                auth_enabled=(AppConfig.get('auth_enabled', 'false') == 'true'),
                                auth_username=AppConfig.get('auth_username', ''),
-                               hide_ssl_card=hide_ssl_card,
+                               caps=caps,
                                luks_in_use=_luks_in_use_safe(),
                                custom_operators_text=_get_custom_operators_text(),
                                operators_builtin=get_default_operators(),

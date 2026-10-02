@@ -36,6 +36,46 @@ The config file keeps its three original keys, so an install that upgrades
 into this version keeps its ntfy settings, and a file written before this
 change loads with sensible defaults instead of an error.
 
+### Settings: only what this install can actually do
+
+The settings page grew up on one kind of machine — a Debian VM that held
+its own certificate, could ask apt for security updates and could reboot
+itself. It offered all of that everywhere, so a container install got a
+card promising Debian security updates on a system without apt, a reboot
+button with nothing to reboot, and a "fetch token" button that would
+pip-install Selenium into a layer the next image pull throws away and
+then fail for want of a browser.
+
+Each of those is now shown only where it can work, decided by looking
+rather than by guessing the shape of the install — the same way the LUKS
+cards have been gated since v3.0.94. A native install with apt and sudo
+sees exactly what it saw before.
+
+- **Security updates** need `unattended-upgrade` *and* sudo.
+- **The reboot button** needs a `shutdown` binary *and* sudo.
+- **The browser token fetch** needs a browser binary. The "paste the
+  token from the URL" path next to it needs nothing and stays, so an
+  install without a browser still has a way through.
+- **The app's own HTTPS card** is hidden when the request arrived through
+  a proxy, because whatever forwards for us is also what terminates TLS.
+  It replaces a rule that asked whether the *client* was on a Tailscale
+  address, which answered differently for two people looking at the same
+  install. Where nothing forwards, the card is shown — hiding a switch
+  somebody needs is worse than showing one they do not.
+
+### The settings sidebar and the settings cards now come from one list
+
+They were two places saying the same thing, and they had drifted. `ssl`
+sat unconditionally in the sidebar list while its card was behind a
+condition, so on every install that hid the card the sidebar kept a link
+to a section that was not on the page. The other direction had happened
+too: the sync-audit card existed with no way to reach it from the
+sidebar.
+
+One list now carries the order, one map carries the visibility, and the
+sidebar and the cards both read them. `tests/test_settings_sections.py`
+fails if they ever disagree again, in either direction.
+
 ### Removed a root privilege nothing was using
 
 `deploy/install.sh` installed this sudoers rule on every native install:
