@@ -1524,6 +1524,7 @@
   "upd.helper_failed": "Il container di supporto non è riuscito a completare l’aggiornamento.",
   "upd.helper_started": "Aggiornamento avviato. Il container di supporto sta scaricando la nuova immagine.",
   "upd.helper_failed_request": "Impossibile avviare l’aggiornamento: il container di supporto non risponde.",
+  "upd.check_failed": "Il controllo degli aggiornamenti non ha raggiunto il server delle versioni. Non si sa quindi se esista una versione più recente: non significa che questa installazione sia aggiornata.",
   "upd.hold_title": "Gli aggiornamenti sono bloccati su questa installazione",
   "upd.hold_refused": "Gli aggiornamenti sono bloccati su questa installazione. Può rimuoverlo solo chi lo ha impostato; dall’interfaccia web non è possibile, per scelta.",
   "upd.hold_until_container": "Il blocco si rimuove da sé appena questa installazione gira come container.",

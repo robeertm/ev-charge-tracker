@@ -1524,6 +1524,7 @@
   "upd.helper_failed": "El contenedor auxiliar no pudo terminar la actualización.",
   "upd.helper_started": "Actualización iniciada. El contenedor auxiliar está descargando la nueva imagen.",
   "upd.helper_failed_request": "No se pudo iniciar la actualización: el contenedor auxiliar no responde.",
+  "upd.check_failed": "La comprobación de actualizaciones no pudo contactar con el servidor de versiones. Por tanto no se sabe si hay una versión más reciente; esto no significa que esta instalación esté al día.",
   "upd.hold_title": "Las actualizaciones están bloqueadas en esta instalación",
   "upd.hold_refused": "Las actualizaciones están bloqueadas en esta instalación. Solo quien puso el bloqueo puede retirarlo; desde la interfaz web no es posible, de forma intencionada.",
   "upd.hold_until_container": "El bloqueo se retira por sí solo en cuanto esta instalación se ejecute como contenedor.",

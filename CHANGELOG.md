@@ -36,6 +36,20 @@ The config file keeps its three original keys, so an install that upgrades
 into this version keeps its ntfy settings, and a file written before this
 change loads with sensible defaults instead of an error.
 
+### An update check that could not be made no longer reports "up to date"
+
+`check_for_update` returned the same `(None, None)` whether GitHub had
+nothing newer or could not be reached at all, and the settings page
+turned that into a green "you're up to date". For a flaky minute that is
+merely wrong; for an installation that cannot reach the release server —
+no route out, DNS pointed elsewhere, a firewall in between — it is a
+standing false statement about the version it is running.
+
+The reason for a failed check is now kept and reported, and the page has
+its own message for it: whether a newer version exists is unknown, which
+is not the same as being current. The return value is unchanged, so
+every existing caller keeps working.
+
 ### Comments no longer name real installations or real places
 
 Bugs get chased on real machines, and the comment explaining the fix

@@ -1524,6 +1524,7 @@
   "upd.helper_failed": "Le conteneur auxiliaire n’a pas pu terminer la mise à jour.",
   "upd.helper_started": "Mise à jour lancée. Le conteneur auxiliaire télécharge la nouvelle image.",
   "upd.helper_failed_request": "Impossible de lancer la mise à jour — le conteneur auxiliaire est injoignable.",
+  "upd.check_failed": "La vérification des mises à jour n’a pas pu joindre le serveur de versions. On ne sait donc pas s’il existe une version plus récente — cela ne veut pas dire que cette installation est à jour.",
   "upd.hold_title": "Les mises à jour sont bloquées sur cette installation",
   "upd.hold_refused": "Les mises à jour sont bloquées sur cette installation. Seule la personne qui a posé le blocage peut le lever ; l’interface web ne le permet pas, volontairement.",
   "upd.hold_until_container": "Le blocage se lève de lui-même dès que cette installation tourne dans un conteneur.",

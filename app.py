@@ -5795,8 +5795,9 @@ def register_routes(app):
     @app.route('/api/update/check')
     def api_update_check():
         """Check GitHub for a strictly newer release."""
-        from updater import check_for_update, updates_by_image
+        from updater import check_for_update, updates_by_image, last_check_error
         new_version, zip_url = check_for_update()
+        pruef_fehler = last_check_error()
         if new_version:
             # Keyed on the version, so a new release speaks up once and
             # then stays quiet — and a week later reminds you at most
@@ -5843,6 +5844,9 @@ def register_routes(app):
             'by_image': by_image,
             'helper_available': helfer,
             'hold': sperre,
+            # None when the question was actually asked. Anything else
+            # means the page must not claim this install is current.
+            'check_error': pruef_fehler,
             'image_ref': Config.CONTAINER_IMAGE if by_image else None,
             'release_url': f"https://github.com/{Config.GITHUB_REPO}/releases/tag/v{new_version}" if new_version else None,
         })

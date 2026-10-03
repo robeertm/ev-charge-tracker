@@ -52,7 +52,7 @@ class Umgebung:
     """Hold file in a temp dir, environment restored afterwards."""
 
     def __enter__(self):
-        self.tmp = Path(tempfile.mkdtemp(prefix='ev-hold-'))
+        self.tmp = Path(tempfile.mkdtemp(prefix='evtest-hold-'))
         self.alt_dir = update_hold._app_dir
         update_hold._app_dir = lambda: self.tmp
         self.alt_env = {k: os.environ.get(k)
@@ -162,6 +162,31 @@ with Umgebung() as u:
         updater._download_zip = alt_dl
 
 
+print("\n== 'could not ask' is not 'nothing new' ==")
+# 🔴 Both used to come back as (None, None), so an installation that
+# cannot reach the release server at all told its user it was up to
+# date. On a box deliberately cut off from that server, that is not a
+# wobble — it is a standing false statement about its own version.
+import urllib.request  # noqa: E402
+
+alt_urlopen = urllib.request.urlopen
+try:
+    def _kein_netz(*a, **k):
+        raise OSError('no route (test)')
+    urllib.request.urlopen = _kein_netz
+    updater._letzter_fehler = None
+    check(updater.check_for_update() == (None, None),
+          "a failed check still answers (None, None) for old callers")
+    fehler = updater.last_check_error()
+    check(fehler is not None and 'no route (test)' in fehler,
+          "but last_check_error() says why it could not ask")
+finally:
+    urllib.request.urlopen = alt_urlopen
+
+check("'check_error': pruef_fehler" in (ROOT / 'app.py').read_text(encoding='utf-8'),
+      "/api/update/check passes that on to the page")
+
+
 print("\n== a release may not delete a hold placed against it ==")
 import updater_helper  # noqa: E402
 from services import update_service  # noqa: E402
@@ -241,6 +266,17 @@ const antw = (u, extra) => Object.assign({ update_available: true, latest: '9.9.
   await __p();
   pruef(kasten.innerHTML.includes('btnInstallUpdate'), 'without a hold the button is back');
   pruef(!kasten.innerHTML.includes('<upd_hold_title>'), 'and no hold message');
+  global.ANTWORT = { update_available: false, latest: null, current: '1.0.0',
+                     check_error: 'OSError: no route' };
+  await __p();
+  h = kasten.innerHTML;
+  pruef(h.includes('<upd_check_failed>'), 'a failed check says so');
+  pruef(!h.includes('<app_up_to_date>'), 'and does NOT claim to be up to date');
+  global.ANTWORT = { update_available: false, latest: null, current: '1.0.0',
+                     check_error: null };
+  await __p();
+  pruef(kasten.innerHTML.includes('<app_up_to_date>'),
+        'a check that found nothing new still says up to date');
   process.exit(schlecht ? 1 : 0);
 })();
 '''

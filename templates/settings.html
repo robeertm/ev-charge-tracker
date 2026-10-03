@@ -1184,6 +1184,7 @@
                     upd_helper_restarting: {{ t('upd.helper_restarting')|tojson }},
                     upd_helper_failed: {{ t('upd.helper_failed')|tojson }},
                     upd_container_hint: {{ t('upd.container_hint')|tojson }},
+                    upd_check_failed: {{ t('upd.check_failed')|tojson }},
                     upd_hold_title: {{ t('upd.hold_title')|tojson }},
                     upd_hold_until_container: {{ t('upd.hold_until_container')|tojson }},
                     upd_copy: {{ t('upd.copy')|tojson }},
@@ -3191,6 +3192,12 @@
                         '</div>';
                     document.getElementById('btnInstallUpdate').addEventListener('click', () => doInstall(false));
                 }
+            } else if (data.check_error) {
+                // Nicht gefragt ist nicht dasselbe wie nichts Neues. Eine
+                // Installation, die den Freigabe-Server nicht erreicht,
+                // darf sich nicht fuer aktuell erklaeren.
+                result.innerHTML = '<div class="alert alert-warning">' +
+                    T.upd_check_failed + '</div>';
             } else if (data.latest === null) {
                 result.innerHTML = '<div class="alert alert-success">' + T.app_up_to_date + '</div>';
             } else {

@@ -1524,6 +1524,7 @@
   "upd.helper_failed": "De hulpcontainer kon de update niet afronden.",
   "upd.helper_started": "Update gestart. De hulpcontainer haalt het nieuwe image op.",
   "upd.helper_failed_request": "De update kon niet worden gestart — de hulpcontainer is niet bereikbaar.",
+  "upd.check_failed": "De updatecontrole kon de releaseserver niet bereiken. Of er een nieuwere versie is, is daarmee onbekend — dat betekent niet dat deze installatie actueel is.",
   "upd.hold_title": "Updates zijn op deze installatie geblokkeerd",
   "upd.hold_refused": "Updates zijn op deze installatie geblokkeerd. Alleen wie de blokkade heeft gezet kan die opheffen; via de webinterface kan dat opzettelijk niet.",
   "upd.hold_until_container": "De blokkade vervalt van zichzelf zodra deze installatie als container draait.",

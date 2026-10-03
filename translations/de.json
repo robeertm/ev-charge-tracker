@@ -1524,6 +1524,7 @@
   "upd.helper_failed": "Der Hilfscontainer konnte das Update nicht abschließen.",
   "upd.helper_started": "Update angestoßen. Der Hilfscontainer lädt jetzt das neue Abbild.",
   "upd.helper_failed_request": "Das Update konnte nicht angestoßen werden — der Hilfscontainer ist nicht erreichbar.",
+  "upd.check_failed": "Die Update-Prüfung konnte den Freigabe-Server nicht erreichen. Ob eine neuere Fassung vorliegt, ist damit unbekannt — das heißt nicht, dass diese Installation aktuell ist.",
   "upd.hold_title": "Updates sind auf dieser Installation gesperrt",
   "upd.hold_refused": "Updates sind auf dieser Installation gesperrt. Aufheben kann das nur, wer die Sperre gesetzt hat — über die Weboberfläche ist es bewusst nicht möglich.",
   "upd.hold_until_container": "Die Sperre hebt sich von selbst auf, sobald diese Installation als Container läuft.",

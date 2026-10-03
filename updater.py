@@ -62,20 +62,41 @@ def _github_get_json(url: str, timeout: float = 10.0) -> dict:
         return json.loads(resp.read().decode())
 
 
+#: Why the last check could not be made, or ``None`` when it was made.
+#: 🔴 Without this there is no difference between "no newer release" and
+#: "could not ask", and both came back as ``(None, None)`` — so a box
+#: that cannot reach GitHub at all told its user they were up to date.
+#: On an install that is deliberately cut off from the release server
+#: that is not a wobble, it is a standing false statement. Kept as module
+#: state rather than a changed return type so every existing caller
+#: keeps working and only those that care have to look.
+_letzter_fehler: Optional[str] = None
+
+
+def last_check_error() -> Optional[str]:
+    """Short description of why the last ``check_for_update`` failed."""
+    return _letzter_fehler
+
+
 def check_for_update() -> Tuple[Optional[str], Optional[str]]:
     """Check GitHub for a strictly newer release.
 
-    Returns ``(new_version, download_url)`` or ``(None, None)``.
+    Returns ``(new_version, download_url)`` or ``(None, None)``. When the
+    answer is ``(None, None)``, ``last_check_error()`` says whether that
+    means "nothing newer" (``None``) or "could not ask" (a reason).
     """
+    global _letzter_fehler
     try:
         data = _github_get_json(GITHUB_API)
         latest = (data.get('tag_name') or '').lstrip('v')
+        _letzter_fehler = None
         if latest and _is_newer(latest, Config.APP_VERSION):
             zip_url = data.get('zipball_url') or ''
             return latest, zip_url
         return None, None
     except Exception as e:
         logger.error(f"Update check failed: {e}")
+        _letzter_fehler = f"{type(e).__name__}: {e}"
         return None, None
 
 
