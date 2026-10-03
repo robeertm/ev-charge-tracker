@@ -28,6 +28,7 @@ Exit code is non-zero if any check fails.
 import os
 import re
 import sys
+from pathlib import Path
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 VORLAGE = os.path.join(ROOT, 'templates', 'settings.html')
@@ -92,6 +93,39 @@ check("zeigen.get(sid, True)" in html,
 # ── nobody may reintroduce a second, independent gate ────────────────
 check("hide_ssl_card" not in html,
       "the old per-viewer `hide_ssl_card` gate is gone from the template")
+
+# ── every template must COMPILE, not merely parse ────────────────────
+# 🔴 This is here because a `| bool` filter — which neither Jinja nor
+# Flask has — once reached three live installs. It is not a parse error:
+# `Environment.parse()` accepts an unknown filter without a murmur and
+# only `compile()` raises, so reading the template as text (which is what
+# the checks above do) and parsing it both said "fine" while every
+# request for the page answered 500.
+#
+# A bare environment is enough: measured, none of these templates needs a
+# filter that Flask adds on top of Jinja. If one ever does, this check
+# will say so and the filter belongs in the list here, deliberately.
+print("\n== every template compiles ==")
+try:
+    import jinja2
+except ImportError:
+    print("  (jinja2 not installed — skipped)")
+else:
+    umgebung = jinja2.Environment(
+        loader=jinja2.FileSystemLoader(os.path.join(ROOT, 'templates')),
+        autoescape=True)
+    vorlagen = sorted(Path(os.path.join(ROOT, 'templates')).rglob('*.html'))
+    check(len(vorlagen) > 0, "there are templates to check")
+    kaputt = []
+    for datei in vorlagen:
+        try:
+            umgebung.compile(datei.read_text(encoding='utf-8'),
+                             filename=str(datei))
+        except Exception as e:
+            kaputt.append(f"{datei.name}: {type(e).__name__}: {e}")
+    check(not kaputt,
+          f"all {len(vorlagen)} templates compile"
+          + ("" if not kaputt else f" — broken: {kaputt[:3]}"))
 
 print()
 if _failures:

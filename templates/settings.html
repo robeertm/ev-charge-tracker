@@ -50,12 +50,20 @@
   steht, wird immer gezeigt.
   Bewacht von `tests/test_settings_sections.py`.
 #}
+{#
+  🔴 KEIN `| bool` HIER. Jinja hat diesen Filter nicht — Flask auch nicht —
+  und ein unbekannter Filter ist kein Parse-Fehler, sondern schlägt erst
+  beim ÜBERSETZEN zu: die ganze Seite antwortet dann mit 500. Genau so
+  stand es kurz im Umlauf. Gebraucht wird ohnehin nur Wahrheitswert, und
+  den liefert jeder dieser Ausdrücke von selbst — `{% if zeigen['ssl'] %}`
+  und `zeigen.get(sid, True)` fragen nichts anderes.
+#}
 {% set zeigen = {
-    'remote':     (remote_vehicles | default(false)) | bool,
-    'ssl':        (caps.own_tls | default(false)) | bool,
-    'luks':       (luks_in_use | default(false)) | bool,
-    'autounlock': (luks_in_use | default(false)) | bool,
-    'sysupd':     (caps.system_update | default(false)) | bool,
+    'remote':     remote_vehicles | default(false),
+    'ssl':        caps.own_tls | default(false),
+    'luks':       luks_in_use | default(false),
+    'autounlock': luks_in_use | default(false),
+    'sysupd':     caps.system_update | default(false),
 } %}
 {% set settings_sections = [
     ('language',  'bi-translate',   t('set.language')),

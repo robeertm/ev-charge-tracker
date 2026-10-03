@@ -1,5 +1,25 @@
 # Changelog
 
+## v3.0.141 (2026-10-03)
+
+### Fix: the settings page answered 500 on v3.0.140
+
+The visibility map added in v3.0.140 cast its entries with a `bool`
+filter. Jinja has no such filter and neither does Flask, so every request
+for `/settings` ended in a `TemplateAssertionError` and a 500. Nothing
+else on the page was wrong — and nothing else in the app was affected —
+but the one page you need in order to change anything was unreachable.
+
+The cast is gone; it was never needed, because the two places that read
+the map ask for a truth value and nothing more.
+
+It slipped through because the template was checked by **parsing** it,
+and an unknown filter is not a parse error: `Environment.parse()` accepts
+it without a murmur and only `compile()` raises. So
+`tests/test_settings_sections.py` now compiles every template in
+`templates/`, which is the step that would have caught this before it
+left the machine.
+
 ## v3.0.140 (2026-10-03)
 
 ### Notifications: Telegram alongside ntfy, and something worth saying
