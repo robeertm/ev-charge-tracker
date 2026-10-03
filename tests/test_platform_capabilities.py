@@ -40,7 +40,12 @@ check(ps.own_tls_card_useful({}) is True,
       "no forwarding headers: the card is shown")
 check(ps.own_tls_card_useful({'X-Forwarded-Proto': 'https'}) is False,
       "a proxy that terminated TLS: the card is hidden")
-check(ps.own_tls_card_useful({'X-Forwarded-For': '100.64.0.1'}) is False,
+# 🔑 192.0.2.x is the documentation range (TEST-NET-1) and is used on
+# purpose: the value is irrelevant here — the check is about the header
+# being present at all — and a real-looking address in a public
+# repository is a thing a leak scanner has to flag, because it cannot
+# tell an example from somebody's actual machine.
+check(ps.own_tls_card_useful({'X-Forwarded-For': '192.0.2.1'}) is False,
       "any forwarding proxy at all: the card is hidden")
 check(ps.own_tls_card_useful({'User-Agent': 'x'}) is True,
       "unrelated headers do not hide it")
