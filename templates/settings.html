@@ -1184,6 +1184,8 @@
                     upd_helper_restarting: {{ t('upd.helper_restarting')|tojson }},
                     upd_helper_failed: {{ t('upd.helper_failed')|tojson }},
                     upd_container_hint: {{ t('upd.container_hint')|tojson }},
+                    upd_hold_title: {{ t('upd.hold_title')|tojson }},
+                    upd_hold_until_container: {{ t('upd.hold_until_container')|tojson }},
                     upd_copy: {{ t('upd.copy')|tojson }},
                     upd_copied: {{ t('upd.copied')|tojson }},
                     api_refresh_token: {{ t('set.api_refresh_token')|tojson }},
@@ -3089,6 +3091,14 @@
     let pendingVersion = null;
     let pendingZipUrl = null;
 
+    // Der Sperrgrund ist freier Text von dem, der die Sperre gesetzt
+    // hat — er geht durch innerHTML, also muss er entschaerft werden.
+    function entschaerft(wert) {
+        return String(wert == null ? '' : wert)
+            .replace(/&/g, '&amp;').replace(/</g, '&lt;')
+            .replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+    }
+
     function setBusy(label) {
         btn.disabled = true;
         btn.innerHTML = '<span class="spinner-border spinner-border-sm"></span> ' + label;
@@ -3113,7 +3123,26 @@
                 const notizen =
                     '<a href="' + data.release_url + '" target="_blank" class="btn btn-sm btn-outline-secondary">' +
                     '<i class="bi bi-github"></i> ' + T.app_release_notes + '</a>';
-                if (data.by_image && data.helper_available) {
+                if (data.hold) {
+                    // Gesperrt. Die neue Fassung wird genannt, die
+                    // Freigabe-Notizen bleiben erreichbar — nur ein
+                    // Knopf wird nicht angeboten, denn der Server
+                    // weist ihn ohnehin ab (409 update_held). Ein
+                    // Knopf, der sicher scheitert, ist schlimmer als
+                    // keiner: er laesst den Grund wie einen Fehler
+                    // aussehen.
+                    const bis = data.hold.until === 'container'
+                        ? '<div class="small text-muted mt-2">' + T.upd_hold_until_container + '</div>'
+                        : '';
+                    result.innerHTML =
+                        '<div class="alert alert-warning">' + kopf +
+                        '<div class="mt-2"><i class="bi bi-lock"></i> <strong>' +
+                        T.upd_hold_title + '</strong></div>' +
+                        '<div class="mt-1 small">' + entschaerft(data.hold.reason) + '</div>' +
+                        bis +
+                        '<div class="mt-2">' + notizen + '</div>' +
+                        '</div>';
+                } else if (data.by_image && data.helper_available) {
                     // Ein Geschwister-Container kann das Abbild ziehen und
                     // uns ersetzen. Also gibt es hier wieder einen Knopf —
                     // vom Handy aus, ohne Konsole auf dem Server.

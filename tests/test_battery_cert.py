@@ -234,7 +234,7 @@ def main():
         check('sparse: pdf refused (no SoH)', pdf is None)
 
     # ── No-SoH API vehicle WITH enough wide charges → certifiable ────────
-    # ev-mike case: the cloud API reports no BMS SoH at all, but the charge
+    # Real-world case: the cloud API reports no BMS SoH at all, but the charge
     # history alone is enough to coulomb-count a measured SoH, so the
     # certificate IS issued (charge/drive data are the "unless" clause).
     app3 = _make_app()

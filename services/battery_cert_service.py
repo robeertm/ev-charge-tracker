@@ -39,7 +39,8 @@ The certificate reports BOTH signals when available:
 A battery-*health* certificate is only meaningful when it can state an
 actual SoH. So the certificate is refused outright when NONE of the three
 SoH sources yields a value — i.e. the car reports no BMS SoH over the
-cloud API (e.g. ev-mike), no OBD/ELM327 read is on file, AND there aren't
+cloud API (some models report none at all), no OBD/ELM327 read is on file,
+AND there aren't
 enough wide-window charge sessions to coulomb-count one. In that case
 ``compute_battery_health`` sets ``can_certify = False`` and
 ``generate_certificate`` returns ``None`` instead of printing an "n/a"

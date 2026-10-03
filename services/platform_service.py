@@ -21,7 +21,6 @@ of a file, which the kernel answers from cache.
 Mirrors the shape of ``setup_service.luks_in_use()``, which has gated the
 LUKS cards the same way since v3.0.94.
 """
-import os
 import shutil
 from pathlib import Path
 
@@ -108,15 +107,17 @@ def in_container() -> bool:
     bare-metal install loses one. This is here for the App-Info card, so
     somebody reading a bug report can tell which shape of install they are
     looking at.
+
+    🔑 It forwards to ``runtime_env``, which calls itself "the one place
+    that answers it" and means it: the update path picks its strategy
+    from that answer. This function first carried its own copy of the
+    detection, and the copy was already weaker — it missed containerd,
+    kubepods and Podman, and it accepted any non-empty ``EV_IN_CONTAINER``
+    where the real one wants ``1``. Two answers to one question is the
+    whole bug; there is now one.
     """
-    if os.environ.get('EV_IN_CONTAINER'):
-        return True
-    if Path('/.dockerenv').exists():
-        return True
-    try:
-        return 'docker' in Path('/proc/1/cgroup').read_text(encoding='utf-8')
-    except Exception:
-        return False
+    from services.runtime_env import in_container as _echt
+    return _echt()
 
 
 def capabilities(headers=None) -> dict:

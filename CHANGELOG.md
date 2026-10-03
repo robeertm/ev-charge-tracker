@@ -1,6 +1,6 @@
 # Changelog
 
-## v3.0.140 (2026-10-02)
+## v3.0.140 (2026-10-03)
 
 ### Notifications: Telegram alongside ntfy, and something worth saying
 
@@ -35,6 +35,88 @@ read the token out of the response and post as that bot.
 The config file keeps its three original keys, so an install that upgrades
 into this version keeps its ntfy settings, and a file written before this
 change loads with sensible defaults instead of an error.
+
+### Comments no longer name real installations or real places
+
+Bugs get chased on real machines, and the comment explaining the fix
+kept the machine's hostname — in one place the saved location labels of
+a real trip log, which were a street and a district. Those comments were
+accurate and useful and also other people's data, in a public
+repository.
+
+The observations stay, the identities are gone: a dated report from a
+reference install explains the guard just as well as a dated report from
+a named one, and a chain of three places works just as well as A → B →
+C. `tests/test_no_private_names.py` keeps it that way. Every host in
+this project is named `ev-<something>` out of a short, knowable list, so
+a hostname that is somebody's machine stands out structurally and the
+test says so; adding a legitimate new name means editing that list,
+which is the point. Place and person names are not structural, so the
+list of those lives in a file outside the repository — a blocklist in
+the repository would publish exactly what it blocks.
+
+### Holding updates on one installation
+
+Some machines must not move to the next version yet. A host part-way
+through a migration is the clearest case: the release is right for every
+other install and wrong for this one, and "wrong" means somebody presses
+"Install now" and their system stops working. Until now the only way to
+prevent that was to ask people not to press it.
+
+An installation can now carry an **update hold**: a reason, and a
+condition under which it lifts.
+
+```json
+{
+  "reason": "This host is being replaced by a container install.",
+  "until": "container",
+  "set_at": "2026-10-03",
+  "set_by": "ops"
+}
+```
+
+Written as `UPDATE_HOLD.json` beside `app.py`, or as `EV_UPDATE_HOLD`
+(plus optional `EV_UPDATE_HOLD_UNTIL`) in the environment, which is the
+natural shape for a compose file. `until` is either `forever` — only
+removing it lifts the hold — or `container`, which lifts by itself once
+the app really is running in a container.
+
+The condition is re-evaluated on every check rather than decided once and
+stored, and that is the point: when a host is replaced by a container,
+its data directory is copied across. A hold that had stored its verdict
+would arrive with that copy and freeze the very thing it was waiting
+for. So the hold file lives with the application, not with the data —
+also because a hold recorded on an encrypted data volume is unreadable
+at exactly the moment the machine is in an odd state.
+
+Three properties were the whole reason to build it rather than hide the
+button:
+
+- **It is refused in the API, not just missing from the page.** `POST
+  /api/update/install` answers `409 update_held`, and `apply_update`
+  refuses before downloading anything. Neither the charging-gate
+  override nor the in-container override lifts a hold — those exist for
+  questions of timing and file layout, and a hold is neither.
+- **There is no way to lift it from the web UI.** A switch next to the
+  button would make it a two-click update. Lifting a hold takes
+  filesystem access or an edit to the compose file.
+- **A release cannot delete a hold placed against it.** The file name is
+  in all three update exclude lists.
+
+The settings page still names the new version and still links the release
+notes — knowing is useful either way — and shows the reason where the
+button used to be. An unreadable hold file holds anyway, with a reason
+saying where to look: a settings card nobody needs is untidy, but an
+update that slips past a deliberate block breaks a running system.
+
+### One place answers whether this is a container
+
+The capability checks added above shipped with their own copy of the
+container detection, and the copy was already the weaker of the two: it
+missed containerd, Podman and Kubernetes, and accepted any non-empty
+`EV_IN_CONTAINER` where `runtime_env` — which calls itself the one place
+that answers it, and which the update path trusts to pick its
+strategy — wants exactly `1`. It now forwards there.
 
 ### Settings: only what this install can actually do
 
@@ -3475,7 +3557,7 @@ Consequence: when Hyundai Bluelink fails to ever deliver a fresh-GPS for a drive
 
 ### Hyundai 1-step-behind: drive-distance discriminator instead of in-lifetime fresh check
 
-v2.28.47's in-lifetime fresh-GPS check had a subtle bug: the sync that TRIGGERS the odo-advance of the following PE falls inside the newly-opened PE's window after SDK reconcile snaps ``arrived_at`` backwards (trip end) — so the opening sync's own fresh-GPS counted as in-lifetime confirmation, and the repeat-echo guard never actually fired. The result: PE#20 still got stamped as Ponytruppe on the Hyundai install.
+v2.28.47's in-lifetime fresh-GPS check had a subtle bug: the sync that TRIGGERS the odo-advance of the following PE falls inside the newly-opened PE's window after SDK reconcile snaps ``arrived_at`` backwards (trip end) — so the opening sync's own fresh-GPS counted as in-lifetime confirmation, and the repeat-echo guard never actually fired. The result: PE#20 still got stamped as B on the Hyundai install.
 
 Replaced the in-lifetime check with a much simpler discriminator: the odometer distance of the drive that triggered this odo-advance. A same-coord stamp candidate is skipped only when the preceding drive was shorter than 2 km (Hyundai's cache occasionally returns the previous coord a second time on in-area hops of a few hundred meters to a kilometre; legitimate same-coord round trips — overnight parking at Home with a real out-and-back during the day — are always longer). Picked from the Hyundai install's observed data: trip#137 at 1 km was the artefact, trip#138 at 9 km was the real round trip, so 2 km splits them cleanly.
 
@@ -3485,7 +3567,7 @@ Also removed the now-unused ``_has_in_lifetime_fresh_at`` helper.
 
 ### Hyundai 1-step-behind: repeat-echo guard on retroactive stamping
 
-v2.28.46's stamp rule always wrote the odo-advance sync's fresh-GPS coord onto the just-closed Unknown PE. That worked when Hyundai Bluelink served a different coord than last time, but when Hyundai returned the SAME coord twice in a row — a second-level echo where the cache still holds the previous location after the car has moved to yet another spot — the rule stamped PE#20 as Ponytruppe when it was actually Einkaufen, producing a nonsense ``Ponytruppe → Ponytruppe`` trip.
+v2.28.46's stamp rule always wrote the odo-advance sync's fresh-GPS coord onto the just-closed Unknown PE. That worked when Hyundai Bluelink served a different coord than last time, but when Hyundai returned the SAME coord twice in a row — a second-level echo where the cache still holds the previous location after the car has moved to yet another spot — the rule stamped PE#20 as B when it was actually Einkaufen, producing a nonsense ``B → B`` trip.
 
 The stamp call now checks the previous labelled PE's coord. If the incoming fresh-GPS matches within ``SAME_PLACE_M`` and no in-lifetime fresh-GPS during THIS PE's life confirmed that coord, the stamp is skipped and the PE stays Unknown. Legit same-coord PEs (e.g. morning stay at Home after overnight stay at Home) are preserved because the in-lifetime fresh-GPS check confirms the car genuinely was at that spot, not just Hyundai re-serving the old cache.
 
@@ -3495,7 +3577,7 @@ Two new helpers in ``trips_service``: ``_previous_labelled_pe`` (finds the most 
 
 ### Hyundai 1-step-behind rule: stamp closed PE retroactively at odo-advance
 
-Each Hyundai Bluelink sync's fresh-GPS represents the car's LAST KNOWN location — i.e. where the car was DURING the now-ending PE, not where it arrived after the current drive. Every previous PE-labelling strategy we tried was one step off: opening the new PE with the fresh-GPS coord labelled the drive's destination as the drive's origin. User's Fahrtenbuch read like ``Home → Work → Ponytruppe → Ponytruppe → Unknown → Home`` instead of the actually-driven ``Home → Unknown → Ponytruppe → Einkaufen → Home``.
+Each Hyundai Bluelink sync's fresh-GPS represents the car's LAST KNOWN location — i.e. where the car was DURING the now-ending PE, not where it arrived after the current drive. Every previous PE-labelling strategy we tried was one step off: opening the new PE with the fresh-GPS coord labelled the drive's destination as the drive's origin. User's Fahrtenbuch read like ``Home → Work → B → B → Unknown → Home`` instead of the actually-driven ``Home → Unknown → B → Einkaufen → Home``.
 
 The odo-advance block now treats the arriving fresh-GPS as the *retroactive* identity of the just-closing Unknown PE: ``_stamp_closed_pe`` writes the fresh coord/label/favorite onto the closed PE. The new PE always opens as Unknown — its real destination will be stamped at the NEXT odo-advance (when the next sync's fresh-GPS becomes THIS PE's retroactive identity) or in-place via ``_upgrade_unknown`` if the car sits parked with subsequent fresh-GPS syncs. Applies only to Hyundai.
 
@@ -3517,13 +3599,13 @@ Hyundai Bluelink has a subtle pattern observed across every install's history: w
 
 The odo-advance branch now compares the purportedly-fresh GPS coord against the just-closed PE's coord. If the distance is within ``SAME_PLACE_M`` (80 m), the fresh fix is treated as a departure echo and the successor PE opens as Unknown instead. The existing ``_upgrade_unknown`` path then handles the real arrival: when a later fresh-GPS sync lands with a *different* coord (the actual destination), it stamps coords + label in place on the Unknown PE. Kia is unaffected (Hyundai-only brand gate).
 
-In Fahrtenbuch: a 17:41 Home → Home (9 km) rendering on the Hyundai install today — the classic same-spot-echo artefact after a Home → Work drive whose arrival GPS hadn't caught up yet — now resolves to Home → Work as soon as sync #72 delivers the real Work coord. Overnight same-spot echoes (``Ponytruppe → Ponytruppe`` 1 km, the shopping-round-trip artefact from yesterday) similarly resolve to ``Ponytruppe → Unknown``, honestly reflecting that we don't actually know the shopping destination.
+In Fahrtenbuch: a 17:41 Home → Home (9 km) rendering on the Hyundai install today — the classic same-spot-echo artefact after a Home → Work drive whose arrival GPS hadn't caught up yet — now resolves to Home → Work as soon as sync #72 delivers the real Work coord. Overnight same-spot echoes (``B → B`` 1 km, the shopping-round-trip artefact from yesterday) similarly resolve to ``B → Unknown``, honestly reflecting that we don't actually know the shopping destination.
 
 ## v2.28.43 (2026-04-22)
 
 ### Hyundai Fahrtenbuch: trip origin degrades to Unknown after long GPS silence
 
-When a Hyundai PE was open for hours without a fresh-GPS confirmation — the ``last_seen_at`` stayed frozen at the last legitimate fix while every subsequent Bluelink read echoed the cached coord with a stale ``gps_ts`` — the trip origin still rendered with the stored label (e.g. "Ponytruppe → Home" after a 12 h overnight parking spell). The label reflected what the car was at *last confirmed GPS contact*, not necessarily where it was at drive start. Per the user's rule "without a fresh GPS lock, render origin as Unknown".
+When a Hyundai PE was open for hours without a fresh-GPS confirmation — the ``last_seen_at`` stayed frozen at the last legitimate fix while every subsequent Bluelink read echoed the cached coord with a stale ``gps_ts`` — the trip origin still rendered with the stored label (e.g. "B → Home" after a 12 h overnight parking spell). The label reflected what the car was at *last confirmed GPS contact*, not necessarily where it was at drive start. Per the user's rule "without a fresh GPS lock, render origin as Unknown".
 
 ``get_trips`` now measures the silence window ``departed_at − last_seen_at`` and, for ``brand == 'hyundai'`` only, masks the origin's label / name / coords to Unknown when the silence exceeds 60 min. Timestamps and the km/SoC/regen figures are unchanged — only the rendered origin label degrades. Kia is not affected: UVO updates its GPS on every cached read, so ``last_seen_at`` stays current and the silence window is always small.
 

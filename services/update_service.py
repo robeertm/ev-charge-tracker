@@ -54,7 +54,7 @@ logger = logging.getLogger(__name__)
 # agree on what belongs to the user, not the release.
 EXCLUDE_NAMES = {
     'venv', '.venv', 'data', 'logs', '.git', '.github',
-    '__pycache__', 'updates',
+    '__pycache__', 'updates', 'UPDATE_HOLD.json',
 }
 
 MARKER_FILE = 'UPDATE_PENDING.json'

@@ -193,9 +193,11 @@ def swaps_inline() -> bool:
 
 
 # Files/dirs never overwritten by an inline swap.
+# UPDATE_HOLD.json belongs to the operator, not to the release — a
+# release must not be able to lift a hold that was placed against it.
 _EXCLUDE_NAMES = {
     'venv', '.venv', 'data', 'logs', '.git', '.github',
-    '__pycache__', 'updates',
+    '__pycache__', 'updates', 'UPDATE_HOLD.json',
 }
 
 
@@ -426,6 +428,12 @@ def apply_update(zip_url: str, new_version: str, force: bool = False,
     plainly that they want it anyway, and it is their own throwaway
     layer to spend.
 
+    Update hold: refuses outright, before either gate below, when this
+    installation carries an update hold (``services.update_hold``).
+    Neither ``force`` nor ``allow_in_container`` lifts it — those are
+    overrides for questions of timing and of file layout, and a hold is
+    neither. Lifting it means removing the hold file.
+
     Charging gate: when ``force`` is False (default), refuses to apply
     the update while the vehicle is actively charging. Restarting
     mid-charge breaks the sync loop briefly and can miss the
@@ -434,6 +442,21 @@ def apply_update(zip_url: str, new_version: str, force: bool = False,
     does NOT lift the container gate: charging is a matter of timing,
     an image-based install is a matter of where the files live.
     """
+    # ── The hold comes first, and nothing lifts it from in here ──
+    # The other two gates are about timing and about where files live;
+    # both have a legitimate override, which is why `force` and
+    # `allow_in_container` exist. A hold is a standing decision by
+    # whoever runs this machine, so neither override touches it. The way
+    # out is to delete UPDATE_HOLD.json — that takes the filesystem
+    # access the decision belongs to, and leaves a trace.
+    from services import update_hold
+    sperre = update_hold.status()
+    if sperre is not None:
+        logger.warning(
+            f"apply_update(v{new_version}) refused: updates are held on "
+            f"this installation — {update_hold.describe()}"
+        )
+        return False
     if not allow_in_container and updates_by_image():
         logger.warning(
             f"apply_update(v{new_version}) refused: this installation is "
@@ -485,6 +508,17 @@ def apply_update(zip_url: str, new_version: str, force: bool = False,
 if __name__ == '__main__':
     logging.basicConfig(level=logging.INFO)
     print(f"Current version: {Config.APP_VERSION}")
+    from services import update_hold
+    _sperre = update_hold.status()
+    if _sperre is not None:
+        print("Updates are held on this installation:")
+        print(f"  {_sperre['reason']}")
+        if _sperre['until'] == 'container':
+            print("  The hold lifts by itself once this runs as a container.")
+        print(f"  To lift it now, remove {update_hold.hold_path()}"
+              if _sperre['source'] == 'file' else
+              f"  To lift it now, unset {update_hold.ENV_REASON}.")
+        raise SystemExit(1)
     new_ver, url = check_for_update()
     if new_ver:
         print(f"New version available: {new_ver}")

@@ -36,6 +36,9 @@ EXCLUDE_NAMES = {
     '__pycache__',
     'updates',        # staging area used by the updater itself
     'backup_*',
+    'UPDATE_HOLD.json',  # the operator's, not the release's — a
+                         # release may not lift a hold placed
+                         # against it
 }
 
 

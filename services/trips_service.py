@@ -205,11 +205,11 @@ def update_parking_from_sync(sync) -> Optional[ParkingEvent]:
             # assumed (a) universally and stamped the closing PE —
             # which was correct for the Home-echo morning commute case
             # but silently shifted labels by one whenever Hyundai
-            # actually returned (b). The 23.04 ev-dirk chain had a
-            # short Home → Micktner hop followed by Micktner → Ponytruppe
+            # actually returned (b). One reported 23.04 chain had a
+            # short Home → A hop followed by A → B
             # where the fresh-GPS at every odo-advance was the TRUE
             # destination; the closing-side stamp wrote each PE with
-            # the NEXT PE's coord, shifting Micktner/Ponytruppe/Dohnaer
+            # the NEXT PE's coord, shifting A/B/C
             # one step down the chain.
             #
             # New rule: stamp the NEW (just-opened) PE with the fresh
@@ -1143,7 +1143,7 @@ def get_trips(limit: Optional[int] = None,
 
         # Hyundai silence degradation: if the origin PE's last fresh-GPS
         # confirmation is more than ORIGIN_SILENCE_MAX_MIN before the trip's
-        # departure, the stored label ("Ponytruppe" / "Home" / …) reflects
+        # departure, the stored label ("B" / "Home" / …) reflects
         # where the car was at its *last confirmed* GPS fix — not
         # necessarily where it is now. Hyundai Bluelink routinely echoes
         # the last GPS for 8+ hours overnight with a stale ``gps_ts`` that

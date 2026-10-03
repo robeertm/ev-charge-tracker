@@ -106,7 +106,7 @@ def _pip_error_summary(result) -> str:
     pip prints a cosmetic ``[notice] To update, run: pip install --upgrade
     pip`` as the very last stderr line on almost every invocation. The old
     code did ``stderr.split('\\n')[-1]`` and so surfaced exactly that notice
-    to the user (ev-rainer's screenshot), hiding the real cause. Here we drop
+    to the user (seen in a user's screenshot), hiding the real cause. Here we drop
     the notice / bare-warning / blank lines from both streams and prefer the
     lines that actually name the error (ERROR:, conflict, could not, no
     matching distribution, …) so the operator sees *why* it failed.
@@ -1638,7 +1638,7 @@ def _detect_auto_charge(end_sync):
     # SoC at charge start: prefer the pre-charge row (true starting SoC
     # before the car started drawing), else the first charging sample.
     # v3.0.68: guard against BlueLink/UVO echoing a stale cached SoC on
-    # the pre-charge row. Observed on ev-robert 2026-07-29: SoC held at
+    # the pre-charge row. Observed on a reference install 2026-07-29: SoC held
     # 97 % for 15 h after a drive to 37 %, then the force-refresh landed
     # simultaneously with is_charging=True (SoC=37, odo jumped +236 km
     # in the same tick). The pre-charge row carried the stale 97 %,
@@ -1959,7 +1959,7 @@ def _detect_auto_charge_from_soc_rise(end_sync):
     # attempted) this session — running the SoC-rise fallback over it
     # would either produce a duplicate Charge OR mutate the primary
     # detector's un-reviewed Charge via the merge path. Real report on
-    # ev-robert 2026-07-30 06:00: the overnight wake-up sync arrived
+    # a reference install, 2026-07-30 06:00: the overnight wake-up sync arrived
     # with the same SoC as the previous day's charge-end, SoC-rise
     # walked back through the whole is_charging=True run to the valley
     # at the actual charge-start, matched yesterday's needs_review
@@ -5418,7 +5418,7 @@ def register_routes(app):
         # (every release >=4.23.1 requires Python >=3.12). Refuse the doomed
         # upgrade up front with an actionable message instead of letting pip
         # fail with a wall of "Ignored the following versions..." / "No matching
-        # distribution found" (ev-rainer's box).
+        # distribution found" (seen in the field).
         if pkg_key == 'hyundai-kia' and upgrade:
             try:
                 from services.vehicle.connector_hyundai_kia import _python_supports_cci
@@ -5437,7 +5437,7 @@ def register_routes(app):
         pip_args = ['install']
         if upgrade and pkg_key == 'hyundai-kia':
             # Upgrade path for an already-installed-but-too-old connector
-            # (ev-rainer's 4.23.0). Bump ONLY the SDK itself: dragging
+            # (4.23.0, seen in the field). Bump ONLY the SDK itself: dragging
             # selenium + webdriver-manager back through the resolver is the
             # likeliest reason the plain install failed on a Pi (a big,
             # conflict-prone dep tree + a slow 4G download that blows the
@@ -5595,7 +5595,7 @@ def register_routes(app):
         # token shape. The former format guard therefore rejected a perfectly
         # working password login with "Ungültiger Token", even while the
         # background sync (which goes straight through the connector) reported
-        # "Sync OK" — the exact contradiction on ev-rainer's dashboard. We drop
+        # "Sync OK" — the exact contradiction seen on a user's dashboard. We drop
         # the format guessing entirely: only require *some* credential and let
         # the connector auto-detect password-vs-token and raise real, actionable
         # errors (see connector_hyundai_kia._check_sdk_supports_credential).
@@ -5829,6 +5829,12 @@ def register_routes(app):
             except Exception:
                 logger.warning('could not check for the updater sibling',
                                exc_info=True)
+        # An installation whose updates are held still learns that a new
+        # version exists and still gets the release notes — the same
+        # answer a container gets. What changes is the next step the
+        # page offers: the reason, instead of a button that is refused.
+        from services import update_hold
+        sperre = update_hold.status()
         return jsonify({
             'current': Config.APP_VERSION,
             'latest': new_version,
@@ -5836,6 +5842,7 @@ def register_routes(app):
             'zip_url': zip_url,
             'by_image': by_image,
             'helper_available': helfer,
+            'hold': sperre,
             'image_ref': Config.CONTAINER_IMAGE if by_image else None,
             'release_url': f"https://github.com/{Config.GITHUB_REPO}/releases/tag/v{new_version}" if new_version else None,
         })
@@ -6011,6 +6018,28 @@ def register_routes(app):
         from updater import check_for_update, apply_update, updates_by_image
         from models.database import VehicleSync
 
+        # ── An update hold outranks everything below ────────────────
+        # The two gates after this one can be waited out or forced: a
+        # car stops charging, and someone in the container's shell may
+        # spend their own writable layer. A hold is a standing decision
+        # by whoever runs the machine, so there is no point telling the
+        # user about a charging car first — the answer would not change.
+        #
+        # 🔑 It is refused HERE and not merely hidden in the page. The
+        # container gate below carries the same note for the same
+        # reason: a button missing from the UI is not a safety property,
+        # and this gate exists precisely because somebody might press
+        # the button.
+        from services import update_hold
+        sperre = update_hold.status()
+        if sperre is not None:
+            logger.info('update refused: %s', update_hold.describe())
+            return jsonify({
+                'error': 'update_held',
+                'message': t('upd.hold_refused'),
+                'hold': sperre,
+            }), 409
+
         # ── Charging gate FIRST, for every kind of installation ──
         # This gate exists because an update interrupts the sync loop and
         # can miss the charge-end transition. Recreating a container does
@@ -6124,7 +6153,7 @@ def register_routes(app):
         # v2.28.31: the /trips page used to kick off a background
         # ``get_status(force=True)`` when the last GPS sync was > 2 h
         # old. That worked out to 5+ car-wakeup events per day on
-        # ev-robert alone (user opens Fahrtenbuch repeatedly from the
+        # one reference install alone (user opens Fahrtenbuch repeatedly from the
         # phone, each visit >2 h after the previous GPS fix in the
         # morning), draining the 12 V aux battery for no real benefit
         # — Fahrtenbuch is a history view, not a live view. Removed:

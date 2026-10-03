@@ -126,7 +126,7 @@ _MIN_CCI_VERSION = (4, 26, 3)
 # box — Raspberry Pi OS bookworm ships 3.11 — the newest *installable* SDK is
 # 4.23.0, which predates the CCI sign-in entirely. No amount of "update the
 # package" can help there: `pip install 'hyundai-kia-connect-api>=4.26.5'` just
-# fails with "No matching distribution found" (ev-rainer's box). Such installs
+# fails with "No matching distribution found" (seen in the field). Such installs
 # MUST use the manual browser token flow (store a refresh_token, not a password).
 # We detect this so the guard/UI stop pointing at an impossible upgrade.
 _CCI_MIN_PYTHON = (3, 12)
@@ -398,7 +398,7 @@ class _HyundaiKiaBase(VehicleConnector):
                 # The upgrade the old message points at can NEVER succeed on
                 # this box — every SDK with the CCI login needs Python >=3.12.
                 # Telling the user to "update the package" sends them into the
-                # exact "No matching distribution found" wall ev-rainer hit.
+                # exact "No matching distribution found" wall seen in the field.
                 py = f"{sys.version_info.major}.{sys.version_info.minor}"
                 raise RuntimeError(
                     f"Die direkte Passwort-Anmeldung braucht hyundai-kia-connect-api "
