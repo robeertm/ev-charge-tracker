@@ -47,8 +47,28 @@ jobs:
         uses: docker/metadata-action@v5
         with:
           images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+          # 🔴 HIER STEHT KEIN `latest` MEHR (04.10.2026).
+          #
+          # Es stand hier als `type=raw,value=latest,enable={{is_default_branch}}`
+          # — also wanderte das Etikett, dem `docker-compose.yml` und der
+          # Update-Knopf in der App folgen, in dem Moment, in dem ein Commit auf
+          # main landete. Bevor irgendetwas das gebaute Abbild angesehen hatte.
+          #
+          # Am 04.10.2026 ging bei DocuSort auf genau diesem Weg eine Fassung
+          # hinaus, die auf bestehenden Datenbanken nicht startete. Watchtower
+          # verteilte sie binnen einer Stunde an Roberts Kunden; die
+          # Installationen standen still und waeren nicht von selbst
+          # zurueckgekommen. Hier ist der Ausloeser ein anderer — der Besitzer
+          # drueckt in der App auf „aktualisieren", und `deploy/updater.sh`
+          # holt, worauf `:latest` zeigt — aber das Ergebnis waere dasselbe:
+          # eine ungepruefte Fassung auf einem Rechner, an dem niemand sitzt.
+          #
+          # Jetzt: ein Push auf main veroeffentlicht `edge` und die
+          # Commit-Marke. `:latest` setzt `promote.yml` — von Hand, und erst
+          # nachdem es das VEROEFFENTLICHTE Abbild selbst angefahren hat,
+          # einmal frisch und einmal als Aufstieg von der vorigen Fassung.
           tags: |
-            type=raw,value=latest,enable={{is_default_branch}}
+            type=raw,value=edge,enable={{is_default_branch}}
             type=semver,pattern={{version}}
             type=semver,pattern={{major}}.{{minor}}
             type=sha,format=short

@@ -1,0 +1,138 @@
+# Setzt `:latest` auf eine Fassung, die bereits VEROEFFENTLICHT ist — und faehrt
+# sie vorher selbst an. Getrennt vom Bauen, ausdruecklich von Hand ausgeloest.
+#
+# 🔴 WARUM ES DIESEN SCHRITT GIBT (04.10.2026)
+#
+# `docker-image.yml` setzte `:latest` bei jedem Push nach main. Diesem Etikett
+# folgen `docker-compose.yml` und `deploy/updater.sh` — also auch der
+# Update-Knopf in der App. Geprueft hatte das gebaute Abbild vorher niemand.
+#
+# Bei DocuSort ging auf genau diesem Weg eine Fassung hinaus, die auf
+# bestehenden Datenbanken nicht startete. Watchtower verteilte sie binnen einer
+# Stunde an Roberts Kunden; die Installationen standen eine Stunde still.
+#
+# 🔴 Hier waere es sogar zaeher: der EV-Tracker hat keinen Watchtower. Sein Weg
+# zurueck ist der Update-Knopf IN DER APP — und der ist weg, wenn die App nicht
+# startet. Eine kaputte Fassung bleibt also, bis jemand auf dem Wirt eine Zeile
+# tippt. Umso wichtiger, dass nie eine hinausgeht.
+#
+# Die Reihenfolge ist jetzt:
+#   1. Push nach main  ->  `edge` und die Commit-Marke. `:latest` bewegt sich NICHT.
+#   2. dieser Schritt  ->  Rauchprobe am VEROEFFENTLICHTEN Abbild:
+#                          a) Neuinstallation auf leerem /app/data
+#                          b) AUFSTIEG: die vorige Fassung laeuft, schreibt ihre
+#                             Datenbank, dann kommt dieses Abbild darueber
+#   3. erst dann       ->  `:latest` wandert
+#
+# 🔑 Es wird NICHT neu gebaut: `imagetools create` haengt das vorhandene
+# Manifest an ein zweites Etikett. Was hier angefahren wurde, ist Byte fuer Byte
+# das, was Installationen bekommen.
+name: Promote to latest
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Die Version, die :latest werden soll, z. B. 3.0.141"
+        required: true
+        type: string
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE_NAME: ${{ github.repository }}
+
+jobs:
+  promote:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      # Tiefe 0, weil die Vorgaengerin aus den Git-Tags kommt.
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Log in to the registry
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Slug in Kleinbuchstaben
+        id: repo
+        run: echo "slug=${GITHUB_REPOSITORY,,}" >> "$GITHUB_OUTPUT"
+
+      - name: Die Fassung muss es wirklich geben
+        run: |
+          set -euo pipefail
+          IMG="${{ env.REGISTRY }}/${{ steps.repo.outputs.slug }}:${{ inputs.version }}"
+          echo "pruefe $IMG"
+          docker buildx imagetools inspect "$IMG" > /dev/null
+          echo "vorhanden."
+
+      # 🔴 DIE VERSION KOMMT AUS DEM ABBILD, NICHT AUS DEM ARBEITSSTAND.
+      # Bei DocuSort nahm der erste Aufstiegs-Test als Vorgaengerin dieselbe
+      # Version wie den Pruefling. Ergebnis: 44 gruen fuer ein nachweislich
+      # kaputtes Abbild — der „Aufstieg" war ein Nichts, die Datenbank stammte
+      # vom neuen Code. Die Vorgaengerin muss STRENG AELTER sein.
+      - name: Vorgaengerin bestimmen
+        id: vor
+        run: |
+          set -euo pipefail
+          SLUG="${{ env.REGISTRY }}/${{ steps.repo.outputs.slug }}"
+          NEU="${{ inputs.version }}"
+          IM_ABBILD="$(docker run --rm --entrypoint sh "$SLUG:$NEU" -c \
+            "sed -n \"s/.*APP_VERSION = '\\(.*\\)'.*/\\1/p\" /app/config.py | head -1")"
+          echo "Abbild $NEU sagt von sich: $IM_ABBILD"
+          if [ "$IM_ABBILD" != "$NEU" ]; then
+            echo "::error::Das Abbild :$NEU traegt die Version $IM_ABBILD. Hier stimmt Etikett und Inhalt nicht zusammen."
+            exit 1
+          fi
+          kandidat=""
+          for t in $(git tag --list 'v*' | sed 's/^v//' | sort -V); do
+            [ "$t" = "$NEU" ] && continue
+            kleiner="$(printf '%s\n%s\n' "$t" "$NEU" | sort -V | head -1)"
+            [ "$kleiner" = "$t" ] || continue
+            if docker buildx imagetools inspect "$SLUG:$t" >/dev/null 2>&1; then
+              kandidat="$t"
+            fi
+          done
+          if [ -z "$kandidat" ]; then
+            echo "::warning::Keine aeltere veroeffentlichte Fassung gefunden — der Aufstieg wird uebersprungen."
+            echo "alt=" >> "$GITHUB_OUTPUT"
+          else
+            echo "Vorgaengerin: $kandidat"
+            echo "alt=$kandidat" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Rauchprobe — a) Neuinstallation auf leerer Datenbank
+        run: |
+          set -euo pipefail
+          SLUG="${{ env.REGISTRY }}/${{ steps.repo.outputs.slug }}"
+          ./.github/rauchprobe.sh "$SLUG:${{ inputs.version }}" "$PWD/probe-neu" ev-neu 17654 "${{ inputs.version }}"
+
+      - name: Rauchprobe — b) AUFSTIEG von der vorigen Fassung
+        if: steps.vor.outputs.alt != ''
+        run: |
+          set -euo pipefail
+          SLUG="${{ env.REGISTRY }}/${{ steps.repo.outputs.slug }}"
+          ALT="${{ steps.vor.outputs.alt }}"
+          NEU="${{ inputs.version }}"
+          mkdir -p "$PWD/probe-auf"
+          echo "── die vorige Fassung laeuft und schreibt ihre Datenbank — benutzt: $ALT ──"
+          ./.github/rauchprobe.sh "$SLUG:$ALT" "$PWD/probe-auf" ev-alt 17655 "$ALT"
+          echo "── jetzt das neue Abbild auf GENAU DIESER Datenbank ──"
+          ./.github/rauchprobe.sh "$SLUG:$NEU" "$PWD/probe-auf" ev-auf 17656 "$NEU"
+
+      - name: :latest auf diese Fassung setzen
+        run: |
+          set -euo pipefail
+          SLUG="${{ env.REGISTRY }}/${{ steps.repo.outputs.slug }}"
+          docker buildx imagetools create -t "$SLUG:latest" "$SLUG:${{ inputs.version }}"
+          echo "::notice::latest zeigt jetzt auf ${{ inputs.version }}"
+
+      - name: Nachlesen, worauf :latest zeigt
+        run: |
+          docker buildx imagetools inspect "${{ env.REGISTRY }}/${{ steps.repo.outputs.slug }}:latest" | head -20
