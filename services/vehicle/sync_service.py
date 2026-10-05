@@ -80,6 +80,11 @@ def _latest_12v_percent(vehicle_id: int) -> int | None:
     row = (VehicleSync.query
            .filter(VehicleSync.vehicle_id == vehicle_id)
            .filter(VehicleSync.battery_12v_percent.isnot(None))
+           # Rows written before the plausibility gate can still carry the
+           # ECU's 255 sentinel. Reading one here would answer "battery
+           # fine" and unlock the very force-refresh this guard exists to
+           # prevent, so the newest *usable* reading is the one that counts.
+           .filter(VehicleSync.battery_12v_percent.between(0, 100))
            .order_by(VehicleSync.timestamp.desc())
            .first())
     return row.battery_12v_percent if row is not None else None

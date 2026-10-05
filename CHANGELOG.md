@@ -1,5 +1,65 @@
 # Changelog
 
+## v3.0.142 (2026-10-05)
+
+### Fix: a rejected sign-in was read as a passing glitch
+
+A Kia install stopped syncing and logged nothing but
+`Token refresh failed, retrying once: Received unexpected statusCode`,
+every ten minutes for close to six hours. That text is the provider's own
+`retMsg`, and the upstream package raises it as `AuthenticationError`
+(`ApiImplType1._check_response_for_errors`) — but it matches none of the
+substrings this connector looked for, so the classifier returned "not a
+credential problem", the caller retried, and the owner was shown raw
+English with nothing in it to act on.
+
+The classifier now asks the **exception class** before it reads the words.
+It reads the class off the exception rather than importing the upstream
+exception types, because the package is absent on a native Python 3.11
+install and a classifier must never be the thing that raises. A rejected
+sign-in therefore always yields a message, which is also what stops the
+retry: an expired credential cannot be revived by asking again, and every
+extra attempt pushes the account toward a captcha.
+
+Two more answers get their own wording instead of a password checklist:
+
+- **An expired token.** Installs set up through the one-off browser flow
+  store a 48-character refresh token in the password field. Once it stops
+  being exchangeable, the package falls back to a full login and sends
+  that token as the password, which cannot work. The hint now says the
+  token expired and that an account password belongs there instead —
+  decided by the shape of the stored credential, so an install that really
+  does use a password still gets the password checklist.
+- **The daily request quota.** Retrying is the one reaction that makes a
+  rate limit worse, so it is named, and the hint says not to push a manual
+  force refresh after it.
+
+### Fix: a 12 V reading above 100 % is not a measurement
+
+After work on the 12 V battery the car answers 255 — `0xFF`, "no value" —
+until it has calibrated again. One install carried that sentinel for nine
+syncs across eighteen hours, and it did damage twice over: the vehicle
+history drew a 255 % spike, and `is_12v_low()` reads the newest stored
+reading, so a sentinel on top of a weak battery reported "fine" and
+released the force-refresh guard whose only job is to not wake a car on a
+flat 12 V battery.
+
+Percentages outside 0–100 are now dropped where they enter, the guard
+ignores them in rows written earlier, and the history plot leaves a gap
+instead of a spike. Deliberately a gate and not a clamp: 255 means
+*unknown*, and folding it to 100 would invent a reading the car never
+reported. Only the one field is dropped — every other value of that sync
+is good, and the untouched payload stays in `raw_json`, so a one-off
+cleanup of existing rows loses nothing.
+
+### The name guard went green again
+
+`tests/test_no_private_names.py` had been failing since the release
+workflow gained its smoke test: three throwaway container names look like
+installation hostnames to the guard. They are now listed as what they are,
+which is the mechanism the guard documents for exactly this case. A guard
+that is always red stops being read.
+
 ## v3.0.141 (2026-10-03)
 
 ### Fix: the settings page answered 500 on v3.0.140

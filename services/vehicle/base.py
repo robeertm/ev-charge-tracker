@@ -5,6 +5,30 @@ from datetime import datetime
 from typing import Optional
 
 
+# A 12 V reading is a percentage, so 0..100 is the whole of its range.
+# Anything outside is not a measurement: the ECU answers 255 (0xFF, "no
+# value") for a while after work on the 12 V battery. One Kia install logged
+# 255 % for nine syncs across 18 hours after a battery service, and that one
+# sentinel is wrong twice over — the history plot draws a 255 % spike, and
+# ``sync_service.is_12v_low`` reads the newest stored value, so a sentinel
+# reports a healthy battery and lets the force-refresh guard wake the car on
+# a flat one. Dropping the field (not the row) keeps every other value of
+# that sync; the untouched payload stays in ``VehicleSync.raw_json``.
+def plausible_percent(value):
+    """``value`` if it is a usable percentage, else ``None``.
+
+    Deliberately not a clamp: 255 does not mean "full", it means "unknown",
+    and a clamp to 100 would invent a reading that the car never reported.
+    """
+    try:
+        v = float(value)
+    except (TypeError, ValueError):
+        return None
+    if v < 0 or v > 100:
+        return None
+    return value
+
+
 @dataclass
 class VehicleStatus:
     soc_percent: Optional[int] = None

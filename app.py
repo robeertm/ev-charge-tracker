@@ -505,6 +505,36 @@ def create_app(config_class=Config):
             except Exception as _e:
                 logger.warning(f"v3.0.114 CO2 attempt reset failed: {_e}")
 
+        # ── v3.0.142 one-off: drop 12 V sentinel readings ────────────
+        # A 12 V percentage above 100 is not a measurement. After work on
+        # the 12 V battery the ECU answers 255 (0xFF, "no value") until it
+        # has calibrated again — on one Kia install for nine syncs across 18
+        # hours. Those rows drew a 255 % spike in the history plot, and
+        # ``sync_service.is_12v_low`` reads the newest stored value, so one
+        # of them would have reported a healthy battery and released the
+        # force-refresh guard. Only this one column is cleared; every other
+        # value of those syncs stays, and the untouched payload remains in
+        # ``raw_json``, so nothing is actually lost.
+        if AppConfig.get('v12v_sentinel_cleanup') != 'done':
+            try:
+                from models.database import VehicleSync as _VS
+                _bad = (_VS.query
+                        .filter(_VS.battery_12v_percent.isnot(None))
+                        .filter((_VS.battery_12v_percent > 100)
+                                | (_VS.battery_12v_percent < 0))
+                        .all())
+                for _row in _bad:
+                    _row.battery_12v_percent = None
+                db.session.commit()
+                AppConfig.set('v12v_sentinel_cleanup', 'done')
+                if _bad:
+                    logger.info(
+                        "v3.0.142: cleared %d implausible 12 V reading(s) "
+                        "(raw payload kept)" % len(_bad)
+                    )
+            except Exception as _e:
+                logger.warning(f"v3.0.142 12 V cleanup failed: {_e}")
+
         # ── v3.0.92 CO2 self-heal on every boot ──────────────────────
         # The v3.0.65 cleanup above fires only once (guarded by its
         # AppConfig flag), so simply *deploying* a new version never
@@ -1415,6 +1445,7 @@ def _build_vehicle_sync(status, battery_kwh, raw_json='', vehicle_id=None):
     ``vehicle_id`` (v2.29) stamps the row so multi-vehicle fleets keep
     each car's syncs scoped — None for legacy single-car installs.
     """
+    from services.vehicle.base import plausible_percent as _plausible_percent
     regen_kwh = None
     if status.total_power_regenerated_kwh is not None:
         try:
@@ -1437,7 +1468,7 @@ def _build_vehicle_sync(status, battery_kwh, raw_json='', vehicle_id=None):
         is_charging=status.is_charging,
         charge_power_kw=status.charge_power_kw,
         estimated_range_km=status.estimated_range_km,
-        battery_12v_percent=status.battery_12v_percent,
+        battery_12v_percent=_plausible_percent(status.battery_12v_percent),
         battery_soh_percent=_calc_soh_percent(status, battery_kwh),
         total_regenerated_kwh=regen_kwh,
         consumption_30d_kwh_per_100km=cons_30d,

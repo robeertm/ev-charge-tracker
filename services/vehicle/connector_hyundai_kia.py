@@ -145,7 +145,42 @@ def _python_supports_cci() -> bool:
 _AUTH_REJECT_MARKERS = (
     'login page', 'username and password', 'authentication failed',
     'invalid credentials', 'unauthorized', 'otp',
+    # The provider's own bare reject, passed through verbatim by the SDK. It is
+    # also matched by class below; kept here as well so an older SDK that
+    # wraps it in a different exception type is still classified correctly.
+    'received unexpected statuscode',
 )
+
+
+# The SDK does not only put the reason in the message — it picks an exception
+# CLASS for it. ``ApiImplType1._check_response_for_errors`` raises
+# ``AuthenticationError("Received unexpected statusCode")`` for the provider's
+# own bare reject, and that string matches none of the markers above. So the
+# message-only classifier returned '' for it, the caller read that as "just a
+# blip" and retried — which can never revive an expired credential, and left
+# the user staring at raw English SDK text. Ask the class first.
+_AUTH_REJECT_TYPE_NAMES = (
+    'AuthenticationError',    # credential or token rejected by the provider
+    'ConsentRequiredError',   # one-off terms acceptance still missing
+    'PINMissingError',        # the account needs its remote-control PIN
+)
+
+
+def _sdk_error_name(err: Exception) -> str:
+    """Name of the SDK exception class behind ``err``, or '' if it is not one.
+
+    Read off the class instead of importing the exception types: the SDK is
+    absent on native Python 3.11 installs and in the test environment, and a
+    classifier must never be the thing that raises. Walking the MRO also
+    catches a subclass the SDK may introduce later.
+    """
+    try:
+        for cls in type(err).__mro__:
+            if getattr(cls, '__module__', '').startswith('hyundai_kia_connect_api'):
+                return cls.__name__
+    except Exception:
+        pass
+    return ''
 
 
 def _installed_sdk_version() -> str:
@@ -173,14 +208,22 @@ def _looks_like_refresh_token(cred: str) -> bool:
 
 
 def _is_auth_rejection(err: Exception) -> bool:
+    if _sdk_error_name(err) in _AUTH_REJECT_TYPE_NAMES:
+        return True
     msg = str(err).lower()
     return any(marker in msg for marker in _AUTH_REJECT_MARKERS)
 
 
-def _friendly_auth_message(err: Exception) -> str:
+def _friendly_auth_message(err: Exception, credential: str = '') -> str:
     """Translate an opaque SDK sign-in failure into an actionable German hint,
     or return '' when the error is *not* a credential-level rejection (so the
     caller can still retry transient token/network blips).
+
+    ``credential`` is the value stored in the password field. It decides
+    between the two very different reasons a reject can have: a legacy
+    refresh token that simply ran out, or an account password that does not
+    work. Without it, a user whose token expired was handed a five-point
+    password checklist and had no reason to suspect the token.
 
     Why this matters: the Kia/Hyundai IdP returns the **exact same** bare
     "redirect back to /authorize (no code, no error_description)" for *every*
@@ -193,7 +236,18 @@ def _friendly_auth_message(err: Exception) -> str:
     (e.g. the account signs in via Apple/Google and has no real password, or an
     invisible autofill space slipped into the field). We spell those out."""
     msg = str(err).lower()
-    if 'consent' in msg or '/web/v1/user/authorization' in msg:
+    name = _sdk_error_name(err)
+    if name == 'RateLimitingError' or 'exceeds number of requests' in msg:
+        # Retrying a rate limit is the one reaction that makes it worse.
+        return (
+            "Kia/Hyundai hat das Tageskontingent an Abfragen erreicht "
+            "(rund 200 je Tag). Das ist kein Konto- oder Passwortproblem und "
+            "heilt von selbst — die Abfragen laufen nach dem Zurücksetzen des "
+            "Zählers wieder. Bitte keine Force-Aktualisierung von Hand "
+            "nachschieben, das verbraucht weitere Abfragen."
+        )
+    if (name == 'ConsentRequiredError' or 'consent' in msg
+            or '/web/v1/user/authorization' in msg):
         return (
             "Kia/Hyundai verlangt eine einmalige Zustimmung (AGB/Consent), "
             "bevor die App sich anmelden darf. Bitte melde dich EINMAL über den "
@@ -207,10 +261,23 @@ def _friendly_auth_message(err: Exception) -> str:
             "Hersteller-Konto vorübergehend deaktivieren oder den Browser-Login "
             "(Server) unten nutzen."
         )
-    if any(m in msg for m in (
-        'login page', 'username and password', 'authentication failed',
-        'invalid credentials', 'unauthorized',
-    )):
+    if _looks_like_refresh_token(credential) and _is_auth_rejection(err):
+        # The common case on an install that was set up through the one-off
+        # browser token flow: the stored 48-char refresh token stopped being
+        # exchangeable, the SDK fell back to a full login and sent that very
+        # token as the password — which cannot work. No retry revives it.
+        return (
+            "Dein gespeicherter Kia/Hyundai-Token ist abgelaufen — deshalb "
+            "lehnt der Hersteller die Anmeldung ab. Ein erneuter Versuch kann "
+            "das nicht beheben.\n"
+            "Bitte trage im Zugangsfeld statt des Tokens dein echtes "
+            "Konto-Passwort ein (dasselbe wie in der Kia-Connect-/"
+            "Bluelink-App). Die direkte Anmeldung braucht dann weder Token "
+            "noch Browser und läuft von allein weiter.\n"
+            "Kann dieses System die direkte Anmeldung nicht, sagt es das beim "
+            "Speichern und zeigt den Browser-Token-Weg an."
+        )
+    if _is_auth_rejection(err):
         return (
             "Kia/Hyundai hat die Anmeldung abgelehnt — das ist KEIN Bann und "
             "kein Server-Fehler: der Login-Server gibt bei jeder Ablehnung "
@@ -429,9 +496,12 @@ class _HyundaiKiaBase(VehicleConnector):
             # A credential rejection won't fix itself on retry — and every extra
             # login attempt nudges the account toward a provider captcha/lockout.
             # Fail fast on those; only retry once for transient token/network blips.
-            friendly = _friendly_auth_message(e)
+            friendly = _friendly_auth_message(e, self._password())
             if friendly:
-                logger.warning(f"Kia/Hyundai sign-in rejected (no retry): {e}")
+                logger.warning(
+                    "Kia/Hyundai sign-in not retried [%s]: %s"
+                    % (_sdk_error_name(e) or 'text match', e)
+                )
                 _managers.pop(self._cache_key, None)
                 raise RuntimeError(friendly) from e
             logger.warning(f"Token refresh failed, retrying once: {e}")

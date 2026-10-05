@@ -47,6 +47,10 @@ ERLAUBT = (
     # what a hostname looks like. Deliberately not real.
     'ev-my-name', 'ev-mein-name', 'ev-meine-vm', 'ev-mi-nombre',
     'ev-mon-nom', 'ev-mio-nome', 'ev-mijn-naam',
+    # Throwaway container names the smoke test gives its three runs
+    # (fresh install, previous version, upgrade on that same database).
+    # They live for the length of one workflow job and name no machine.
+    'ev-neu', 'ev-alt', 'ev-auf',
 )
 
 BLOCKLISTE = Path(os.path.expanduser('~/.ev-tracker-private-names'))

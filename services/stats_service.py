@@ -3,6 +3,7 @@ import bisect
 from datetime import date, datetime, timedelta
 from sqlalchemy import func, extract
 from models.database import db, Charge, ThgQuota, AppConfig, VehicleSync
+from services.vehicle.base import plausible_percent
 
 
 def _vehicle_field(vehicle_id, attr, appconfig_key, default):
@@ -514,7 +515,7 @@ def get_vehicle_history(days=None, vehicle_id=None):
         'soc': [r.soc_percent for r in rows],
         'range_km': [r.estimated_range_km for r in rows],
         'odometer_km': [r.odometer_km for r in rows],
-        'battery_12v': [r.battery_12v_percent for r in rows],
+        'battery_12v': [plausible_percent(r.battery_12v_percent) for r in rows],
         'soh': [scale_soh(r.battery_soh_percent) for r in rows],
         # Cumulative (monotonic) — real measured recup since tracking started
         'regen_kwh': [r.regen_cumulative_kwh for r in rows],
@@ -534,7 +535,7 @@ def get_vehicle_history(days=None, vehicle_id=None):
             'soc': last.soc_percent,
             'range_km': last.estimated_range_km,
             'odometer_km': last.odometer_km,
-            'battery_12v': last.battery_12v_percent,
+            'battery_12v': plausible_percent(last.battery_12v_percent),
             'soh': scale_soh(last.battery_soh_percent),
             'regen_kwh': last.regen_cumulative_kwh,
             'regen_3mo': last.total_regenerated_kwh,
