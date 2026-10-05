@@ -1621,5 +1621,6 @@
   "wb.state_conflict": "contradice la batería",
   "wb.discard": "Descartar",
   "wb.discard_ask": "¿Descartar realmente esta medición? Una carga basada en ella no se toca: solo se descarta una medición sin carga asignada.",
-  "wb.discard_refused": "Una carga se basa en esta medición. Sepárala primero y después descártala."
+  "wb.discard_refused": "Una carga se basa en esta medición. Sepárala primero y después descártala.",
+  "upd.automatic_hint": "Las actualizaciones se instalan solas aquí: una versión nueva se publica tras la prueba de humo y el contenedor vigilante la aplica, sin hacer nada. Si el coche está cargando, la actualización espera a que termine la carga."
 }

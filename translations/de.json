@@ -1621,5 +1621,6 @@
   "wb.state_conflict": "widerspricht dem Akku",
   "wb.discard": "Verwerfen",
   "wb.discard_ask": "Diese Messung wirklich verwerfen? Eine Ladung, die darauf beruht, bleibt unberührt — verworfen wird nur, was keiner Ladung zugeordnet ist.",
-  "wb.discard_refused": "Auf dieser Messung beruht eine Ladung. Erst abhängen, dann verwerfen."
+  "wb.discard_refused": "Auf dieser Messung beruht eine Ladung. Erst abhängen, dann verwerfen.",
+  "upd.automatic_hint": "Updates installieren sich hier selbst: eine neue Fassung wird nach der Rauchprobe veröffentlicht und vom Wächter-Container eingespielt — ohne Zutun. Lädt das Fahrzeug gerade, wartet das Update, bis die Ladung zu Ende ist."
 }

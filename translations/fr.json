@@ -1621,5 +1621,6 @@
   "wb.state_conflict": "contredit la batterie",
   "wb.discard": "Écarter",
   "wb.discard_ask": "Vraiment écarter cette mesure ? Une charge qui en dépend reste intacte : seule une mesure sans charge associée peut partir.",
-  "wb.discard_refused": "Une charge repose sur cette mesure. Détachez-la d’abord, puis écartez-la."
+  "wb.discard_refused": "Une charge repose sur cette mesure. Détachez-la d’abord, puis écartez-la.",
+  "upd.automatic_hint": "Les mises à jour s'installent d'elles-mêmes ici : une nouvelle version est publiée après le test de fumée, puis appliquée par le conteneur veilleur, sans rien faire. Si la voiture charge, la mise à jour attend la fin de la charge."
 }

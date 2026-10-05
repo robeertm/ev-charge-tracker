@@ -1516,7 +1516,10 @@ makeExpandableChart('chartCumulativeCo2', {
 
     (async function() {
         const data = await fetchUpdateInfo();
-        if (data && data.update_available && data.latest) {
+        // Wo Updates sich selbst installieren, kuendigt das Banner etwas
+        // an, wofuer niemand etwas tun muss — und gewoehnt daran, Banner
+        // zu uebersehen. Siehe services/update_mode.
+        if (data && data.update_available && data.latest && !data.automatic) {
             verEl.textContent = 'v' + data.latest;
             banner.classList.remove('d-none');
         }

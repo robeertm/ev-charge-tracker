@@ -1,5 +1,82 @@
 # Changelog
 
+## v3.0.143 (2026-10-05)
+
+### Updates arrive by themselves, and the charging guard comes along
+
+Three things had to be true at once for this to be an improvement rather
+than a shortcut: nobody has to click, nothing is published untested, and
+a car that is charging is still left alone.
+
+**The promote workflow now runs on a published release**, not only by
+hand. It is unchanged in what it does — fetch the published image, run it
+on an empty database and then on a database written by the previous
+version, and move `latest` only if both come up and report their own
+version. What disappears is the click, not the gate. A manual run stays
+available, because rolling `latest` *back* to an older version is the one
+case a human has to decide.
+
+🔴 A release builds the image and promotes it at the same time, so the
+promote run can start before the image it needs exists. The existence
+check therefore waits instead of failing: up to 20 minutes, polled, with
+a real error if the time runs out. The bound is measured — the last six
+builds took between 0.7 and 6.3 minutes, the 6.3 with a cold cache.
+
+**The charging guard moves into Watchtower's `pre-update` hook**
+(`deploy/pre-update.sh`). An update stops the sync loop, and the loop is
+what notices a charge ending; that is why the container used to be
+excluded from automatic updates altogether. A non-zero exit from the hook
+cancels the update — measured against a throwaway container, in both
+directions, because a guard nobody has seen work is a guess.
+
+🔴 The hook deliberately does not build the application to ask its
+question. `create_app()` starts the sync loop, the wallbox poll and the
+geocode loop; doing that in a short-lived process next to a running
+install is a measured mistake, not a theoretical one.
+
+### One definition of "a charge is running"
+
+`services/charge_gate.py`. The question used to be written out inline in
+`/api/update/install`; a second caller means a second copy, and in this
+project a rule that lived in four places had two of those copies
+disagreeing. The endpoint and the hook now ask the same code — through
+the ORM where there is an application context, and straight from the
+database file where there is not.
+
+It also fixes something the inline version got wrong. **A charge END
+writes no row**: rows are written when a tracked field differs and
+`is_charging` is not one of them, so the newest row can keep saying
+"charging" long after the cable came out. Next to a button with a force
+option that is an annoyance. In front of an automatic updater it is a
+silent, permanent block. A charging row older than three hours therefore
+no longer claims a charge — measured, not picked: across 294 charging
+rows the longest gap to the next row was 1.95 hours.
+
+The gate still fails closed where the evidence is genuinely unclear (an
+unreadable database, an unparseable timestamp), and deliberately does not
+where it is simply absent — a fresh install has no car yet, and blocking
+every update on day one would be the worse mistake.
+
+### An install that updates itself stops announcing versions
+
+`EV_UPDATE_MODE=auto` (environment, like `EV_UPDATE_HOLD`, because how an
+install receives updates belongs next to the image tag) silences the push
+notification and the dashboard banner, and replaces the install button
+with one sentence. The settings page still names the new version and links
+the release notes: knowing is useful, being nagged about something you
+cannot act on is not — and it teaches owners to ignore the one channel
+that should matter.
+
+🔑 The mode decides what is **said**, never what is **allowed**. An
+automatic install that is charging still waits, and a held install still
+refuses. A typo in the value falls back to manual, so a misspelling
+cannot quietly switch off a notice somebody relies on.
+
+New guard `tests/test_update_kommt_von_allein.py` (20 checks), including
+one that all six translations carry the same keys — a new key reaching one
+file renders raw German to the other five, and nothing was watching for
+that before.
+
 ## v3.0.142 (2026-10-05)
 
 ### Fix: a rejected sign-in was read as a passing glitch

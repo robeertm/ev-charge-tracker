@@ -30,6 +30,16 @@
 name: Promote to latest
 
 on:
+  # 🔑 BEI EINER FREIGABE VON ALLEIN (05.10.2026)
+  # Robert: Updates sollen ausschliesslich ueber GitHub und den
+  # Waechter-Container kommen, ohne Klicks. Der Aufstieg bleibt aber das
+  # Tor: dieser Ablauf faehrt die veroeffentlichte Fassung erst auf leerer
+  # UND auf bestehender Datenbank an und bewegt `latest` erst danach. Was
+  # wegfaellt, ist der Klick — nicht die Pruefung.
+  release:
+    types: [published]
+  # Von Hand bleibt moeglich: fuer einen Rueckfall auf eine aeltere Fassung
+  # und wenn eine Freigabe nachtraeglich noch einmal aufsteigen soll.
   workflow_dispatch:
     inputs:
       version:
@@ -64,13 +74,45 @@ jobs:
         id: repo
         run: echo "slug=${GITHUB_REPOSITORY,,}" >> "$GITHUB_OUTPUT"
 
+      # Eine Quelle fuer die Fassung, egal welcher Ausloeser: die Eingabe
+      # von Hand oder die Marke der Freigabe (ohne fuehrendes `v`).
+      - name: Fassung bestimmen
+        id: fassung
+        run: |
+          set -euo pipefail
+          roh="${{ inputs.version }}"
+          if [ -z "$roh" ]; then
+            roh="${{ github.event.release.tag_name }}"
+          fi
+          ver="${roh#v}"
+          case "$ver" in
+            [0-9]*.[0-9]*.[0-9]*) : ;;
+            *) echo "::error::Keine brauchbare Fassung: '$roh'"; exit 1 ;;
+          esac
+          echo "version=$ver" >> "$GITHUB_OUTPUT"
+          echo "Aufstieg fuer $ver (Ausloeser: ${{ github.event_name }})"
+
+      # 🔴 BEI EINER FREIGABE BAUT `docker-image.yml` GLEICHZEITIG.
+      # Ein sofortiges Abbrechen waere deshalb beim Ausloeser `release`
+      # fast immer ein Fehlalarm. Also warten — aber begrenzt: gemessen
+      # dauerten die letzten sechs Baeue 0,7 bis 6,3 Minuten (6,3 mit
+      # kaltem Zwischenspeicher), 20 Minuten sind rund dreifache Luft.
+      # Laeuft die Zeit ab, ist das ein echter Fehler und kein Warten
+      # ohne Ende.
       - name: Die Fassung muss es wirklich geben
         run: |
           set -euo pipefail
-          IMG="${{ env.REGISTRY }}/${{ steps.repo.outputs.slug }}:${{ inputs.version }}"
-          echo "pruefe $IMG"
-          docker buildx imagetools inspect "$IMG" > /dev/null
-          echo "vorhanden."
+          IMG="${{ env.REGISTRY }}/${{ steps.repo.outputs.slug }}:${{ steps.fassung.outputs.version }}"
+          echo "warte auf $IMG (maximal 20 Minuten)"
+          ende=$((SECONDS + 1200))
+          until docker buildx imagetools inspect "$IMG" > /dev/null 2>&1; do
+            if [ $SECONDS -ge $ende ]; then
+              echo "::error::$IMG ist nach 20 Minuten nicht veroeffentlicht."
+              exit 1
+            fi
+            sleep 15
+          done
+          echo "vorhanden nach ${SECONDS}s."
 
       # 🔴 DIE VERSION KOMMT AUS DEM ABBILD, NICHT AUS DEM ARBEITSSTAND.
       # Bei DocuSort nahm der erste Aufstiegs-Test als Vorgaengerin dieselbe
@@ -82,7 +124,7 @@ jobs:
         run: |
           set -euo pipefail
           SLUG="${{ env.REGISTRY }}/${{ steps.repo.outputs.slug }}"
-          NEU="${{ inputs.version }}"
+          NEU="${{ steps.fassung.outputs.version }}"
           IM_ABBILD="$(docker run --rm --entrypoint sh "$SLUG:$NEU" -c \
             "sed -n \"s/.*APP_VERSION = '\\(.*\\)'.*/\\1/p\" /app/config.py | head -1")"
           echo "Abbild $NEU sagt von sich: $IM_ABBILD"
@@ -111,7 +153,7 @@ jobs:
         run: |
           set -euo pipefail
           SLUG="${{ env.REGISTRY }}/${{ steps.repo.outputs.slug }}"
-          ./.github/rauchprobe.sh "$SLUG:${{ inputs.version }}" "$PWD/probe-neu" ev-neu 17654 "${{ inputs.version }}"
+          ./.github/rauchprobe.sh "$SLUG:${{ steps.fassung.outputs.version }}" "$PWD/probe-neu" ev-neu 17654 "${{ steps.fassung.outputs.version }}"
 
       - name: Rauchprobe — b) AUFSTIEG von der vorigen Fassung
         if: steps.vor.outputs.alt != ''
@@ -119,7 +161,7 @@ jobs:
           set -euo pipefail
           SLUG="${{ env.REGISTRY }}/${{ steps.repo.outputs.slug }}"
           ALT="${{ steps.vor.outputs.alt }}"
-          NEU="${{ inputs.version }}"
+          NEU="${{ steps.fassung.outputs.version }}"
           mkdir -p "$PWD/probe-auf"
           echo "── die vorige Fassung laeuft und schreibt ihre Datenbank — benutzt: $ALT ──"
           ./.github/rauchprobe.sh "$SLUG:$ALT" "$PWD/probe-auf" ev-alt 17655 "$ALT"
@@ -130,8 +172,8 @@ jobs:
         run: |
           set -euo pipefail
           SLUG="${{ env.REGISTRY }}/${{ steps.repo.outputs.slug }}"
-          docker buildx imagetools create -t "$SLUG:latest" "$SLUG:${{ inputs.version }}"
-          echo "::notice::latest zeigt jetzt auf ${{ inputs.version }}"
+          docker buildx imagetools create -t "$SLUG:latest" "$SLUG:${{ steps.fassung.outputs.version }}"
+          echo "::notice::latest zeigt jetzt auf ${{ steps.fassung.outputs.version }}"
 
       - name: Nachlesen, worauf :latest zeigt
         run: |

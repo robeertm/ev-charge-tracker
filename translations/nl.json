@@ -1621,5 +1621,6 @@
   "wb.state_conflict": "spreekt de accu tegen",
   "wb.discard": "Weggooien",
   "wb.discard_ask": "Deze meting echt weggooien? Een lading die erop steunt blijft ongemoeid — alleen een meting zonder gekoppelde lading kan weg.",
-  "wb.discard_refused": "Op deze meting steunt een lading. Koppel hem eerst los en gooi hem dan weg."
+  "wb.discard_refused": "Op deze meting steunt een lading. Koppel hem eerst los en gooi hem dan weg.",
+  "upd.automatic_hint": "Updates installeren zich hier zelf: een nieuwe versie wordt na de rooktest gepubliceerd en door de wachtercontainer toegepast — zonder iets te doen. Laadt de auto, dan wacht de update tot het laden klaar is."
 }

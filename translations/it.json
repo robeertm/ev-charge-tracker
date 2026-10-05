@@ -1621,5 +1621,6 @@
   "wb.state_conflict": "contraddice la batteria",
   "wb.discard": "Scarta",
   "wb.discard_ask": "Scartare davvero questa misura? Una ricarica basata su di essa resta intatta: si scarta solo una misura senza ricarica associata.",
-  "wb.discard_refused": "Una ricarica si basa su questa misura. Prima staccala, poi scartala."
+  "wb.discard_refused": "Una ricarica si basa su questa misura. Prima staccala, poi scartala.",
+  "upd.automatic_hint": "Qui gli aggiornamenti si installano da sé: una nuova versione viene pubblicata dopo la prova di fumo e applicata dal contenitore sentinella, senza fare nulla. Se l'auto è in carica, l'aggiornamento attende la fine della carica."
 }

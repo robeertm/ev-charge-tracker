@@ -1621,5 +1621,6 @@
   "wb.state_conflict": "contradicts the battery",
   "wb.discard": "Discard",
   "wb.discard_ask": "Really discard this reading? A charge built on one is left alone — only a reading no charge is matched to can go.",
-  "wb.discard_refused": "A charge entry is built on this reading. Detach it first, then discard."
+  "wb.discard_refused": "A charge entry is built on this reading. Detach it first, then discard.",
+  "upd.automatic_hint": "Updates install themselves on this install: a new version is published after the smoke test and picked up by the watcher container — nothing to do. While the car is charging the update waits until the charge is over."
 }

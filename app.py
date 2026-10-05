@@ -5829,7 +5829,12 @@ def register_routes(app):
         from updater import check_for_update, updates_by_image, last_check_error
         new_version, zip_url = check_for_update()
         pruef_fehler = last_check_error()
-        if new_version:
+        # Where updates install themselves there is nothing to act on, so
+        # the push stays silent — see services/update_mode. It changes
+        # what is SAID; the charging guard and the hold are untouched.
+        from services import update_mode
+        automatisch = update_mode.is_automatic()
+        if new_version and not automatisch:
             # Keyed on the version, so a new release speaks up once and
             # then stays quiet — and a week later reminds you at most
             # once more. This endpoint is polled by the dashboard, so
@@ -5871,6 +5876,7 @@ def register_routes(app):
             'current': Config.APP_VERSION,
             'latest': new_version,
             'update_available': bool(new_version),
+            'automatic': automatisch,
             'zip_url': zip_url,
             'by_image': by_image,
             'helper_available': helfer,
@@ -6086,12 +6092,19 @@ def register_routes(app):
         # The query is deliberately NOT scoped to the picked vehicle: a
         # restart stops the sync loop for the whole fleet, so any car
         # currently charging is a reason to wait.
+        #
+        # One definition, asked from here and from the Watchtower
+        # pre-update hook: services/charge_gate. It also bounds how old a
+        # charging row may be — a charge END writes no row (is_charging is
+        # not a tracked field), so the newest row can keep saying
+        # "charging" long after the cable came out. That is an annoyance
+        # next to a button with a force option, and a silent permanent
+        # block in front of an automatic updater.
         force = request.args.get('force') in ('1', 'true', 'yes')
         if not force:
-            last_sync = (VehicleSync.query
-                         .order_by(VehicleSync.timestamp.desc())
-                         .first())
-            if last_sync is not None and last_sync.is_charging:
+            from services.charge_gate import charge_state
+            lade = charge_state()
+            if lade['charging']:
                 return jsonify({
                     'error': 'vehicle_charging',
                     'message': (
@@ -6099,7 +6112,9 @@ def register_routes(app):
                         'Nach Ende des Ladevorgangs erneut versuchen '
                         'oder mit „Trotzdem installieren" erzwingen.'
                     ),
-                    'last_sync_at': last_sync.timestamp.isoformat(),
+                    'reason': lade['reason'],
+                    'last_sync_at': (lade['row_at'].isoformat()
+                                     if lade['row_at'] is not None else None),
                 }), 409
 
         # ── A container updates by image ─────────────────────────────

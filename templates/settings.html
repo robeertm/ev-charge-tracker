@@ -1188,6 +1188,7 @@
                 <script>
                 const T = {
                     upd_helper_hint: {{ t('upd.helper_hint')|tojson }},
+                    upd_automatic_hint: {{ t('upd.automatic_hint')|tojson }},
                     upd_helper_pulling: {{ t('upd.helper_pulling')|tojson }},
                     upd_helper_restarting: {{ t('upd.helper_restarting')|tojson }},
                     upd_helper_failed: {{ t('upd.helper_failed')|tojson }},
@@ -3149,6 +3150,17 @@
                         T.upd_hold_title + '</strong></div>' +
                         '<div class="mt-1 small">' + entschaerft(data.hold.reason) + '</div>' +
                         bis +
+                        '<div class="mt-2">' + notizen + '</div>' +
+                        '</div>';
+                } else if (data.automatic) {
+                    // Updates kommen von allein (Freigabe -> Rauchprobe ->
+                    // `latest` -> Waechter-Container). Die neue Fassung wird
+                    // genannt und die Freigabe-Notizen bleiben erreichbar —
+                    // aber kein Knopf: es gibt nichts zu druecken, und ein
+                    // Knopf wuerde eine Entscheidung vortaeuschen.
+                    result.innerHTML =
+                        '<div class="alert alert-info">' + kopf +
+                        '<div class="mt-2 small">' + T.upd_automatic_hint + '</div>' +
                         '<div class="mt-2">' + notizen + '</div>' +
                         '</div>';
                 } else if (data.by_image && data.helper_available) {
