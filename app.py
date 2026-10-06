@@ -566,6 +566,37 @@ def create_app(config_class=Config):
             except Exception as _e:
                 logger.warning(f"v3.0.144 unknown-PE unstick failed: {_e}")
 
+        # ── v3.0.146: die Luecke im Fahrtenbuch aus den Rohdaten fuellen ──
+        # Wenn das Buch an einem Punkt stehengeblieben ist, liegen die Fahrten
+        # danach trotzdem vollstaendig in ``vehicle_syncs`` — Ort, Zeit,
+        # Kilometerstand. Gemessen auf einer Kia-Installation: 12 Syncs mit
+        # frischem GPS, fuenf Fahrten, 61 km, die im Buch fehlten.
+        #
+        # 🔑 Die Signatur eines stehengebliebenen Buchs ist genau: der neueste
+        # Parkvorgang ist GESCHLOSSEN und danach gibt es noch GPS-Syncs. Solange
+        # er offen ist, laeuft das Buch und es gibt nichts nachzutragen — darum
+        # ist das auf einer gesunden Installation ein Leerlauf.
+        #
+        # 🔴 Bewusst NICHT ``backfill_parking_events()``: ohne ``wipe`` spielt
+        # das die ganze Historie erneut ein, mit ``wipe`` sind alle Etiketten,
+        # Adressen und Favoriten weg. Hier wird nur das Fenster nach dem letzten
+        # bekannten Ende wiederholt, und der Sync, der diesen Parkvorgang selbst
+        # erzeugt hat, ist ausgeschlossen (sonst entstuende ein Doppel).
+        if AppConfig.get('v3_0_146_pe_gap_replay') != 'done':
+            try:
+                from services.trips_service import replay_gap_for_every_vehicle
+                _erg = replay_gap_for_every_vehicle()
+                AppConfig.set('v3_0_146_pe_gap_replay', 'done')
+                for _vid, _z in (_erg or {}).items():
+                    _dazu = _z.get('events_after', 0) - _z.get('events_before', 0)
+                    if _z.get('syncs_processed'):
+                        logger.info(
+                            "v3.0.146: trip-log gap replayed [vehicle %s]: "
+                            "%d sync(s), %+d parking event(s)"
+                            % (_vid, _z['syncs_processed'], _dazu))
+            except Exception as _e:
+                logger.warning(f"v3.0.146 gap replay failed: {_e}")
+
         # ── v3.0.92 CO2 self-heal on every boot ──────────────────────
         # The v3.0.65 cleanup above fires only once (guarded by its
         # AppConfig flag), so simply *deploying* a new version never

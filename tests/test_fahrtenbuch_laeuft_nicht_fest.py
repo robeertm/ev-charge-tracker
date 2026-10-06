@@ -313,6 +313,98 @@ def test_ohne_kilometerbeweis_bleibt_der_waechter_streng():
         ctx.pop()
 
 
+# ── Die Lücke aus den Rohdaten füllen ─────────────────────────────────
+
+def _beschrifteter_pe(vid, lat, lon, an, ab, odo, etikett='home'):
+    M = _m()
+    pe = M.ParkingEvent(vehicle_id=vid, arrived_at=an, last_seen_at=ab,
+                        departed_at=ab, lat=lat, lon=lon, label=etikett,
+                        odometer_arrived=odo, odometer_departed=odo)
+    M.db.session.add(pe); M.db.session.commit()
+    return pe
+
+
+def test_luecke_wird_aus_den_rohdaten_gefuellt():
+    """Das Buch steht, die Rohdaten sind vollständig — dann muss es wachsen."""
+    app, ctx = _app()
+    try:
+        from services.trips_service import replay_gap_for_every_vehicle
+        v = _auto('kia')
+        t0 = JETZT - timedelta(hours=20)
+        _beschrifteter_pe(v.id, 51.1120, 13.9194, t0, t0 + timedelta(minutes=30), 91867)
+        # Drei Orte nach dem Ende, alle mit frischem GPS.
+        for n, (la, lo, odo) in enumerate(((51.1120, 13.9194, 91867),
+                                           (51.1278, 13.9543, 91871),
+                                           (51.1248, 13.7195, 91899)), start=1):
+            _sync(v.id, odo=odo, wann=t0 + timedelta(hours=n), lat=la, lon=lo,
+                  gps_alter_min=3)
+        vorher = _m().ParkingEvent.query.count()
+        erg = replay_gap_for_every_vehicle()
+        nachher = _m().ParkingEvent.query.count()
+        assert nachher > vorher, (vorher, nachher, erg)
+        assert erg and list(erg.values())[0]['syncs_processed'] == 3, erg
+        # Und die Orte stehen wirklich drin, nicht als Platzhalter.
+        orte = {(round(p.lat, 4), round(p.lon, 4))
+                for p in _m().ParkingEvent.query.all()}
+        assert (51.1278, 13.9543) in orte, orte
+    finally:
+        ctx.pop()
+
+
+def test_bei_laufendem_buch_wird_nichts_nachgetragen():
+    """Gegenprobe: der neueste Parkvorgang ist OFFEN — dann läuft das Buch."""
+    app, ctx = _app()
+    try:
+        from services.trips_service import replay_gap_for_every_vehicle
+        v = _auto('kia')
+        t0 = JETZT - timedelta(hours=5)
+        pe = _platzhalter(v.id, odo=91867, wann=t0, etikett='home')
+        pe.departed_at = None
+        _m().db.session.commit()
+        _sync(v.id, odo=91871, wann=t0 + timedelta(hours=1),
+              lat=51.1278, lon=13.9543, gps_alter_min=3)
+        vorher = _m().ParkingEvent.query.count()
+        erg = replay_gap_for_every_vehicle()
+        assert erg == {}, erg
+        assert _m().ParkingEvent.query.count() == vorher
+    finally:
+        ctx.pop()
+
+
+def test_ohne_rohdaten_nach_dem_ende_bleibt_es_dabei():
+    app, ctx = _app()
+    try:
+        from services.trips_service import replay_gap_for_every_vehicle
+        v = _auto('kia')
+        t0 = JETZT - timedelta(hours=5)
+        _beschrifteter_pe(v.id, 51.1120, 13.9194, t0, t0 + timedelta(minutes=10), 91867)
+        vorher = _m().ParkingEvent.query.count()
+        assert replay_gap_for_every_vehicle() == {}
+        assert _m().ParkingEvent.query.count() == vorher
+    finally:
+        ctx.pop()
+
+
+def test_der_erzeugende_sync_wird_nicht_doppelt_verarbeitet():
+    """``since`` ist ausschliessend — sonst entstuende ein Doppel des
+    Parkvorgangs, der gerade geschlossen wurde."""
+    app, ctx = _app()
+    try:
+        from services.trips_service import rebuild_parking_events_since
+        v = _auto('kia')
+        t0 = JETZT - timedelta(hours=5)
+        ende = t0 + timedelta(minutes=10)
+        _beschrifteter_pe(v.id, 51.1120, 13.9194, t0, ende, 91867)
+        # Genau auf dem Anker, mit demselben Ort:
+        _sync(v.id, odo=91867, wann=ende, lat=51.1120, lon=13.9194, gps_alter_min=2)
+        vorher = _m().ParkingEvent.query.count()
+        erg = rebuild_parking_events_since(ende, vehicle_id=v.id)
+        assert erg['syncs_processed'] == 0, erg
+        assert _m().ParkingEvent.query.count() == vorher
+    finally:
+        ctx.pop()
+
+
 # ── Die Oberfläche darf die Zahl nicht behaupten ──────────────────────
 
 def test_keine_feste_schwelle_in_vorlage_und_texten():

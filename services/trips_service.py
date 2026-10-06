@@ -1442,6 +1442,76 @@ def backfill_parking_events(wipe_existing: bool = False) -> dict:
     }
 
 
+def rebuild_parking_events_since(since, vehicle_id=None, max_days=30) -> dict:
+    """Replay only the GPS syncs *after* ``since`` through the parking hook.
+
+    The existing :func:`backfill_parking_events` is all-or-nothing: without
+    ``wipe_existing`` it replays the entire history on top of what is already
+    there, and with it every label, address and favourite the owner ever set is
+    gone. Neither is usable when the log simply stopped growing at a point in
+    time and the raw syncs after it are intact.
+
+    This replays a window and nothing else. ``since`` is exclusive, so the sync
+    that produced the last known event is not processed again — replaying it
+    would open a duplicate of an event that is already closed.
+
+    Returns ``{'syncs_processed', 'events_before', 'events_after'}``.
+    """
+    from datetime import timedelta
+    from models.database import VehicleSync
+    vorher = ParkingEvent.query.count()
+    if since is None:
+        return {'syncs_processed': 0, 'events_before': vorher,
+                'events_after': vorher, 'skipped': 'no_anchor'}
+    untergrenze = since
+    q = (VehicleSync.query
+         .filter(VehicleSync.location_lat.isnot(None),
+                 VehicleSync.location_lon.isnot(None),
+                 VehicleSync.timestamp > untergrenze,
+                 # Ein Nachtrag ueber Monate ist kein Nachtrag mehr. Die Grenze
+                 # haelt den Wiederlauf klein und vorhersagbar.
+                 VehicleSync.timestamp <= since + timedelta(days=max_days))
+         .order_by(VehicleSync.timestamp.asc()))
+    if vehicle_id is not None:
+        q = q.filter(VehicleSync.vehicle_id == vehicle_id)
+    syncs = q.all()
+    for s in syncs:
+        update_parking_from_sync(s)
+    return {'syncs_processed': len(syncs), 'events_before': vorher,
+            'events_after': ParkingEvent.query.count()}
+
+
+def replay_gap_for_every_vehicle(max_days=30) -> dict:
+    """Find every vehicle whose log stopped growing and replay its gap.
+
+    The signature of a stalled log is precise: the newest parking event is
+    **closed** and there are GPS syncs after it. While the newest event is still
+    open the log is live and there is nothing to replay — so this is a no-op on
+    a healthy install, which is what makes it safe to run on startup.
+    """
+    from models.database import VehicleSync
+    raus = {}
+    vids = [r[0] for r in db.session.query(ParkingEvent.vehicle_id).distinct().all()]
+    for vid in vids:
+        q = ParkingEvent.query
+        if vid is not None:
+            q = q.filter(ParkingEvent.vehicle_id == vid)
+        neuester = q.order_by(ParkingEvent.arrived_at.desc()).first()
+        if neuester is None or neuester.departed_at is None:
+            continue                      # Buch laeuft — nichts nachzutragen
+        anker = (neuester.departed_at or neuester.last_seen_at
+                 or neuester.arrived_at)
+        sq = VehicleSync.query.filter(VehicleSync.location_lat.isnot(None),
+                                      VehicleSync.timestamp > anker)
+        if vid is not None:
+            sq = sq.filter(VehicleSync.vehicle_id == vid)
+        if sq.count() == 0:
+            continue                      # keine Rohdaten nach dem Ende
+        raus[vid] = rebuild_parking_events_since(anker, vehicle_id=vid,
+                                                 max_days=max_days)
+    return raus
+
+
 def geocode_missing_events(limit: int = 50) -> int:
     """Resolve addresses for parking events that don't yet have one.
 

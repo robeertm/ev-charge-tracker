@@ -1,5 +1,35 @@
 # Changelog
 
+## v3.0.146 (2026-10-06)
+
+### The trips were never lost — they were only missing from the log
+
+Fixing the state machine stops the next gap; it does not fill the one already
+there. When the log stalls, the drives after it are still complete in
+`vehicle_syncs`: position, time, odometer, state of charge. On one install
+that was twelve syncs with a fresh GPS fix — five trips and 61 km that the
+trip log did not show, and no way to get them back short of driving again.
+
+**A bounded replay now fills that window on startup.** `rebuild_parking_
+events_since()` replays only the GPS syncs after a given moment through the
+parking hook, and `replay_gap_for_every_vehicle()` finds the moment itself:
+the newest parking event is **closed** and GPS syncs exist after it. That is
+the exact signature of a stalled log — while the newest event is still open
+the log is live and there is nothing to replay, which is what makes this a
+no-op on a healthy install.
+
+🔴 Deliberately **not** `backfill_parking_events()`. Without `wipe_existing`
+it replays the whole history on top of what is already there; with it, every
+label, address and favourite the owner ever set is gone. Only the window
+after the last known ending is repeated, and the sync that produced that very
+event is excluded — replaying it would open a duplicate of an event that is
+already closed. A test asserts that exclusion.
+
+Verified against a copy of a real 26 MB database before release: 611 parking
+events became 617 — five trips with their own labels (home, favourite, work)
+and odometer readings, the newest one open again, and the pre-existing
+placeholder untouched.
+
 ## v3.0.145 (2026-10-06)
 
 ### Distrusting a coordinate is not the same as denying the car left
