@@ -1,5 +1,31 @@
 # Changelog
 
+## v3.0.145 (2026-10-06)
+
+### Distrusting a coordinate is not the same as denying the car left
+
+v3.0.144 released the stuck placeholders and opened the odometer rescue to
+other brands — but only for syncs carrying no fresh GPS, and that turned out
+to be the wrong half of the problem.
+
+The upgrade path has two echo guards. Both exist to avoid stamping a
+placeholder with a cloud cache echo, and both are right to: a teleport guard
+for a coordinate matching the spot just left, and a flip guard for two
+disagreeing fresh fixes inside the placeholder's own lifetime. On a refusal
+the branch returned unchanged — and the move path below was therefore never
+reached. Since the flip condition stays true forever once the car has driven
+while the placeholder was open, such a placeholder could never be closed at
+all, with or without fresh GPS. Measured: 25 hours open, 57 km driven, and on
+a second install 23 placeholders stuck as far back as April.
+
+**The odometer is independent of the coordinate.** When it has advanced past
+the placeholder's own reading the car has demonstrably moved on, so the
+placeholder is now closed and a new one opened — and nothing is guessed: the
+distrusted coordinate is still not believed, the new event stays `unknown`.
+Honest over clever means leaving the location open, not concealing the
+departure. Without that odometer proof the guards keep refusing exactly as
+before; a test asserts that direction too.
+
 ## v3.0.144 (2026-10-06)
 
 ### A placeholder could freeze the trip log, and nothing could unfreeze it

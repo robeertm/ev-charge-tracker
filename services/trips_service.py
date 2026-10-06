@@ -303,6 +303,41 @@ def update_parking_from_sync(sync) -> Optional[ParkingEvent]:
                     flip = True
                     break
         if teleport or flip:
+            # 🔴 v3.0.145: aber nicht um JEDEN Preis unveraendert.
+            #
+            # Beide Waechter sagen dasselbe: "ich traue dieser Koordinate
+            # nicht". Sie sagen NICHT "das Auto steht noch hier". Bis v3.0.144
+            # kehrte dieser Zweig trotzdem unveraendert zurueck — der
+            # Bewegungspfad weiter unten wurde nie erreicht, und weil ``flip``
+            # dauerhaft wahr bleibt, sobald der Wagen einmal gefahren ist,
+            # waehrend der Platzhalter offen war, konnte der Platzhalter NIE
+            # mehr geschlossen werden. Auf einer Kia-Installation hing er so
+            # 25 h, waehrend der Kilometerstand um 57 km stieg, und das ganze
+            # Fahrtenbuch stand an ihm.
+            #
+            # 🔑 Der Kilometerstand ist unabhaengig von der Koordinate. Steigt
+            # er ueber den Stand des Platzhalters, ist das Auto nachweislich
+            # weitergefahren — dann wird der Platzhalter geschlossen und ein
+            # NEUER Platzhalter geoeffnet. Geraten wird dabei nichts: der
+            # unglaubwuerdigen Koordinate wird weiter nicht geglaubt, der neue
+            # Parkvorgang bleibt ``unknown``. "Honest over clever" heisst, den
+            # Ort offen zu lassen — nicht, die Abfahrt zu verschweigen.
+            _odo_pe = open_evt.odometer_departed or open_evt.odometer_arrived
+            if (_odo_pe is not None and sync.odometer_km is not None
+                    and sync.odometer_km - _odo_pe >= 1):
+                open_evt.departed_at = open_evt.last_seen_at or open_evt.arrived_at
+                recompute_pe_soc(open_evt)
+                db.session.commit()
+                try:
+                    from services.vehicle.sync_service import (
+                        request_force_refresh, request_post_move_reconcile,
+                    )
+                    request_force_refresh(reason='unknown_pe_odo_advance',
+                                          vehicle_id=veh_id)
+                    request_post_move_reconcile()
+                except Exception:
+                    pass
+                return _open_unknown(sync)
             return open_evt
         _upgrade_unknown(open_evt, sync)
         return open_evt

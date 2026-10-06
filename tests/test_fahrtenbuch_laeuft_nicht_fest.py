@@ -254,6 +254,65 @@ def test_mit_frischem_gps_bleibt_der_bewaehrte_weg():
         ctx.pop()
 
 
+# ── Der Platzhalter muss auch schließen, wenn der Ort unklar bleibt ───
+
+def _flip_lage(vid, pe_odo, pe_wann):
+    """Die Lage, in der ``flip`` dauerhaft wahr ist.
+
+    Innerhalb der Lebenszeit des Platzhalters liegt ein frueherer Sync mit
+    FRISCHEM GPS an einem ANDEREN Ort. Danach misstraut der Waechter jeder
+    Koordinate — zu Recht. Nur darf das nicht heissen, dass die Abfahrt
+    verschwiegen wird.
+    """
+    _sync(vid, odo=pe_odo, wann=pe_wann + timedelta(minutes=5),
+          lat=52.5200, lon=13.4050, gps_alter_min=2)      # weit weg, frisch
+
+
+def test_platzhalter_schliesst_auch_wenn_die_koordinate_misstraut_wird():
+    app, ctx = _app()
+    try:
+        from services.trips_service import update_parking_from_sync
+        v = _auto('kia')
+        wann = JETZT - timedelta(hours=25)
+        pe = _platzhalter(v.id, odo=91871, wann=wann)
+        _flip_lage(v.id, 91871, wann)
+        # Jetzt: frisches GPS UND der Kilometerstand ist weitergelaufen.
+        s = _sync(v.id, odo=91928, lat=51.1120, lon=13.9194, gps_alter_min=2)
+        update_parking_from_sync(s)
+        PE = _m().ParkingEvent
+        assert PE.query.get(pe.id).departed_at is not None, \
+            'der Platzhalter haette schliessen muessen'
+        neu_pe = (PE.query.filter(PE.id != pe.id)
+                  .order_by(PE.id.desc()).first())
+        assert neu_pe is not None and neu_pe.departed_at is None
+        # Geraten wird nichts: der neue Parkvorgang bleibt ohne Ort.
+        assert neu_pe.label == 'unknown', neu_pe.label
+        assert (neu_pe.lat, neu_pe.lon) == (0.0, 0.0)
+    finally:
+        ctx.pop()
+
+
+def test_ohne_kilometerbeweis_bleibt_der_waechter_streng():
+    """Gegenprobe: misstraute Koordinate UND kein gefahrener Kilometer —
+    dann darf sich nichts aendern, das ist der Sinn des Waechters."""
+    app, ctx = _app()
+    try:
+        from services.trips_service import update_parking_from_sync
+        v = _auto('kia')
+        wann = JETZT - timedelta(hours=25)
+        pe = _platzhalter(v.id, odo=91871, wann=wann)
+        _flip_lage(v.id, 91871, wann)
+        vorher = _m().ParkingEvent.query.count()
+        s = _sync(v.id, odo=91871, lat=51.1120, lon=13.9194, gps_alter_min=2)
+        update_parking_from_sync(s)
+        PE = _m().ParkingEvent
+        assert PE.query.get(pe.id).departed_at is None, 'haette offen bleiben muessen'
+        assert PE.query.get(pe.id).label == 'unknown'
+        assert PE.query.count() == vorher, 'kein neuer Parkvorgang ohne Beweis'
+    finally:
+        ctx.pop()
+
+
 # ── Die Oberfläche darf die Zahl nicht behaupten ──────────────────────
 
 def test_keine_feste_schwelle_in_vorlage_und_texten():
