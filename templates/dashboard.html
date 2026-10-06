@@ -69,6 +69,18 @@
     </div>
 </div>
 
+<!-- v3.0.144: Die Sperre ist ein Augenblick, ihre Folge nicht. Dieser
+     Hinweis bleibt stehen, solange kein frisches GPS ankommt — auch wenn die
+     12 V gerade wieder ueber der Schwelle liegt. Ohne ihn sieht man alte
+     Daten und keinen Grund. -->
+<div id="staleGpsBanner" class="alert alert-secondary mb-3 d-none d-flex align-items-start gap-2" style="border-left: 5px solid #6c757d;">
+    <i class="bi bi-geo-alt-fill fs-4 text-secondary"></i>
+    <div class="flex-grow-1">
+        <div class="fw-bold text-dark">{{ t('dash.stale_gps_title') }} <span id="staleGpsAge" class="badge bg-secondary"></span></div>
+        <div class="small text-muted">{{ t('dash.stale_gps_hint') }}</div>
+    </div>
+</div>
+
 <!-- 12V low confirmation modal -->
 <div class="modal fade" id="low12vConfirmModal" tabindex="-1">
     <div class="modal-dialog modal-dialog-centered">
@@ -441,6 +453,20 @@
                         banner.classList.add('d-none');
                     }
                 }
+                // Folge-Hinweis: unabhaengig von der Sperre, rein am Alter
+                // des neuesten GPS-Fixes. 6 h ist dieselbe Grenze, die die
+                // Smart-Logik fuer "veraltet" benutzt (smart_force_max_hours).
+                const sBan = document.getElementById('staleGpsBanner');
+                if (sBan) {
+                    const h = d.fresh_gps_age_hours;
+                    if (h !== null && h !== undefined && h >= 6) {
+                        document.getElementById('staleGpsAge').textContent =
+                            (h >= 48 ? Math.round(h / 24) + ' d' : h + ' h');
+                        sBan.classList.remove('d-none');
+                    } else {
+                        sBan.classList.add('d-none');
+                    }
+                }
             } catch (e) {}
             const cls = { green: 'bg-success', yellow: 'bg-warning text-dark', red: 'bg-danger' }[d.status] || 'bg-secondary';
             chip.className = 'badge rounded-pill ' + cls;
@@ -588,7 +614,7 @@
         { id: 'vhSoc',   field: 'soc',             color: 'rgba(76, 175, 80, 1)',  fmt: v => v + '%',             label: {{ t('dash.battery')|tojson }} + ' (SoC %)' },
         { id: 'vhRange', field: 'range_km',        color: 'rgba(33, 150, 243, 1)', fmt: v => v + ' km',           label: {{ t('dash.range')|tojson }} + ' (km)' },
         { id: 'vhOdo',   field: 'odometer_km',     color: 'rgba(96, 125, 139, 1)', fmt: v => v.toLocaleString('de'), label: {{ t('dash.odometer')|tojson }} + ' (km)' },
-        { id: 'vh12v',   field: 'battery_12v',     color: 'rgba(255, 193, 7, 1)',  fmt: v => v + '%',             label: {{ t('dash.v12')|tojson }} + ' (%)', threshold: { value: 70, color: 'rgba(220, 53, 69, 0.9)', label: {{ t('dash.low_12v_threshold_label')|tojson }} } },
+        { id: 'vh12v',   field: 'battery_12v',     color: 'rgba(255, 193, 7, 1)',  fmt: v => v + '%',             label: {{ t('dash.v12')|tojson }} + ' (%)', threshold: { value: {{ low_12v_threshold|default(60) }}, color: 'rgba(220, 53, 69, 0.9)', label: {{ t('dash.low_12v_threshold_label', pct=low_12v_threshold|default(60))|tojson }} } },
         { id: 'vhSoh',   field: 'soh',             color: 'rgba(244, 67, 54, 1)',  fmt: v => v + '%',             label: {{ t('dash.soh')|tojson }} + ' (%)', withAvg: true },
         { id: 'vhRegen', field: 'regen_kwh',       color: 'rgba(0, 188, 212, 1)',  fmt: v => v.toFixed(0),        label: {{ t('dash.regenerated')|tojson }} },
         { id: 'vhCons',  field: 'consumption_30d', color: 'rgba(255, 152, 0, 1)',  fmt: v => v.toFixed(1),        label: {{ t('dash.avg_30d')|tojson }} + ' (kWh/100km)' },

@@ -36,7 +36,7 @@ _force_refresh_executor = concurrent.futures.ThreadPoolExecutor(
 # v3.0.67: same wedge risk on the *cached* code paths. The BlueLink/UVO
 # cloud API also has no socket-level timeout in the SDK — a stalled
 # ``check_and_refresh_token`` or ``update_vehicle_with_cached_state``
-# call sits on a socket read forever. Ev-robert wedged for 9 h on
+# call sits on a socket read forever. One install wedged for 9 h on
 # 2026-07-06 exactly here (last log line was a cached-mode sync, then
 # silence until manual restart). Every SDK call is now submitted to this
 # executor with a 60 s deadline; timeouts raise, the bg-loop's outer

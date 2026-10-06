@@ -535,6 +535,37 @@ def create_app(config_class=Config):
             except Exception as _e:
                 logger.warning(f"v3.0.142 12 V cleanup failed: {_e}")
 
+        # ── v3.0.144: festsitzende Unknown-Platzhalter befreien ───────
+        # Ein ``_open_unknown``-Platzhalter (Sentinel 0,0, label
+        # 'unknown') wartet darauf, von einem Sync mit FRISCHEM GPS
+        # aufgewertet zu werden. Bleibt das frische GPS aus — auf einer
+        # Kia-Installation, weil die 12-V-Sperre jeden Force-Refresh
+        # unterdrueckte — dann wartet er fuer immer, und weil er der
+        # offene Parkvorgang ist, steht das ganze Fahrtenbuch. Gemessen:
+        # 25 h offen, waehrenddessen 57 km gefahren.
+        #
+        # Der Kilometerstand beweist, dass das Auto weitergefahren ist.
+        # Genau dann (und nur dann) wird der Platzhalter geschlossen —
+        # mit ``last_seen_at`` als Abfahrtszeit, wie es der Odo-Zweig in
+        # trips_service auch tut. Ohne Odo-Beweis bleibt er offen: ein
+        # Platzhalter fuer ein Auto, das wirklich noch dort steht, darf
+        # nicht abgeraeumt werden.
+        if AppConfig.get('v3_0_144_unknown_pe_unstick') != 'done':
+            try:
+                from services.trips_service import (
+                    release_stuck_unknown_events as _release_stuck,
+                )
+                _befreit = _release_stuck()
+                AppConfig.set('v3_0_144_unknown_pe_unstick', 'done')
+                if _befreit:
+                    logger.info(
+                        "v3.0.144: released %d stuck 'unknown' parking "
+                        "event(s) (odometer proved the car moved on)"
+                        % _befreit
+                    )
+            except Exception as _e:
+                logger.warning(f"v3.0.144 unknown-PE unstick failed: {_e}")
+
         # ── v3.0.92 CO2 self-heal on every boot ──────────────────────
         # The v3.0.65 cleanup above fires only once (guarded by its
         # AppConfig flag), so simply *deploying* a new version never
@@ -1253,7 +1284,7 @@ def _resolved_vehicle_filter():
     """Returns (vehicle_id_or_None_for_all, vehicle_or_None).
 
     Helper for routes that need both the filter int and the actual
-    Vehicle object (e.g. dashboard header showing "Robert's Niro").
+    Vehicle object (e.g. dashboard header showing "My Niro").
     Returns (None, None) for fleet view; (id, Vehicle) for specific.
     """
     from models.database import Vehicle
@@ -2398,6 +2429,22 @@ def register_routes(app):
             _vid_h = _vh.id if _vh else None
         battery_12v = _latest_12v_percent(_vid_h) if _vid_h else None
         low_12v_lockout = bool(_vid_h and is_12v_low(_vid_h))
+        # Neuester GPS-Fix: nimmt die juengste Sync-Zeile MIT Koordinaten.
+        # Bewusst nicht der AppConfig-Anker allein — der wird nur bei einem
+        # erfolgreichen Force-Refresh gesetzt und fehlt genau dann, wenn die
+        # Frage interessant wird.
+        fresh_gps_age_hours = None
+        try:
+            from models.database import VehicleSync as _VSg
+            _q = _VSg.query.filter(_VSg.location_lat.isnot(None))
+            if _vid_h:
+                _q = _q.filter(_VSg.vehicle_id == _vid_h)
+            _g = _q.order_by(_VSg.timestamp.desc()).first()
+            if _g is not None and _g.timestamp is not None:
+                fresh_gps_age_hours = round(
+                    (_dt.now() - _g.timestamp).total_seconds() / 3600.0, 1)
+        except Exception:
+            fresh_gps_age_hours = None
         try:
             from services.vehicle.connector_hyundai_kia import get_force_refresh_health
             fr = get_force_refresh_health()
@@ -2467,6 +2514,12 @@ def register_routes(app):
             'battery_12v': battery_12v,
             'low_12v_lockout': low_12v_lockout,
             'low_12v_threshold': LOW_12V_THRESHOLD_PERCENT,
+            # v3.0.144: Alter des neuesten GPS-Fixes in Stunden. Die Sperre
+            # selbst ist nur ein Augenblickswert — ihre FOLGE (Position und
+            # Fahrtenbuch wachsen nicht weiter) ueberlebt sie. Ohne diese Zahl
+            # sieht der Benutzer nach dem Ende der Sperre einen leeren
+            # Hinweisbereich und alte Daten, ohne Zusammenhang.
+            'fresh_gps_age_hours': fresh_gps_age_hours,
         })
 
     # ── LUKS auto-unlock (v3.0.3) ─────────────────────────────
@@ -3097,7 +3150,7 @@ def register_routes(app):
     def vehicles_certificate(vid):
         """Generate a self-created battery-health certificate
         for one vehicle from its own charge/sync history. Available any time
-        — not just at archive/sale — so Robert can print a current SoH proof
+        — not just at archive/sale — so the owner can print a current SoH proof
         whenever a buyer asks."""
         from models.database import Vehicle
         v = Vehicle.query.get_or_404(vid)
@@ -3684,7 +3737,14 @@ def register_routes(app):
         except Exception as _de:
             logger.warning(f"dashboard remote scan failed ({type(_de).__name__}: {_de})")
 
+        # v3.0.144: die Schwelle gehoert dem Server. Vorher stand die 70 in
+        # der Vorlage UND fest im Uebersetzungstext — beim Senken auf 60 haette
+        # die Oberflaeche eine falsche Zahl behauptet.
+        from services.vehicle.sync_service import (
+            LOW_12V_THRESHOLD_PERCENT as _LOW12V,
+        )
         return render_template('dashboard.html',
+                               low_12v_threshold=_LOW12V,
                                dash_remote=_dash_remote,
                                stats=stats, chart_data=chart_data,
                                acdc=acdc, yearly=yearly,
@@ -4750,7 +4810,7 @@ def register_routes(app):
                                # ``per_kwp × kwp`` for installs that filled in
                                # both legacy fields, and finally treating the
                                # bare legacy ``per_kwp`` value as the annual
-                               # total for installs (like Mike) that wrote
+                               # total for installs that wrote
                                # their full annual into it.
                                pv_annual_yield_kwh=_pv_annual_yield_for_form(),
                                pv_lifetime=AppConfig.get('pv_lifetime', '30'),

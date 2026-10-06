@@ -29,7 +29,20 @@ sys.path.insert(0, ROOT)
 os.environ.setdefault('EV_DATA_DIR', tempfile.mkdtemp(prefix='ev12v-'))
 
 from flask import Flask                                            # noqa: E402
-from models.database import db, Vehicle, VehicleSync               # noqa: E402
+
+
+def _m():
+    """Die Modelle ZUR LAUFZEIT holen, nicht beim Import.
+
+    🔴 ``tests/test_sync_audit.py`` leert in seiner Fixture ``sys.modules`` von
+    allem mit Praefix ``app``/``config``/``models`` und importiert neu. Ein
+    Testmodul mit Modell-Importen am Dateikopf haelt danach ein ``db``, das zu
+    keiner App mehr gehoert — gemessen: diese Datei allein 8 gruen, nach
+    ``test_sync_audit`` dreimal rot, und zwar schon vor jeder Aenderung an ihr.
+    Wer die Modelle erst im Aufruf holt, ist von der Reihenfolge unabhaengig.
+    """
+    import models.database as M
+    return M
 from services.vehicle.base import VehicleStatus, plausible_percent  # noqa: E402
 
 SENTINEL = 255
@@ -39,10 +52,11 @@ def _app():
     app = Flask(__name__)
     app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite://'
     app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
-    db.init_app(app)
+    M = _m()
+    M.db.init_app(app)
     ctx = app.app_context()
     ctx.push()
-    db.create_all()
+    M.db.create_all()
     return app, ctx
 
 
@@ -89,19 +103,26 @@ def test_ein_echter_wert_wird_weiter_geschrieben():
 
 def test_ein_neuerer_platzhalter_verdeckt_keine_schwache_batterie():
     """The behavioural heart of it: before the gate, the newest row won —
-    and a 255 on top of a 60 % reading said "fine, go wake the car"."""
+    and a 255 on top of a weak reading said "fine, go wake the car".
+
+    v3.0.144: the weak reading is derived from the threshold instead of being
+    a literal. It used to be a hardcoded 60, which silently became a *passing*
+    value the moment the threshold itself was lowered to 60 — the test would
+    have gone red for a reason that has nothing to do with its subject.
+    """
     from services.vehicle import sync_service as S
     app, ctx = _app()
     try:
-        db.session.add(Vehicle(id=1, name='Prüfwagen'))
+        schwach = S.LOW_12V_THRESHOLD_PERCENT - 1
+        _m().db.session.add(_m().Vehicle(id=1, name='Prüfwagen'))
         jetzt = datetime.now()
-        db.session.add(VehicleSync(vehicle_id=1, battery_12v_percent=60,
+        _m().db.session.add(_m().VehicleSync(vehicle_id=1, battery_12v_percent=schwach,
                                    timestamp=jetzt - timedelta(hours=2)))
-        db.session.add(VehicleSync(vehicle_id=1,
+        _m().db.session.add(_m().VehicleSync(vehicle_id=1,
                                    battery_12v_percent=SENTINEL,
                                    timestamp=jetzt))
-        db.session.commit()
-        assert S._latest_12v_percent(1) == 60, 'der Platzhalter darf nicht gelten'
+        _m().db.session.commit()
+        assert S._latest_12v_percent(1) == schwach, 'der Platzhalter darf nicht gelten'
         assert S.is_12v_low(1) is True, 'die Sperre muss greifen'
     finally:
         ctx.pop()
@@ -111,10 +132,10 @@ def test_ohne_brauchbaren_wert_wird_die_erste_abfrage_nicht_blockiert():
     from services.vehicle import sync_service as S
     app, ctx = _app()
     try:
-        db.session.add(Vehicle(id=1, name='Prüfwagen'))
-        db.session.add(VehicleSync(vehicle_id=1, battery_12v_percent=SENTINEL,
+        _m().db.session.add(_m().Vehicle(id=1, name='Prüfwagen'))
+        _m().db.session.add(_m().VehicleSync(vehicle_id=1, battery_12v_percent=SENTINEL,
                                    timestamp=datetime.now()))
-        db.session.commit()
+        _m().db.session.commit()
         assert S._latest_12v_percent(1) is None
         assert S.is_12v_low(1) is False
     finally:
@@ -127,13 +148,13 @@ def test_der_plot_zeigt_eine_luecke_statt_eines_ausschlags():
     from services import stats_service as ST
     app, ctx = _app()
     try:
-        db.session.add(Vehicle(id=1, name='Prüfwagen'))
+        _m().db.session.add(_m().Vehicle(id=1, name='Prüfwagen'))
         jetzt = datetime.now()
         for versatz, wert in ((3, 67), (2, SENTINEL), (1, 64)):
-            db.session.add(VehicleSync(vehicle_id=1, soc_percent=70,
+            _m().db.session.add(_m().VehicleSync(vehicle_id=1, soc_percent=70,
                                        battery_12v_percent=wert,
                                        timestamp=jetzt - timedelta(hours=versatz)))
-        db.session.commit()
+        _m().db.session.commit()
         d = ST.get_vehicle_history(vehicle_id=1)
         assert d is not None
         reihe = d['series']['battery_12v']

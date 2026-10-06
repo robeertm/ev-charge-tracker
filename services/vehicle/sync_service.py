@@ -70,7 +70,18 @@ DEFAULT_INTERVAL_HOURS = 4
 # the bg-loop falls back to cached-only and queued forces are dropped.
 # Manual UI force-refresh still possible but requires the user to
 # confirm an explicit override prompt.
-LOW_12V_THRESHOLD_PERCENT = 70
+# v3.0.144: 70 → 60, auf ausdrueckliche Ansage des Besitzers.
+# Hintergrund, gemessen am 06.10.2026: die Obergrenze der 12-V-Messung
+# seiner Kia faellt seit Mai von 93 % auf 73 %, im September lag der Wert
+# bereits bei 97 von 237 Messungen unter 70 — und ab dem 04.10. kam er zwei
+# Tage lang nicht mehr darueber. Bei 70 war damit JEDER automatische
+# Force-Refresh gesperrt, und ohne frisches GPS fror das Fahrtenbuch an einem
+# offenen Platzhalter ein.
+#
+# 🔴 Der Preis ist echt und bleibt beim Besitzer: tiefer heisst, dass die App
+# das Auto auch bei schwaecherer 12-V-Batterie noch weckt. Der Schutz ist
+# NICHT weg, er greift nur spaeter.
+LOW_12V_THRESHOLD_PERCENT = 60
 
 
 def _latest_12v_percent(vehicle_id: int) -> int | None:

@@ -1,6 +1,6 @@
 """Battery-Health Certificate service (self-generated).
 
-Robert asked for a self-created battery-health certificate he can hand a
+A self-created battery-health certificate the owner can hand a
 buyer when he sells / archives a vehicle — comparable to an independent
 professional battery test, but derived from the *own* charge/sync history
 this app has been logging for months.

@@ -176,9 +176,22 @@ def update_parking_from_sync(sync) -> Optional[ParkingEvent]:
     # real trip-end moment. Hyundai-only: Kia pushes fresh GPS with every
     # update, so it never hits the "odo advanced while GPS still stale"
     # data shape that this path exists to rescue.
-    if (brand == 'hyundai'
-            and open_evt is not None
-            and sync.odometer_km is not None):
+    # 🔴 v3.0.144: the ``brand == 'hyundai'`` restriction is GONE for the
+    # no-fresh-GPS case. The claim above ("Kia pushes fresh GPS with every
+    # update, so it never hits this data shape") was disproven on a live Kia
+    # install on 2026-10-05: a 12 V lockout suppressed every force-refresh,
+    # so the only GPS arriving was cache-echo with a stale ``gps_ts``. The
+    # staleness gate below correctly dropped all of it, the move path never
+    # fired, and an open ``unknown`` placeholder stayed open for 25 h while
+    # the odometer advanced 57 km. The Fahrtenbuch froze at that placeholder.
+    #
+    # The odometer is ground truth for EVERY brand. So this branch now also
+    # runs for non-Hyundai — but ONLY when this sync carries no fresh GPS.
+    # With fresh GPS the proven move path below keeps handling Kia exactly as
+    # before; this is a rescue for the shape that otherwise has no exit.
+    if (open_evt is not None
+            and sync.odometer_km is not None
+            and (brand == 'hyundai' or not _is_fresh_gps())):
         last_odo = open_evt.odometer_departed or open_evt.odometer_arrived
         if last_odo is not None and sync.odometer_km - last_odo >= 1:
             open_evt.departed_at = open_evt.last_seen_at or open_evt.arrived_at
@@ -468,6 +481,46 @@ def update_parking_from_sync(sync) -> Optional[ParkingEvent]:
         return _open_event(sync, lat, lon)
 
     return open_evt
+
+
+def release_stuck_unknown_events(vehicle_id=None) -> int:
+    """Close ``unknown`` placeholder PEs that can never be upgraded again.
+
+    A placeholder opened by :func:`_open_unknown` carries sentinel coords and
+    waits for a sync with *fresh* GPS to stamp the real location onto it. When
+    fresh GPS stops arriving — measured on a live Kia install on 2026-10-05,
+    where a 12 V lockout suppressed every force-refresh for 25 h — it waits
+    forever, and because it is the open PE the whole trip log stops there.
+
+    The odometer is the way out: if the newest sync shows the car has driven
+    on, the placeholder provably belongs to the past and is closed at its
+    ``last_seen_at``. Without that proof it stays open — a placeholder for a
+    car that really is still standing there must not be swept away.
+
+    Returns the number of events closed.
+    """
+    from models.database import VehicleSync
+    q = (ParkingEvent.query
+         .filter(ParkingEvent.departed_at.is_(None))
+         .filter(ParkingEvent.label == 'unknown'))
+    if vehicle_id is not None:
+        q = q.filter(ParkingEvent.vehicle_id == vehicle_id)
+    befreit = 0
+    for pe in q.all():
+        odo_pe = pe.odometer_departed or pe.odometer_arrived
+        if odo_pe is None:
+            continue
+        sq = VehicleSync.query.filter(VehicleSync.odometer_km.isnot(None))
+        if pe.vehicle_id is not None:
+            sq = sq.filter(VehicleSync.vehicle_id == pe.vehicle_id)
+        neuester = sq.order_by(VehicleSync.timestamp.desc()).first()
+        if neuester is None or neuester.odometer_km - odo_pe < 1:
+            continue
+        pe.departed_at = pe.last_seen_at or pe.arrived_at
+        befreit += 1
+    if befreit:
+        db.session.commit()
+    return befreit
 
 
 def _open_event(sync, lat: float, lon: float) -> ParkingEvent:

@@ -32,7 +32,7 @@ Jaguar I-Pace, MG/SAIC (ZS EV, MG5) + MG4/MULAN, BYD (Atto 3, Dolphin),
 Nissan Leaf/e-NV200, Renault Zoe (Ph1 + ZE50), and the VW MEB platform
 (ID.3/4/5, Enyaq, Cupra Born, Q4 e-tron). Each carries its documented source
 in a comment and a confidence caveat in its label. These offsets are NOT
-bench-verified on Robert's own car (he drives the Kia) — they are transcribed
+bench-verified on a live Kia — they are transcribed
 from open reference implementations (OpenVehicles/OVMS, CanZE, evDash, OBDb,
 the meatpiHQ/WiCAN profiles and community Torque/CarScanner PID lists). As
 with every profile the raw frames are stored, so a capture can be re-decoded
@@ -283,7 +283,7 @@ PROFILES = {
         # Scalars. Offsets are 0-based into the reassembled response, whose
         # first three bytes are the echo 62 01 0X.
         #
-        # ✅ VERIFIED 2026-08-08 against a live read from Robert's own Kia Niro
+        # ✅ VERIFIED 2026-08-08 against a live read from a Kia Niro
         # EV (awake, ready-to-drive). Every scalar sat exactly 1 byte too low
         # in the original community table — the real 220101 reply carries an
         # extra status byte (0xFF) right after `62 01 01`, so each documented

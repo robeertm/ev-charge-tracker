@@ -1,5 +1,65 @@
 # Changelog
 
+## v3.0.144 (2026-10-06)
+
+### A placeholder could freeze the trip log, and nothing could unfreeze it
+
+An `unknown` parking-event placeholder is opened when the odometer proves
+the car drove somewhere but no fresh GPS fix is available to anchor the
+destination. It carries sentinel coordinates and waits to be upgraded by a
+later sync that does carry a fresh fix. That wait had no time limit.
+
+On a Kia install the 12 V lockout suppressed every automatic force-refresh
+for two days. The only GPS still arriving was cloud cache echo with a stale
+ECU timestamp, which the staleness gate correctly discards — so no fresh
+fix ever came, the placeholder was never upgraded, and because it was the
+open event the whole trip log stopped at it: 25 hours open while the
+odometer advanced 57 km.
+
+**The odometer rescue is no longer Hyundai-only.** It was gated on
+`brand == 'hyundai'` with the comment "Kia pushes fresh GPS with every
+update, so it never hits this data shape". It does. The branch now also
+runs for other brands — but only when the sync carries no fresh GPS, so
+with a fresh fix the proven move path keeps deciding exactly as before.
+A test asserts both directions.
+
+**Placeholders already stuck are released once, on startup.** The odometer
+is the only admissible proof: if the newest sync shows the car has driven
+on, the placeholder provably belongs to the past and is closed at its
+`last_seen_at`. Without that proof it stays open — a placeholder for a car
+that really is still standing there must not be swept away. Labelled events
+are never touched.
+
+### The 12 V force-refresh lockout now starts at 60 %
+
+Lowered from 70 % on the owner's explicit instruction. The guard is not
+gone, it engages later: below the threshold the background loop stays on
+cached reads and queued forces are dropped, while a manual force-refresh
+remains possible behind its confirmation prompt.
+
+🔴 The threshold used to be written into the chart definition **and** into
+all six translations as a literal "70 %". Lowering it would have left the
+interface stating a number the code no longer used. The value now comes
+from the server and the label takes it as a placeholder.
+
+### The consequence outlives the moment, so it is now said out loud
+
+The existing low-12 V banner is visible exactly while the lockout holds.
+What survives it is the effect: position and trip log stop advancing, and
+after the reading recovers there is stale data and no stated reason. A
+second notice therefore reports the age of the newest GPS fix whenever it
+exceeds the same six hours the smart window uses for "stale", independent
+of the lockout. `/api/sync/health` gained `fresh_gps_age_hours`.
+
+### Housekeeping
+
+- Source comments no longer name individuals; the privacy guard only ever
+  checked hostnames and an external term list, so eight first-name
+  mentions had been sitting in public comments.
+- Two test files resolved their models at import time, which made them
+  order-dependent against a suite file that clears `sys.modules`. They now
+  resolve at call time; every ordering is green.
+
 ## v3.0.143 (2026-10-05)
 
 ### Updates arrive by themselves, and the charging guard comes along
