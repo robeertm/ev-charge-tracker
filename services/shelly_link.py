@@ -857,17 +857,27 @@ def _erster_sync(vehicle_id, ab):
 def beleg_fuer_dieses_auto(wc, vehicle, tol_min):
     """Proof that THIS car was the one drawing — or ``None``.
 
-    Two independent routes, either is enough, neither is a guess:
+    Three independent routes, any one is enough, none is a guess:
 
     A  the car itself reported ``is_charging`` inside the window;
     B  the car stood at home across the whole window — same odometer on
        both sides — and its battery was fuller afterwards. A battery that
        gains while the car does not move was charging; there is no other
        way for it to gain.
+    C  the owner has declared that nothing else ever charges on this box,
+       and nothing inside the window contradicts it.
 
     Measured over all 45 readings of one wallbox, the two that provably
-    belong to a visitor are refused by both: through the first the house car
-    sat at 100 % and never moved, and over the second it LOST charge.
+    belong to a visitor are refused by A and B: through the first the house
+    car sat at 100 % and never moved, and over the second it LOST charge.
+
+    🔴 A and B need the car to be ASKED at the right moment. Where the cloud
+    is polled every few hours and a charge lasts half an hour, that moment
+    almost never falls inside the window: on one install not a single sync
+    landed in either of two real charges, and both were refused although the
+    meter had them to the watt-hour. Route C exists for exactly that, and it
+    is not a weaker B — it is a different question, put to the only party
+    that can answer it.
     """
     from models.database import VehicleSync
     ws = datetime.fromtimestamp(int(wc.start_ts))
@@ -891,16 +901,50 @@ def beleg_fuer_dieses_auto(wc, vehicle, tol_min):
                     VehicleSync.timestamp >= we,
                     VehicleSync.timestamp <= we + tol)
             .order_by(VehicleSync.timestamp.asc()).first())
-    if not _steht_zuhause(vor) or not _steht_zuhause(nach):
-        return None
-    if (vor.odometer_km is not None and nach.odometer_km is not None
-            and nach.odometer_km != vor.odometer_km):
-        return None
-    if (vor.soc_percent is None or nach.soc_percent is None
-            or nach.soc_percent <= vor.soc_percent):
-        return None
-    return ('the car stood at home and its battery gained %s -> %s %%'
-            % (vor.soc_percent, nach.soc_percent))
+    def _weg_b():
+        if not _steht_zuhause(vor) or not _steht_zuhause(nach):
+            return None
+        if (vor.odometer_km is not None and nach.odometer_km is not None
+                and nach.odometer_km != vor.odometer_km):
+            return None
+        if (vor.soc_percent is None or nach.soc_percent is None
+                or nach.soc_percent <= vor.soc_percent):
+            return None
+        return ('the car stood at home and its battery gained %s -> %s %%'
+                % (vor.soc_percent, nach.soc_percent))
+
+    b = _weg_b()
+    if b:
+        return b
+
+    # ── C ─────────────────────────────────────────────────────────────────
+    # The owner states that nothing else is ever plugged into this box. The
+    # meter cannot know that and the car cannot prove it; only the person who
+    # lives there can say it, and they say it per car, off by default.
+    #
+    # 🔴 C does not lower B's bar, it asks a different question — and it then
+    # looks for a REFUTATION rather than a proof. The one thing that genuinely
+    # rules this car out is a sync taken INSIDE the window that places it
+    # somewhere else: a car that is not at the box cannot be drawing from it.
+    #
+    # 🔑 Deliberately NOT treated as a refutation: a state of charge that did
+    # not rise. Both real cases that reached this point ended the window at the
+    # value they started it at. In one the car had stood plugged in and full
+    # for 36 hours and the box replaced ~2 kWh of standby draw — 100 % before,
+    # 100 % after. In the other it drove 19 km home and then took 3.73 kWh, and
+    # the two cancelled to the percentage point. Standby draw, preconditioning
+    # and charging losses cannot be recovered from two state-of-charge
+    # readings; a rule that pretends otherwise discards real charges and keeps
+    # the appearance of rigour.
+    if getattr(vehicle, 'wallbox_exclusive', False):
+        woanders = [s for s in im_fenster
+                    if s.location_lat is not None and not _steht_zuhause(s)]
+        if woanders:
+            return None
+        return ('this wallbox serves only this car, as set by its owner'
+                + ('; and the car was at home inside the window'
+                   if im_fenster else ''))
+    return None
 
 
 def _schon_gebucht(wc, vehicle, tol_min):

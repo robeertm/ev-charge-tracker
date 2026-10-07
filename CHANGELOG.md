@@ -1,5 +1,44 @@
 # Changelog
 
+## v3.0.148 (2026-10-07)
+
+### Only the owner can say what the meter cannot see
+
+A wallbox measures energy. It cannot see cars. So before a reading becomes a
+charge, the car has to confirm it took that energy: either it reported charging
+inside the window, or it stood at home across the whole window and its battery
+was fuller afterwards.
+
+Both answers require the car to have been asked at the right moment. Where the
+cloud is polled every few hours and a charge lasts half an hour, that moment
+almost never falls inside the window. Measured on one install: of two real home
+charges, **not a single sync landed inside either window**, and both were
+refused while the meter had them to the watt-hour.
+
+**New per-car setting: "only this car charges on this wallbox".** Off by
+default, so nothing changes anywhere until someone sets it. Where it is set, a
+reading from that box is filed even when the car could not confirm it — flagged
+for review, exactly like every other entry the link creates.
+
+It is not a weaker version of the existing rule, it is a different question put
+to the only party that can answer it. The guards stay: a reading is still
+refused when a sync taken **inside** the window places the car somewhere else,
+because a car that is not at the box cannot be drawing from it.
+
+🔴 Deliberately **not** inferred from the state of charge. Both real cases above
+ended the window at the value they started it at. In one, the car had stood
+plugged in and full for 36 hours and the box replaced about 2 kWh of standby
+draw — full before, full after. In the other it drove 19 km home and then took
+3.73 kWh, and the two cancelled to the percentage point. Standby draw,
+preconditioning and charging losses cannot be recovered from two state-of-charge
+readings, and a rule that pretends otherwise discards real charges while keeping
+the appearance of rigour.
+
+🔴 Equally deliberately **not** inferred from "only one car is linked to this
+box". A visitor's car is never linked, so that test answers a different
+question. Whether anything else is ever plugged in is not a fact the software
+can derive — it is a fact somebody knows.
+
 ## v3.0.147 (2026-10-07)
 
 ### A missing GPS timestamp is not a stale one

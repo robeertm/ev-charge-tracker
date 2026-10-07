@@ -1615,6 +1615,8 @@
   "wb.vehicle_enable": "Quest’auto ricarica alla wallbox",
   "wb.vehicle_key_placeholder": "chiave dispositivo (vuoto = l’unica wallbox)",
   "wb.vehicle_key_hint": "Da compilare solo se c’è più di una wallbox — allora «la» wallbox non è una risposta.",
+  "wb.vehicle_exclusive": "Solo questa auto si ricarica su questa wallbox",
+  "wb.vehicle_exclusive_hint": "Selezionare solo se nessun'altra auto viene mai collegata. Una misurazione della wallbox verrà registrata come ricarica anche se l'auto non ha potuto confermarla — segnalata per la revisione.",
   "flash.wallbox_saved": "Collegamento wallbox salvato.",
   "wb.curve_grid_only": "Tutto dalla rete — nessun contatore FV o batteria",
   "wb.curve_split_unknown": "Andamento misurato — le sorgenti dietro no",

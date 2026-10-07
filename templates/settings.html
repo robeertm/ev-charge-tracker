@@ -357,6 +357,17 @@
                                        name="wallbox_device_key" id="vf_wallbox_key"
                                        placeholder="{{ t('wb.vehicle_key_placeholder') }}">
                                 <div class="form-text small">{{ t('wb.vehicle_key_hint') }}</div>
+                                {# Nur der Besitzer weiss, ob dort je ein
+                                   anderes Auto haengt. Zaehler und Fahrzeug
+                                   koennen das beide nicht beantworten. #}
+                                <div class="form-check mt-2">
+                                    <input class="form-check-input" type="checkbox"
+                                           name="wallbox_exclusive" id="vf_wallbox_exclusive">
+                                    <label class="form-check-label small" for="vf_wallbox_exclusive">
+                                        {{ t('wb.vehicle_exclusive') }}
+                                    </label>
+                                </div>
+                                <div class="form-text small">{{ t('wb.vehicle_exclusive_hint') }}</div>
                             </div>
                             <div class="col-md-3">
                                 <label class="form-label small">
@@ -2717,6 +2728,7 @@
         auto_sync: 'vf_auto_sync',
         wallbox_link_enabled: 'vf_wallbox_link',
         wallbox_device_key: 'vf_wallbox_key',
+        wallbox_exclusive: 'vf_wallbox_exclusive',
         first_registered_at: 'vf_first_registered_at',
         acquired_at: 'vf_acquired_at', retired_at: 'vf_retired_at',
         notes: 'vf_notes',

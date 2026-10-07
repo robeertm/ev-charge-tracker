@@ -148,6 +148,12 @@ class Vehicle(db.Model):
     # Set it only in a household with more than one box, where "the"
     # wallbox is not an answer.
     wallbox_device_key = db.Column(db.String(64))
+    # v3.0.148: the owner declares that nothing else is ever plugged into
+    # this box. The meter cannot know that and the car cannot prove it —
+    # only the person who lives there can say it. Off by default, because a
+    # wrong yes books a stranger's energy onto this car.
+    wallbox_exclusive = db.Column(db.Boolean, default=False, nullable=False,
+                                  server_default='0')
 
     # Lifecycle
     is_archived = db.Column(db.Boolean, default=False, nullable=False)
@@ -186,6 +192,7 @@ class Vehicle(db.Model):
             'remote_control_enabled': bool(self.remote_control_enabled),
             'wallbox_link_enabled': bool(self.wallbox_link_enabled),
             'wallbox_device_key': self.wallbox_device_key or '',
+            'wallbox_exclusive': bool(self.wallbox_exclusive),
             'auto_sync': self.auto_sync,
             'is_archived': self.is_archived,
             'first_registered_at': self.first_registered_at.isoformat() if self.first_registered_at else None,

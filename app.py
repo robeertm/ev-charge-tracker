@@ -267,6 +267,13 @@ def create_app(config_class=Config):
             if 'wallbox_device_key' not in veh_columns:
                 db.session.execute(text(
                     'ALTER TABLE vehicles ADD COLUMN wallbox_device_key VARCHAR(64)'))
+            # v3.0.148: "nothing else charges on this box" — a statement
+            # only the owner can make. Defaults to 0, so an existing install
+            # behaves exactly as before until someone ticks it.
+            if 'wallbox_exclusive' not in veh_columns:
+                db.session.execute(text(
+                    'ALTER TABLE vehicles ADD COLUMN wallbox_exclusive '
+                    'BOOLEAN NOT NULL DEFAULT 0'))
             # v3.0.129: the undo of an adopted measurement also has to put the
             # review flag and the charge type back.
             wb_columns = [c['name'] for c in inspector.get_columns('wallbox_charges')]
@@ -3097,6 +3104,7 @@ def register_routes(app):
             v.wallbox_link_enabled = 'wallbox_link_enabled' in request.form
             v.wallbox_device_key = (request.form.get('wallbox_device_key', '')
                                     or '').strip()[:64] or None
+            v.wallbox_exclusive = 'wallbox_exclusive' in request.form
         v.api_brand = (request.form.get('api_brand', '') or '').strip().lower() or None
         # The form only sends the credential boxes the chosen brand
         # actually uses; the rest are disabled and therefore absent. A

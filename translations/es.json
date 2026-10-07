@@ -1615,6 +1615,8 @@
   "wb.vehicle_enable": "Este coche carga en la wallbox",
   "wb.vehicle_key_placeholder": "clave de dispositivo (vacío = la única wallbox)",
   "wb.vehicle_key_hint": "Rellénalo solo si hay más de una wallbox — entonces «la» wallbox no es una respuesta.",
+  "wb.vehicle_exclusive": "Solo este coche carga en esta wallbox",
+  "wb.vehicle_exclusive_hint": "Marque esto solo si nunca se conecta otro coche. Una medición de la wallbox se registrará como carga aunque el coche no haya podido confirmarla — marcada para revisión.",
   "flash.wallbox_saved": "Enlace de wallbox guardado.",
   "wb.curve_grid_only": "Todo de la red — sin medidor fotovoltaico ni de batería",
   "wb.curve_split_unknown": "Curso medido — las fuentes detrás no",

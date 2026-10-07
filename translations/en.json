@@ -1615,6 +1615,8 @@
   "wb.vehicle_enable": "This car charges on the wallbox",
   "wb.vehicle_key_placeholder": "device key (empty = the one wallbox)",
   "wb.vehicle_key_hint": "Fill this in only where there is more than one wallbox — then “the” wallbox is not an answer.",
+  "wb.vehicle_exclusive": "Only this car charges on this wallbox",
+  "wb.vehicle_exclusive_hint": "Tick this only where no other car is ever plugged in. A reading from the wallbox is then filed as a charge even when the car could not confirm it — flagged for review.",
   "flash.wallbox_saved": "Wallbox link saved.",
   "wb.curve_grid_only": "All from the grid — no PV or battery meter",
   "wb.curve_split_unknown": "Course measured — the sources behind it are not",
