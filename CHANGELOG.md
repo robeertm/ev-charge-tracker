@@ -1,5 +1,19 @@
 # Changelog
 
+## v3.0.149 (2026-10-07)
+
+### Correction: a measured charge is not flagged for review
+
+The hint under "only this car charges on this wallbox" claimed the entry would
+be flagged for review. It is not, and that is deliberate: `apply_measurement`
+clears the flag, because the flag asks "is this entry right?" and the answer
+arrived from the wire with a curve behind it. The note shipped in v3.0.148 said
+the opposite in all six languages, and the release note repeated it.
+
+The text now says what actually happens, and names the one thing that still
+stops a reading: a sync taken during the charge that places the car somewhere
+else. Wording only — no behaviour changed.
+
 ## v3.0.148 (2026-10-07)
 
 ### Only the owner can say what the meter cannot see

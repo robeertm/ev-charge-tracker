@@ -1616,7 +1616,7 @@
   "wb.vehicle_key_placeholder": "Geräteschlüssel (leer = die eine Wallbox)",
   "wb.vehicle_key_hint": "Nur ausfüllen, wenn es mehr als eine Wallbox gibt — dann ist „die“ Wallbox keine Antwort.",
   "wb.vehicle_exclusive": "An dieser Wallbox lädt nur dieses Auto",
-  "wb.vehicle_exclusive_hint": "Nur setzen, wenn dort nie ein anderes Auto hängt. Dann wird eine Messung der Wallbox auch dann als Ladung übernommen, wenn das Auto es nicht bestätigen konnte — zur Prüfung vorgemerkt.",
+  "wb.vehicle_exclusive_hint": "Nur setzen, wenn dort nie ein anderes Auto hängt. Dann wird eine Messung der Wallbox auch dann als Ladung eingetragen, wenn das Auto es nicht bestätigen konnte. Zeigt ein Abruf im Ladefenster das Auto woanders, bleibt sie liegen.",
   "flash.wallbox_saved": "Wallbox-Verbindung gespeichert.",
   "wb.curve_grid_only": "Alles Netzstrom — kein PV- oder Akku-Zähler",
   "wb.curve_split_unknown": "Verlauf gemessen — die Quellen dahinter nicht",

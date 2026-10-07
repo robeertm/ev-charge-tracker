@@ -1616,7 +1616,7 @@
   "wb.vehicle_key_placeholder": "apparaatsleutel (leeg = de ene wallbox)",
   "wb.vehicle_key_hint": "Alleen invullen als er meer dan één wallbox is — dan is «de» wallbox geen antwoord.",
   "wb.vehicle_exclusive": "Alleen deze auto laadt op deze wallbox",
-  "wb.vehicle_exclusive_hint": "Vink dit alleen aan als er nooit een andere auto wordt aangesloten. Een meting van de wallbox wordt dan als lading geboekt, ook als de auto dat niet kon bevestigen — gemarkeerd ter controle.",
+  "wb.vehicle_exclusive_hint": "Vink dit alleen aan als er nooit een andere auto wordt aangesloten. Een meting van de wallbox wordt dan als lading geboekt, ook als de auto dat niet kon bevestigen. Ze blijft liggen als een uitlezing tijdens het laden de auto elders plaatst.",
   "flash.wallbox_saved": "Wallbox-koppeling opgeslagen.",
   "wb.curve_grid_only": "Alles van het net — geen PV- of accumeter",
   "wb.curve_split_unknown": "Verloop gemeten — de bronnen erachter niet",
