@@ -1,5 +1,43 @@
 # Changelog
 
+## v3.0.147 (2026-10-07)
+
+### A missing GPS timestamp is not a stale one
+
+Some connectors send a position together with the time that position was
+taken; others send the position alone. Since v3.0.144 the trip log read both
+the same way — no timestamp meant "do not trust this coordinate" — and routed
+every such sync into the odometer rescue, which closes the open parking event
+and files an `unknown` placeholder with sentinel coordinates.
+
+For a car whose cloud never sends the timestamp, that is every sync. Measured
+on one install: **0 of 132 syncs carried a GPS time**, so every drive after
+the upgrade lost its destination, while the correct coordinate sat in the very
+same database row. The log kept recording arrivals and departures; it simply
+could no longer name a single place.
+
+The guard itself is sound where it came from. A **missing** timestamp is the
+cache-echo fingerprint of the clouds it was written for: the last known
+position is re-served with no time of its own while the car is already
+somewhere else, and stamping a destination from it invents a stop that never
+happened.
+
+So the question is no longer "does this sync carry a timestamp" but **"does
+this car ever send one"**. A car that normally supplies the time and skips it
+once is the echo shape the guard exists for and stays guarded, unchanged. A
+car that never supplies it is trusted, because the coordinate is all it will
+ever send — refusing it buys no safety and costs every destination.
+
+The decision is made per car from its own recorded history, not per brand: the
+brand says which cloud answers, not which fields that cloud fills, and the same
+brand is reached through more than one connector.
+
+🔴 Scope is deliberately narrow. Only the fresh-GPS shortcut changed. The
+staleness gate on the main movement path already let a missing timestamp pass
+and is untouched, and the odometer rescue added in v3.0.144 keeps working for
+every car that does report GPS times — that rescue remains the only exit for a
+cloud that echoes an old position with a current-looking one.
+
 ## v3.0.146 (2026-10-06)
 
 ### The trips were never lost — they were only missing from the log

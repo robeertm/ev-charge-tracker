@@ -254,6 +254,71 @@ def test_mit_frischem_gps_bleibt_der_bewaehrte_weg():
         ctx.pop()
 
 
+# ── Ein Auto, das NIE einen GPS-Zeitstempel liefert ───────────────────
+
+def test_auto_ohne_gps_zeitstempel_behaelt_seinen_ort():
+    """Der Regressionsfall: fehlender Zeitstempel ist nicht gleich altem.
+
+    Die offizielle Skoda-Schnittstelle schickt Koordinaten **ohne** eigene
+    Zeitangabe — auf einer echten Installation 0 von 132 Syncs mit
+    Zeitstempel. Wird das als ``nicht frisch`` gelesen, landet JEDE Fahrt im
+    Odo-Rettungszweig und bekommt einen ``unknown``-Platzhalter, obwohl die
+    richtige Koordinate in derselben Zeile steht.
+    """
+    app, ctx = _app()
+    try:
+        from services.trips_service import update_parking_from_sync
+        v = _auto('skoda_api')
+        pe = _platzhalter(v.id, odo=34486, etikett='home')
+        pe.lat, pe.lon = 51.0714, 13.5253
+        _m().db.session.commit()
+        # Koordinate da, Zeitstempel fehlt — und dieses Auto liefert nie einen.
+        s = _sync(v.id, odo=34506, lat=51.1241, lon=13.7204, gps_alter_min=None)
+        update_parking_from_sync(s)
+
+        PE = _m().ParkingEvent
+        assert PE.query.get(pe.id).departed_at is not None, \
+            'der alte Parkvorgang haette schliessen muessen'
+        neu = PE.query.filter(PE.id != pe.id).order_by(PE.id.desc()).first()
+        assert neu is not None, 'es haette ein neuer Parkvorgang entstehen muessen'
+        assert (neu.lat, neu.lon) != (0.0, 0.0), \
+            'die gelieferte Koordinate darf nicht gegen einen Sentinel getauscht werden'
+        assert neu.label != 'unknown', \
+            'ein Auto ohne Zeitstempel darf seinen Ort nicht verlieren'
+    finally:
+        ctx.pop()
+
+
+def test_fehlender_zeitstempel_bleibt_streng_wenn_das_auto_sonst_einen_liefert():
+    """Gegenprobe: der Echo-Schutz fuer Hyundai/Kia bleibt wirksam.
+
+    Liefert ein Auto normalerweise einen Zeitstempel und fehlt er in EINEM
+    Sync, ist genau das der Cache-Echo-Fingerabdruck, fuer den die Sperre
+    gebaut wurde. Dann bleibt es beim Platzhalter.
+    """
+    app, ctx = _app()
+    try:
+        from services.trips_service import update_parking_from_sync
+        v = _auto('kia')
+        # Vorgeschichte: dieses Auto liefert sehr wohl Zeitstempel.
+        _sync(v.id, odo=91800, wann=JETZT - timedelta(hours=30),
+              lat=51.1247, lon=13.7206, gps_alter_min=2)
+        pe = _platzhalter(v.id, odo=91871, etikett='home')
+        pe.lat, pe.lon = 51.1247, 13.7206
+        _m().db.session.commit()
+        # Jetzt ein Sync OHNE Zeitstempel — Echo-Verdacht.
+        s = _sync(v.id, odo=91928, lat=51.1120, lon=13.9194, gps_alter_min=None)
+        update_parking_from_sync(s)
+
+        PE = _m().ParkingEvent
+        assert PE.query.get(pe.id).departed_at is not None
+        neu = PE.query.filter(PE.id != pe.id).order_by(PE.id.desc()).first()
+        assert neu is not None and neu.label == 'unknown', \
+            'ohne Vertrauen in die Koordinate muss ein Platzhalter entstehen'
+    finally:
+        ctx.pop()
+
+
 # ── Der Platzhalter muss auch schließen, wenn der Ort unklar bleibt ───
 
 def _flip_lage(vid, pe_odo, pe_wann):

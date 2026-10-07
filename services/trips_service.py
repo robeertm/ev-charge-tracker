@@ -152,17 +152,57 @@ def update_parking_from_sync(sync) -> Optional[ParkingEvent]:
         brand = (AppConfig.get('vehicle_api_brand', '') or '').lower()
 
     # Fresh-GPS shortcut (used for upgrade and odo-advance branches).
-    # Strict: requires ``location_last_updated_at`` to be present AND
-    # within the staleness threshold. A missing gps_ts is treated as
-    # not-fresh — observed on Hyundai where secondary cache-echo syncs
-    # (the same cached coord re-served a minute after a stale-gps-ts
-    # primary) come back with no ts at all. Accepting them as fresh
-    # would cause phantom upgrades of Unknown PEs to echo coords.
+    # Requires ``location_last_updated_at`` to be present AND within the
+    # staleness threshold. A missing gps_ts is treated as not-fresh —
+    # observed on Hyundai where secondary cache-echo syncs (the same cached
+    # coord re-served a minute after a stale-gps-ts primary) come back with
+    # no ts at all. Accepting them as fresh would cause phantom upgrades of
+    # Unknown PEs to echo coords.
+    _gps_ts_bekannt = {}
+
+    def _car_ever_reports_gps_time() -> bool:
+        """Has this car EVER delivered a ``location_last_updated_at``?
+
+        🔴 v3.0.147: until now the gate below read "this sync has no gps_ts"
+        as "not fresh" for every car. That is right where a MISSING timestamp
+        is the cache-echo fingerprint — the cloud re-serves the last known
+        coordinate with no time of its own, and believing it would stamp a
+        destination the car never reached.
+
+        It is wrong for a connector that never sends a timestamp at all. The
+        official Skoda API ships lat/lon and nothing else, on every single
+        sync, and those coordinates are current. Reading that as "not fresh"
+        routed every drive into the odometer rescue below, which discards the
+        coordinate and files an ``unknown`` placeholder instead. Measured on a
+        live install: 0 of 132 syncs carried a timestamp, so 100 % of its
+        drives lost their destination — while the correct coordinate sat in
+        the very same database row.
+
+        The question is therefore not "does THIS sync carry a timestamp" but
+        "does this car ever send one". A car that normally does and skips one
+        is exactly the echo shape this gate exists for and stays guarded. A
+        car that never does is trusted, because the coordinate is all it will
+        ever send — refusing it buys no safety and costs every destination.
+
+        Deliberately decided per CAR and not per brand: the brand string says
+        which cloud answers, not which fields that cloud fills, and the same
+        brand is reached through more than one connector.
+        """
+        if veh_id in _gps_ts_bekannt:
+            return _gps_ts_bekannt[veh_id]
+        from models.database import VehicleSync
+        _q = VehicleSync.query.filter(
+            VehicleSync.location_last_updated_at.isnot(None))
+        if veh_id is not None:
+            _q = _q.filter(VehicleSync.vehicle_id == veh_id)
+        _gps_ts_bekannt[veh_id] = _q.first() is not None
+        return _gps_ts_bekannt[veh_id]
+
     def _is_fresh_gps() -> bool:
         if sync.location_lat is None or sync.location_lon is None:
             return False
         if sync.location_last_updated_at is None:
-            return False
+            return not _car_ever_reports_gps_time()
         age = (sync.timestamp - sync.location_last_updated_at).total_seconds() / 60.0
         return age <= STALE_GPS_MAX_MIN
 
