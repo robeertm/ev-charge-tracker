@@ -854,6 +854,55 @@ def _erster_sync(vehicle_id, ab):
             .order_by(VehicleSync.timestamp.asc()).first())
 
 
+def mitbewerber_an_dieser_box(vehicle, wc, tol_min):
+    """Cars of this household that could just as well have been at this box.
+
+    Route C rests on a sentence about the BOX — *nothing else ever charges
+    here*. A second car in the same installation makes that sentence false,
+    and the owner must not have to remember to withdraw the tick on the FIRST
+    car when they add the second. So the question is put to the data on every
+    pass instead of to a checkbox that was ticked while the household had one
+    car. A guard that depends on somebody updating a different record is a
+    hope, not a property.
+
+    A car is ruled out only by something that actually rules it out:
+
+    * it names a **different** wallbox — its owner has said it charges
+      elsewhere;
+    * or a sync taken inside the window places it away from home.
+
+    Everything else counts as a rival, **including a car that was never
+    asked**. That is the safe direction: a rival makes route C go quiet, the
+    reading stays open with its reason, and the owner can file it by hand.
+    Treating silence as absence would book one car's kilowatt-hours onto the
+    other, and nobody would ever notice.
+
+    🔑 Deliberately NOT a criterion: ``wallbox_link_enabled``. That switch
+    says whether we fetch readings for a car, not where it charges. The
+    dangerous case is exactly the second car that is in the fleet while its
+    link is still off.
+    """
+    from models.database import Vehicle, VehicleSync
+    ws = datetime.fromtimestamp(int(wc.start_ts))
+    we = datetime.fromtimestamp(int(wc.end_ts))
+    eigene_box = str(getattr(vehicle, 'wallbox_device_key', '') or '').strip()
+    rivalen = []
+    for v in Vehicle.query.filter(Vehicle.id != vehicle.id).all():
+        fremde_box = str(getattr(v, 'wallbox_device_key', '') or '').strip()
+        if fremde_box and eigene_box and fremde_box != eigene_box:
+            continue
+        woanders = (VehicleSync.query
+                    .filter(VehicleSync.vehicle_id == v.id,
+                            VehicleSync.timestamp >= ws,
+                            VehicleSync.timestamp <= we,
+                            VehicleSync.location_lat.isnot(None))
+                    .order_by(VehicleSync.timestamp.asc()).all())
+        if woanders and not any(_steht_zuhause(s) for s in woanders):
+            continue
+        rivalen.append(v)
+    return rivalen
+
+
 def beleg_fuer_dieses_auto(wc, vehicle, tol_min):
     """Proof that THIS car was the one drawing — or ``None``.
 
@@ -941,6 +990,12 @@ def beleg_fuer_dieses_auto(wc, vehicle, tol_min):
                     if s.location_lat is not None and not _steht_zuhause(s)]
         if woanders:
             return None
+        # 🔴 v3.0.150: and the declaration has to still be true. It speaks
+        # about the box, so a second car of the same household that could
+        # have been standing there takes it apart — whatever the tick on
+        # this car still says. See ``mitbewerber_an_dieser_box``.
+        if mitbewerber_an_dieser_box(vehicle, wc, tol_min):
+            return None
         return ('this wallbox serves only this car, as set by its owner'
                 + ('; and the car was at home inside the window'
                    if im_fenster else ''))
@@ -972,76 +1027,27 @@ def _schon_gebucht(wc, vehicle, tol_min):
     return None
 
 
-def aus_der_messung_anlegen(wc, vehicles, cfg, specs=None):
-    """Make this reading its own charge entry. Returns ``(charge, reason)``.
+def _ladung_aus_messung_bauen(wc, v, energie, beleg, danach=None):
+    """Build the charge entry for this reading. ONE place, two callers.
 
-    ``charge`` is ``None`` when nothing was filed; ``reason`` then says why,
-    in words worth putting in front of the owner.
+    Lifted out of ``aus_der_messung_anlegen`` unchanged in v3.0.150, so that
+    the by-hand route below files an entry that is identical in every field
+    to an automatically filed one. A second copy of this would drift, and the
+    two would stop being comparable in the statistics without anyone noticing.
     """
     from models.database import db, Charge, AppConfig
-    # Imported here on purpose: the threshold belongs to the car-side
-    # detector and must stay ONE number. A copy in this file would drift.
-    from app import _AUTO_CHARGE_MIN_SOC_GAIN
-
-    if len(vehicles) != 1:
-        return None, 'more than one car is linked to this wallbox'
-    v = vehicles[0]
-    bk, eff = (specs or _default_specs)(v.id)
-    energie = float(wc.energy_kwh or 0.0)
-    if energie <= 0 or not bk:
-        return None, 'nothing measured'
-
-    # As large as the smallest thing this app calls a charge. The car-side
-    # detector draws that line at a SoC gain of _AUTO_CHARGE_MIN_SOC_GAIN;
-    # at the wall the same gain is that share of the battery plus the charge
-    # losses. Same bar, measured instead of inferred — on one wallbox it
-    # lands at 1.89 kWh and separates eight short plug-ins (0.33 … 1.74 kWh,
-    # nobody ever called them charges) from every reading ever matched to
-    # one (4.16 kWh and up).
-    mindest = _AUTO_CHARGE_MIN_SOC_GAIN / 100.0 * float(bk) / float(eff or 1.0)
-    if energie < mindest:
-        return None, ('%.3f kWh is under what counts as a charge here (%.2f kWh)'
-                      % (energie, mindest))
-
+    ws = datetime.fromtimestamp(int(wc.start_ts))
     we = datetime.fromtimestamp(int(wc.end_ts))
-    # 🔴 The car side has to have had its turn first. Its trigger is the sync
-    # that reports is_charging=0 after a charge — before that arrives it may
-    # still file the entry itself, and the day would end up with two.
-    danach = _erster_sync(v.id, we)
-    if danach is None:
-        return None, 'no sync after this window yet — the car side may still file it'
-
-    beleg = beleg_fuer_dieses_auto(wc, v, cfg.get('tolerance_min'))
-    if not beleg:
-        return None, 'nothing shows that this car was the one charging'
-
-    # 🔴 Is this window already filed? `match_one` said no, but it asks a
-    #    narrower question: it skips a charge that is tied to ANOTHER reading,
-    #    because a reading and an entry are one to one. For creating, that is
-    #    the wrong question — the question here is whether a charge exists at
-    #    all, and one that already carries a different reading is exactly the
-    #    case that matters.
-    #    Found the hard way on a live system: a full re-fetch answered about
-    #    two charges again with a window shifted by minutes, so neither the
-    #    reading nor the entry matched, and this function filed a SECOND
-    #    charge for a day that already had one. Both had to be deleted by
-    #    hand. The analyzer's idea of a window moves while its samples settle;
-    #    an entry's does not.
-    ueberlappt = _schon_gebucht(wc, v, cfg.get('tolerance_min'))
-    if ueberlappt is not None:
-        return None, ('a charge is already filed for this window (entry %s)'
-                      % ueberlappt.id)
-
     # The state of charge it ENDED at — but only when the car demonstrably
     # did not move in between, otherwise that reading is from after a drive.
     bezug = _letzter_sync(v.id, we)
     soc_to = None
-    if (danach.soc_percent is not None and _steht_zuhause(danach)
+    if (danach is not None and danach.soc_percent is not None
+            and _steht_zuhause(danach)
             and bezug is not None and bezug.odometer_km is not None
             and danach.odometer_km == bezug.odometer_km):
         soc_to = danach.soc_percent
 
-    ws = datetime.fromtimestamp(int(wc.start_ts))
     heim = AppConfig.get('home_label', 'Home') or 'Home'
     _lat = AppConfig.get('home_lat', '')
     _lon = AppConfig.get('home_lon', '')
@@ -1073,7 +1079,129 @@ def aus_der_messung_anlegen(wc, vehicles, cfg, specs=None):
         % (c.id, wc.id, energie, ws.strftime('%Y-%m-%d %H:%M'),
            we.strftime('%H:%M'), beleg)
     )
+    return c
+
+
+def auf_wunsch_anlegen(wc, vehicle, cfg):
+    """File this reading as a new charge for the car the OWNER names.
+
+    Returns ``(charge, reason)`` exactly like the automatic route.
+
+    Why this exists. With two electric cars on one box and a cloud that is
+    polled every few hours, a charge can be measured to the watt-hour while
+    neither car was ever asked during its window. The automatic route then
+    files nothing — correctly, because it must not guess between two cars.
+    But the energy was real and it belongs in somebody's running costs, and
+    the one party who knows whose is the person who plugged the cable in.
+    Before v3.0.150 they could only attach a reading to a charge that already
+    existed, which is no help in precisely the case where none does.
+
+    🔑 The owner's word replaces the PROOF, not the plausibility checks. A
+    window that already holds an entry for this car is still refused — that
+    guard exists because a shifting analyzer window once produced a second
+    charge for a day that already had one, and no decision of the owner's
+    makes a duplicate right.
+
+    🔑 Deliberately dropped here, unlike the automatic route: the minimum
+    energy and the "the car side may still file it" gate. Both answer the
+    question *should this be filed WITHOUT being asked?* — and the answer to
+    that is no longer wanted once somebody has been asked and has answered.
+    """
+    if vehicle is None:
+        return None, 'no car named'
+    energie = float(wc.energy_kwh or 0.0)
+    if energie <= 0:
+        return None, 'nothing measured'
+    ueberlappt = _schon_gebucht(wc, vehicle, (cfg or {}).get('tolerance_min'))
+    if ueberlappt is not None:
+        return None, ('a charge is already filed for this window (entry %s)'
+                      % ueberlappt.id)
+    we = datetime.fromtimestamp(int(wc.end_ts))
+    beleg = 'filed for %s by its owner' % vehicle.name
+    c = _ladung_aus_messung_bauen(wc, vehicle, energie, beleg,
+                                  _erster_sync(vehicle.id, we))
     return c, beleg
+
+
+def aus_der_messung_anlegen(wc, vehicles, cfg, specs=None):
+    """Make this reading its own charge entry. Returns ``(charge, reason)``.
+
+    ``charge`` is ``None`` when nothing was filed; ``reason`` then says why,
+    in words worth putting in front of the owner.
+    """
+    # Imported here on purpose: the threshold belongs to the car-side
+    # detector and must stay ONE number. A copy in this file would drift.
+    from app import _AUTO_CHARGE_MIN_SOC_GAIN
+
+    if not vehicles:
+        return None, 'no car is linked to this wallbox'
+    energie = float(wc.energy_kwh or 0.0)
+    if energie <= 0:
+        return None, 'nothing measured'
+
+    # 🔴 v3.0.150: which of the linked cars can be SHOWN to have taken this
+    # energy? Until now this path refused outright as soon as a second car
+    # was linked to the box — and that is the wrong question. With one car
+    # "is exactly one car linked?" and "which car was it?" happen to have the
+    # same answer; with two they do not, and the household that adds a second
+    # electric car lost the whole path overnight, with one line of reason per
+    # reading as the only notice. The question asked here is the same one for
+    # one car and for five: put it to each of them, and file only if exactly
+    # one answers. Two answers is an ambiguity, and guessing between two cars
+    # is the one thing this file has refused to do since ``match_one``.
+    belege = []
+    for _v in vehicles:
+        _b = beleg_fuer_dieses_auto(wc, _v, cfg.get('tolerance_min'))
+        if _b:
+            belege.append((_v, _b))
+    if not belege:
+        return None, 'nothing shows which car was the one charging'
+    if len(belege) > 1:
+        return None, ('more than one car could have taken this energy (%s)'
+                      % ', '.join(str(_v.name) for _v, _ in belege))
+    v, beleg = belege[0]
+    bk, eff = (specs or _default_specs)(v.id)
+    if not bk:
+        return None, 'no battery size known for %s' % v.name
+
+    # As large as the smallest thing this app calls a charge. The car-side
+    # detector draws that line at a SoC gain of _AUTO_CHARGE_MIN_SOC_GAIN;
+    # at the wall the same gain is that share of the battery plus the charge
+    # losses. Same bar, measured instead of inferred — on one wallbox it
+    # lands at 1.89 kWh and separates eight short plug-ins (0.33 … 1.74 kWh,
+    # nobody ever called them charges) from every reading ever matched to
+    # one (4.16 kWh and up).
+    mindest = _AUTO_CHARGE_MIN_SOC_GAIN / 100.0 * float(bk) / float(eff or 1.0)
+    if energie < mindest:
+        return None, ('%.3f kWh is under what counts as a charge here (%.2f kWh)'
+                      % (energie, mindest))
+
+    we = datetime.fromtimestamp(int(wc.end_ts))
+    # 🔴 The car side has to have had its turn first. Its trigger is the sync
+    # that reports is_charging=0 after a charge — before that arrives it may
+    # still file the entry itself, and the day would end up with two.
+    danach = _erster_sync(v.id, we)
+    if danach is None:
+        return None, 'no sync after this window yet — the car side may still file it'
+
+    # 🔴 Is this window already filed? `match_one` said no, but it asks a
+    #    narrower question: it skips a charge that is tied to ANOTHER reading,
+    #    because a reading and an entry are one to one. For creating, that is
+    #    the wrong question — the question here is whether a charge exists at
+    #    all, and one that already carries a different reading is exactly the
+    #    case that matters.
+    #    Found the hard way on a live system: a full re-fetch answered about
+    #    two charges again with a window shifted by minutes, so neither the
+    #    reading nor the entry matched, and this function filed a SECOND
+    #    charge for a day that already had one. Both had to be deleted by
+    #    hand. The analyzer's idea of a window moves while its samples settle;
+    #    an entry's does not.
+    ueberlappt = _schon_gebucht(wc, v, cfg.get('tolerance_min'))
+    if ueberlappt is not None:
+        return None, ('a charge is already filed for this window (entry %s)'
+                      % ueberlappt.id)
+
+    return _ladung_aus_messung_bauen(wc, v, energie, beleg, danach), beleg
 
 
 def match_all(cfg=None, device_key='', specs=None, pv_co2=None):

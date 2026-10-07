@@ -4994,7 +4994,7 @@ def register_routes(app):
         charges in the same window. Only a person knows which car was plugged
         in, so the decision is theirs and is recorded as such.
         """
-        from models.database import db, Charge, WallboxCharge
+        from models.database import db, Charge, Vehicle, WallboxCharge
         from services import shelly_link as wl
         data = request.get_json(silent=True) or {}
         wc = WallboxCharge.query.get_or_404(int(data.get('reading_id') or 0))
@@ -5013,6 +5013,31 @@ def register_routes(app):
             wc.match_note = 'detached by hand'
             db.session.commit()
             return jsonify({'ok': True, 'state': wc.match_state})
+        # 🔑 v3.0.150: the owner may name a CAR instead of an entry. With two
+        # electric cars on one box and a cloud polled every few hours, a real
+        # charge can end up with no entry to point at — and attaching a
+        # reading to an entry that does not exist is no help. The link then
+        # files the entry for the car they named, and records that this is
+        # what happened.
+        if str(raw) == 'new':
+            vid = int(data.get('vehicle_id') or 0)
+            v = Vehicle.query.get(vid) if vid else None
+            if v is None:
+                return jsonify({'ok': False, 'error': 'unknown car'}), 200
+            c, grund = wl.auf_wunsch_anlegen(wc, v, wl.settings())
+            if c is None:
+                return jsonify({'ok': False, 'error': grund}), 200
+            wc.charge_id, wc.vehicle_id = c.id, c.vehicle_id
+            wc.match_state = 'matched'
+            wc.match_note = ('filed as a new charge by hand: %s' % grund)[:200]
+            wc.matched_at = datetime.now()
+            c.wallbox_charge_id = wc.id
+            if wl.settings()['apply_mode'] != 'never':
+                bk, eff = _wallbox_specs(c.vehicle_id)
+                wl.apply_measurement(wc, c, bk, eff, _get_pv_co2)
+            db.session.commit()
+            return jsonify({'ok': True, 'state': wc.match_state,
+                            'charge': c.to_dict()})
         c = Charge.query.get_or_404(int(raw))
         if c.wallbox_charge_id and c.wallbox_charge_id != wc.id:
             return jsonify({'ok': False,
@@ -5076,7 +5101,15 @@ def register_routes(app):
         cands = wl._candidates(wc, wl.linked_vehicles(wc.device_key),
                                cfg['tolerance_min'])
         namen = {v.id: v.name for v in Vehicle.query.all()}
-        return jsonify({'ok': True, 'reading': wc.to_dict(), 'candidates': [
+        # The cars the reading could be filed FOR, as opposed to the entries it
+        # could be attached to. Only offered where no entry of that car already
+        # covers the window — otherwise the picker would hold out a button
+        # whose only possible answer is "already filed".
+        autos = [{'vehicle_id': v.id, 'vehicle': v.name}
+                 for v in wl.linked_vehicles(wc.device_key)
+                 if wl._schon_gebucht(wc, v, cfg['tolerance_min']) is None]
+        return jsonify({'ok': True, 'reading': wc.to_dict(), 'vehicles': autos,
+                        'candidates': [
             {'charge_id': c.id, 'vehicle_id': c.vehicle_id,
              'vehicle': namen.get(c.vehicle_id, ''),
              'date': c.date.isoformat() if c.date else None,

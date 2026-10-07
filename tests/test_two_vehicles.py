@@ -272,3 +272,119 @@ def test_the_dashboard_cache_key_names_the_vehicle(zwei_autos):
     assert schluessel(seite_a) == str(ids[0])
     assert schluessel(seite_b) == str(ids[1])
     assert schluessel(seite_a) != schluessel(seite_b)
+
+# ══════════════════════════════════════════════════════════════════════════
+# v3.0.150 — zwei Autos an EINER Wallbox
+# ══════════════════════════════════════════════════════════════════════════
+#
+# Der Fall, auf den dieser Teil wartet: ein Haushalt bekommt ein zweites
+# Elektroauto, das an derselben Box laedt. Die Wallbox misst Energie, sie sieht
+# keine Autos — und wird die Wolke nur alle paar Stunden befragt, gibt es
+# Ladungen, die auf die Wattstunde gemessen sind und die KEIN Auto bestaetigen
+# konnte. Vorher liess sich so eine Messung nur an eine BESTEHENDE Ladung
+# haengen, was genau dann nicht hilft, wenn es keine gibt.
+#
+# Gefahren wird das durch den echten Server, nicht gegen die Funktionen: die
+# zwei Endpunkte sind die Stelle, an der die Oberflaeche es anfasst.
+
+_WB_START = 1791296100          # fester Zeitpunkt, nie "jetzt" — sonst haengt
+_WB_ENDE = 1791299340           # die Probe am Tag ihres Laufs
+
+
+def _wallbox_vorbereiten(db, ids, apply_mode='auto'):
+    """Beide Autos an dieselbe Box binden und eine unbelegte Messung ablegen."""
+    con = sqlite3.connect(db)
+    con.execute("UPDATE vehicles SET wallbox_link_enabled=1,"
+                " wallbox_device_key='wallbox', battery_kwh=58.0")
+    for key, wert in (('shelly_enabled', '1'),
+                      ('shelly_apply_mode', apply_mode),
+                      ('shelly_match_tolerance_min', '90'),
+                      ('home_label', 'Home'),
+                      ('home_lat', '52.0'), ('home_lon', '13.0')):
+        con.execute('INSERT OR REPLACE INTO app_config (key, value) '
+                    'VALUES (?, ?)', (key, wert))
+    con.commit()
+    con.close()
+
+
+def _messung_ablegen(db, sid, start=_WB_START, ende=_WB_ENDE, kwh=3.73):
+    con = sqlite3.connect(db)
+    con.execute("INSERT INTO wallbox_charges (source_id, device_key, start_ts,"
+                " end_ts, energy_kwh, match_state, fetched_at)"
+                " VALUES (?, 'wallbox', ?, ?, ?, 'unmatched', '2026-10-06 18:00:00')",
+                (sid, start, ende, kwh))
+    con.commit()
+    rid = con.execute("SELECT id FROM wallbox_charges WHERE source_id=?",
+                      (sid,)).fetchone()[0]
+    con.close()
+    return rid
+
+
+def test_wallbox_zwei_autos_der_besitzer_darf_entscheiden(zwei_autos):
+    """🔴 Keines der beiden Autos hat etwas bestaetigt — und die Energie ist
+    trotzdem geflossen. Dann darf gefragt werden, und nur dann."""
+    base, ids, db = zwei_autos
+    _wallbox_vorbereiten(db, ids)
+    rid = _messung_ablegen(db, 'zweiautos-1')
+    s = _Sitzung(base)
+
+    with s.op.open(base + '/api/wallbox/candidates/%d' % rid) as r:
+        d = json.loads(r.read())
+    assert d['ok'] is True
+    assert d['candidates'] == [], d['candidates']
+    angeboten = {a['vehicle_id'] for a in d.get('vehicles', [])}
+    assert angeboten == set(ids), (angeboten, ids)
+
+    req = urllib.request.Request(
+        base + '/api/wallbox/assign', method='POST',
+        data=json.dumps({'reading_id': rid, 'charge_id': 'new',
+                         'vehicle_id': ids[1]}).encode(),
+        headers={'Content-Type': 'application/json'})
+    with s.op.open(req) as r:
+        d = json.loads(r.read())
+    assert d['ok'] is True, d
+    # 🔑 Nicht aus der Antwort geprueft: ``Charge.to_dict()`` fuehrt kein
+    # ``vehicle_id``. Welchem Auto die Ladung gehoert, steht in der Datenbank,
+    # und dort nachzusehen ist ohnehin der staerkere Beweis.
+    assert d['charge']['kwh_loaded'] == 3.73, d['charge']
+
+    con = sqlite3.connect(db)
+    zeilen = con.execute("SELECT vehicle_id, kwh_loaded FROM charges").fetchall()
+    zustand = con.execute("SELECT match_state, vehicle_id FROM wallbox_charges"
+                          " WHERE id=?", (rid,)).fetchone()
+    con.close()
+    assert zeilen == [(ids[1], 3.73)], zeilen
+    assert zustand == ('matched', ids[1]), zustand
+
+
+def test_wallbox_ein_auto_das_die_stunde_schon_hat_wird_nicht_mehr_angeboten(
+        zwei_autos):
+    """Gegenprobe zur vorigen: der Knopf verschwindet fuer das Auto, dessen
+    Fenster bereits eine Ladung traegt. Ein Knopf, dessen einzige moegliche
+    Antwort „gibt es schon" ist, gehoert nicht hingehalten."""
+    base, ids, db = zwei_autos
+    rid2 = _messung_ablegen(db, 'zweiautos-2', start=_WB_START + 300,
+                            ende=_WB_ENDE + 300, kwh=3.60)
+    s = _Sitzung(base)
+    with s.op.open(base + '/api/wallbox/candidates/%d' % rid2) as r:
+        d = json.loads(r.read())
+    angeboten = {a['vehicle_id'] for a in d.get('vehicles', [])}
+    assert ids[1] not in angeboten, angeboten
+    assert ids[0] in angeboten, angeboten
+
+
+def test_wallbox_ein_unbekanntes_auto_wird_abgewiesen(zwei_autos):
+    """Und eine Absage sagt, warum — sie darf nicht als Erfolg aussehen."""
+    base, ids, db = zwei_autos
+    rid3 = _messung_ablegen(db, 'zweiautos-3', start=_WB_START + 90000,
+                            ende=_WB_ENDE + 90000)
+    s = _Sitzung(base)
+    req = urllib.request.Request(
+        base + '/api/wallbox/assign', method='POST',
+        data=json.dumps({'reading_id': rid3, 'charge_id': 'new',
+                         'vehicle_id': 999999}).encode(),
+        headers={'Content-Type': 'application/json'})
+    with s.op.open(req) as r:
+        d = json.loads(r.read())
+    assert d['ok'] is False, d
+    assert 'unknown car' in d.get('error', ''), d

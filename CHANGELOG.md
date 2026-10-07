@@ -1,5 +1,42 @@
 # Changelog
 
+## v3.0.150 (2026-10-07)
+
+### A second electric car on the same wallbox
+
+Everything the wallbox link does rested on a household having one electric car.
+Adding a second one broke three things at once, and two of them silently.
+
+**The link stopped filing charges at all.** Before a reading becomes a charge of
+its own, the link asked "is exactly one car bound to this wallbox?" — and
+refused outright from the second one on. That is the wrong question. With one
+car it happens to have the same answer as "which car was it?"; with two it does
+not. The question is now put to each bound car separately, and a charge is filed
+when exactly one of them can be shown to have taken the energy. Two answers is
+an ambiguity, and guessing between two cars is what this code has refused to do
+since the matcher was written.
+
+**The "only this car charges here" declaration outlived its truth.** That
+setting states something about the *box*, so a second car in the same
+installation makes it false — but it kept being honoured, and withdrawing it was
+left to whoever remembered to untick it on the *first* car. It is now checked
+against the fleet on every pass. A second car counts as a rival unless something
+actually rules it out: it names a different wallbox, or a sync taken inside the
+window places it away from home. A car that was never asked counts as a rival
+too, which is the safe direction — the reading stays open instead of booking one
+car's kilowatt-hours onto the other.
+
+**And there was no way to settle what was left over.** An ambiguous reading
+could only be attached to a charge that already existed, which is no help in
+exactly the case where none does. The picker now also offers to file the reading
+as a new charge for a car the owner names. Their word replaces the proof, not
+the plausibility checks: a window that already holds an entry for that car is
+still refused, and a refusal now shows its reason instead of quietly reloading
+the page.
+
+Fleet settings show a warning beside the declaration once more than one vehicle
+exists, so a tick that no longer applies cannot sit there looking as if it does.
+
 ## v3.0.149 (2026-10-07)
 
 ### Correction: a measured charge is not flagged for review

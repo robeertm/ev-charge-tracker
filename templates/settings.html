@@ -368,6 +368,17 @@
                                     </label>
                                 </div>
                                 <div class="form-text small">{{ t('wb.vehicle_exclusive_hint') }}</div>
+                                {# 🔴 Die Erklaerung redet ueber die BOX. Steht
+                                   ein zweites Auto in der Flotte, ist sie
+                                   falsch — und der Code haelt sie ab v3.0.150
+                                   bei jedem Durchgang gegen die Flotte. Ein
+                                   Haken, der gesetzt dasteht und nicht wirkt,
+                                   ist schlimmer als keiner. #}
+                                {% if fleet_vehicles | length > 1 %}
+                                <div class="alert alert-warning py-1 px-2 mt-2 mb-0 small">
+                                    {{ t('wb.vehicle_exclusive_void') }}
+                                </div>
+                                {% endif %}
                             </div>
                             <div class="col-md-3">
                                 <label class="form-label small">
@@ -4479,7 +4490,8 @@
         detach:    {{ t('wb.detach')|tojson }},
         drop_ask:  {{ t('wb.discard_ask')|tojson }},
         drop_no:   {{ t('wb.discard_refused')|tojson }},
-        notcfg:    {{ t('wb.not_configured')|tojson }}
+        notcfg:    {{ t('wb.not_configured')|tojson }},
+        file_for:  {{ t('wb.file_for_car')|tojson }}
     };
     function esc(x) {
         return String(x == null ? '' : x).replace(/[&<>"']/g, function (c) {
@@ -4562,7 +4574,12 @@
         var r = await fetch('/api/wallbox/candidates/' + id);
         var d = await r.json();
         var cands = (d.candidates || []);
-        if (!cands.length) {
+        /* Cars this reading may be filed FOR, as opposed to entries it may be
+           attached to. Two electric cars on one box and a cloud polled every
+           few hours produce real charges that no entry covers — before
+           v3.0.150 the picker then had nothing to offer at all. */
+        var autos = (d.vehicles || []);
+        if (!cands.length && !autos.length) {
             out.innerHTML = '<div class="alert alert-secondary py-2 small">' +
                 esc(T.none) + '</div>';
             return;
@@ -4576,6 +4593,12 @@
                     esc(String(c.hour).padStart(2, '0')) + ':00 · ' +
                     esc(Number(c.kwh_loaded || 0).toFixed(1)) + ' kWh</button>';
             }).join('') +
+            autos.map(function (a) {
+                return '<button type="button" class="btn btn-sm btn-outline-success mb-1 wbPick" ' +
+                    'data-reading="' + esc(id) + '" data-charge="new" ' +
+                    'data-vehicle="' + esc(a.vehicle_id) + '">' +
+                    esc(String(T.file_for).replace('%s', a.vehicle)) + '</button>';
+            }).join('') +
             '<button type="button" class="btn btn-sm btn-outline-secondary mt-1 wbPick" ' +
             'data-reading="' + esc(id) + '" data-charge="">' + esc(T.detach) + '</button></div>';
     });
@@ -4583,11 +4606,17 @@
     document.addEventListener('click', async function (e) {
         var b = e.target.closest ? e.target.closest('.wbPick') : null;
         if (!b) return;
-        await fetch('/api/wallbox/assign', {
+        var r = await fetch('/api/wallbox/assign', {
             method: 'POST', headers: {'Content-Type': 'application/json'},
             body: JSON.stringify({reading_id: b.dataset.reading,
-                                  charge_id: b.dataset.charge || null})
+                                  charge_id: b.dataset.charge || null,
+                                  vehicle_id: b.dataset.vehicle || null})
         });
+        /* 🔴 A refusal used to reload the page as if it had worked, so the
+           reading simply stayed where it was with no word about why. The
+           server answers with a reason; it belongs in front of the owner. */
+        var d2 = await r.json().catch(function () { return {ok: false}; });
+        if (!d2.ok) { box(esc(d2.error || ''), 'danger'); return; }
         location.reload();
     });
 

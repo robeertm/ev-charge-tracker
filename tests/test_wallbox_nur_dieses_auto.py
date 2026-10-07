@@ -87,19 +87,20 @@ def _app():
     return app, ctx
 
 
-def _auto(exklusiv=False, batterie=58.0):
+def _auto(exklusiv=False, batterie=58.0, name='Probewagen', box='',
+          gebunden=True):
     M = _m()
-    v = M.Vehicle(name='Probewagen', battery_kwh=batterie,
-                  wallbox_link_enabled=True, wallbox_device_key='',
+    v = M.Vehicle(name=name, battery_kwh=batterie,
+                  wallbox_link_enabled=gebunden, wallbox_device_key=box,
                   wallbox_exclusive=exklusiv)
     M.db.session.add(v)
     M.db.session.commit()
     return v
 
 
-def _messung(vid=None):
+def _messung(vid=None, sid='s1'):
     M = _m()
-    wc = M.WallboxCharge(device_key='wallbox', source_id='s1',
+    wc = M.WallboxCharge(device_key='wallbox', source_id=sid,
                          start_ts=int(FENSTER_AN.timestamp()),
                          end_ts=int(FENSTER_AUS.timestamp()),
                          energy_kwh=3.73, vehicle_id=vid)
@@ -251,3 +252,148 @@ def test_08_weg_B_schlaegt_weg_C_wenn_beides_zutraefe():
                'stood at home' in (L.beleg_fuer_dieses_auto(wc, v, 90) or ''), True)
     finally:
         ctx.pop()
+
+
+# ── Weg C tritt zurueck, sobald ein zweites Auto im Haushalt steht ────────
+#
+# Der Haken sagt einen Satz ueber die BOX: „hier haengt nie ein anderes Auto".
+# Bekommt der Haushalt ein zweites Elektroauto, ist der Satz falsch — und der
+# Besitzer darf nicht darauf angewiesen sein, daran zu denken, ihn beim ERSTEN
+# Auto zurueckzunehmen. Darum wird er bei jedem Durchgang gegen die Flotte
+# gehalten, nicht gegen die Erinnerung von damals.
+
+def test_09_ein_zweites_auto_in_der_flotte_setzt_weg_C_aus():
+    """Der Fall, der kommt: zweites Elektroauto, gleiche Wallbox."""
+    app, ctx = _app()
+    try:
+        v = _auto(exklusiv=True, name='Erstwagen')
+        _auto(name='Zweitwagen')
+        wc = _messung()
+        _sync(v, FENSTER_AN - timedelta(minutes=53), 70, 34506, ort=None)
+        _sync(v, FENSTER_AUS + timedelta(minutes=6), 70, 34525, ort=HEIM)
+        pruefe('zweites Auto -> Weg C schweigt',
+               L.beleg_fuer_dieses_auto(wc, v, 90), None)
+    finally:
+        ctx.pop()
+
+
+def test_10_ein_zweites_auto_mit_GESETZTEM_haken_aendert_daran_nichts():
+    """🔴 Der Haken des anderen Autos ist kein Gegenbeweis, sondern derselbe
+    falsche Satz zweimal. Beide muessen schweigen, nicht sich aufheben."""
+    app, ctx = _app()
+    try:
+        v = _auto(exklusiv=True, name='Erstwagen')
+        z = _auto(exklusiv=True, name='Zweitwagen')
+        wc = _messung()
+        pruefe('Erstwagen schweigt', L.beleg_fuer_dieses_auto(wc, v, 90), None)
+        pruefe('Zweitwagen schweigt', L.beleg_fuer_dieses_auto(wc, z, 90), None)
+    finally:
+        ctx.pop()
+
+
+def test_11_ein_zweites_auto_OHNE_bindung_zaehlt_trotzdem():
+    """🔴 Der gefaehrlichste Fall, und der wahrscheinlichste.
+
+    ``wallbox_link_enabled`` sagt, ob wir fuer dieses Auto Messungen holen —
+    nicht, wo es laedt. Wer das zweite Auto eintraegt und den Schalter noch
+    nicht umgelegt hat, haette sonst dessen Kilowattstunden beim ersten Auto
+    stehen, und niemandem waere es aufgefallen. Ein nie befragtes Auto gilt
+    deshalb als Mitbewerber.
+    """
+    app, ctx = _app()
+    try:
+        v = _auto(exklusiv=True, name='Erstwagen')
+        _auto(name='Zweitwagen', gebunden=False)
+        wc = _messung()
+        pruefe('ungebundenes zweites Auto -> Weg C schweigt',
+               L.beleg_fuer_dieses_auto(wc, v, 90), None)
+    finally:
+        ctx.pop()
+
+
+def test_12_ein_zweites_auto_an_EINER_ANDEREN_box_zaehlt_nicht():
+    """Gegenprobe: hier hat der Besitzer gesagt, wo das zweite Auto laedt.
+    Das ist eine Aussage und kein Schweigen — Weg C bleibt gueltig."""
+    app, ctx = _app()
+    try:
+        v = _auto(exklusiv=True, name='Erstwagen', box='wallbox')
+        _auto(name='Zweitwagen', box='garage-hinten')
+        wc = _messung()
+        pruefe('andere Box -> Weg C greift weiter',
+               bool(L.beleg_fuer_dieses_auto(wc, v, 90)), True)
+    finally:
+        ctx.pop()
+
+
+def test_13_ein_zweites_auto_das_im_fenster_WOANDERS_war_zaehlt_nicht():
+    """Die zweite Gegenprobe: wer nachweislich nicht da war, ist kein
+    Mitbewerber. Gemessen, nicht erklaert."""
+    app, ctx = _app()
+    try:
+        v = _auto(exklusiv=True, name='Erstwagen')
+        z = _auto(name='Zweitwagen')
+        wc = _messung()
+        _sync(z, FENSTER_AN + timedelta(minutes=10), 55, 8000, ort=ARBEIT)
+        pruefe('nachweislich weg -> Weg C greift weiter',
+               bool(L.beleg_fuer_dieses_auto(wc, v, 90)), True)
+    finally:
+        ctx.pop()
+
+
+def test_14_ein_zweites_auto_das_im_fenster_ZUHAUSE_war_zaehlt_sehr_wohl():
+    """Und die Umkehrung davon, damit 13 nicht aus dem falschen Grund gruen
+    ist: ein Abruf, der das zweite Auto zu Hause zeigt, ist der Mitbewerber
+    in seiner deutlichsten Form."""
+    app, ctx = _app()
+    try:
+        v = _auto(exklusiv=True, name='Erstwagen')
+        z = _auto(name='Zweitwagen')
+        wc = _messung()
+        _sync(z, FENSTER_AN + timedelta(minutes=10), 55, 8000, ort=HEIM)
+        pruefe('zweites Auto war hier -> Weg C schweigt',
+               L.beleg_fuer_dieses_auto(wc, v, 90), None)
+    finally:
+        ctx.pop()
+
+
+# ── Und was an die Stelle von Weg C tritt: der Besitzer sagt es ───────────
+
+def test_15_der_besitzer_kann_die_messung_selbst_einem_auto_zuschreiben():
+    """Weg C zieht sich zurueck — dafuer darf gefragt werden.
+
+    Vorher liess sich eine Messung nur an eine BESTEHENDE Ladung haengen, was
+    genau in dem Fall nicht hilft, in dem es keine gibt.
+    """
+    app, ctx = _app()
+    try:
+        v = _auto(name='Erstwagen')
+        _auto(name='Zweitwagen')
+        wc = _messung()
+        c, grund = L.auf_wunsch_anlegen(wc, v, {'tolerance_min': 90})
+        pruefe('Ladung angelegt', c is not None, True)
+        pruefe('fuer das genannte Auto', c.vehicle_id, v.id)
+        pruefe('mit der gemessenen Energie', c.kwh_loaded, 3.73)
+        pruefe('Ladestand bleibt leer', c.soc_from, None)
+        pruefe('und der Grund nennt den Besitzer', 'owner' in grund, True)
+    finally:
+        ctx.pop()
+
+
+def test_16_auch_der_besitzer_legt_keine_zweite_ladung_fuers_fenster_an():
+    """🔑 Sein Wort ersetzt den BEWEIS, nicht die Plausibilitaet. Ein Doppel
+    wird von keiner Entscheidung richtig — der Fall, der auf einem laufenden
+    System zwei Ladungen von Hand loeschen liess."""
+    app, ctx = _app()
+    try:
+        v = _auto(name='Erstwagen')
+        wc = _messung()
+        c1, _ = L.auf_wunsch_anlegen(wc, v, {'tolerance_min': 90})
+        _m().db.session.commit()
+        pruefe('die erste entsteht', c1 is not None, True)
+        wc2 = _messung(sid='s2')
+        c2, grund = L.auf_wunsch_anlegen(wc2, v, {'tolerance_min': 90})
+        pruefe('die zweite nicht', c2, None)
+        pruefe('und der Grund sagt warum', 'already filed' in grund, True)
+    finally:
+        ctx.pop()
+

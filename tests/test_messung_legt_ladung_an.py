@@ -290,14 +290,47 @@ def test_10_nicht_zuhause_ist_kein_beleg():
     ctx.pop()
 
 
-def test_11_zwei_autos_an_einer_box_werden_nicht_geraten():
-    print("== Zwei gebundene Autos: niemand raet ==")
+def test_11_zwei_autos_an_einer_box_und_nur_eines_hat_geladen():
+    """🔴 Bis v3.0.149 lehnte dieser Weg ab, SOBALD ein zweites Auto an der Box
+    haengt — ohne zu fragen, welches geladen hat. Das ist die falsche Frage:
+    hier meldet Auto 1 im Fenster ``is_charging``, und Auto 2 hat ueberhaupt
+    keine Daten. Da ist nichts zu raten, und ein Haushalt, der ein zweites
+    Elektroauto bekommt, verlor den ganzen Weg ueber Nacht.
+
+    Die Probe hiess vorher „werden nicht geraten" und pruefte einen Fall, in
+    dem nichts zu raten war. Der echte Mehrdeutigkeitsfall steht in 11b.
+    """
+    print("== Zwei Autos an einer Box, eines hat belegbar geladen ==")
     app, ctx, v, wc = _der_echte_fall()
-    _car(name='Zweitwagen', key='wallbox')
+    zweit = _car(name='Zweitwagen', key='wallbox')
+    tally = L.match_all(device_key='wallbox')
+    pruefe("angelegt", tally.get('created', 0) or 0, 1)
+    pruefe("und zwar fuer das Auto, das es gemeldet hat",
+           Charge.query.one().vehicle_id, v.id)
+    pruefe("nicht fuer das andere", Charge.query.filter_by(
+        vehicle_id=zweit.id).count(), 0)
+    ctx.pop()
+
+
+def test_11b_zwei_autos_die_BEIDE_geladen_haben_werden_nicht_geraten():
+    """Der echte Mehrdeutigkeitsfall: beide melden im Fenster ``is_charging``.
+
+    Eine Wallbox misst Energie, sie sieht keine Autos. Zwei Belege sind hier
+    kein doppelter Beweis, sondern gar keiner — und raten hiesse, die
+    Kilowattstunden des einen in die Kosten des anderen zu schreiben.
+    """
+    print("== Zwei Autos, beide belegt: niemand raet ==")
+    app, ctx, v, wc = _der_echte_fall()
+    zweit = _car(name='Zweitwagen', key='wallbox')
+    _sync(zweit, _t(16, 50), 40, 8000, laedt=True, kw=2.0)
     tally = L.match_all(device_key='wallbox')
     pruefe("nichts angelegt", tally.get('created', 0) or 0, 0)
+    pruefe("keine Ladung entstanden", Charge.query.count(), 0)
     pruefe("und der Grund sagt es",
            'more than one car' in (wc.match_note or ''), True)
+    pruefe("er nennt beide Autos",
+           'Testwagen' in (wc.match_note or '')
+           and 'Zweitwagen' in (wc.match_note or ''), True)
     ctx.pop()
 
 
