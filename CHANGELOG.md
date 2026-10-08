@@ -1,5 +1,36 @@
 # Changelog
 
+## v3.0.151 (2026-10-08)
+
+### A GPS timestamp was relabelled instead of converted
+
+Where a car's API hands over the time of its last position fix as a
+timezone-aware value, that value was stripped of its timezone rather than
+converted to local time. The clock reading stayed as it was, so a fix taken in
+UTC became a "local" time exactly the UTC offset too early — two hours in
+summer, one in winter.
+
+Nothing downstream could tell. Every reader that measures how old a fix is then
+measured it as that much older than it is, and a fix older than half an hour is
+treated as unusable. The parking log therefore filed the sentinel entry for "no
+usable position" instead of the place the car was actually standing — most
+reliably for cars that are polled rarely, because there the affected reading is
+more often the only one at the moment a stay begins or ends.
+
+Measured across three live installs whose SDK returns aware timestamps: the
+computed age of those rows was 120.0 to 120.1 minutes, to the tenth of a minute
+and without the spread a real delay would have. On the install polled least
+often, four of nine stays recorded since the last release carried the sentinel
+instead of a location; its overnight stay at home was lost every night. A car
+whose API supplies no timestamp at all was never affected, which is why this
+stayed hidden.
+
+The conversion now happens before the timezone is dropped. On a value that
+carries no timezone this is a no-op, so rows that were already correct are
+untouched, and nothing depends on a fixed number of hours: the eight new tests
+set the timezone themselves and cover summer, winter and a machine running in
+UTC.
+
 ## v3.0.150 (2026-10-07)
 
 ### A second electric car on the same wallbox

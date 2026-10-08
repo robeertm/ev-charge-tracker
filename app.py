@@ -1488,12 +1488,25 @@ def _extract_location_last_updated(status, raw_json):
     """
     ts = getattr(status, 'location_last_updated_at', None)
     if isinstance(ts, datetime):
-        # Strip tzinfo — all downstream datetimes in this app are naive local.
-        return ts.replace(tzinfo=None) if ts.tzinfo else ts
+        # 🔴 v3.0.151: this used to be a bare ``replace(tzinfo=None)``. That
+        # drops the LABEL without converting the clock, so an aware UTC
+        # timestamp became a "local" time that is exactly the UTC offset too
+        # early — two hours in summer, one in winter. Every reader downstream
+        # then measured a GPS fix as that much older than it is, and the
+        # freshness gate treats a fix older than half an hour as unusable:
+        # the parking hook filed "unknown" at the sentinel coordinate instead
+        # of the place the car was standing. Measured on three live installs
+        # (Kia and Hyundai, whose SDK returns aware timestamps): the age of
+        # those rows was 120.0 min to the tenth of a minute, never a real
+        # spread. The car with no timestamp at all was unaffected, which is
+        # why this hid for so long. ``astimezone()`` converts first, and on a
+        # naive value it is a no-op, so the rows that were already right stay
+        # untouched.
+        return ts.astimezone().replace(tzinfo=None) if ts.tzinfo else ts
     if isinstance(ts, str) and ts:
         try:
             dt = datetime.fromisoformat(ts.replace('Z', '+00:00'))
-            return dt.replace(tzinfo=None) if dt.tzinfo else dt
+            return dt.astimezone().replace(tzinfo=None) if dt.tzinfo else dt
         except ValueError:
             pass
     # Fallback: parse raw JSON
