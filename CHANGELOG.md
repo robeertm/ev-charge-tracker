@@ -1,5 +1,33 @@
 # Changelog
 
+## v3.0.152 (2026-10-08)
+
+### A stay the car has long driven away from is now closed, whatever it is called
+
+The rule that frees a stuck parking event was restricted to the placeholder
+entries written when no usable position is available. That restriction never
+carried any weight. What decides is the odometer: if the newest reading shows
+the car is further on, it did not stay. That is just as true of a stay that
+carries a real address.
+
+Found while checking an install where a backfill had left a named stay open
+since May — superseded by 176 later entries, the car 4661 km further on, and
+still listed as ongoing in every view that reads parking events.
+
+The restriction was never a safeguard either. The odometer test alone protects
+the entry that is genuinely current, because a car that has not moved since the
+entry opened shows a difference of zero. Checked against four live installs
+before the change: exactly one entry was affected and every current one stayed
+open.
+
+The one-off repair runs under its own marker. The earlier, narrower run is
+recorded as done on every existing install, so reusing its marker would have
+meant the widened rule never came round again — a change that does nothing,
+with nothing to show for it.
+
+The function is renamed to match what it now does; a name that promises
+something narrower than the code is the same defect one level up.
+
 ## v3.0.151 (2026-10-08)
 
 ### A GPS timestamp was relabelled instead of converted

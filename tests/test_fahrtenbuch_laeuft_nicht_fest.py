@@ -157,11 +157,11 @@ def test_sperre_greift_genau_unter_der_schwelle():
 def test_platzhalter_wird_durch_kilometerstand_befreit():
     app, ctx = _app()
     try:
-        from services.trips_service import release_stuck_unknown_events
+        from services.trips_service import release_stuck_parking_events
         v = _auto()
         pe = _platzhalter(v.id, odo=91871)
         _sync(v.id, odo=91928)                      # 57 km weitergefahren
-        assert release_stuck_unknown_events() == 1
+        assert release_stuck_parking_events() == 1
         assert _m().ParkingEvent.query.get(pe.id).departed_at is not None
     finally:
         ctx.pop()
@@ -171,25 +171,68 @@ def test_platzhalter_ohne_kilometerbeweis_bleibt_offen():
     """Ein Auto, das wirklich noch dort steht, darf nicht abgeraeumt werden."""
     app, ctx = _app()
     try:
-        from services.trips_service import release_stuck_unknown_events
+        from services.trips_service import release_stuck_parking_events
         v = _auto()
         pe = _platzhalter(v.id, odo=91871)
         _sync(v.id, odo=91871)                      # keinen Meter bewegt
-        assert release_stuck_unknown_events() == 0
+        assert release_stuck_parking_events() == 0
         assert _m().ParkingEvent.query.get(pe.id).departed_at is None
     finally:
         ctx.pop()
 
 
-def test_beschrifteter_parkvorgang_wird_nie_angefasst():
+def test_auch_ein_beschrifteter_parkvorgang_wird_befreit():
+    """🔴 Bis v3.0.151 hiess diese Probe „wird nie angefasst" und hielt damit
+    eine Einschraenkung fest, die nie begruendet war: die Regel galt nur fuer
+    ``label == 'unknown'``.
+
+    Das Etikett sagt, WO das Auto stand — nicht, ob es noch dort steht. Das
+    sagt der Kilometerstand, und der sagt es ueber einen benannten Halt genauso
+    wie ueber einen Platzhalter. Auf einer echten Installation stand deshalb
+    ein Halt mit Adresse seit Mai offen, ueberholt von 176 spaeteren Eintraegen
+    und in jeder Auswertung weiterhin als „laeuft noch" gefuehrt.
+    """
     app, ctx = _app()
     try:
-        from services.trips_service import release_stuck_unknown_events
+        from services.trips_service import release_stuck_parking_events
         v = _auto()
         pe = _platzhalter(v.id, odo=91871, etikett='home')
-        _sync(v.id, odo=91928)
-        assert release_stuck_unknown_events() == 0
+        _sync(v.id, odo=91928)                      # 57 km weitergefahren
+        assert release_stuck_parking_events() == 1
+        assert _m().ParkingEvent.query.get(pe.id).departed_at is not None
+    finally:
+        ctx.pop()
+
+
+def test_ein_beschrifteter_parkvorgang_ohne_kilometerbeweis_bleibt_offen():
+    """🔑 Die Gegenprobe, und zugleich der Grund, warum die Einschraenkung auf
+    'unknown' nie noetig war: der Kilometerstand allein schuetzt den Halt, an
+    dem das Auto wirklich noch steht. Keinen Meter bewegt — bleibt offen."""
+    app, ctx = _app()
+    try:
+        from services.trips_service import release_stuck_parking_events
+        v = _auto()
+        pe = _platzhalter(v.id, odo=91871, etikett='home')
+        _sync(v.id, odo=91871)
+        assert release_stuck_parking_events() == 0
         assert _m().ParkingEvent.query.get(pe.id).departed_at is None
+    finally:
+        ctx.pop()
+
+
+def test_der_juengste_halt_bleibt_offen_auch_wenn_ein_alter_befreit_wird():
+    """Der echte Fall in einem Bild: ein Altlast-Halt und der aktuelle.
+    Genau einer der beiden darf fallen."""
+    app, ctx = _app()
+    try:
+        from services.trips_service import release_stuck_parking_events
+        v = _auto()
+        alt_pe = _platzhalter(v.id, odo=52587, etikett='home')
+        neu_pe = _platzhalter(v.id, odo=57248, etikett='work')
+        _sync(v.id, odo=57248)                      # steht da, wo neu_pe oeffnete
+        assert release_stuck_parking_events() == 1
+        assert _m().ParkingEvent.query.get(alt_pe.id).departed_at is not None
+        assert _m().ParkingEvent.query.get(neu_pe.id).departed_at is None
     finally:
         ctx.pop()
 
@@ -197,13 +240,13 @@ def test_beschrifteter_parkvorgang_wird_nie_angefasst():
 def test_fremdes_fahrzeug_bleibt_unberuehrt():
     app, ctx = _app()
     try:
-        from services.trips_service import release_stuck_unknown_events
+        from services.trips_service import release_stuck_parking_events
         a = _auto(); b = _auto()
         pa = _platzhalter(a.id, odo=100)
         pb = _platzhalter(b.id, odo=200)
         _sync(a.id, odo=180)                        # nur a ist gefahren
         _sync(b.id, odo=200)
-        assert release_stuck_unknown_events() == 1
+        assert release_stuck_parking_events() == 1
         assert _m().ParkingEvent.query.get(pa.id).departed_at is not None
         assert _m().ParkingEvent.query.get(pb.id).departed_at is None
     finally:
@@ -495,3 +538,43 @@ def test_alle_sechs_sprachen_tragen_die_neuen_schluessel():
     basis = mengen['de']
     for lang, m in mengen.items():
         assert m == basis, (lang, sorted(m ^ basis)[:5])
+
+# ── Und die Stelle, an der die Aenderung sonst wirkungslos bliebe ─────────
+
+def test_der_nachtrag_benutzt_eine_EIGENE_marke():
+    """🔑 Der Stolperstein dieser Aenderung.
+
+    Der Aufruf haengt an einer einmaligen Marke in ``app_config``. Die des
+    engeren Laufs steht auf jeder bestehenden Installation laengst auf 'done'
+    — haette die erweiterte Regel dieselbe Marke benutzt, waere sie nie wieder
+    vorbeigekommen und die ganze Aenderung waere ein Nulldurchgang gewesen,
+    ohne dass irgendetwas rot wird.
+    """
+    import inspect
+    import app as appmod
+    q = inspect.getsource(appmod)
+    # 🔴 Erst mit einem Zeichenfenster um den Aufruf herum versucht — das misst
+    # die Laenge der Kommentare, nicht den Code, und war prompt rot. Jetzt am
+    # CODE verankert: von der Wachzeile bis zum naechsten `if AppConfig.get(`.
+    wache = "if AppConfig.get('v3_0_152_stuck_pe_unstick') != 'done':"
+    assert wache in q, 'der Nachtrag haengt nicht an einer eigenen Marke'
+    rest = q[q.index(wache) + len(wache):]
+    ende = rest.find('if AppConfig.get(')
+    block = rest if ende < 0 else rest[:ende]
+    assert 'release_stuck_parking_events' in block, \
+        'unter dieser Marke wird die Regel gar nicht gerufen'
+    assert "AppConfig.set('v3_0_152_stuck_pe_unstick', 'done')" in block, \
+        'die Marke wird nicht gesetzt — der Nachtrag liefe bei jedem Start'
+    assert 'v3_0_144_unknown_pe_unstick' not in block, \
+        'die alte Marke steht noch im neuen Block'
+
+
+def test_es_gibt_nur_noch_einen_namen_fuer_die_regel():
+    """Ein Name, der etwas anderes verspricht als der Code tut, ist die
+    Fehlerklasse dieser Woche. Der alte Name darf nirgends mehr stehen."""
+    import inspect
+    import app as appmod
+    import services.trips_service as ts
+    for modul in (appmod, ts):
+        assert 'release_stuck_unknown_events' not in inspect.getsource(modul), \
+            'alter Name noch vorhanden in %s' % modul.__name__

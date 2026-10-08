@@ -557,21 +557,26 @@ def create_app(config_class=Config):
         # trips_service auch tut. Ohne Odo-Beweis bleibt er offen: ein
         # Platzhalter fuer ein Auto, das wirklich noch dort steht, darf
         # nicht abgeraeumt werden.
-        if AppConfig.get('v3_0_144_unknown_pe_unstick') != 'done':
+        #
+        # 🔴 v3.0.152: dieselbe Regel, nur ohne die Einschraenkung auf
+        # 'unknown' — siehe ``release_stuck_parking_events``. Das braucht eine
+        # EIGENE Marke: die alte steht auf jeder Installation laengst auf
+        # 'done', der Lauf kaeme sonst nie wieder vorbei. Die alte Marke bleibt
+        # stehen, sie ist der Nachweis, dass der engere Lauf stattgefunden hat.
+        if AppConfig.get('v3_0_152_stuck_pe_unstick') != 'done':
             try:
                 from services.trips_service import (
-                    release_stuck_unknown_events as _release_stuck,
+                    release_stuck_parking_events as _release_stuck,
                 )
                 _befreit = _release_stuck()
-                AppConfig.set('v3_0_144_unknown_pe_unstick', 'done')
+                AppConfig.set('v3_0_152_stuck_pe_unstick', 'done')
                 if _befreit:
                     logger.info(
-                        "v3.0.144: released %d stuck 'unknown' parking "
-                        "event(s) (odometer proved the car moved on)"
-                        % _befreit
+                        "v3.0.152: released %d stuck parking event(s) "
+                        "(odometer proved the car moved on)" % _befreit
                     )
             except Exception as _e:
-                logger.warning(f"v3.0.144 unknown-PE unstick failed: {_e}")
+                logger.warning(f"v3.0.152 stuck-PE unstick failed: {_e}")
 
         # ── v3.0.146: die Luecke im Fahrtenbuch aus den Rohdaten fuellen ──
         # Wenn das Buch an einem Punkt stehengeblieben ist, liegen die Fahrten

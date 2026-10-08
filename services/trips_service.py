@@ -558,8 +558,8 @@ def update_parking_from_sync(sync) -> Optional[ParkingEvent]:
     return open_evt
 
 
-def release_stuck_unknown_events(vehicle_id=None) -> int:
-    """Close ``unknown`` placeholder PEs that can never be upgraded again.
+def release_stuck_parking_events(vehicle_id=None) -> int:
+    """Close open parking events the car has provably driven away from.
 
     A placeholder opened by :func:`_open_unknown` carries sentinel coords and
     waits for a sync with *fresh* GPS to stamp the real location onto it. When
@@ -568,16 +568,28 @@ def release_stuck_unknown_events(vehicle_id=None) -> int:
     forever, and because it is the open PE the whole trip log stops there.
 
     The odometer is the way out: if the newest sync shows the car has driven
-    on, the placeholder provably belongs to the past and is closed at its
-    ``last_seen_at``. Without that proof it stays open — a placeholder for a
-    car that really is still standing there must not be swept away.
+    on, the event provably belongs to the past and is closed at its
+    ``last_seen_at``. Without that proof it stays open — an event for a car
+    that really is still standing there must not be swept away.
+
+    🔴 v3.0.152: until now this was restricted to ``label == 'unknown'``, and
+    that restriction never carried any weight. The odometer is what decides,
+    and it says the same thing about a stay that carries a real address: the
+    car is 4661 km further on, so it did not stay. Measured on a live install
+    whose backfill left a named stay open from May — superseded by 176 later
+    events and still shown as ongoing. The label describes WHERE the car
+    stood, not whether it is still there.
+
+    Note the restriction was never a safeguard either: the odometer test alone
+    protects the genuinely current event, because a car that has not moved
+    since the event opened shows a difference of zero. Checked across four
+    live installs before the change: exactly one event was affected, and every
+    current one stayed open.
 
     Returns the number of events closed.
     """
     from models.database import VehicleSync
-    q = (ParkingEvent.query
-         .filter(ParkingEvent.departed_at.is_(None))
-         .filter(ParkingEvent.label == 'unknown'))
+    q = ParkingEvent.query.filter(ParkingEvent.departed_at.is_(None))
     if vehicle_id is not None:
         q = q.filter(ParkingEvent.vehicle_id == vehicle_id)
     befreit = 0
