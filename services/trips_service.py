@@ -117,6 +117,37 @@ def _classify_location(lat: float, lon: float, locations=None):
     return ('other', None)
 
 
+def _abfahrt_anker(open_evt, sync):
+    """Die Abfahrtszeit fuer einen Halt, den der Kilometerstand beendet.
+
+    Erste Wahl ist ``last_seen_at``: der letzte Zeitpunkt, zu dem das Auto an
+    diesem Halt BELEGT war. Das unterschaetzt die Standzeit nie und wird von
+    einer nachgelieferten Koordinate nicht ueber den echten Aufbruch
+    hinausgezogen.
+
+    🔴 v3.0.153: ist ``last_seen_at`` aber nie fortgeschrieben worden, steht es
+    noch auf der Ankunft — und dann ist das Ergebnis ein Halt von null
+    Sekunden. Das ist nie wahr: das Auto wurde zur Ankunft dort gesehen und
+    beim naechsten Mal woanders, es stand also eine positive Zeit da. Im
+    Fahrtenbuch erschien stattdessen eine Fahrt, die in derselben Sekunde
+    ankommt und abfaehrt, und der Halt des Tages war weg.
+
+    🔑 Fehlt die Bestaetigung am Ort, ist der Sync, der die Bewegung beweist,
+    der einzige belegte Anker. Das ueberschaetzt die Standzeit — die Fahrt
+    bekommt dann die Dauer null, und genau diese Abwaegung trifft der
+    Bewegungspfad weiter unten schon immer genauso (``departed_at =
+    sync.timestamp``). Eine Fahrt ohne Dauer ist die gewohnte Form im Buch,
+    ein HALT ohne Dauer war die Ausnahme: einer in 194 Eintraegen.
+    """
+    letzt = getattr(open_evt, 'last_seen_at', None)
+    if letzt is not None and open_evt.arrived_at is not None \
+            and letzt > open_evt.arrived_at:
+        return letzt
+    if getattr(sync, 'timestamp', None) is not None:
+        return sync.timestamp
+    return letzt or open_evt.arrived_at
+
+
 def update_parking_from_sync(sync) -> Optional[ParkingEvent]:
     """Hook called from _save_vehicle_sync after a new sync row is created.
 
@@ -234,7 +265,7 @@ def update_parking_from_sync(sync) -> Optional[ParkingEvent]:
             and (brand == 'hyundai' or not _is_fresh_gps())):
         last_odo = open_evt.odometer_departed or open_evt.odometer_arrived
         if last_odo is not None and sync.odometer_km - last_odo >= 1:
-            open_evt.departed_at = open_evt.last_seen_at or open_evt.arrived_at
+            open_evt.departed_at = _abfahrt_anker(open_evt, sync)
             # Realign arrival/departure SoC with the trip-display derivation
             # (min-in-first-30min for arrival; last sync before departure for
             # departure) now that this PE is closed. The running same-place
@@ -365,7 +396,7 @@ def update_parking_from_sync(sync) -> Optional[ParkingEvent]:
             _odo_pe = open_evt.odometer_departed or open_evt.odometer_arrived
             if (_odo_pe is not None and sync.odometer_km is not None
                     and sync.odometer_km - _odo_pe >= 1):
-                open_evt.departed_at = open_evt.last_seen_at or open_evt.arrived_at
+                open_evt.departed_at = _abfahrt_anker(open_evt, sync)
                 recompute_pe_soc(open_evt)
                 db.session.commit()
                 try:
@@ -379,6 +410,44 @@ def update_parking_from_sync(sync) -> Optional[ParkingEvent]:
                     pass
                 return _open_unknown(sync)
             return open_evt
+        # 🔴 v3.0.153: ein Platzhalter darf nur dann nachtraeglich beschriftet
+        # werden, wenn das Auto in der Zwischenzeit STAND.
+        #
+        # Das Nachbeschriften haelt ``arrived_at`` absichtlich auf dem
+        # Odometer-Anker fest — richtig, solange die Koordinate nur spaeter
+        # EINTRIFFT als die Ankunft. Sie kann aber auch von einem spaeteren
+        # ORT stammen: gemessen wurde ein Platzhalter von 16:39 bei 34629 km,
+        # dessen naechste Koordinate 3 h 16 min spaeter und 36 km weiter kam.
+        # Der Stempel datierte die Ankunft um drei Stunden zurueck und die
+        # Fahrt dazwischen verschwand aus dem Buch.
+        #
+        # 🔑 Beide Waechter oben sind gegen diese Form blind, und zwar aus
+        # Bauart: der Teleport-Waechter vergleicht KOORDINATEN und schweigt
+        # genau dann, wenn der Ort ein anderer ist; der Flip-Waechter liest
+        # ``location_last_updated_at`` und findet bei einem Auto, das nie
+        # einen Zeitstempel schickt, nichts zu vergleichen. Der
+        # Kilometerstand ist von beidem unabhaengig und sagt es trotzdem.
+        #
+        # Dieselbe Begruendung wie in v3.0.145, nur mit dem anderen Ausgang:
+        # dort wird der Koordinate nicht geglaubt, also bleibt der neue Halt
+        # ``unknown``. Hier ist sie frisch und von keinem Waechter
+        # beanstandet — dann darf der neue Halt benannt werden.
+        _odo_platz = open_evt.odometer_departed or open_evt.odometer_arrived
+        if (_odo_platz is not None and sync.odometer_km is not None
+                and sync.odometer_km - _odo_platz >= 1):
+            open_evt.departed_at = _abfahrt_anker(open_evt, sync)
+            recompute_pe_soc(open_evt)
+            db.session.commit()
+            try:
+                from services.vehicle.sync_service import (
+                    request_force_refresh, request_post_move_reconcile,
+                )
+                request_force_refresh(reason='unknown_pe_moved_on',
+                                      vehicle_id=veh_id)
+                request_post_move_reconcile()
+            except Exception:
+                pass
+            return _open_event(sync, new_lat, new_lon)
         _upgrade_unknown(open_evt, sync)
         return open_evt
 
@@ -456,12 +525,32 @@ def update_parking_from_sync(sync) -> Optional[ParkingEvent]:
         # e.g. a 50 % → 45 % Home arrival that was actually the SoC
         # drop across the commute itself. Without a fresh gps_ts we
         # cannot distinguish the two.
-        gps_fresh = (
-            sync.location_last_updated_at is not None
-            and (sync.timestamp - sync.location_last_updated_at).total_seconds() / 60.0
-                <= STALE_GPS_MAX_MIN
-        )
-        if not gps_fresh:
+        # 🔴 v3.0.153: hier stand eine ZWEITE, eigene Frischepruefung, die
+        # ``location_last_updated_at`` schlicht verlangte. v3.0.147 hat die
+        # Frage "traegt DIESER Sync einen Zeitstempel" durch "schickt dieses
+        # Auto je einen" ersetzt — aber nur in ``_is_fresh_gps``. Diese Kopie
+        # blieb streng, und damit war die Behebung fuer ein Auto, dessen Wolke
+        # NIE einen Zeitstempel sendet, an dieser Stelle wirkungslos: der
+        # Zweig kehrte bei jedem Sync sofort zurueck, ``last_seen_at`` und
+        # ``odometer_departed`` wuchsen nie mit.
+        #
+        # Gemessen auf vier Installationen: dort, wo die Wolke Zeitstempel
+        # schickt, wurde ``last_seen_at`` bei 373 von 624, 182 von 283 und
+        # 158 von 326 Haltn fortgeschrieben — auf der Installation ohne
+        # Zeitstempel bei 7 von 194, und 6 davon stammen aus einem Import.
+        #
+        # 🔑 Die Folge war nicht nur ein fehlendes Feld. Die Odometer-Rettung
+        # schliesst einen Halt bei ``last_seen_at or arrived_at``; stand
+        # ``last_seen_at`` nie fort, fallen Ankunft und Abfahrt zusammen und
+        # der Halt hat Dauer null. Im Fahrtenbuch erscheint dann eine Fahrt,
+        # die in derselben Sekunde ankommt und abfaehrt, und die echte Fahrt
+        # des Tages fehlt.
+        #
+        # Es gibt jetzt genau EINE Frischepruefung. Der Echo-Schutz bleibt
+        # voll erhalten: wer sonst Zeitstempel liefert und einen auslaesst,
+        # ist weiter abgewiesen — darum ist die Antwort ``_is_fresh_gps`` und
+        # nicht "Zeitstempel egal".
+        if not _is_fresh_gps():
             return open_evt
 
         # Odometer-jump split: if a fresh-GPS sync lands on the same
@@ -476,7 +565,7 @@ def update_parking_from_sync(sync) -> Optional[ParkingEvent]:
         if (last_odo is not None
                 and sync.odometer_km is not None
                 and sync.odometer_km - last_odo >= 1):
-            open_evt.departed_at = open_evt.last_seen_at or open_evt.arrived_at
+            open_evt.departed_at = _abfahrt_anker(open_evt, sync)
             recompute_pe_soc(open_evt)
             db.session.commit()
             try:
@@ -632,6 +721,157 @@ def _open_event(sync, lat: float, lon: float) -> ParkingEvent:
     db.session.add(evt)
     db.session.commit()
     return evt
+
+
+def repariere_halte_ohne_dauer(vehicle_id=None) -> int:
+    """Einen Halt, der zu Dauer null zusammengefallen ist, am Beweis aufziehen.
+
+    Hinterlassenschaft der zweiten Frischepruefung (siehe v3.0.153 in
+    ``update_parking_from_sync``): stand ``last_seen_at`` nie fort, schloss die
+    Odometer-Rettung den Halt auf seine eigene Ankunftszeit. Im Fahrtenbuch
+    steht dann eine Fahrt, die in derselben Sekunde ankommt und abfaehrt, und
+    die echte Fahrt des Tages fehlt.
+
+    🔑 Geraten wird nichts. Die Abfahrt wird nur auf einen Sync gesetzt, der
+    das Auto NACHWEISLICH noch an diesem Halt zeigt: dieselbe Koordinate
+    (innerhalb ``SAME_PLACE_M``), derselbe Kilometerstand wie bei der Ankunft,
+    und zeitlich vor dem naechsten Halt desselben Autos. Gibt es keinen
+    solchen Sync, bleibt der Halt unveraendert — ein Halt von null Sekunden
+    kann auch einfach die Wahrheit sein.
+
+    Trockenlauf ueber vier Installationen vor der Aenderung: 79 Halte mit
+    Dauer null, davon 6 mit Beweis (die laengste Korrektur 23 h, die kuerzeste
+    5 s), 73 ohne Beweis und damit unberuehrt.
+
+    Gibt die Zahl der korrigierten Halte zurueck.
+    """
+    from models.database import VehicleSync
+    q = ParkingEvent.query.filter(
+        ParkingEvent.departed_at.isnot(None),
+        ParkingEvent.departed_at == ParkingEvent.arrived_at)
+    if vehicle_id is not None:
+        q = q.filter(ParkingEvent.vehicle_id == vehicle_id)
+    korrigiert = 0
+    for pe in q.order_by(ParkingEvent.arrived_at.asc()).all():
+        if pe.lat is None or pe.lon is None or pe.odometer_arrived is None:
+            continue
+        naechster = (ParkingEvent.query
+                     .filter(ParkingEvent.vehicle_id == pe.vehicle_id,
+                             ParkingEvent.arrived_at > pe.arrived_at)
+                     .order_by(ParkingEvent.arrived_at.asc()).first())
+        sq = (VehicleSync.query
+              .filter(VehicleSync.vehicle_id == pe.vehicle_id,
+                      VehicleSync.timestamp > pe.arrived_at,
+                      VehicleSync.location_lat.isnot(None),
+                      VehicleSync.location_lon.isnot(None),
+                      VehicleSync.odometer_km == pe.odometer_arrived))
+        if naechster is not None:
+            sq = sq.filter(VehicleSync.timestamp < naechster.arrived_at)
+        beweis = None
+        for s in sq.order_by(VehicleSync.timestamp.desc()).all():
+            if _haversine_m(pe.lat, pe.lon, float(s.location_lat),
+                            float(s.location_lon)) <= SAME_PLACE_M:
+                beweis = s
+                break
+        if beweis is None:
+            continue
+        pe.departed_at = beweis.timestamp
+        if pe.last_seen_at is None or beweis.timestamp > pe.last_seen_at:
+            pe.last_seen_at = beweis.timestamp
+        if beweis.odometer_km is not None:
+            pe.odometer_departed = beweis.odometer_km
+        if beweis.soc_percent is not None:
+            pe.soc_departed = beweis.soc_percent
+        recompute_pe_soc(pe)
+        db.session.commit()
+        korrigiert += 1
+    return korrigiert
+
+
+def repariere_zurueckdatierte_ankunft(vehicle_id=None) -> int:
+    """Einen LAUFENDEN Halt, dessen Ort erst viel spaeter eintraf, richtigstellen.
+
+    Hinterlassenschaft des Nachbeschriftens (siehe v3.0.153 in
+    ``update_parking_from_sync``): auf einen Platzhalter wurde eine Koordinate
+    gestempelt, die erst Stunden und Kilometer spaeter kam. Gemessen: Ankunft
+    um 3 h 16 min zurueckdatiert, die Fahrt von 36 km dazwischen fehlte.
+
+    🔴 Bewusst nur der OFFENE Halt, und das ist eine Eigenschaft, keine
+    gewaehlte Zahl. Der Trockenlauf fand dieselbe Form auch auf zwei
+    GESCHLOSSENEN Halten einer anderen Installation — dort mit einem einzigen
+    Kilometer Unterschied. Ein Kilometer ist genau das Rauschband, das dieses
+    Modul anderswo selbst als "keine Bewegung" liest, und die Endpunkte eines
+    geschlossenen Halts sind ausserdem schon am SDK-Fahrtenabgleich
+    ausgerichtet. Sie umzuschreiben waere gegen den Abgleich gearbeitet und
+    waere geraten, nicht repariert. Der laufende Halt dagegen ist von keinem
+    Abgleich beruehrt und sein Fehler wirkt weiter.
+
+    Ergebnis ist genau das, was der korrigierte Code selbst erzeugt haette:
+    der Halt faellt auf einen namenlosen Platzhalter zurueck und wird zu
+    seinem eigenen Zeitpunkt geschlossen, und der benannte Halt beginnt an
+    dem Sync, der das Auto dort zum ersten Mal zeigt.
+
+    Gibt die Zahl der richtiggestellten Halte zurueck.
+    """
+    from models.database import VehicleSync
+    q = ParkingEvent.query.filter(ParkingEvent.departed_at.is_(None))
+    if vehicle_id is not None:
+        q = q.filter(ParkingEvent.vehicle_id == vehicle_id)
+    gerichtet = 0
+    for pe in q.all():
+        if (pe.lat is None or pe.lon is None or pe.odometer_arrived is None
+                or pe.label in (None, 'unknown')):
+            continue
+        if abs(pe.lat) < 1e-9 and abs(pe.lon) < 1e-9:
+            continue                      # Sentinel — kein Ort zum Pruefen
+        erster = None
+        for s in (VehicleSync.query
+                  .filter(VehicleSync.vehicle_id == pe.vehicle_id,
+                          VehicleSync.timestamp >= pe.arrived_at,
+                          VehicleSync.location_lat.isnot(None),
+                          VehicleSync.location_lon.isnot(None))
+                  .order_by(VehicleSync.timestamp.asc()).all()):
+            if _haversine_m(pe.lat, pe.lon, float(s.location_lat),
+                            float(s.location_lon)) <= SAME_PLACE_M:
+                erster = s
+                break
+        if erster is None or erster.timestamp <= pe.arrived_at:
+            continue
+        if (erster.odometer_km is None
+                or erster.odometer_km - pe.odometer_arrived < 1):
+            continue                      # das Auto stand — nichts zu richten
+        # Der benannte Halt beginnt dort, wo das Auto zum ersten Mal belegt ist.
+        neu = ParkingEvent(
+            vehicle_id=pe.vehicle_id,
+            arrived_at=erster.timestamp,
+            last_seen_at=pe.last_seen_at
+                if (pe.last_seen_at and pe.last_seen_at > erster.timestamp)
+                else erster.timestamp,
+            departed_at=None,
+            lat=pe.lat, lon=pe.lon, label=pe.label,
+            favorite_name=pe.favorite_name, address=pe.address,
+            odometer_arrived=erster.odometer_km,
+            odometer_departed=erster.odometer_km,
+            soc_arrived=erster.soc_percent,
+            soc_departed=erster.soc_percent,
+        )
+        # Und der Abschnitt davor faellt auf das zurueck, was er wirklich war:
+        # ein Kilometerstand ohne Ort, geschlossen zu seiner eigenen Zeit.
+        pe.lat = 0.0
+        pe.lon = 0.0
+        pe.label = 'unknown'
+        pe.favorite_name = None
+        pe.address = None
+        pe.departed_at = pe.last_seen_at \
+            if (pe.last_seen_at and pe.last_seen_at < erster.timestamp) \
+            else pe.arrived_at
+        db.session.add(neu)
+        db.session.commit()
+        recompute_pe_soc(pe)
+        recompute_pe_soc(neu)
+        db.session.commit()
+        gerichtet += 1
+    return gerichtet
 
 
 def _open_unknown(sync) -> ParkingEvent:

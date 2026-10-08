@@ -1,5 +1,118 @@
 # Changelog
 
+## v3.0.153 (2026-10-08)
+
+### The trip log needs one freshness rule, not two
+
+A car whose cloud never sends a GPS timestamp lost its trip log. Stays
+collapsed to zero length, one arrival was backdated by more than three hours,
+and the drive in between disappeared from the book.
+
+The cause is a leftover of an earlier correction. That correction replaced the
+question "does THIS reading carry a timestamp" with "does this car ever send
+one", because a missing timestamp is the fingerprint of a re-served cached
+position only for a cloud that normally sends one. For a connector that never
+sends one, the coordinate is all there will ever be, and refusing it buys no
+safety while costing every destination.
+
+It reached one of the two freshness tests. The branch that handles "the car is
+still at the same spot" kept its own, inline copy that demanded a timestamp
+outright, so for such a car it returned at every single reading and the stay's
+"last seen here" time was never advanced. Measured across four installations:
+where the cloud sends timestamps, that time was advanced on 373 of 624, 182 of
+283 and 158 of 326 stays — on the installation without timestamps, on 7 of 194,
+and six of those came from an import.
+
+The consequence was not a missing field. Closing a stay takes its "last seen
+here" time as the departure, so with that time frozen at the arrival, arrival
+and departure fell together: a stay of zero seconds, and in the book a drive
+that arrives and departs in the same second while the day's real drive is gone.
+There is now exactly one freshness rule. The protection against re-served
+positions is fully preserved: a car that normally sends timestamps and skips
+one is still refused.
+
+### A stay never has a duration of zero seconds
+
+The first version of the correction above was not enough, which a replay of the
+previous day's readings showed: there, no reading at all arrived while the car
+stood at the place, so "last seen here" was still the arrival even with one
+freshness rule, and the stay collapsed anyway.
+
+Closing a stay prefers "last seen here", which never underestimates the time
+spent and is not dragged past the real departure by a position delivered later.
+But when that time was never advanced it still equals the arrival, and the
+result is a stay of zero seconds — which is never true: the car was seen there
+on arrival and elsewhere on the next reading, so it stood there for some
+positive time. Without a confirmation at the place, the reading that proves the
+movement is the only anchor there is. That overestimates the time spent and
+leaves the drive with no duration, which is exactly the trade-off the motion
+path has always made the same way. A drive without duration is the familiar
+shape in the book; a STAY without duration was the exception — one in 194
+entries. All four places that close a stay on odometer evidence now share one
+helper for that decision.
+
+### A placeholder is only given a name if the car actually stood there
+
+When no usable position is available, an odometer advance opens a placeholder
+and a later reading with a position fills in the name, deliberately keeping the
+earlier arrival time. That is right while the position merely ARRIVES late. It
+can also come from a later PLACE: measured was a placeholder opened at one
+odometer reading whose next position arrived three hours and 36 kilometres
+later. The stamp backdated the arrival by those three hours and the drive in
+between vanished.
+
+Both existing guards are blind to this shape by construction. One compares
+coordinates and stays silent precisely when the place is a different one; the
+other reads the GPS timestamps that such a car never sends. The odometer is
+independent of both and says it anyway. So when the odometer has advanced since
+the placeholder was opened, the placeholder is closed and a new stay is opened
+at the fresh position instead of being stamped onto the old one.
+
+### What the defect had already left in the book
+
+Fixing the state machine and restoring the entries are two different jobs; the
+second is done by two one-time repairs, each behind its own new marker. A rule
+placed behind a marker that already reads "done" would never come past again.
+
+The first pulls a zero-length stay back onto its evidence: the departure is
+moved to a reading that demonstrably still shows the car at that stay — same
+place, same odometer, and before the next stay began. Without such a reading
+nothing is touched, because a stay of zero seconds can simply be the truth.
+Dry run across four installations beforehand: 79 zero-length stays, 6 with
+evidence (longest correction 23 h, shortest 5 s), 73 untouched.
+
+The second corrects an ongoing stay whose position arrived hours and kilometres
+later, and deliberately only an ongoing one. The same shape was found on two
+CLOSED stays of another installation — there with a single kilometre of
+difference, which is exactly the noise band this code reads elsewhere as "no
+movement", and a closed stay's endpoints are already aligned against the
+manufacturer's own trip data. Rewriting those would be guessing, not repairing.
+Dry run beforehand: one stay affected across four installations, and every
+other ongoing stay stayed as it was.
+
+### Tests
+
+Twenty-two new checks in the shape of the failing installation, nine of them
+counter-checks. Four were red against the uncorrected code and are green now.
+Every guard in the two repairs was then removed one at a time to see which
+check turns red: three guards were covered by no check at all, so three more
+were written. One half of one condition remains deliberately uncovered and says
+so — the code cannot produce that shape.
+
+A guard measures the property the defect hung on rather than a count: outside
+the one freshness function, nothing in the parking hook may decide freshness on
+its own again. It is measured on the syntax tree.
+
+A replay of the previous day's readings against the state before the odometer
+rescue was widened to every brand shows the stay untouched there, and closed
+without collapsing under this version. That is what dates the change on the
+affected installation: the shape that triggers it had occurred five times
+before without consequence.
+
+Full run 395 green / 14 red; baseline 373 green / 14 red, and the red lists are
+identical.
+
+
 ## v3.0.152 (2026-10-08)
 
 ### A stay the car has long driven away from is now closed, whatever it is called

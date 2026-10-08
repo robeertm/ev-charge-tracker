@@ -578,6 +578,47 @@ def create_app(config_class=Config):
             except Exception as _e:
                 logger.warning(f"v3.0.152 stuck-PE unstick failed: {_e}")
 
+        # ── v3.0.153: was die zweite Frischepruefung im Buch hinterlassen hat ──
+        # Die Behebung in ``update_parking_from_sync`` wirkt ab dem naechsten
+        # Sync. Die Halte, die der Fehler schon zusammengefaltet hat, liegen
+        # weiter falsch im Buch — und die Fahrten dazu liegen vollstaendig in
+        # ``vehicle_syncs``. Reparieren und Wiederherstellen sind zwei
+        # Aufgaben; hier die zweite.
+        #
+        # Zwei getrennte Regeln, zwei getrennte Marken — damit die eine nicht
+        # an der anderen haengt, wenn eine davon je erweitert werden muss. Und
+        # beide Marken sind NEU: eine Regel unter einer Marke, die schon auf
+        # 'done' steht, kommt nie wieder vorbei.
+        if AppConfig.get('v3_0_153_halt_ohne_dauer') != 'done':
+            try:
+                from services.trips_service import (
+                    repariere_halte_ohne_dauer as _rep_dauer,
+                )
+                _n = _rep_dauer()
+                AppConfig.set('v3_0_153_halt_ohne_dauer', 'done')
+                if _n:
+                    logger.info(
+                        "v3.0.153: repaired %d zero-length stay(s) from the "
+                        "raw syncs that prove the car was still there" % _n
+                    )
+            except Exception as _e:
+                logger.warning(f"v3.0.153 zero-length-stay repair failed: {_e}")
+
+        if AppConfig.get('v3_0_153_zurueckdatierte_ankunft') != 'done':
+            try:
+                from services.trips_service import (
+                    repariere_zurueckdatierte_ankunft as _rep_ankunft,
+                )
+                _n = _rep_ankunft()
+                AppConfig.set('v3_0_153_zurueckdatierte_ankunft', 'done')
+                if _n:
+                    logger.info(
+                        "v3.0.153: corrected %d ongoing stay(s) whose "
+                        "location arrived hours and kilometres later" % _n
+                    )
+            except Exception as _e:
+                logger.warning(f"v3.0.153 backdated-arrival repair failed: {_e}")
+
         # ── v3.0.146: die Luecke im Fahrtenbuch aus den Rohdaten fuellen ──
         # Wenn das Buch an einem Punkt stehengeblieben ist, liegen die Fahrten
         # danach trotzdem vollstaendig in ``vehicle_syncs`` — Ort, Zeit,
