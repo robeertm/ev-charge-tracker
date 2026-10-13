@@ -110,7 +110,16 @@ class Vehicle(db.Model):
     # capacity above. We store gross only to print it on the battery-health
     # certificate (a buyer expects to see both numbers) and to show the
     # buffer share. NULL = not entered → certificate simply omits it.
+    # v3.0.154: gross is no longer only printed — with it the certificate can
+    # say how much of the hidden buffer may already be spent (see
+    # services/battery_analysis.capacity_picture).
     battery_kwh_gross = db.Column(db.Float)
+    # v3.0.154: cell chemistry key (services/battery_analysis.CHEMISTRIES,
+    # e.g. 'nmc622') and the number of cells in series — the battery page
+    # draws the cells as a block and names the chemistry's top voltage.
+    # Both optional; NULL = not entered.
+    battery_chemistry = db.Column(db.String(16))
+    battery_cells_series = db.Column(db.Integer)
     battery_soh_baseline = db.Column(db.Float)
     battery_co2_per_kwh = db.Column(db.Float)
     max_ac_kw = db.Column(db.Float)
@@ -179,6 +188,8 @@ class Vehicle(db.Model):
             'icon': self.icon,
             'battery_kwh': self.battery_kwh,
             'battery_kwh_gross': self.battery_kwh_gross,
+            'battery_chemistry': self.battery_chemistry,
+            'battery_cells_series': self.battery_cells_series,
             'battery_soh_baseline': self.battery_soh_baseline,
             'battery_co2_per_kwh': self.battery_co2_per_kwh,
             'max_ac_kw': self.max_ac_kw,

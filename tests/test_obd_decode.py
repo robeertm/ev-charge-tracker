@@ -134,6 +134,16 @@ def main():
     check('cell max 4.02', abs(d['cell_max_v'] - 4.02) < 0.001)
     check('cell delta 40 mV', abs(d['cell_delta_mv'] - 40.0) < 0.1)
 
+    # 220105 with filler bytes at 37/38 adds NO phantom cells (synthetic
+    # frame has 0x00 there) — and 0xFF would read 5.10 V, also refused.
+    filler = _mk_2105(); filler[37] = filler[38] = 0xFF
+    f2 = od.decode('kia_hyundai_ext', dict(frames, **{'220105': _frame_lines(filler)}))
+    check('filler 0xFF in 220105: still 96 cells', f2['cell_count'] == 96)
+    plaus = _mk_2105(); plaus[37], plaus[38] = 200, 198
+    f3 = od.decode('kia_hyundai_ext', dict(frames, **{'220105': _frame_lines(plaus)}))
+    check('plausible cells 97/98 appended', f3['cell_count'] == 98
+          and f3['cell_voltages'][96:] == [4.0, 3.96])
+
     # module temps summarised
     check('temp avg from modules', d['temp_avg_c'] is not None)
     check('cell_voltages array present', len(d.get('cell_voltages', [])) == 96)
@@ -266,7 +276,9 @@ def main():
     check('real aux 14.8', abs(rd['aux_battery_v'] - 14.8) < 0.01)
     check('real soh 94.7', abs(rd['soh_pct'] - 94.7) < 0.01)
     check('real display soc 68.0', abs(rd['soc_display_pct'] - 68.0) < 0.01)
-    check('real 96 cells', rd['cell_count'] == 96)
+    # v3.0.154: the 64 kWh pack is 98s — cells 97/98 come from 220105 (BF BF).
+    check('real 98 cells', rd['cell_count'] == 98)
+    check('real cells 97/98 = 3.82 V', rd['cell_voltages'][96:] == [3.82, 3.82])
     check('real cell min 3.82', abs(rd['cell_min_v'] - 3.82) < 0.001)
     check('real cell max 3.84', abs(rd['cell_max_v'] - 3.84) < 0.001)
     check('real cell delta 20 mV', abs(rd['cell_delta_mv'] - 20.0) < 0.5)

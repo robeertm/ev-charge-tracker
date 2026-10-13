@@ -1,5 +1,77 @@
 # Changelog
 
+## v3.0.154 (2026-10-13)
+
+### The battery gets its own pages
+
+The certificate showed the cells as two bar charts — 98 bars of nearly the same
+height say nothing about where a weak cell sits or whether it is weak every
+time. The battery now has its own annex pages:
+
+- **A heat map of every cell**: one tile per cell in a block, its voltage in mV
+  and its colour the deviation from the pack mean. The colour scale never
+  narrows below one BMS step, so an even pack reads as one calm colour instead
+  of noise blown up to full scale. The lowest and highest cells are named by
+  number; cells beyond two standard deviations are listed.
+- **The cells across all reads**: one row per OBD read, one column per cell. A
+  cell that is low once is measuring noise; a cell that is low in every row is
+  the weak cell of the pack.
+- Mean, median, spread, standard deviation, module temperatures, and the BMS's
+  resolution (20 mV per step on Kia/Hyundai). When every cell is level within
+  one step — typical in the middle of the state of charge — the page says so
+  and explains that a read near full or near empty shows more.
+
+### The "measured SoH" only measured the setting
+
+The charge history's coulomb count took `(energy at the wall − loss) / SoC
+window`. But the loss of a charge is filled in as `energy − SoC window ×
+configured capacity`, so the result was the configured capacity again, charge
+after charge. On a real car with four years of metered charges, 284 of 323
+samples came out at exactly 64.00 kWh while the energy per SoC point at the wall
+ranged over 15 %. Such a count is now recognised (most samples sharing one value
+while their raw input scatters) and refused; the certificate says why instead of
+printing a reassuring 100 %.
+
+### What the history can say: the displayed window over the years
+
+Capacity and charging loss cannot be separated from wall energy alone — but a
+CHANGE can be seen. The certificate now takes the energy per displayed 100 % of
+every metered charge (wallbox meter, receipt; auto-detected estimates are left
+out) and compares each half-year with the same half-year of an earlier year,
+for AC and DC separately. Charging in winter costs about 5 % more energy than in
+summer; comparing January with July would measure the weather. On the car above
+the window moved −0.6 % from 2023 to 2026, AC and DC, summer and winter within
+four points of each other.
+
+### Net, gross and the hidden buffer
+
+The gross pack size was printed and otherwise ignored. With it the certificate
+now shows the buffer (gross − net) and turns the window into an honest range:
+the upper end assumes the buffer is untouched (usable ÷ net), the lower end that
+the manufacturer has already spent it to keep the displayed window constant
+(usable ÷ gross). The window alone cannot tell the two apart; the BMS can: with
+its SoH register the gross capacity today is gross × SoH, and what is left of
+the buffer follows. On the car above: register 94.7 %, gross 67.5 → 63.9 kWh
+today against a usable window of ~63.5 kWh — the buffer is almost spent. Without
+an OBD read the headline SoH is the conservative end of the range.
+
+Cell chemistry and cells in series are new optional fields per vehicle.
+
+### Capacity from the BMS's own counters
+
+Two OBD reads at least 25 SoC points apart and at most a week apart now give a
+capacity in Ah straight from the BMS's cumulative charge/discharge counters —
+no wall meter, no loss model. The certificate explains how to take such a pair
+(read after charging to 100 %, drive, read again at ~20 %).
+
+### Cells 97 and 98
+
+The 64 kWh Kia/Hyundai pack is 98s, but the decoder read 96 cells: the last two
+sit in the 220105 reply. They are read now, only where the byte reads as a
+plausible cell voltage, so a smaller pack gets no phantom cells. A decode that
+produced an impossible cell (5.10 V) or SoH (3481.9 %) no longer enters the
+certificate's history.
+
 ## v3.0.153 (2026-10-08)
 
 ### The trip log needs one freshness rule, not two

@@ -60,6 +60,7 @@ from datetime import date, datetime
 from statistics import median
 
 from models.database import Charge, Vehicle, ObdReading
+from services import battery_analysis as BA
 from services.stats_service import (
     get_soh_baseline, get_summary_stats, get_vehicle_history,
     get_ac_dc_stats, _vehicle_field,
@@ -135,6 +136,7 @@ def _measured_capacity(vehicle_id, nominal_kwh):
     lo = CAP_LOW_FRAC * nominal_kwh
     hi = CAP_HIGH_FRAC * nominal_kwh
     samples = []  # (date, capacity_kwh)
+    gross_per_window = []
     for c in q.all():
         window = (c.soc_to or 0) - (c.soc_from or 0)
         if window < MIN_SOC_WINDOW:
@@ -152,12 +154,33 @@ def _measured_capacity(vehicle_id, nominal_kwh):
         if cap < lo or cap > hi:
             continue
         samples.append((c.date, round(cap, 2)))
+        gross_per_window.append(gross / window)
 
     if not samples:
         return None
 
     caps = [s[1] for s in samples]
     med = median(caps)
+
+    # 🔴 THE MEASUREMENT THAT MEASURED THE SETTING (v3.0.154)
+    # ``Charge.calculate_fields`` fills a missing loss as
+    # ``kwh_loaded - soc_charged/100 * battery_kwh`` — so ``net / window`` is
+    # the configured capacity again, charge after charge. On a real car with
+    # four years of metered charges every single sample read 64.00 kWh while
+    # the energy per SoC point at the wall ranged over 15 %. A capacity that
+    # stays constant to the third digit while its raw input scatters is not
+    # a measurement; it is refused here and the certificate says why.
+    # Measured on that car: 284 of 323 samples were 64.00 to the cent, the
+    # rest came from a handful of hand-entered losses — so the test is "most
+    # samples share ONE value", not "all of them".
+    if len(samples) >= 3:
+        from collections import Counter
+        gross_pw = [g for g in gross_per_window if g > 0]
+        dominant, count = Counter(round(c, 2) for c in caps).most_common(1)[0]
+        raw_spread = (max(gross_pw) - min(gross_pw)) / median(gross_pw) if gross_pw else 0
+        if count / len(caps) > 0.5 and raw_spread > 0.02:
+            return {'circular': True, 'capacity_kwh': dominant,
+                    'sample_count': len(samples)}
 
     # SoH is capped at 100 %: a *measured* usable capacity above nominal is a
     # measurement artefact (charging-loss under-counting on legacy rows, ±1 %
@@ -235,6 +258,70 @@ def _latest_obd(vehicle_id):
     }
 
 
+def _obd_reads(vehicle_id):
+    """Every OBD read of the vehicle that is physically plausible, oldest
+    first, as plain dicts — for the cell history, the buffer view and the
+    capacity from the BMS counters.
+
+    🔴 A broken decode must not become a data point: the first Kia read of
+    2026-08-08 decoded to a 5.10 V phantom cell and a SoH of 3481.9 %. Reads
+    with any cell outside the plausible band or a SoH above 110 % are left
+    out (they stay in the database, with their raw frames)."""
+    import json as _json
+    q = ObdReading.query.order_by(ObdReading.timestamp.asc())
+    if vehicle_id is not None:
+        q = q.filter(ObdReading.vehicle_id == vehicle_id)
+    lo, hi = BA_CELL_BAND
+    raus = []
+    for row in q.all():
+        try:
+            cells = _json.loads(row.cell_voltages_json) if row.cell_voltages_json else None
+        except (ValueError, TypeError):
+            cells = None
+        try:
+            temps = _json.loads(row.cell_temps_json) if row.cell_temps_json else None
+        except (ValueError, TypeError):
+            temps = None
+        if cells and any((not isinstance(v, (int, float))) or v < lo or v > hi for v in cells):
+            continue
+        if row.soh_pct is not None and row.soh_pct > 110:
+            continue
+        raus.append({
+            'timestamp': row.timestamp.isoformat() if row.timestamp else None,
+            'profile': row.profile,
+            'soc_bms_pct': row.soc_bms_pct, 'soc_display_pct': row.soc_display_pct,
+            'soh_pct': row.soh_pct, 'pack_voltage_v': row.pack_voltage_v,
+            'cell_max_v': row.cell_max_v, 'cell_min_v': row.cell_min_v,
+            'cumulative_charge_ah': row.cumulative_charge_ah,
+            'cumulative_discharge_ah': row.cumulative_discharge_ah,
+            'cell_voltages': cells, 'cell_temps': temps,
+        })
+    return raus
+
+
+# The same band the decoder uses for optional cells.
+try:
+    from services.vehicle.obd_decode import CELL_PLAUSIBLE as BA_CELL_BAND
+except Exception:  # pragma: no cover - decoder always ships with the app
+    BA_CELL_BAND = (2.5, 4.4)
+
+# Typical charge efficiencies an auto-detected charge may have been filled
+# with — a wall-energy value equal to capacity/one of these is an estimate.
+_EST_EFFICIENCIES = (0.85, 0.88, 0.90, 0.92, 0.95, 1.0)
+
+
+def _window_analysis(vehicle_id, nominal_kwh):
+    """The displayed window over time, from METERED charges only."""
+    q = Charge.query.order_by(Charge.date.asc())
+    if vehicle_id is not None:
+        q = q.filter(Charge.vehicle_id == vehicle_id)
+    samples = BA.window_samples(q.all(), (nominal_kwh,) if nominal_kwh else (),
+                                _EST_EFFICIENCIES)
+    if not samples:
+        return None
+    return BA.window_trend(samples)
+
+
 def compute_battery_health(vehicle_id):
     """Assemble every battery-health metric for one vehicle.
 
@@ -273,10 +360,34 @@ def compute_battery_health(vehicle_id):
 
     # ── Measured SoH (Premium-Test equivalent) ───────────────────────
     measured = _measured_capacity(vehicle_id, nominal_kwh)
+    # A coulomb count that only reproduced the configured capacity is not a
+    # measurement (see _measured_capacity) — keep the fact, drop the figure.
+    measured_circular = bool(measured and measured.get('circular'))
+    if measured_circular:
+        measured = None
+
+    # ── The displayed window over the years, and what it means ──────
+    window = _window_analysis(vehicle_id, nominal_kwh)
 
     # ── OBD/ELM327 cell snapshot (Flash-Test equivalent, direct BMS) ──
     obd = _latest_obd(vehicle_id)
     obd_soh = obd.get('soh_pct') if obd else None
+    if obd_soh is not None and obd_soh > 110:
+        obd_soh = None                    # a broken decode, not a battery
+    reads = _obd_reads(vehicle_id)
+    chem_key, chem_label, chem_nom_v, chem_max_v = BA.chemistry(
+        getattr(vehicle, 'battery_chemistry', None))
+    cells_series = getattr(vehicle, 'battery_cells_series', None)
+    latest_cells = None
+    for rd in reversed(reads):
+        if rd.get('cell_voltages'):
+            latest_cells = rd
+            break
+    capacity = BA.capacity_picture(
+        nominal_kwh, gross_kwh,
+        window.get('change_pct') if window else None, obd_soh)
+    obd_cap = BA.obd_capacity(reads, chem_nom_v, cells_series)
+    buffer_rows = BA.buffer_view(reads, chem_max_v)
 
     # ── Certified headline SoH. Priority:
     #   1. BOTH a solid coulomb-count AND a direct OBD BMS-register read →
@@ -305,6 +416,13 @@ def compute_battery_health(vehicle_id):
     elif obd_soh is not None:
         certified_soh = obd_soh
         certified_source = 'obd'
+    elif capacity and capacity.get('soh_high') is not None:
+        # 🔑 Conservative on purpose: with the gross size known, the lower
+        # bound assumes the hidden buffer is already spent — the displayed
+        # window cannot tell, and a certificate handed to a buyer must not
+        # promise what the data cannot show.
+        certified_soh = capacity.get('soh_low', capacity['soh_high'])
+        certified_source = 'window'
     elif bms['current'] is not None:
         certified_soh = bms['current']
         certified_source = 'bms'
@@ -405,7 +523,20 @@ def compute_battery_health(vehicle_id):
         'grade': {'letter': letter, 'label_key': label_key, 'color': color},
         'bms': bms,
         'measured': measured,
+        'measured_circular': measured_circular,
         'obd': obd,
+        'window': window,
+        'capacity': capacity,
+        'obd_capacity': obd_cap,
+        'buffer_view': buffer_rows,
+        'obd_reads': reads,
+        'cells': {
+            'read': latest_cells,
+            'stats': BA.cell_stats(latest_cells['cell_voltages']) if latest_cells else None,
+            'series_configured': cells_series,
+            'chemistry': {'key': chem_key, 'label': chem_label,
+                          'nominal_v': chem_nom_v, 'max_v': chem_max_v},
+        },
         'expected_soh': expected_soh,
         'vs_benchmark': vs_benchmark,
         'behaviour': {
@@ -481,74 +612,164 @@ def _soh_trend_chart(history, nominal_kwh, tmp_dir):
     return path
 
 
-def _cell_voltage_chart(cell_voltages, tmp_dir):
-    """Render a per-cell voltage + deviation chart to a PNG, or None.
-
-    Two stacked panels sharing the cell axis:
-      * top    — one bar per cell = its absolute voltage, with the pack mean
-                 drawn as a dashed line (y-axis tightened around the spread so
-                 the small differences are actually visible);
-      * bottom — one bar per cell = its deviation from the mean in mV, colour
-                 coded (green ≤10 mV, amber ≤25 mV, red above) so a weak or
-                 runaway cell jumps out. The title also states the worst
-                 deviation in both mV and % of the mean.
-
-    This is the "jede einzelne Zelle mit Spannung und Abweichung" view — the
-    single best imbalance picture the OBD read can give.
-    """
-    cells = [c for c in (cell_voltages or []) if isinstance(c, (int, float))]
-    if len(cells) < 2:
-        return None
+def _mpl():
     try:
         import matplotlib
         matplotlib.use('Agg')
         import matplotlib.pyplot as plt
+        return matplotlib, plt
     except ImportError:
+        return None, None
+
+
+def _short_ts(iso):
+    try:
+        return datetime.fromisoformat(str(iso)[:19]).strftime('%d.%m.%y %H:%M')
+    except ValueError:
+        return str(iso or '')[:16]
+
+
+def _cell_heatmap(voltages, stats, tmp_dir, title, resolution_mv=None):
+    """Every cell as a tile in a block — colour = deviation from the pack
+    mean, text = cell number and voltage in mV.
+
+    🔑 A HEAT MAP, not bars: 98 bars of 3.82 V are 98 identical lines; a
+    block shows at one glance whether the weak cells cluster (one module, one
+    corner of the pack) or scatter. The colour scale is symmetric around the
+    mean and never narrower than one BMS step, so a perfectly even pack reads
+    as one calm colour instead of noise blown up to full scale.
+    """
+    mpl, plt = _mpl()
+    if not plt or not stats:
         return None
+    import numpy as np
+    n = stats['n']
+    cols = BA.grid_columns(n)
+    rows = -(-n // cols)
+    dev = np.full((rows, cols), np.nan)
+    for i, d in enumerate(stats['deviation_mv']):
+        dev[i // cols, i % cols] = d
+    step = resolution_mv or stats.get('resolution_mv') or 20.0
+    lim = max(max(abs(d) for d in stats['deviation_mv']), step)
+    cmap = mpl.colormaps['RdBu_r'].with_extremes(bad='#eeeeee')
+    fig, ax = plt.subplots(figsize=(7.4, 0.56 * rows + 1.5))
+    im = ax.imshow(dev, cmap=cmap, vmin=-lim, vmax=lim, aspect='auto')
+    for i, v in enumerate(voltages):
+        rr, cc = i // cols, i % cols
+        # On a strong tile dark text disappears — white there.
+        kraeftig = abs(stats['deviation_mv'][i]) / lim > 0.55
+        ax.text(cc, rr - 0.22, str(i + 1), ha='center', va='center',
+                fontsize=5, color='#f0f0f0' if kraeftig else '#555555')
+        ax.text(cc, rr + 0.16, '%.0f' % (v * 1000), ha='center', va='center',
+                fontsize=6.2, fontweight='bold', color='white' if kraeftig else '#222222')
+    if not stats['all_equal']:
+        # Framed only when they are few: 17 cells sharing the top value are a
+        # plateau, and framing "the first six" of them would point at nothing.
+        for idx_list, col in ((stats['min_cells'], '#0d47a1'), (stats['max_cells'], '#b71c1c')):
+            if len(idx_list) > 6:
+                continue
+            for c in idx_list:
+                rr, cc = (c - 1) // cols, (c - 1) % cols
+                ax.add_patch(mpl.patches.Rectangle((cc - 0.5, rr - 0.5), 1, 1, fill=False,
+                                                   edgecolor=col, linewidth=1.8))
+    ax.set_xticks(np.arange(-0.5, cols, 1), minor=True)
+    ax.set_yticks(np.arange(-0.5, rows, 1), minor=True)
+    ax.grid(which='minor', color='white', linewidth=1.4)
+    ax.tick_params(which='both', bottom=False, left=False, labelbottom=False, labelleft=False)
+    for s in ax.spines.values():
+        s.set_visible(False)
+    ax.set_title(title, fontweight='bold', fontsize=9.5)
+    cb = fig.colorbar(im, ax=ax, orientation='horizontal', fraction=0.06, pad=0.04, aspect=45)
+    cb.set_label(t('cert.cellmap_scale', default='Abweichung vom Mittel (mV) - blau tiefer, rot hoeher'),
+                 fontsize=7)
+    cb.ax.tick_params(labelsize=6.5)
+    path = os.path.join(tmp_dir, 'cert_cellmap.png')
+    fig.savefig(path, dpi=170, bbox_inches='tight', facecolor='white')
+    plt.close(fig)
+    return path
 
-    n = len(cells)
-    mean = sum(cells) / n
-    dev_mv = [(c - mean) * 1000.0 for c in cells]
-    worst_mv = max(abs(d) for d in dev_mv)
-    worst_pct = (worst_mv / 1000.0 / mean * 100.0) if mean else 0.0
-    x = list(range(1, n + 1))
 
-    def _col(d):
-        a = abs(d)
-        return '#2e7d32' if a <= 10 else ('#f9a825' if a <= 25 else '#c62828')
-    bar_cols = [_col(d) for d in dev_mv]
+def _cell_history_heatmap(reads, tmp_dir):
+    """Cells across reads — does the same cell sit low every time?
 
-    fig, (ax1, ax2) = plt.subplots(
-        2, 1, figsize=(7.2, 4.2), sharex=True,
-        gridspec_kw={'height_ratios': [1.15, 1]})
+    One row per read (with its time and SoC), one column per cell, colour =
+    deviation from THAT read's mean. A cell that is low once is noise; a
+    cell that is low in every row is the weak cell. Needs two reads with the
+    same cell count."""
+    mpl, plt = _mpl()
+    if not plt:
+        return None
+    rows = [r for r in reads if r.get('cell_voltages')]
+    if len(rows) < 2:
+        return None
+    n = len(rows[-1]['cell_voltages'])
+    rows = [r for r in rows if len(r['cell_voltages']) == n][-12:]
+    if len(rows) < 2:
+        return None
+    import numpy as np
+    mat = []
+    labels = []
+    for r in rows:
+        cells = r['cell_voltages']
+        m = sum(cells) / n
+        mat.append([(v - m) * 1000.0 for v in cells])
+        soc = r.get('soc_display_pct') if r.get('soc_display_pct') is not None else r.get('soc_bms_pct')
+        labels.append(_short_ts(r['timestamp']) + ('  %.0f %%' % soc if soc is not None else ''))
+    mat = np.array(mat)
+    lim = max(float(np.nanmax(np.abs(mat))), 20.0)
+    fig, ax = plt.subplots(figsize=(7.4, 0.32 * len(rows) + 1.2))
+    im = ax.imshow(mat, cmap='RdBu_r', vmin=-lim, vmax=lim, aspect='auto', interpolation='nearest')
+    ax.set_yticks(range(len(rows)))
+    ax.set_yticklabels(labels, fontsize=6.5)
+    step = 7 if n > 50 else 2
+    ax.set_xticks(range(0, n, step))
+    ax.set_xticklabels([str(i + 1) for i in range(0, n, step)], fontsize=6.5)
+    ax.set_xlabel(t('cert.cellchart_xlabel', default='Zelle'), fontsize=7)
+    ax.set_title(t('cert.cellhist_title', default='Abweichung je Zelle ueber die Auslesungen (mV)'),
+                 fontweight='bold', fontsize=9.5)
+    cb = fig.colorbar(im, ax=ax, fraction=0.025, pad=0.02)
+    cb.ax.tick_params(labelsize=6.5)
+    path = os.path.join(tmp_dir, 'cert_cellhist.png')
+    fig.savefig(path, dpi=160, bbox_inches='tight', facecolor='white')
+    plt.close(fig)
+    return path
 
-    ax1.bar(x, cells, color=bar_cols, width=0.9)
-    lo, hi = min(cells), max(cells)
-    pad = max((hi - lo) * 0.25, 0.01)
-    ax1.set_ylim(lo - pad, hi + pad)
-    ax1.axhline(mean, color='#1565c0', linestyle='--', linewidth=1,
-                label=t('cert.cellchart_mean', default='Mittel {v} V',
-                        v=f'{mean:.3f}'))
-    ax1.set_ylabel('V')
-    ax1.set_title(t('cert.cellchart_title',
-                    default='Zellspannungen je Zelle ({n} Zellen)', n=n),
-                  fontweight='bold', fontsize=10)
-    ax1.grid(True, axis='y', alpha=0.3)
-    ax1.legend(fontsize=7, loc='lower right')
 
-    ax2.bar(x, dev_mv, color=bar_cols, width=0.9)
-    ax2.axhline(0, color='#666', linewidth=0.8)
-    ax2.set_ylabel('mV')
-    ax2.set_xlabel(t('cert.cellchart_xlabel', default='Zelle'))
-    ax2.set_title(t('cert.cellchart_dev_title',
-                    default='Abweichung vom Mittel (max +/-{mv} mV / +/-{pct} %)',
-                    mv=f'{worst_mv:.0f}', pct=f'{worst_pct:.2f}'),
-                  fontweight='bold', fontsize=9)
-    ax2.grid(True, axis='y', alpha=0.3)
+def _window_chart(window, tmp_dir):
+    """Energy at the wall per displayed 100 %, per half-year, AC and DC.
 
-    path = os.path.join(tmp_dir, 'cert_cells.png')
-    fig.tight_layout()
-    fig.savefig(path, dpi=150, bbox_inches='tight', facecolor='white')
+    Bars are the middle half of the charges (25 %–75 %), the dot their
+    median, the number the charge count. A falling line would be a shrinking
+    window; a saw-tooth between first and second half-year is the season."""
+    mpl, plt = _mpl()
+    if not plt or not window or not window.get('periods'):
+        return None
+    alle = sorted({p['period'] for p in window['periods']})
+    x = {per: i for i, per in enumerate(alle)}
+    fig, ax = plt.subplots(figsize=(7.4, 2.9))
+    for typ, col, off in (('AC', '#1565c0', -0.12), ('DC', '#ef6c00', 0.12)):
+        pts = [p for p in window['periods'] if p['type'] == typ and p['n'] >= 3]
+        if not pts:
+            continue
+        xs = [x[p['period']] + off for p in pts]
+        ax.errorbar(xs, [p['median'] for p in pts],
+                    yerr=[[p['median'] - p['q1'] for p in pts], [p['q3'] - p['median'] for p in pts]],
+                    fmt='o-', color=col, ecolor=col, elinewidth=1, capsize=2, markersize=4,
+                    linewidth=1.2, label=typ)
+        for xx, p in zip(xs, pts):
+            ax.annotate('n=%d' % p['n'], (xx, p['q3']), textcoords='offset points',
+                        xytext=(0, 3), ha='center', fontsize=5.5, color=col)
+    ax.set_xticks(range(len(alle)))
+    ax.set_xticklabels([a.replace('H1', ' I').replace('H2', ' II') for a in alle], fontsize=7)
+    ax.set_ylabel(t('cert.window_axis', default='kWh je 100 % Anzeige'), fontsize=7.5)
+    ax.tick_params(axis='y', labelsize=7)
+    ax.grid(True, axis='y', alpha=0.3)
+    ax.legend(fontsize=7, loc='lower left')
+    ax.set_title(t('cert.window_chart_title',
+                   default='Energie je angezeigtem Vollladen - an der Wand gemessen, je Halbjahr'),
+                 fontweight='bold', fontsize=9.5)
+    path = os.path.join(tmp_dir, 'cert_window.png')
+    fig.savefig(path, dpi=160, bbox_inches='tight', facecolor='white')
     plt.close(fig)
     return path
 
@@ -647,6 +868,254 @@ def _hex_rgb(h):
     return tuple(int(h[i:i + 2], 16) for i in (0, 2, 4))
 
 
+def _halbjahr(period):
+    """'2023H1' → '1. Hj. 2023' (localised)."""
+    if not period or len(period) < 6:
+        return period or '-'
+    return t('cert.half_year', default='{h}. Hj. {y}', h=period[-1], y=period[:4])
+
+
+def _profile_resolution_mv(profile):
+    """The step a BMS reports a single cell in, from the decoder profile —
+    1 byte × 0.02 V is 20 mV. None when unknown."""
+    try:
+        from services.vehicle.obd_decode import PROFILES
+        spec = (PROFILES.get(profile) or {}).get('cells') or []
+        if spec:
+            return round(spec[0]['scale'] * 1000.0, 1)
+    except Exception:
+        pass
+    return None
+
+
+def _abschnitt(pdf, title, need=34):
+    """A section heading that never stands alone at the foot of a page."""
+    if pdf.get_y() + need > pdf.h - 20:
+        pdf.add_page()
+    pdf.section(title)
+
+
+def _para(pdf, text, size=8):
+    pdf.set_font('Helvetica', '', size)
+    pdf.set_text_color(70, 70, 70)
+    pdf.multi_cell(0, 4.2, pdf._clean(text))
+    pdf.ln(1)
+
+
+def _anlage_kopf(pdf, title, sub):
+    pdf.add_page()
+    pdf.set_fill_color(21, 101, 192)
+    pdf.set_text_color(255, 255, 255)
+    pdf.set_font('Helvetica', 'B', 14)
+    pdf.cell(0, 10, pdf._clean(title), fill=True, align='C', new_x='LMARGIN', new_y='NEXT')
+    pdf.set_font('Helvetica', '', 8)
+    pdf.set_fill_color(33, 118, 210)
+    pdf.cell(0, 5.5, pdf._clean(sub), fill=True, align='C', new_x='LMARGIN', new_y='NEXT')
+    pdf.ln(2)
+
+
+def _page_cells(pdf, data, tmp_dir):
+    """Anlage 1 — every cell: a heat map, the statistics, the history."""
+    cells = data.get('cells') or {}
+    stats, read = cells.get('stats'), cells.get('read')
+    if not stats or not read:
+        return
+    chem = cells.get('chemistry') or {}
+    _anlage_kopf(pdf, t('cert.page_cells', default='Anlage 1 - Batterie im Detail: die Zellen'),
+                 t('cert.page_cells_sub', default='Direkt aus dem Batteriemanagement gelesen (OBD / ELM327)'))
+    res_mv = _profile_resolution_mv(read.get('profile')) or stats.get('resolution_mv')
+
+    _abschnitt(pdf, t('cert.cells_read', default='Auslesung'))
+    pdf.kv(t('cert.obd_time', default='Auslesezeitpunkt'), _short_ts(read['timestamp']))
+    soc_parts = []
+    if read.get('soc_display_pct') is not None:
+        soc_parts.append(t('cert.soc_display', default='Anzeige {v:.0f} %', v=read['soc_display_pct']))
+    if read.get('soc_bms_pct') is not None:
+        soc_parts.append(t('cert.soc_bms', default='BMS {v:.1f} %', v=read['soc_bms_pct']))
+    if soc_parts:
+        pdf.kv(t('cert.cells_soc', default='Ladestand'), ' / '.join(soc_parts))
+    cfg = cells.get('series_configured')
+    n_txt = str(stats['n'])
+    if cfg and cfg != stats['n']:
+        n_txt += '  ' + t('cert.cells_mismatch', default='(eingetragen: {c} in Serie)', c=cfg)
+    pdf.kv(t('cert.obd_cells', default='Zellen'), n_txt)
+    if chem.get('label') and chem.get('key') != 'other':
+        chem_txt = chem['label']
+        if chem.get('max_v'):
+            chem_txt += t('cert.chem_max', default='  (Ladeschluss {v:.2f} V je Zelle)', v=chem['max_v'])
+        pdf.kv(t('cert.chemistry', default='Zellchemie'), chem_txt)
+    if res_mv:
+        pdf.kv(t('cert.resolution', default='Aufloesung des BMS'),
+               t('cert.resolution_val', default='{r:.0f} mV je Schritt', r=res_mv))
+
+    title = t('cert.cellmap_title', default='{n} Zellen - Spannung in mV, Farbe = Abweichung vom Mittel',
+              n=stats['n'])
+    img = _cell_heatmap(read['cell_voltages'], stats, tmp_dir, title, res_mv)
+    if img:
+        pdf.ln(1)
+        pdf.image(img, x=(pdf.w - 178) / 2, w=178)
+        pdf.ln(1)
+        _para(pdf, t('cert.cellmap_order',
+                     default='Die Kacheln folgen der Zellnummer des Batteriemanagements, Reihe fuer Reihe - '
+                             'nicht der Einbaulage im Fahrzeug.'), size=7)
+
+    _abschnitt(pdf, t('cert.cells_stats', default='Kennzahlen'))
+
+    def nummern(lst):
+        if len(lst) > 8:
+            return t('cert.cells_many', default='{n} Zellen', n=len(lst))
+        return ', '.join('#%d' % c for c in lst)
+    pdf.kv(t('cert.cells_mean', default='Mittel / Median'),
+           '%.3f / %.3f V' % (stats['mean_v'], stats['median_v']))
+    pdf.kv(t('cert.cells_min', default='Tiefste Zelle'),
+           '%.3f V  (%s)' % (stats['min_v'], nummern(stats['min_cells'])))
+    pdf.kv(t('cert.cells_max', default='Hoechste Zelle'),
+           '%.3f V  (%s)' % (stats['max_v'], nummern(stats['max_cells'])))
+    spread = stats['spread_mv']
+    verdict = (t('cert.obd_spread_ok', default='sehr gut') if spread <= 30
+               else t('cert.obd_spread_mid', default='ok') if spread <= 60
+               else t('cert.obd_spread_bad', default='auffaellig'))
+    pdf.kv(t('cert.obd_spread', default='Zell-Spreizung (max-min)'), '%.0f mV (%s)' % (spread, verdict))
+    pdf.kv(t('cert.cells_std', default='Standardabweichung'), '%.1f mV' % stats['std_mv'])
+    out = stats.get('outliers') or []
+    pdf.kv(t('cert.cells_outliers', default='Auffaellige Zellen (> 2 sigma)'),
+           nummern(out) if out else t('cert.none', default='keine'))
+    temps = read.get('cell_temps') or []
+    if temps:
+        pdf.kv(t('cert.cells_temps', default='Modultemperaturen'),
+               ' / '.join('%g' % v for v in temps) + ' C')
+    if stats['all_equal']:
+        _para(pdf, t('cert.cells_equal_note',
+                     default='Alle Zellen liegen innerhalb eines Messschritts gleich auf. Das ist in der '
+                             'Mitte des Ladestands typisch: dort ist die Spannungskurve flach und das BMS '
+                             'meldet in {r:.0f}-mV-Schritten. Unterschiede zeigen sich bei hohem (ueber 95 %) '
+                             'oder niedrigem (unter 15 %) Ladestand - eine Auslesung dort ist aussagekraeftiger.',
+                     r=res_mv or 20))
+
+    hist = _cell_history_heatmap(data.get('obd_reads') or [], tmp_dir)
+    if hist:
+        if pdf.get_y() + 50 > pdf.h - 20:
+            pdf.add_page()
+        _abschnitt(pdf, t('cert.cells_history', default='Verlauf ueber alle Auslesungen'))
+        pdf.image(hist, x=(pdf.w - 178) / 2, w=178)
+        _para(pdf, t('cert.cells_history_note',
+                     default='Eine Zelle, die einmal tief liegt, ist Messrauschen. Eine Zelle, die in jeder '
+                             'Zeile tief liegt, ist die schwache Zelle des Packs.'))
+
+
+def _page_capacity(pdf, data, tmp_dir):
+    """Anlage 2 — capacity without a lab: the displayed window over the
+    years, net vs. gross, the buffer, and the BMS's own counters."""
+    win = data.get('window')
+    cap = data.get('capacity') or {}
+    obd_cap = data.get('obd_capacity') or []
+    buf = data.get('buffer_view') or []
+    if not win and not cap and not obd_cap and not buf:
+        return
+    _anlage_kopf(pdf, t('cert.page_capacity', default='Anlage 2 - Kapazitaet, Netto, Brutto und Puffer'),
+                 t('cert.page_capacity_sub',
+                   default='Aus den gemessenen Ladungen der ganzen Besitzzeit und den BMS-Zaehlern'))
+
+    if win and win.get('periods'):
+        _abschnitt(pdf, t('cert.window_sec', default='Das angezeigte Fenster ueber die Jahre'))
+        img = _window_chart(win, tmp_dir)
+        if img:
+            pdf.image(img, x=(pdf.w - 178) / 2, w=178)
+            pdf.ln(1)
+        _para(pdf, t('cert.window_method',
+                     default='Gezaehlt werden nur Ladungen mit gemessener Energie (Wallbox-Zaehler, Ladebeleg) '
+                             'und mindestens {w} % SoC-Fenster - {n} Ladungen. Verglichen wird jedes Halbjahr mit '
+                             'demselben Halbjahr eines frueheren Jahres: im Winter kostet Laden mehr Energie, ein '
+                             'Vergleich Januar gegen Juli wuerde das Wetter messen, nicht die Batterie. Der '
+                             'Ladeverlust derselben Wallbox in derselben Jahreszeit aendert sich kaum - aendert '
+                             'sich die Energie je Prozent, hat sich das Fenster geaendert.',
+                     w=BA.MIN_WINDOW, n=win.get('sample_count', 0)))
+        for c in win.get('comparisons') or []:
+            pdf.kv('%s - %s' % (c['type'], t('cert.half_n', default='{h}. Halbjahr', h=c['half'][-1])),
+                   t('cert.window_cmp',
+                     default='{a}: {ra:.1f} kWh (n={na}) -> {b}: {rb:.1f} kWh (n={nb}) = {c:+.1f} %',
+                     a=c['ref_period'][:4], ra=c['ref_median'], na=c['ref_n'],
+                     b=c['last_period'][:4], rb=c['last_median'], nb=c['last_n'], c=c['change_pct']),
+                   lw=40)
+        if win.get('change_pct') is not None:
+            pdf.kv(t('cert.window_total', default='Veraenderung zusammen'),
+                   t('cert.window_total_val', default='{c:+.1f} %  (die Vergleiche liegen {s:.1f} Punkte auseinander)',
+                     c=win['change_pct'], s=win['agreement_pct']), lw=40)
+        else:
+            _para(pdf, t('cert.window_too_few',
+                         default='Noch kein Vergleich moeglich: je Halbjahr braucht es mindestens {n} gemessene '
+                                 'Ladungen in zwei verschiedenen Jahren.', n=BA.MIN_PERIOD_N))
+
+    if cap:
+        _abschnitt(pdf, t('cert.buffer_sec', default='Netto, Brutto und der Puffer'))
+        pdf.kv(t('cert.net', default='Netto (Anzeige 0-100 %)'), '%.1f kWh' % cap['net_kwh'], lw=60)
+        if cap.get('gross_kwh'):
+            pdf.kv(t('cert.gross', default='Brutto (Zellen gesamt)'), '%.1f kWh' % cap['gross_kwh'], lw=60)
+        if cap.get('buffer_kwh'):
+            pdf.kv(t('cert.buffer', default='Verborgener Puffer'),
+                   '%.1f kWh (%.1f %%)' % (cap['buffer_kwh'], cap['buffer_pct']), lw=60)
+        if cap.get('usable_kwh') is not None:
+            pdf.kv(t('cert.usable_now', default='Nutzbar heute (aus dem Fenster)'),
+                   '%.1f kWh' % cap['usable_kwh'], lw=60)
+        if cap.get('soh_low') is not None:
+            pdf.kv(t('cert.soh_range', default='SoH ohne BMS-Wert'),
+                   t('cert.soh_range_val', default='{lo:.1f} % bis {hi:.1f} %', lo=cap['soh_low'], hi=cap['soh_high']),
+                   lw=60)
+            _para(pdf, t('cert.soh_range_note',
+                         default='Oben: der Puffer ist unberuehrt (nutzbar / netto). Unten: der Hersteller hat die '
+                                 'Alterung bereits mit dem Puffer ausgeglichen (nutzbar / brutto). Das angezeigte '
+                                 'Fenster allein kann beides nicht unterscheiden - das kann nur das BMS.'))
+        elif cap.get('soh_high') is not None:
+            pdf.kv(t('cert.soh_window', default='SoH aus dem Fenster'), '%.1f %%' % cap['soh_high'], lw=60)
+            _para(pdf, t('cert.gross_missing',
+                         default='Brutto nicht eingetragen: ohne Bruttogroesse laesst sich nicht sagen, wie viel '
+                                 'Alterung der Puffer schon verdeckt. Eintragen unter Einstellungen > Fahrzeuge.'))
+        if cap.get('gross_now_kwh') is not None:
+            pdf.kv(t('cert.gross_now', default='Brutto heute (BMS-SoH)'),
+                   '%.1f kWh' % cap['gross_now_kwh'], lw=60)
+        if cap.get('buffer_left_kwh') is not None:
+            pdf.kv(t('cert.buffer_left', default='Davon noch Puffer'),
+                   t('cert.buffer_left_val', default='{k:.1f} kWh  (etwa {u:.0f} % des Puffers verbraucht)',
+                     k=max(cap['buffer_left_kwh'], 0.0), u=cap['buffer_used_pct']), lw=60)
+            if cap['buffer_used_pct'] >= 60:
+                _para(pdf, t('cert.buffer_spent_note',
+                             default='Das angezeigte Fenster ist stabil, das BMS zaehlt aber bereits Alterung: sie '
+                                     'wurde mit dem Puffer ausgeglichen. Ist er aufgebraucht, sinkt die nutzbare '
+                                     'Kapazitaet ab jetzt mit jeder weiteren Alterung sichtbar.'))
+
+    _abschnitt(pdf, t('cert.obdcap_sec', default='Kapazitaet aus den BMS-Zaehlern'))
+    if obd_cap:
+        for m in obd_cap[-4:]:
+            val = '%.1f Ah' % m['capacity_ah']
+            if m.get('capacity_kwh'):
+                val += ' / ~%.1f kWh' % m['capacity_kwh']
+            pdf.kv('%s -> %s' % (_short_ts(m['from']), _short_ts(m['to'])[-5:]),
+                   t('cert.obdcap_val', default='{v}  (BMS {a:.0f} -> {b:.0f} %, {ah} Ah)',
+                     v=val, a=m['soc_from'], b=m['soc_to'], ah=m['ah']), lw=48)
+    else:
+        _para(pdf, t('cert.obdcap_howto',
+                     default='Noch keine Messung. So geht sie ohne Labor: einmal direkt nach dem Laden auf 100 % '
+                             'auslesen, dann fahren ohne zu laden und bei etwa 20 % noch einmal auslesen. Das BMS '
+                             'zaehlt dazwischen jede entnommene Amperestunde - geteilt durch die Ladestandspunkte '
+                             'ergibt das die Kapazitaet, ohne jede Annahme ueber Ladeverluste.'))
+
+    if buf:
+        _abschnitt(pdf, t('cert.bufview_sec', default='Der Puffer von aussen: Anzeige gegen BMS'))
+        for b in buf[-6:]:
+            line = t('cert.bufview_row', default='Anzeige {d:.0f} %  /  BMS {b:.1f} %  (Abstand {g:+.1f})',
+                     d=b['display'], b=b['bms'], g=b['gap'])
+            if b.get('cell_max_v'):
+                line += t('cert.bufview_top', default='  -  hoechste Zelle {v:.2f} V', v=b['cell_max_v'])
+                if b.get('headroom_mv') is not None:
+                    line += t('cert.bufview_head', default=' ({h} mV unter Ladeschluss)', h=b['headroom_mv'])
+            pdf.kv(_short_ts(b['timestamp']), line, lw=30)
+        if not any(b['top'] for b in buf):
+            _para(pdf, t('cert.bufview_need_top',
+                         default='Fuer die Frage, ob der Hersteller den Puffer oben oder unten freigibt, fehlt eine '
+                                 'Auslesung bei 100 % Anzeige: bleibt die hoechste Zellspannung dort ueber die Jahre '
+                                 'gleich, wird das Fenster nicht oben verschoben.'))
+
+
 def generate_certificate(vehicle_id):
     """Build the battery-health certificate PDF. Returns bytes or None."""
     data = compute_battery_health(vehicle_id)
@@ -661,8 +1130,6 @@ def generate_certificate(vehicle_id):
 
     tmp_dir = tempfile.mkdtemp()
     chart = _soh_trend_chart(data['history'], data['vehicle']['nominal_kwh'], tmp_dir)
-    cell_chart = _cell_voltage_chart(
-        (data.get('obd') or {}).get('cell_voltages'), tmp_dir)
 
     veh = data['vehicle']
     grade = data['grade']
@@ -755,6 +1222,8 @@ def generate_certificate(vehicle_id):
         'measured': t('cert.src_measured', default='gemessen (Ladedaten, Coulomb-Zaehlung)'),
         'obd': t('cert.src_obd', default='BMS-Wert per OBD (ELM327)'),
         'bms': t('cert.src_bms', default='BMS-Wert des Fahrzeugs'),
+        'window': t('cert.src_window',
+                    default='aus dem angezeigten Fenster, Puffer als verbraucht angenommen'),
     }.get(src, t('cert.na', default='keine Datengrundlage'))
     pdf.cell(0, 6, pdf._clean(f"State of Health - {src_label}"),
              new_x='LMARGIN', new_y='NEXT')
@@ -779,9 +1248,18 @@ def generate_certificate(vehicle_id):
             tr = meas['trend']
             pdf.kv(t('cert.meas_trend', default='Trend (frueh -> aktuell)'),
                    f"{tr['early_soh']:.1f} % -> {tr['recent_soh']:.1f} %")
+    elif data.get('measured_circular'):
+        pdf.kv(t('cert.meas_soh', default='Gemessene SoH (Ladedaten)'),
+               t('cert.meas_circular',
+                 default='nicht unabhaengig messbar - Ladeverlust aus der Kapazitaet abgeleitet'))
     else:
         pdf.kv(t('cert.meas_soh', default='Gemessene SoH (Ladedaten)'),
                t('cert.meas_none', default='zu wenige breite Ladefenster (>= 25% SoC) fuer eine Messung'))
+    win = data.get('window') or {}
+    if win.get('change_pct') is not None:
+        pdf.kv(t('cert.window_kv', default='Angezeigtes Fenster'),
+               t('cert.window_kv_val', default='{c:+.1f} % seit {ref} - Details in der Anlage',
+                 c=win['change_pct'], ref=_halbjahr(win['ref_period'])))
     # BMS (Flash-equivalent)
     if bms['current'] is not None:
         pdf.kv(t('cert.bms_soh', default='BMS-SoH (Fahrzeug)'),
@@ -830,13 +1308,10 @@ def generate_certificate(vehicle_id):
         if obd.get('aux_battery_v') is not None:
             pdf.kv(t('cert.obd_aux', default='12V-Batterie'), f"{obd['aux_battery_v']:.1f} V")
 
-        # Per-cell voltage + deviation chart (one bar per cell).
-        if cell_chart:
-            if pdf.get_y() + 62 > pdf.h - 20:
-                pdf.add_page()
-            pdf.ln(1)
-            pdf.image(cell_chart, x=(pdf.w - 170) / 2, w=170)
-            pdf.ln(2)
+        # The cells themselves have their own page now (Anlage).
+        if (data.get('cells') or {}).get('stats'):
+            pdf.kv(t('cert.obd_cells_more', default='Einzelzellen'),
+                   t('cert.obd_cells_more_val', default='Heatmap aller Zellen in der Anlage'))
 
     # ── Benchmark ────────────────────────────────────────────────────
     if data['expected_soh'] is not None:
@@ -930,6 +1405,10 @@ def generate_certificate(vehicle_id):
     pdf.cell(70, 5, pdf._clean(t('cert.sig_place', default='Ort, Datum')))
     pdf.cell(0, 5, pdf._clean(t('cert.sig_owner', default='Unterschrift Halter')),
              align='R', new_x='LMARGIN', new_y='NEXT')
+
+    # ── Anlage: the battery on its own pages ────────────────────────
+    _page_cells(pdf, data, tmp_dir)
+    _page_capacity(pdf, data, tmp_dir)
 
     # Cleanup temp files
     for f in os.listdir(tmp_dir):

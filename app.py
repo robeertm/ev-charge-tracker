@@ -417,6 +417,11 @@ def create_app(config_class=Config):
                 db.session.execute(text('ALTER TABLE vehicles ADD COLUMN first_registered_at DATE'))
             if 'battery_kwh_gross' not in veh_columns:
                 db.session.execute(text('ALTER TABLE vehicles ADD COLUMN battery_kwh_gross REAL'))
+            # v3.0.154: cell chemistry + cells in series for the battery page.
+            if 'battery_chemistry' not in veh_columns:
+                db.session.execute(text('ALTER TABLE vehicles ADD COLUMN battery_chemistry VARCHAR(16)'))
+            if 'battery_cells_series' not in veh_columns:
+                db.session.execute(text('ALTER TABLE vehicles ADD COLUMN battery_cells_series INTEGER'))
             # v3.0.121: per-vehicle remote-control opt-in for the official
             # Škoda API. NOT NULL DEFAULT 0 on purpose — an upgrade must
             # never hand an existing install a capability to move a real
@@ -3151,6 +3156,15 @@ def register_routes(app):
         v.color = (request.form.get('color', '') or '').strip() or None
         v.battery_kwh = _float(request.form.get('battery_kwh'))
         v.battery_kwh_gross = _float(request.form.get('battery_kwh_gross'))
+        # Only read when the form carried the fields — a form that does not
+        # show them must not wipe them.
+        if 'battery_chemistry' in request.form:
+            from services.battery_analysis import CHEMISTRIES
+            chem = (request.form.get('battery_chemistry', '') or '').strip().lower()
+            v.battery_chemistry = chem if chem in CHEMISTRIES else None
+        if 'battery_cells_series' in request.form:
+            cells = _int(request.form.get('battery_cells_series'))
+            v.battery_cells_series = cells if cells and 2 <= cells <= 400 else None
         v.battery_soh_baseline = _float(request.form.get('battery_soh_baseline'))
         v.battery_co2_per_kwh = _float(request.form.get('battery_co2_per_kwh'))
         v.max_ac_kw = _float(request.form.get('max_ac_kw'))
@@ -4858,7 +4872,9 @@ def register_routes(app):
                 _wv = _unconn_kh[0]
                 _wiz_connect = {'id': _wv.id, 'brand': (_wv.api_brand or '').lower(),
                                 'name': _wv.name, 'username': _wv.api_username or ''}
+        from services.battery_analysis import CHEMISTRIES as _CHEM
         return render_template('settings.html',
+                               battery_chemistries=[(k, v[0]) for k, v in _CHEM.items()],
                                entsoe_key=AppConfig.get('entsoe_api_key', ''),
                                ocm_key=AppConfig.get('ocm_api_key', ''),
                                novnc_url=os.environ.get('NOVNC_URL', ''),

@@ -272,6 +272,10 @@ def _init_29bit(req, resp):
             'ATCAF0', 'ATCRA' + resp, 'ATFCSH' + req, 'ATFCSD300000', 'ATFCSM1']
 
 
+# A cell an ``optional`` spec may add must read like a cell: anything outside
+# this band is a filler byte (0x00 / 0xFF) or another field, not a cell.
+CELL_PLAUSIBLE = (2.5, 4.4)
+
 PROFILES = {
     # Hyundai Kona EV / Kia e-Niro / Soul EV — 64 kWh (and 39 kWh) first
     # generation. BMS answers on 7EC to header 7E4, extended service 22.
@@ -316,11 +320,20 @@ PROFILES = {
         # replies carry a 4-byte prefix (62 01 0X + one status byte) so the cells
         # start at byte 7 — byte 6 would read the trailing 0xFF as a bogus 5.10 V
         # cell (verified: byte 7 gives the real 0xBF = 3.82 V run). 96 cells over
-        # the three PIDs; a 98s pack has 2 more in 220105 we don't rely on.
+        # the three PIDs.
+        #
+        # 🔴 v3.0.154: the 64 kWh pack is 98s — cells 97 and 98 sit in 220105
+        # at bytes 37/38 (same +1 shift; verified on the 2026-08-08 capture,
+        # `... 84 00 00 BF BF 00 00`: two more 0xBF = 3.82 V). They used to be
+        # dropped, so every report spoke of 96 cells on a 98-cell pack and two
+        # cells were never looked at. ``optional``: taken only when the byte
+        # reads as a plausible cell voltage, so a smaller pack whose 220105
+        # carries 0x00/0xFF there gets no phantom cells.
         'cells': [
             {'pid': '220102', 'byte': 7, 'count': 32, 'scale': 0.02},
             {'pid': '220103', 'byte': 7, 'count': 32, 'scale': 0.02},
             {'pid': '220104', 'byte': 7, 'count': 32, 'scale': 0.02},
+            {'pid': '220105', 'byte': 37, 'count': 2, 'scale': 0.02, 'optional': True},
         ],
     },
     # Generic OBD-II fallback: standard PID 01 5B = Hybrid/EV battery pack
@@ -855,7 +868,10 @@ def decode(profile_key: str, frames: dict):
             v = _u(r, cspec['byte'] + i * clen, clen, cle)
             if v is None:
                 break
-            cells.append(round(v * cspec['scale'] + coff, 3))
+            volt = round(v * cspec['scale'] + coff, 3)
+            if cspec.get('optional') and not (CELL_PLAUSIBLE[0] <= volt <= CELL_PLAUSIBLE[1]):
+                break
+            cells.append(volt)
     if cells:
         cmin, cmax, cavg = _summ(cells)
         out['cell_count'] = len(cells)
