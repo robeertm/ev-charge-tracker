@@ -1,5 +1,22 @@
 # Changelog
 
+## v3.0.156 (2026-10-14)
+
+### The data folder is never silently swapped for an empty database
+
+When a container was recreated for an update, SQLite's start-up write test
+in the data folder failed once — and the app quietly switched to an empty
+database in its home directory. The owner saw a fresh install with a new
+"Mein Auto"; the real data sat untouched right next to it, and anything
+entered meanwhile would have been lost with the next recreate, because that
+fallback lives inside the container.
+
+Now a failed write test is retried for about half a minute, and a data
+folder that already holds a database is never replaced by an empty one: the
+app refuses to start and says why, and the container's restart policy tries
+again. An install whose folder never held a database still falls back at
+once, as before.
+
 ## v3.0.155 (2026-10-14)
 
 ### Kilometres or miles, any currency — and it sets itself from your browser
