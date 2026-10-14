@@ -1795,7 +1795,7 @@
   "pleos.err_vin_not_in_key": "Dit VIN hoort niet bij deze Pleos-sleutel. Kies een van deze auto’s:",
   "pleos.err_pick_vin": "Deze sleutel omvat meerdere auto’s — kies er een:",
   "cred.ha_url": "Home Assistant-adres",
-  "cred.help_ha_url": "Bijvoorbeeld http://192.168.1.10:8123 — het adres in het thuisnetwerk is het veiligst.",
+  "cred.help_ha_url": "Bijvoorbeeld http://homeassistant.local:8123 — draait de tracker in een container, dan is het IP-adres van Home Assistant in het thuisnetwerk het veiligst.",
   "cred.ha_token": "Langlevend toegangstoken",
   "cred.help_ha_token": "In Home Assistant: profiel → Beveiliging → Langlevende toegangstokens → Token aanmaken. De app leest er alleen mee, ze verandert niets.",
   "cred.ha_prefix": "Begin van de entiteitsnamen",

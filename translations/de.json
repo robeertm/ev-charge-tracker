@@ -1795,7 +1795,7 @@
   "pleos.err_vin_not_in_key": "Diese Fahrgestellnummer gehört nicht zu diesem Pleos-Schlüssel. Bitte eines der folgenden Autos wählen:",
   "pleos.err_pick_vin": "Zu diesem Schlüssel gehören mehrere Autos — bitte eines wählen:",
   "cred.ha_url": "Home-Assistant-Adresse",
-  "cred.help_ha_url": "Zum Beispiel http://192.168.1.10:8123 — am sichersten die Adresse im Heimnetz.",
+  "cred.help_ha_url": "Zum Beispiel http://homeassistant.local:8123 — läuft der Tracker in einem Container, am sichersten die IP-Adresse von Home Assistant im Heimnetz.",
   "cred.ha_token": "Langlebiger Zugriffstoken",
   "cred.help_ha_token": "In Home Assistant: Profil → Sicherheit → Langlebige Zugriffstoken → Token erstellen. Die App liest damit nur, sie ändert nichts.",
   "cred.ha_prefix": "Namensanfang der Entitäten",

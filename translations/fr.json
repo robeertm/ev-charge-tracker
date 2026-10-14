@@ -1795,7 +1795,7 @@
   "pleos.err_vin_not_in_key": "Ce VIN n’appartient pas à cette clé Pleos. Veuillez choisir l’une de ces voitures :",
   "pleos.err_pick_vin": "Cette clé couvre plusieurs voitures — veuillez en choisir une :",
   "cred.ha_url": "Adresse de Home Assistant",
-  "cred.help_ha_url": "Par exemple http://192.168.1.10:8123 — l’adresse du réseau local est le choix le plus sûr.",
+  "cred.help_ha_url": "Par exemple http://homeassistant.local:8123 — si le tracker tourne dans un conteneur, l’adresse IP de Home Assistant sur le réseau local est le choix le plus sûr.",
   "cred.ha_token": "Jeton d’accès longue durée",
   "cred.help_ha_token": "Dans Home Assistant : profil → Sécurité → Jetons d’accès longue durée → Créer un jeton. L’application ne fait que lire, elle ne modifie rien.",
   "cred.ha_prefix": "Début du nom des entités",

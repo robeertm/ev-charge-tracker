@@ -1795,7 +1795,7 @@
   "pleos.err_vin_not_in_key": "This VIN does not belong to this Pleos key. Please choose one of these cars:",
   "pleos.err_pick_vin": "This key covers several cars — please choose one:",
   "cred.ha_url": "Home Assistant address",
-  "cred.help_ha_url": "For example http://192.168.1.10:8123 — the home-network address is the safest choice.",
+  "cred.help_ha_url": "For example http://homeassistant.local:8123 — if the tracker runs in a container, Home Assistant’s IP address on the home network is the safest choice.",
   "cred.ha_token": "Long-lived access token",
   "cred.help_ha_token": "In Home Assistant: profile → Security → Long-lived access tokens → Create token. The app only reads with it, it changes nothing.",
   "cred.ha_prefix": "Start of the entity names",
