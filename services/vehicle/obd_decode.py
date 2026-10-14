@@ -360,11 +360,20 @@ PROFILES = {
     # are not published — if 704 returns NO DATA on those models, run the
     # in-app ECU scan (see scan_plan) to find the address that answers.
     #
-    # ⚠️  These byte offsets/scalings are COMMUNITY-GUESSED and even disputed
-    # between sources — treat every decoded value as experimental. As with
-    # the Kia map, the raw frames are always stored (ObdReading.raw_json) so a
-    # capture can be re-decoded once verified against CarScanner. Byte offset
-    # = 3 (the 62 11 xx service echo) + the community "Bn" data-byte index.
+    # v3.0.158: byte offsets checked against a profile that was run on a
+    # real 2026 G6 (FranckH250/xpeng-home-assistant-wican, WiCAN Pro). WiCAN
+    # counts the RAW ISO-TP bytes, PCI included — proved on the Kia map
+    # above, which is verified on a real Niro: WiCAN's SOC B10 / HV_A
+    # B17:B18 / HV_V B19:B20 land exactly on our bytes 7 / 13 / 15. For a
+    # single-frame XPENG answer (PCI, 62, 11, xx, data…) WiCAN's B4 is
+    # therefore the FIRST data byte = our byte 3. Pack voltage and current
+    # used to read byte 7 (4 bytes too far, from a source that counted
+    # differently), so they could never have shown a real value; the
+    # scan probe below already carried 62 11 01 0E 10 = 360.0 V at byte 3.
+    # Field-tested on the 2026 G6: SoC (to 0.1 %), odometer, pack V/A,
+    # cell min/max, temp min/max. NOT answered by the 2026 LFP pack: SoH.
+    # The raw frames are always stored (ObdReading.raw_json), so a capture
+    # can be re-decoded if anything here turns out wrong.
     'xpeng': {
         'label': 'XPENG (G6 — BMS 704/784)',
         # Bewertung getrennt vom Namen, damit sie uebersetzbar ist:
@@ -373,22 +382,26 @@ PROFILES = {
         'header': '704',
         'init': _init_lines_xpeng(),
         'pids': ['221101', '221103', '221105', '221106',
-                 '221107', '221108', '221109', '22110A'],
+                 '221107', '221108', '221109', '22110A', '220101'],
         'fields': {
-            # Pack voltage 221101 B4:B5 / 10.
-            'pack_voltage_v': {'pid': '221101', 'byte': 7, 'len': 2, 'scale': 0.1},
-            # Pack current 221103 B4:B5 * 0.5 - 1600 (negative = charging).
-            'pack_current_a': {'pid': '221103', 'byte': 7, 'len': 2, 'scale': 0.5, 'offset': -1600.0},
-            # Cell voltage max/min 221105/221106 B0:B1 / 1000 (mV -> V).
+            # Pack voltage 221101 [B4:B5] / 10.
+            'pack_voltage_v': {'pid': '221101', 'byte': 3, 'len': 2, 'scale': 0.1},
+            # Pack current 221103 (B4*256+B5) * 0.5 - 1600 (positive = charging
+            # on the G6 per the field profile).
+            'pack_current_a': {'pid': '221103', 'byte': 3, 'len': 2, 'scale': 0.5, 'offset': -1600.0},
+            # Cell voltage max/min 221105/221106 [B4:B5] / 1000 (mV -> V).
             'cell_max_v': {'pid': '221105', 'byte': 3, 'len': 2, 'scale': 0.001},
             'cell_min_v': {'pid': '221106', 'byte': 3, 'len': 2, 'scale': 0.001},
-            # Temp max/min 221107/221108 B0 - 40.
+            # Temp max/min 221107/221108 B4 - 40.
             'temp_max_c': {'pid': '221107', 'byte': 3, 'len': 1, 'offset': -40.0},
             'temp_min_c': {'pid': '221108', 'byte': 3, 'len': 1, 'offset': -40.0},
-            # SoC (BMS) 221109 B0:B1 / 10.
+            # SoC (BMS) 221109 [B4:B5] / 10.
             'soc_bms_pct': {'pid': '221109', 'byte': 3, 'len': 2, 'scale': 0.1},
-            # SoH 22110A B4:B5 / 10.
-            'soh_pct': {'pid': '22110A', 'byte': 7, 'len': 2, 'scale': 0.1},
+            # SoH 22110A — same layout as its neighbours; unconfirmed (the
+            # 2026 LFP pack does not answer it at all).
+            'soh_pct': {'pid': '22110A', 'byte': 3, 'len': 2, 'scale': 0.1},
+            # Odometer 220101 [B5:B6] km — second data byte onward.
+            'odometer_km': {'pid': '220101', 'byte': 4, 'len': 2},
         },
         # Per-cell arrays and per-module temps use undocumented multi-frame
         # DIDs (only in CarScanner's closed profile) — we don't guess them.

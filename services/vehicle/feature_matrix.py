@@ -220,6 +220,15 @@ MATRIX = {
         'charge_eta':      'yes',
         'portable_charge': 'no',
     } for key in ('kia_pleos', 'hyundai_pleos', 'genesis_pleos')},
+
+    # v3.0.158: whatever Home Assistant knows about the car — depends
+    # entirely on the source feeding HA (Tibber, an OBD dongle, …).
+    'homeassistant': {
+        'soc_range_odo':   'partial',
+        'live_status':     'partial',
+        'location':        'partial',
+        'charge_limits':   'partial',
+    },
 }
 
 

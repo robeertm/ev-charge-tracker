@@ -57,6 +57,40 @@ def _label(entry: dict) -> str:
     return ' · '.join(parts)
 
 
+# Rows open-ev-data has wrong or not yet, checked against EV Database
+# (ev-database.org, cars 3402/3275/3276, read 2026-10-14). Applied after
+# every rebuild so a refresh cannot bring the old numbers back. Each entry
+# replaces the upstream rows of the same make/model/variant label.
+#
+# XPENG G6 facelift (MY25, sold from Aug 2025, also MY26): LFP packs,
+# 68.5 / 80.8 kWh nominal, 67.8 / 80.0 kWh usable, up to 382 / 451 kW DC.
+# Upstream v1.24.0 still carried the pre-facelift 66.0 / 87.5 kWh NMC
+# numbers under the 2025 labels — an AWD Performance owner would have
+# been handed 87.5 kWh and every kWh-from-SoC figure would be 9 % high.
+CORRECTIONS = [
+    {'make': 'XPeng', 'model': 'G6', 'variant': f'{year} · {name}',
+     'net_kwh': net, 'gross_kwh': gross, 'ac_kw': 11.0, 'dc_kw': dc}
+    for year in (2025, 2026)
+    for name, net, gross, dc in (
+        ('Standard Range', 67.8, 68.5, 382.0),
+        ('Long Range', 80.0, 80.8, 451.0),
+        ('AWD Performance', 80.0, 80.8, 451.0),
+    )
+]
+# Upstream labels that the corrections retire (pre-facelift names reused
+# for 2025 that no longer exist in that model year).
+RETIRED = [('XPeng', 'G6', '2025 · Ultra Long Range')]
+
+
+def apply_corrections(rows: list) -> list:
+    """Replace/insert the CORRECTIONS rows; idempotent."""
+    drop = {(c['make'], c['model'], c['variant']) for c in CORRECTIONS} | set(RETIRED)
+    out = [r for r in rows if (r['make'], r['model'], r.get('variant', '')) not in drop]
+    out.extend(dict(c) for c in CORRECTIONS)
+    out.sort(key=lambda r: (r['make'].lower(), r['model'].lower(), r.get('variant', '')))
+    return out
+
+
 def build(version: str | None = None) -> dict:
     if not version:
         with urllib.request.urlopen(LATEST_API, timeout=30) as resp:
@@ -98,8 +132,7 @@ def build(version: str | None = None) -> dict:
             row['dc_kw'] = dc
         rows.append(row)
 
-    rows.sort(key=lambda r: (r['make'].lower(), r['model'].lower(),
-                             r.get('variant', '')))
+    rows = apply_corrections(rows)
     return {
         'source': 'open-ev-data',
         'source_repo': 'https://github.com/open-ev-data/open-ev-data-dataset',

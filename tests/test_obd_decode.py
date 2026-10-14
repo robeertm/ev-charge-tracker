@@ -174,11 +174,14 @@ def main():
     def _xp(did, data):
         # 62 11 <xx> echo (3 bytes) + data, rendered as one ELM SF/MF line.
         return _frame_lines([0x62, 0x11, int(did[-2:], 16)] + data, can_id='784')
+    # WiCAN's B4 (raw ISO-TP bytes, PCI included) is the FIRST data byte of
+    # a single-frame answer — field-tested on a 2026 G6 (v3.0.158). The
+    # values sit right after the 62 11 xx echo, like the scan probe below.
     xframes = {
-        # pack V: B4:B5 = 0x0E10 (3600) * 0.1 = 360.0
-        '221101': _xp('221101', [0, 0, 0, 0, 0x0E, 0x10]),
-        # current: B4:B5 = 0x0C80 (3200) * 0.5 - 1600 = 0.0
-        '221103': _xp('221103', [0, 0, 0, 0, 0x0C, 0x80]),
+        # pack V: first two data bytes = 0x0E10 (3600) * 0.1 = 360.0
+        '221101': _xp('221101', [0x0E, 0x10]),
+        # current: 0x0C80 (3200) * 0.5 - 1600 = 0.0
+        '221103': _xp('221103', [0x0C, 0x80]),
         # cell max/min: B0:B1 /1000 -> 4.100 / 3.950
         '221105': _xp('221105', [0x10, 0x04]),   # 0x1004 = 4100
         '221106': _xp('221106', [0x0F, 0x6E]),   # 0x0F6E = 3950
@@ -187,8 +190,10 @@ def main():
         '221108': _xp('221108', [52]),
         # SoC: B0:B1 /10 -> 78.0
         '221109': _xp('221109', [0x03, 0x0C]),   # 0x030C = 780
-        # SoH: B4:B5 /10 -> 96.0
-        '22110A': _xp('22110A', [0, 0, 0, 0, 0x03, 0xC0]),  # 0x03C0 = 960
+        # SoH: same layout /10 -> 96.0 (unconfirmed on the car)
+        '22110A': _xp('22110A', [0x03, 0xC0]),  # 0x03C0 = 960
+        # odometer 220101: WiCAN [B5:B6] = data bytes 1..2 -> 12345 km
+        '220101': _frame_lines([0x62, 0x01, 0x01, 0x00, 0x30, 0x39], can_id='784'),
     }
     x = od.decode('xpeng', xframes)
     check('xpeng pack V 360.0', abs(x['pack_voltage_v'] - 360.0) < 0.01)
@@ -200,6 +205,7 @@ def main():
     check('xpeng temp min 12', x['temp_min_c'] == 12)
     check('xpeng soc 78.0', abs(x['soc_bms_pct'] - 78.0) < 0.01)
     check('xpeng soh 96.0', abs(x['soh_pct'] - 96.0) < 0.01)
+    check('xpeng odometer 12345', x['odometer_km'] == 12345)
 
     # ── ECU scan classification + interpretation ───────────────────────
     check('probe ok (62)', od._classify_probe('784 06 62 11 01 0E 10 00 >') == 'ok')

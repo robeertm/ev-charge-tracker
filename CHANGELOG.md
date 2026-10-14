@@ -1,5 +1,31 @@
 # Changelog
 
+## v3.0.158 (2026-10-14)
+
+### Any car Home Assistant already knows — and the XPENG G6, prepared
+
+Some cars have no cloud API a private owner can use. The XPENG G6 is one
+(there is no public XPENG API yet, and the Enode aggregator does not take
+private sign-ups), and Kia/Hyundai Europe now refuse third-party sign-ins.
+What these owners often do have is the car in Home Assistant.
+
+- **New brand: Home Assistant.** Enter the Home Assistant address, a
+  long-lived access token and the shared start of the car's entity ids
+  (e.g. `xpeng_g6`). The tracker reads state of charge, odometer, range,
+  charge target, charging and plug state, charging power, 12 V and position
+  from whatever feeds Home Assistant — the core Tibber integration, an OBD
+  dongle such as the WiCAN Pro over MQTT, or a future official integration.
+  Entities are recognised by device class and unit first, by name second;
+  *Test connection* lists what it picked. Read-only: only `/api/states`.
+- **XPENG G6 OBD profile corrected.** Checked against a profile run on a real
+  2026 G6 (WiCAN Pro): pack voltage and pack current were read four bytes too
+  far and could never show a real value. The odometer (220101) is now read
+  too and fills an OBD reading when the form leaves it empty.
+- **XPENG G6 facelift (2025/2026) in the vehicle catalog.** The upstream data
+  still carried the pre-facelift 66.0 / 87.5 kWh NMC numbers; the facelift has
+  LFP packs with 67.8 / 80.0 kWh usable and up to 382 / 451 kW DC. The fix is
+  part of the catalog builder, so a refresh cannot bring the old rows back.
+
 ## v3.0.157 (2026-10-14)
 
 ### Kia/Hyundai in Europe: the official Pleos API, and an honest message for the block

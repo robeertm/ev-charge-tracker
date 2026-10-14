@@ -106,6 +106,10 @@ BRANDS: List[Brand] = [
     Brand('smart',    'Smart #1/#3',  'smart'),
     Brand('porsche',  'Porsche',      'porsche'),
     Brand('xpeng',    'XPENG (Enode)', None),
+    # v3.0.158: any car whose data already reaches Home Assistant (core
+    # Tibber integration, an OBD dongle over MQTT, …) — for cars without a
+    # vendor API a private owner can use, the XPENG G6 among them.
+    Brand('homeassistant', 'Home Assistant', None),
 ]
 
 # XPENG used to be deliberately absent from the list above: it

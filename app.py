@@ -3497,7 +3497,9 @@ def register_routes(app):
             temp_avg_c=decoded.get('temp_avg_c'),
             cumulative_charge_ah=decoded.get('cumulative_charge_ah'),
             cumulative_discharge_ah=decoded.get('cumulative_discharge_ah'),
-            odometer_km=_int(data.get('odometer_km')),
+            # v3.0.158: a profile that reads the odometer (XPENG 220101)
+            # fills it when the form left it empty.
+            odometer_km=_int(data.get('odometer_km') or decoded.get('odometer_km')),
             cell_voltages_json=(_json.dumps(decoded['cell_voltages'])
                                 if decoded.get('cell_voltages') else None),
             cell_temps_json=(_json.dumps(decoded['cell_temps'])
@@ -3561,10 +3563,15 @@ def register_routes(app):
             from services.vehicle import get_connector
             creds = credentials_of(v)
             connector = get_connector(v.api_brand.lower(), creds)
-            connector.verify_credentials()
+            detail = connector.verify_credentials()
+            msg = t('flash.vehicle_test_ok', name=v.name)
+            # A connector may say WHAT it found (Home Assistant lists the
+            # entities it picked) — shown, so a wrong guess is seen at once.
+            if isinstance(detail, str) and detail:
+                msg = f'{msg} {detail}'
             if _ajax:
-                return jsonify({'ok': True, 'message': t('flash.vehicle_test_ok', name=v.name)})
-            flash(t('flash.vehicle_test_ok', name=v.name), 'success')
+                return jsonify({'ok': True, 'message': msg})
+            flash(msg, 'success')
         except Exception as e:
             if _ajax:
                 return jsonify({'ok': False, 'error': t('flash.vehicle_test_failed', name=v.name, error=str(e))}), 200

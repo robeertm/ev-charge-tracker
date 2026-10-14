@@ -78,6 +78,7 @@ _CONNECTOR_MODULES = [
     'connector_xpeng',
     'connector_skoda_public',
     'connector_pleos',
+    'connector_homeassistant',
 ]
 for _mod in _CONNECTOR_MODULES:
     try:

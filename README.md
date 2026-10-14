@@ -394,6 +394,7 @@ needed.
 | **Smart #1/#3** | `pySmartHashtag` | Username / Password |
 | **Porsche** | `pyporscheconnectapi` | Username / Password |
 | **XPENG** | *(none — built-in)* | Enode Client ID / Secret |
+| **Home Assistant** (any car HA knows) | none — reads HA's REST API | HA address + long-lived token + entity prefix ⁵ |
 
 After installing, configure credentials in Settings > Vehicle API. Optional background sync polls your vehicle at a configurable interval (1-12h).
 
@@ -429,6 +430,15 @@ targets, time to full, range, odometer, position, doors and lock, climate and ou
 temperature. Not available: 12 V battery, state of health, charging power, remote control
 and waking the car; trips are derived from parking events. Pleos says data flows fully
 24 hours after consent.
+
+**⁵ Home Assistant:** for a car without a vendor API you can use — for example an
+XPENG G6 (no public XPENG API yet) — the tracker can read the car from Home Assistant.
+Whatever brings the car into HA works: the core Tibber integration (state of charge,
+target, range, plug and charging state), an OBD dongle such as the WiCAN Pro over MQTT
+(state of charge, odometer, pack values, 12 V), or a later official integration. Give the
+car's entities one shared start (e.g. `sensor.xpeng_g6_soc`, `sensor.xpeng_g6_odometer`,
+`device_tracker.xpeng_g6`) and enter that prefix; *Test connection* lists the entities it
+picked. A container on a NAS may not resolve `*.ts.net` names — use the LAN address.
 
 **Škoda note:** Škoda is retiring the unofficial app API in October 2026. The app now
 speaks the official [MyŠkoda Public API](https://public.api.connect.skoda-auto.cz/docs):
