@@ -78,6 +78,14 @@ class Brand:
 BRANDS: List[Brand] = [
     Brand('hyundai',  'Hyundai',      'hyundai-kia', token=True),
     Brand('kia',      'Kia',          'hyundai-kia', token=True),
+    # v3.0.157: the official Pleos Vehicle Data API (Europe). Since
+    # 14 Oct 2026 Kia/Hyundai EU refuse the app sign-in above with code
+    # 9035; this is the sanctioned door — no package, plain HTTPS with a
+    # Client ID/Secret the owner creates on pleos.ai. The old entries stay
+    # offered: outside Europe they still work, and Pleos is EU-only.
+    Brand('kia_pleos',     'Kia (Pleos)',     None),
+    Brand('hyundai_pleos', 'Hyundai (Pleos)', None),
+    Brand('genesis_pleos', 'Genesis (Pleos)', None),
     # The official Škoda API — no package, plain HTTPS with an API key
     # the owner creates in the MyŠkoda app.
     Brand('skoda_api', 'Škoda',        None),

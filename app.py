@@ -3617,6 +3617,61 @@ def register_routes(app):
             'key_expires_at': probe.get('_key_expires_at'),
         })
 
+    # ── Kia / Hyundai / Genesis: official Pleos API ────────────────
+    @app.route('/api/vehicle/<int:vid>/pleos/switch', methods=['POST'])
+    def api_pleos_switch(vid):
+        """Move one vehicle to the official Pleos Vehicle Data API.
+
+        Since 14 Oct 2026 Kia/Hyundai Europe refuse the app sign-in with
+        code 9035. The Client ID/Secret are PROVED against Pleos before
+        anything is written, and the VIN is taken from what the key covers:
+        storing an unverified key would take the car offline at the next
+        background sync with the old credentials already gone.
+
+        Only the credentials change — charges, trips and history stay on
+        the same vehicle row. The previous brand and account name are kept
+        in AppConfig so going back needs nothing but the password.
+        """
+        import json as _json
+        from models.database import Vehicle
+        from services.vehicle.connector_pleos import REPLACES
+        from services.vehicle.pleos_api import PleosError, pick_vehicle, reset_state
+        v = Vehicle.query.get_or_404(vid)
+        data = request.get_json(silent=True) or request.form
+        cid = (data.get('client_id') or '').strip()
+        secret = (data.get('client_secret') or '').strip()
+        vin = (data.get('vin') or '').strip().upper()
+        old_brand = (v.api_brand or '').lower()
+        new_brand = (data.get('brand') or '').strip().lower() or REPLACES.get(old_brand, '')
+        if new_brand not in ('kia_pleos', 'hyundai_pleos', 'genesis_pleos'):
+            return jsonify({'ok': False, 'error': t('pleos.err_brand')}), 400
+        if not cid or not secret:
+            return jsonify({'ok': False, 'error': t('pleos.err_need_key')}), 400
+        pleos_brand = new_brand.split('_', 1)[0]
+        try:
+            car = pick_vehicle(pleos_brand, cid, secret, vin, fresh=True)
+        except PleosError as e:
+            return jsonify({'ok': False, 'kind': e.kind, 'error': str(e),
+                            'vehicles': e.vehicles}), 200
+        if old_brand and old_brand != new_brand and not old_brand.endswith('_pleos'):
+            AppConfig.set(f'pleos_previous_{v.id}', _json.dumps({
+                'brand': old_brand, 'username': v.api_username or '',
+                'region': v.api_region or '', 'switched_at': datetime.now().isoformat(timespec='seconds'),
+            }))
+        v.api_brand = new_brand
+        v.api_username = cid
+        v.api_password = secret
+        v.api_vin = car['vin']
+        # Same reason as the Škoda switch: single-vehicle paths (the
+        # dashboard's live status among them) read the brand from AppConfig.
+        mirror_primary_vehicle_to_legacy_config(v)
+        db.session.commit()
+        AppConfig.set(f'vendor_block_at_{v.id}', '')
+        reset_state()
+        logger.info(f"Vehicle {v.id} switched to the official Pleos API ({pleos_brand})")
+        return jsonify({'ok': True,
+                        'name': car.get('nickname') or car.get('sellname') or v.name})
+
     # NOT /remote/enable: that would sit under the same prefix as
     # /remote/<command> and the two would only be told apart by
     # Werkzeug preferring a static rule. A command called "enable" would
@@ -4790,6 +4845,7 @@ def register_routes(app):
         _remote_vehicles = []
         _skoda_legacy = []
         _skoda_keys = []
+        _pleos_switch = []
         try:
             # app.py does NOT import Vehicle at module level — every route
             # pulls it in locally. Relying on a bare `Vehicle` here raised
@@ -4805,6 +4861,15 @@ def register_routes(app):
                        .order_by(_RcVehicle.id).all()):
                 _brand = (_v.api_brand or '').lower()
                 _cat = by_key(_brand)
+                # v3.0.157: the manufacturer refused this car's sign-in
+                # (9035) — offer the official Pleos API right here.
+                if _brand in ('kia', 'hyundai'):
+                    _blocked = AppConfig.get(f'vendor_block_at_{_v.id}', '')
+                    if _blocked:
+                        _pleos_switch.append({
+                            'id': _v.id, 'name': _v.name, 'brand': _brand,
+                            'since': _blocked[:16].replace('T', ' '),
+                        })
                 if _cat and _cat.legacy:
                     _skoda_legacy.append({
                         'id': _v.id, 'name': _v.name,
@@ -4980,6 +5045,7 @@ def register_routes(app):
                                credential_fields=_credential_fields,
                                remote_vehicles=_remote_vehicles,
                                skoda_legacy_vehicles=_skoda_legacy,
+                               pleos_switch_vehicles=_pleos_switch,
                                skoda_key_status=_skoda_keys,
                                hyundai_kia_sdk_outdated=hyundai_kia_sdk_outdated,
                                hyundai_kia_sdk_version=hyundai_kia_sdk_version,

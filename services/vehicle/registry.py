@@ -77,6 +77,7 @@ _CONNECTOR_MODULES = [
     'connector_porsche',
     'connector_xpeng',
     'connector_skoda_public',
+    'connector_pleos',
 ]
 for _mod in _CONNECTOR_MODULES:
     try:

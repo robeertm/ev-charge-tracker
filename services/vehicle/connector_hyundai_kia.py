@@ -199,6 +199,50 @@ def _version_tuple(v: str) -> tuple:
     return tuple(parts) or (0,)
 
 
+# v3.0.157: on 13/14 Oct 2026 Kia and Hyundai Europe started refusing
+# every third-party sign-in. The password check itself still PASSES — the
+# IdP answers 302 with an authorization code — and only the token exchange
+# right after it answers ``HTTP 400 {"code": 9035, "message": "Unusual
+# activity has been detected so you've been logged out"}`` (9036 on the
+# fingerprint variant). The friendly text below used to send the owner
+# through a five-point password checklist for this, so an owner with a
+# correct password started doubting it. It is the manufacturer's block,
+# and the owner's way out is the official Pleos API (connector_pleos).
+_VENDOR_BLOCK_MARKERS = (
+    '"code":9035', '"code": 9035', '"code":9036', '"code": 9036',
+    'unusual activity has been detected',
+    'ungewöhnliche aktivität festgestellt',
+)
+
+# Every further sign-in is one more "unusual activity" on the account and
+# cannot succeed while the block stands — and each one ALSO logs the owner
+# out of the official Kia/Hyundai app (reported upstream, #1338, and seen
+# by our own owner on 14 Oct 2026). With the loop running every 10 minutes
+# that is an owner thrown out of their own car app six times an hour. So
+# after a block the app stops signing in by itself altogether: only the
+# "Test" button, or a restart (a new version), asks again.
+_vendor_blocked_until: dict = {}
+
+
+class VendorBlocked(RuntimeError):
+    """The manufacturer refuses third-party sign-ins (code 9035/9036)."""
+    kind = 'vendor_block'
+
+
+def _is_vendor_block(err: Exception) -> bool:
+    msg = str(err).lower()
+    return any(m in msg for m in _VENDOR_BLOCK_MARKERS)
+
+
+def _vendor_block_message() -> str:
+    try:
+        from services.i18n import t
+        return t('hk.err_vendor_block')
+    except Exception:
+        return ('Kia/Hyundai block sign-ins from third-party apps (code 9035). '
+                'Your e-mail and password are correct.')
+
+
 def _looks_like_refresh_token(cred: str) -> bool:
     """Legacy refresh tokens are long opaque strings with no '@' or spaces.
     A real account password is typically shorter and/or contains neither.
@@ -485,14 +529,29 @@ class _HyundaiKiaBase(VehicleConnector):
     def _ensure_auth(self):
         """Refresh the access token (headless CCI sign-in on first call)."""
         self._check_sdk_supports_credential()
+        import time as _time
+        paused = _vendor_blocked_until.get(self._cache_key, 0)
+        if paused > _time.time() and not getattr(self, '_ignore_vendor_pause', False):
+            raise VendorBlocked(_vendor_block_message())
         mgr = self._get_manager()
         try:
-            return _call_with_deadline(
+            result = _call_with_deadline(
                 mgr.check_and_refresh_token, label='check_and_refresh_token'
             )
+            _vendor_blocked_until.pop(self._cache_key, None)
+            return result
         except TimeoutError:
             raise
         except Exception as e:
+            if _is_vendor_block(e):
+                # Not retried, and not again by itself: see
+                # _vendor_blocked_until. The provider's text stays in the log.
+                logger.warning("Kia/Hyundai sign-in blocked by the manufacturer "
+                               "(9035) — no further automatic sign-ins until the "
+                               "Test button or a restart: %s" % e)
+                _vendor_blocked_until[self._cache_key] = float('inf')
+                _managers.pop(self._cache_key, None)
+                raise VendorBlocked(_vendor_block_message()) from e
             # A credential rejection won't fix itself on retry — and every extra
             # login attempt nudges the account toward a provider captcha/lockout.
             # Fail fast on those; only retry once for transient token/network blips.
@@ -591,8 +650,13 @@ class _HyundaiKiaBase(VehicleConnector):
     def verify_credentials(self) -> None:
         # _ensure_auth raises with the provider's own, actionable wording
         # (expired token, captcha lockout, SDK too old) — far better than
-        # a generic "rejected".
-        self._ensure_auth()
+        # a generic "rejected". A person pressing "Test" always asks the
+        # manufacturer, even during the 9035 pause.
+        self._ignore_vendor_pause = True
+        try:
+            self._ensure_auth()
+        finally:
+            self._ignore_vendor_pause = False
 
     def test_connection(self) -> bool:
         return self.authenticate()

@@ -228,6 +228,46 @@
             </div>
             {% endfor %}
             {% endif %}
+            {% if pleos_switch_vehicles %}
+            {# v3.0.157: Kia/Hyundai Europa lassen seit 14.10.2026 keine Anmeldung
+               von Drittprogrammen mehr zu (Code 9035). Passwort ist richtig —
+               der Ausweg ist die offizielle Pleos-API, mit Anleitung und Knopf. #}
+            <div class="alert alert-warning m-3 mb-0" id="pleosSwitchBox">
+                <div class="fw-bold"><i class="bi bi-shield-lock"></i> {{ t('pleos.switch_title') }}</div>
+                <div class="small mt-1">{{ t('pleos.switch_body') }}</div>
+                <ol class="small mt-2 mb-0 ps-3">
+                    <li>{{ t('pleos.step1') }} <a href="https://pleos.ai/" target="_blank" rel="noopener">pleos.ai</a></li>
+                    <li>{{ t('pleos.step2') }}</li>
+                    <li>{{ t('pleos.step3') }}</li>
+                    <li>{{ t('pleos.step4') }}</li>
+                </ol>
+                {% for pv in pleos_switch_vehicles %}
+                <div class="mt-3 p-2 border rounded bg-body" data-pleos-vehicle="{{ pv.id }}">
+                    <div class="fw-semibold small mb-1">{{ pv.name }}</div>
+                    <div class="small text-muted mb-2">{{ t('pleos.blocked_since', date=pv.since) }}</div>
+                    <div class="row g-2 align-items-end">
+                        <div class="col-12 col-md-4">
+                            <label class="form-label small mb-1">{{ t('cred.client_id') }}</label>
+                            <input type="text" class="form-control form-control-sm pl-id" autocomplete="off">
+                        </div>
+                        <div class="col-12 col-md-4">
+                            <label class="form-label small mb-1">{{ t('cred.client_secret') }}</label>
+                            <input type="password" class="form-control form-control-sm pl-secret" autocomplete="new-password">
+                        </div>
+                        <div class="col-12 col-md-2">
+                            <label class="form-label small mb-1">{{ t('cred.vin') }} <span class="text-muted">({{ t('cred.optional') }})</span></label>
+                            <input type="text" class="form-control form-control-sm pl-vin" autocomplete="off">
+                        </div>
+                        <div class="col-12 col-md-2">
+                            <button type="button" class="btn btn-sm btn-warning w-100 pl-go">{{ t('pleos.switch_btn') }}</button>
+                        </div>
+                    </div>
+                    <div class="small mt-2 text-muted">{{ t('pleos.key_hint') }}</div>
+                    <div class="small mt-1 pl-status"></div>
+                </div>
+                {% endfor %}
+            </div>
+            {% endif %}
             {% if skoda_legacy_vehicles %}
             {# Der Hersteller schaltet den bisherigen Zugang ab. Ein Hinweis ohne
                Datum und ohne Knopf wäre eine Sorge ohne Ausweg — deshalb beides. #}
@@ -1556,6 +1596,55 @@
                                 st.innerHTML = '<span class="text-danger">' + e.message + '</span>';
                                 btn.disabled = false;
                             }
+                        });
+                    });
+                });
+
+                // ── Kia/Hyundai: Umstieg auf die offizielle Pleos-API ─────
+                // Gleiches Muster wie Škoda: erst nach DOMContentLoaded binden,
+                // nach Erfolg neu laden (der Serverzustand ist die Wahrheit).
+                document.addEventListener('DOMContentLoaded', function () {
+                    document.querySelectorAll('[data-pleos-vehicle]').forEach(box => {
+                        const vid = box.dataset.pleosVehicle;
+                        const btn = box.querySelector('.pl-go');
+                        const st  = box.querySelector('.pl-status');
+                        if (!btn) return;
+                        const esc = s => String(s == null ? '' : s).replace(/[&<>"']/g,
+                            c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+                        btn.addEventListener('click', async () => {
+                            btn.disabled = true;
+                            st.innerHTML = '<span class="spinner-border spinner-border-sm"></span>';
+                            try {
+                                const r = await fetch('/api/vehicle/' + vid + '/pleos/switch', {
+                                    method: 'POST',
+                                    headers: {'Content-Type': 'application/json'},
+                                    body: JSON.stringify({
+                                        client_id: box.querySelector('.pl-id').value.trim(),
+                                        client_secret: box.querySelector('.pl-secret').value.trim(),
+                                        vin: box.querySelector('.pl-vin').value.trim()
+                                    })
+                                });
+                                const d = await r.json();
+                                if (d.ok) {
+                                    st.innerHTML = '<span class="text-success"><i class="bi bi-check-lg"></i> ' + esc(d.name) + '</span>';
+                                    setTimeout(() => location.reload(), 900);
+                                    return;
+                                }
+                                let html = '<span class="text-danger">' + esc(d.error || '') + '</span>';
+                                // Mehrere Autos am Schlüssel: zur Auswahl anbieten,
+                                // ein Klick trägt die VIN ein.
+                                (d.vehicles || []).forEach(c => {
+                                    html += '<div><a href="#" class="pl-pick" data-vin="' + esc(c.vin) + '">' + esc(c.label) + '</a></div>';
+                                });
+                                st.innerHTML = html;
+                                st.querySelectorAll('.pl-pick').forEach(a => a.addEventListener('click', ev => {
+                                    ev.preventDefault();
+                                    box.querySelector('.pl-vin').value = a.dataset.vin;
+                                }));
+                            } catch (e) {
+                                st.innerHTML = '<span class="text-danger">' + esc(e.message) + '</span>';
+                            }
+                            btn.disabled = false;
                         });
                     });
                 });

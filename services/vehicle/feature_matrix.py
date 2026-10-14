@@ -201,6 +201,25 @@ MATRIX = {
         'tires':           'no',
         'charge_eta':      'partial',
     },
+
+    # v3.0.157: Hyundai/Kia/Genesis via the official Pleos Vehicle Data
+    # API. A snapshot of what the car last reported — no 12 V, no SoH, no
+    # charging power, no consumption history, no wake-up.
+    **{key: {
+        'soc_range_odo':   'yes',
+        'live_status':     'partial',  # last reported state, cannot wake the car
+        'location':        'yes',
+        'battery_12v':     'no',
+        'soh':             'no',
+        'regenerated':     'no',
+        'consumption_30d': 'no',
+        'doors_locks':     'yes',
+        'climate':         'yes',
+        'tires':           'partial',  # warnings only
+        'charge_limits':   'yes',
+        'charge_eta':      'yes',
+        'portable_charge': 'no',
+    } for key in ('kia_pleos', 'hyundai_pleos', 'genesis_pleos')},
 }
 
 

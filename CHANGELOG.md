@@ -1,5 +1,39 @@
 # Changelog
 
+## v3.0.157 (2026-10-14)
+
+### Kia/Hyundai in Europe: the official Pleos API, and an honest message for the block
+
+Since 14 October 2026 Kia and Hyundai Europe refuse every sign-in by
+third-party programs. The password check itself still passes; the token
+exchange right after it answers `HTTP 400` with code 9035 ("Unusual activity
+has been detected so you've been logged out"). Every integration in Europe
+stopped the same morning, Home Assistant's included, and each attempt also
+logged the owner out of the official app.
+
+- **New brands: Kia, Hyundai and Genesis via Pleos**, the manufacturer group's
+  official personal Vehicle Data API for Europe. Client ID and Client Secret
+  are created once on pleos.ai; no extra package is needed. The app reads
+  state of charge, charging and plug state, AC/DC targets, time to full,
+  range, odometer, position, doors and lock, climate and outside temperature.
+  Not available through Pleos: 12 V battery, state of health, charging power,
+  remote control, waking the car. Trips are derived from parking events.
+- **Switch-over in Settings → Vehicles** for a car whose sign-in was refused:
+  step-by-step instructions and a form. The key is checked with Pleos first
+  and only stored if that works; if a key covers several cars, they are
+  offered for choice. History stays on the same vehicle.
+- **Code 9035 is named for what it is.** The app used to show a five-point
+  password checklist for it, so owners with a correct password doubted it.
+  It now says the manufacturer blocks third-party sign-ins and points to
+  Pleos — in all six languages.
+- **No more knocking.** After a 9035 the app stops signing in by itself,
+  because every attempt counts as more "unusual activity" and logs the owner
+  out of the official app. *Test connection* (or a restart) asks again.
+- Pleos client: the access token is renewed once when the API answers 403
+  (its way of saying "expired"), a 429 is honoured with its Retry-After, one
+  failing endpoint never hides the others, and neither secrets nor VINs end
+  up in log lines or error texts.
+
 ## v3.0.156 (2026-10-14)
 
 ### The data folder is never silently swapped for an empty database

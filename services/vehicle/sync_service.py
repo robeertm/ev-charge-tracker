@@ -435,6 +435,28 @@ def _sync_one_vehicle(app, vehicle):
     return sync
 
 
+VENDOR_BLOCK_KEY = 'vendor_block_at_{vid}'
+
+
+def _note_vendor_block(vehicle_id, err):
+    """Remember when the manufacturer refused this car's sign-in (9035).
+
+    The settings page reads it to offer the switch to the official Pleos
+    API at the moment it is needed, instead of to everybody. A successful
+    sync clears it again.
+    """
+    try:
+        from models.database import AppConfig
+        key = VENDOR_BLOCK_KEY.format(vid=vehicle_id)
+        if err is None:
+            if AppConfig.get(key, ''):
+                AppConfig.set(key, '')
+        elif not AppConfig.get(key, ''):
+            AppConfig.set(key, datetime.now().isoformat(timespec='seconds'))
+    except Exception as e:                  # never let a marker break the loop
+        logger.debug(f"vendor block marker: {e}")
+
+
 def _do_sync(app):
     """Fetch vehicle status for every active fleet vehicle.
 
@@ -459,6 +481,7 @@ def _do_sync(app):
                 r = _sync_one_vehicle(app, v)
                 if r is not None:
                     results.append(r)
+                    _note_vendor_block(v.id, None)
             except Exception as e:
                 logger.error(f"Vehicle sync [{v.name}] error: {e}")
                 # v3.0.112: shared session across the fleet loop — clear any
@@ -469,6 +492,8 @@ def _do_sync(app):
                     db.session.rollback()
                 except Exception:
                     pass
+                if getattr(e, 'kind', '') == 'vendor_block':
+                    _note_vendor_block(v.id, e)
         return results
 
 

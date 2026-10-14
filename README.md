@@ -379,6 +379,7 @@ needed.
 |-------|---------|------|
 | **Kia** | `hyundai-kia-connect-api` | Username / Password ¹ |
 | **Hyundai** | `hyundai-kia-connect-api` | Username / Password ¹ |
+| **Kia / Hyundai / Genesis (Pleos)** | none — official Pleos Vehicle Data API (Europe) | Client ID / Secret from pleos.ai ⁴ |
 | **Volkswagen** | `carconnectivity` + connector | Username / Password |
 | **Škoda** | none — official MyŠkoda Public API | API key (MyŠkoda app) + VIN ² |
 | **Škoda (old access)** | `carconnectivity` + connector | Username / Password ³ |
@@ -409,6 +410,25 @@ There the app falls back to fetching a refresh token once through a browser
 ("Fetch Token" in Settings, valid about a year). It detects which of the two
 cases it is in and offers only the one that can actually work, instead of
 pointing at an upgrade that cannot happen.
+
+**⁴ Kia/Hyundai in Europe — use Pleos:** since 14 October 2026 Kia and Hyundai Europe
+refuse every sign-in by third-party programs, Home Assistant included. The password check
+still passes; the token exchange right after it answers `HTTP 400` with code **9035**
+("Unusual activity has been detected so you've been logged out"), and each attempt also logs
+the owner out of the official app. The app recognises this, says so plainly instead of
+pointing at the password, and stops signing in by itself (only *Test connection* asks again).
+
+The way out is the manufacturer group's official
+[Pleos personal Vehicle Data API](https://document.pleos.ai/en/api-reference/vehicle-data-api/getting-started/for-private-users/request-my-vehicle-api-key):
+on [pleos.ai](https://pleos.ai/) open the account menu → *My Vehicle Data API* → pick the
+brand → *Get API Key* → sign in with your Kia/Hyundai account, and copy the Client ID and
+Client Secret. A car that hit the block gets a switch-over form in Settings → Vehicles; the
+key is checked with Pleos before anything is stored, and everything recorded so far stays.
+Pleos serves what the car last reported: state of charge, charging and plug state, AC/DC
+targets, time to full, range, odometer, position, doors and lock, climate and outside
+temperature. Not available: 12 V battery, state of health, charging power, remote control
+and waking the car; trips are derived from parking events. Pleos says data flows fully
+24 hours after consent.
 
 **Škoda note:** Škoda is retiring the unofficial app API in October 2026. The app now
 speaks the official [MyŠkoda Public API](https://public.api.connect.skoda-auto.cz/docs):
