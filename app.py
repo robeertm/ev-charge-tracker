@@ -25,6 +25,7 @@ from models.database import (
 )
 from config import Config, DATA_DIR
 from services.i18n import t
+from services import units as _units
 from services.co2_backfill import missing_co2_filter as _missing_co2_filter
 
 def mirror_primary_vehicle_to_legacy_config(v) -> bool:
@@ -422,6 +423,12 @@ def create_app(config_class=Config):
                 db.session.execute(text('ALTER TABLE vehicles ADD COLUMN battery_chemistry VARCHAR(16)'))
             if 'battery_cells_series' not in veh_columns:
                 db.session.execute(text('ALTER TABLE vehicles ADD COLUMN battery_cells_series INTEGER'))
+            # v3.0.155: which unit the car's cloud speaks + when its miles
+            # history was converted (services/unit_history).
+            if 'distance_source_unit' not in veh_columns:
+                db.session.execute(text('ALTER TABLE vehicles ADD COLUMN distance_source_unit VARCHAR(2)'))
+            if 'history_unit_fixed_at' not in veh_columns:
+                db.session.execute(text('ALTER TABLE vehicles ADD COLUMN history_unit_fixed_at DATETIME'))
             # v3.0.121: per-vehicle remote-control opt-in for the official
             # Škoda API. NOT NULL DEFAULT 0 on purpose — an upgrade must
             # never hand an existing install a capability to move a real
@@ -839,11 +846,38 @@ def create_app(config_class=Config):
         except Exception as _e:
             logger.warning(f"v3.0 thg_quotas backfill skipped: {_e}")
 
+        # v3.0.155: a US Kia/Hyundai stored its history in miles under
+        # ``_km`` columns. Convert it once, per car, before its first sync
+        # under this version writes real km next to it. A failure leaves
+        # everything as it was (one transaction) and is retried next boot.
+        try:
+            from services.unit_history import convert_miles_cars_on_start
+            _conv = convert_miles_cars_on_start(db)
+            if _conv:
+                logger.warning(f"v3.0.155: miles history converted to km for vehicles {_conv}")
+        except Exception as _e:
+            db.session.rollback()
+            logger.error(f"v3.0.155 miles history conversion skipped: {_e}")
+
+        # v3.0.155: an install with data keeps the language, currency and
+        # units it showed until now; only fresh ones detect from the browser.
+        try:
+            from services.units import settle_existing_install
+            _settled = settle_existing_install(db)
+            if _settled:
+                logger.info(f"v3.0.155: region settings kept as they were: {_settled}")
+        except Exception as _e:
+            db.session.rollback()
+            logger.error(f"v3.0.155 region settle skipped: {_e}")
+
     register_routes(app)
 
     # Initialize i18n
     from services.i18n import init_app as init_i18n
     init_i18n(app)
+    # v3.0.155: km or miles on every page (stored is always km)
+    from services.units import init_app as init_units
+    init_units(app)
 
     # Auto-backfill parking events from existing vehicle sync history if
     # the parking log is empty (e.g. fresh upgrade from a pre-fahrtenbuch
@@ -1624,6 +1658,19 @@ def _save_vehicle_sync(status, battery_kwh, raw_json='', vehicle_id=None):
       2. A force-refresh delivers identical GPS coords to the existing row
          (car hasn't moved), which would otherwise skip the hook entirely.
     """
+    # v3.0.155: the first time a car's cloud says "miles", what it stored
+    # before was miles under ``_km`` names — convert that history once,
+    # BEFORE the previous-row lookup below compares km against miles.
+    if vehicle_id is not None and getattr(status, 'distance_unit', None):
+        try:
+            from services.unit_history import note_reported_unit
+            from models.database import Vehicle as _UV
+            _veh = _UV.query.get(vehicle_id)
+            if _veh is not None:
+                note_reported_unit(db, _veh, status.distance_unit)
+        except Exception as _ue:
+            db.session.rollback()
+            logger.error(f"unit check for vehicle {vehicle_id} failed: {_ue}")
     new_sync = _build_vehicle_sync(status, battery_kwh, raw_json=raw_json,
                                    vehicle_id=vehicle_id)
     # v2.29: scope the "previous sync" lookup per-vehicle so the
@@ -3168,8 +3215,11 @@ def register_routes(app):
         v.battery_soh_baseline = _float(request.form.get('battery_soh_baseline'))
         v.battery_co2_per_kwh = _float(request.form.get('battery_co2_per_kwh'))
         v.max_ac_kw = _float(request.form.get('max_ac_kw'))
-        v.fossil_co2_per_km = _float(request.form.get('fossil_co2_per_km'))
-        v.recuperation_kwh_per_km = _float(request.form.get('recuperation_kwh_per_km'))
+        # v3.0.155: typed per chosen unit (g/mi, kWh/mi), stored per km
+        v.fossil_co2_per_km = _units.rate_input(request.form.get('fossil_co2_per_km'),
+                                                request.form.get('fossil_co2_per_km__km'), nd=0)
+        v.recuperation_kwh_per_km = _units.rate_input(request.form.get('recuperation_kwh_per_km'),
+                                                      request.form.get('recuperation_kwh_per_km__km'), nd=3)
         # Which wallbox at home this car charges on. Only read when the form
         # actually carried the field — the fleet form is also submitted from
         # places that do not show it, and a missing field must not unpair a car.
@@ -3693,7 +3743,7 @@ def register_routes(app):
                 if sync.soc_percent is not None:
                     parts.append(f'SoC {sync.soc_percent}%')
                 if sync.odometer_km is not None:
-                    parts.append(f'{sync.odometer_km:,} km')
+                    parts.append(f'{_units.dist(sync.odometer_km, 0):,} {_units.dist_label()}')
                 summary = ' · '.join(parts) if parts else 'OK'
                 flash(t('flash.vehicle_sync_ok', name=v.name, summary=summary), 'success')
         except Exception as e:
@@ -3924,7 +3974,8 @@ def register_routes(app):
                 charge.date = datetime.strptime(request.form['date'], '%Y-%m-%d').date()
                 charge.charge_hour = _int(request.form.get('charge_hour'))
                 charge.charge_end_hour = _int(request.form.get('charge_end_hour'))
-                charge.odometer = _int(request.form.get('odometer'))
+                charge.odometer = _units.km_input(request.form.get('odometer'),
+                                                  request.form.get('odometer__km'))
                 charge.eur_per_kwh = _float(request.form.get('eur_per_kwh'))
                 charge.kwh_loaded = _float(request.form.get('kwh_loaded'))
                 charge.charge_type = request.form.get('charge_type', 'AC').upper()
@@ -4030,9 +4081,10 @@ def register_routes(app):
                             charge.co2_estimated = False
                             charge.calculate_fields(_bk, _eff)
                             db.session.commit()
-                            hour_label = f" ({charge.charge_hour}:00 Uhr)" if charge.charge_hour is not None else ""
+                            hour_label = f" ({charge.charge_hour}:00)" if charge.charge_hour is not None else ""
                             flash(t('flash.co2_fetched', value=co2, hour=hour_label), 'info')
-                cost_str = f'€{charge.total_cost:.2f}' if charge.total_cost is not None else '€—'
+                cost_str = (f'{_units.cur_pre()}{charge.total_cost:.2f}' if charge.total_cost is not None
+                            else f'{_units.cur_pre()}—')
                 flash(t('flash.charge_saved', date=charge.date.strftime("%d.%m.%Y"), kwh=charge.kwh_loaded or 0, cost=cost_str), 'success')
                 return redirect(url_for('input_charge'))
 
@@ -4259,7 +4311,8 @@ def register_routes(app):
                 charge.date = datetime.strptime(request.form['date'], '%Y-%m-%d').date()
                 charge.charge_hour = _int(request.form.get('charge_hour'))
                 charge.charge_end_hour = _int(request.form.get('charge_end_hour'))
-                charge.odometer = _int(request.form.get('odometer'))
+                charge.odometer = _units.km_input(request.form.get('odometer'),
+                                                  request.form.get('odometer__km'))
                 charge.eur_per_kwh = _float(request.form.get('eur_per_kwh'))
                 charge.kwh_loaded = _float(request.form.get('kwh_loaded'))
                 charge.charge_type = request.form.get('charge_type', 'AC').upper()
@@ -4397,11 +4450,45 @@ def register_routes(app):
                 AppConfig.set('ocm_api_key', key)
                 flash(t('flash.ocm_saved'), 'success')
 
+            elif action == 'save_units':
+                # v3.0.155: what the pages show — never what is stored
+                unit = request.form.get('distance_unit', 'auto')
+                if unit in _units.UNITS or unit == 'auto':
+                    AppConfig.set('distance_unit', unit)
+                    if unit != 'auto':
+                        _units.set_unit(unit)
+                code = request.form.get('currency')
+                if code in _units.CURRENCIES:
+                    AppConfig.set('currency', code)
+                    _units.set_currency(code)
+                return redirect(_settings_url_with_section())
+
+            elif action in ('units_convert', 'units_undo'):
+                # v3.0.155: a car's history recorded in miles → km (or back)
+                from models.database import Vehicle as _UVeh
+                from services import unit_history as _uh
+                _veh = _UVeh.query.get(_int(request.form.get('vehicle_id')) or 0)
+                if _veh is not None:
+                    _dir = 'mi_to_km' if action == 'units_convert' else 'km_to_mi'
+                    try:
+                        res = _uh.convert(db, _veh, _dir, reason='settings')
+                    except Exception as _ce:
+                        flash(t('flash.units_failed', error=_ce), 'danger')
+                    else:
+                        n = sum((res.get('counts') or {}).values())
+                        if res.get('ok'):
+                            flash(t('flash.units_converted' if _dir == 'mi_to_km' else 'flash.units_undone',
+                                    n=n, name=_veh.name), 'success')
+                        else:
+                            flash(t('flash.units_already' if res.get('reason') == 'already'
+                                    else 'flash.units_not_converted', name=_veh.name), 'warning')
+                return redirect(_settings_url_with_section())
+
             elif action == 'save_language':
                 lang = request.form.get('app_language', 'de')
                 AppConfig.set('app_language', lang)
-                from services.i18n import set_language
-                set_language(lang)
+                from services.i18n import set_language, detect_language
+                set_language(detect_language() or 'de' if lang == 'auto' else lang)
                 return redirect(_settings_url_with_section())
 
             elif action == 'save_car':
@@ -4875,6 +4962,8 @@ def register_routes(app):
         from services.battery_analysis import CHEMISTRIES as _CHEM
         return render_template('settings.html',
                                battery_chemistries=[(k, v[0]) for k, v in _CHEM.items()],
+                               unit_vehicles=_unit_vehicles(),
+                               region_cfg=_region_cfg(),
                                entsoe_key=AppConfig.get('entsoe_api_key', ''),
                                ocm_key=AppConfig.get('ocm_api_key', ''),
                                novnc_url=os.environ.get('NOVNC_URL', ''),
@@ -5358,7 +5447,8 @@ def register_routes(app):
         preset = request.args.get('preset', 'month')
         start = request.args.get('start')
         end = request.args.get('end')
-        lang = AppConfig.get('app_language', 'de')
+        from services.i18n import get_language as _gl
+        lang = _gl()   # v3.0.155: may be "auto" in the config — the resolved one
         s, e, label = resolve_range(preset, start, end, lang=lang)
         # v2.29 fleet picker
         _picker = _active_vehicle_id()
@@ -6487,7 +6577,14 @@ def register_routes(app):
         trips = get_trips()
         out = _io.StringIO()
         writer = csv.writer(out, delimiter=';')
-        writer.writerow(['Datum', 'Von', 'Nach', 'km', 'SoC %'])
+        # v3.0.155: column names in the page's language, distance in the
+        # chosen unit (the charges CSV below stays km — it is the lossless
+        # backup/import format)
+        # 🔴 not t(): the loop below names its trips ``t``, which makes ``t``
+        # local to this whole function
+        from services.i18n import t as _tr
+        writer.writerow([_tr('trips.col_when'), _tr('trips.col_from'), _tr('trips.col_to'),
+                         _units.dist_label(), 'SoC %'])
         for t in trips:
             from_label = (t['from'].get('address')
                           or t['from'].get('name')
@@ -6498,7 +6595,7 @@ def register_routes(app):
             writer.writerow([
                 (t['from']['departed_at'] or '')[:10],
                 from_label, to_label,
-                t['km'] or '', t['soc_used'] or '',
+                _units.dist(t['km'], mi_nd=1) or '', t['soc_used'] or '',
             ])
         from flask import Response
         return Response(out.getvalue(), mimetype='text/csv',
@@ -7389,7 +7486,8 @@ def register_routes(app):
         except (TypeError, ValueError):
             return jsonify({'error': 'invalid_coords'}), 400
         from services.geocode_service import reverse
-        addr = reverse(lat, lon, language=AppConfig.get('app_language', 'de'))
+        from services.i18n import get_language as _gl
+        addr = reverse(lat, lon, language=_gl())
         return jsonify({'address': addr})
 
     @app.route('/api/locations/operator')
@@ -7496,10 +7594,10 @@ def register_routes(app):
                     date_=datetime.strptime(date_str, '%Y-%m-%d').date() if date_str else date.today(),
                     item_type=request.form.get('item_type', 'other'),
                     title=request.form.get('title', '').strip() or None,
-                    odometer_km=_int(request.form.get('odometer_km')),
+                    odometer_km=_units.km_input(request.form.get('odometer_km'), request.form.get('odometer_km__km')),
                     cost_eur=_float(request.form.get('cost_eur')),
                     notes=request.form.get('notes', '').strip() or None,
-                    next_due_km=_int(request.form.get('next_due_km')),
+                    next_due_km=_units.km_input(request.form.get('next_due_km'), request.form.get('next_due_km__km')),
                     next_due_date=(datetime.strptime(request.form.get('next_due_date'), '%Y-%m-%d').date()
                                     if request.form.get('next_due_date') else None),
                     vehicle_id=stamp_vid,
@@ -7546,10 +7644,10 @@ def register_routes(app):
                 date=datetime.strptime(date_str, '%Y-%m-%d').date() if date_str else None,
                 item_type=request.form.get('item_type', 'other'),
                 title=request.form.get('title', '').strip() or None,
-                odometer_km=_int(request.form.get('odometer_km')),
+                odometer_km=_units.km_input(request.form.get('odometer_km'), request.form.get('odometer_km__km')),
                 cost_eur=_float(request.form.get('cost_eur')),
                 notes=request.form.get('notes', '').strip() or None,
-                next_due_km=_int(request.form.get('next_due_km')),
+                next_due_km=_units.km_input(request.form.get('next_due_km'), request.form.get('next_due_km__km')),
                 next_due_date=(datetime.strptime(next_date_str, '%Y-%m-%d').date()
                                if next_date_str else None),
             )
@@ -7758,6 +7856,47 @@ def _float(val):
         return float(str(val).replace(',', '.'))
     except (ValueError, TypeError):
         return None
+
+
+def _region_cfg():
+    """What the language/units card shows: the stored choices ("auto"
+    when none) and what this browser told us."""
+    try:
+        langs = [l for l, _q in request.accept_languages]
+    except Exception:
+        langs = []
+    from services.i18n import detect_language
+    country = _units.country_of(langs)
+    return {
+        'language': AppConfig.get('app_language') or 'auto',
+        'unit': AppConfig.get('distance_unit') or 'auto',
+        'currency': AppConfig.get('currency') or _units.get_currency(),
+        'currency_detected_from': AppConfig.get('currency_detected_from') or '',
+        'browser': ', '.join(langs[:3]) or '—',
+        'country': country or '—',
+        'auto_language': detect_language() or 'de',
+        'auto_unit': _units.unit_for(country) if country else 'km',
+    }
+
+
+def _unit_vehicles():
+    """Per car for the units card: what its cloud speaks, whether its
+    history was converted, and how many stored values a conversion would
+    touch (shown before anybody presses)."""
+    from models.database import Vehicle
+    from services.unit_history import count_rows
+    out = []
+    try:
+        for v in Vehicle.query.order_by(Vehicle.is_archived.asc(), Vehicle.id.asc()).all():
+            out.append({
+                'id': v.id, 'name': v.name or ('#%d' % v.id),
+                'source_unit': v.distance_source_unit,
+                'converted_at': v.history_unit_fixed_at,
+                'values': sum(count_rows(db, v.id).values()),
+            })
+    except Exception as e:
+        logger.warning(f"units card: {e}")
+    return out
 
 
 def _int(val):

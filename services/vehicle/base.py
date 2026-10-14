@@ -29,6 +29,55 @@ def plausible_percent(value):
     return value
 
 
+# v3.0.155: the app stores kilometres, full stop. A manufacturer cloud that
+# answers in miles (every US Kia/Hyundai, Porsche or VW accounts set to
+# imperial) used to land in ``odometer_km`` as it came — 30 000 miles
+# became "30 000 km", and every trip, km/h and kWh/100 km computed from it
+# was off by 1.609 without anything looking wrong. The connectors now
+# convert at the door; showing miles is the page's job (services/units).
+KM_PER_MI = 1.609344
+_MILE_NAMES = {'mi', 'mile', 'miles', 'mph', 'imperial'}
+_KM_NAMES = {'km', 'kilometer', 'kilometers', 'kilometre', 'kilometres', 'km/h',
+             'kmh', 'kph', 'metric'}
+
+
+def unit_name(unit):
+    """'mi', 'km' or None from whatever a library calls its unit — a
+    string ('mi', 'MILES', 'km'), an enum (Length.MI, value 'mi'), or a
+    small object carrying ``unit``/``value``."""
+    if unit is None:
+        return None
+    inner = getattr(unit, 'value', None)
+    if isinstance(inner, str):
+        unit = inner
+    name = getattr(unit, 'name', None) if not isinstance(unit, str) else None
+    raw = str(unit if isinstance(unit, str) else (name or unit)).strip().lower()
+    raw = raw.rsplit('.', 1)[-1]          # 'Length.MI' -> 'mi'
+    if raw in _MILE_NAMES:
+        return 'mi'
+    if raw in _KM_NAMES:
+        return 'km'
+    return None
+
+
+def to_km(value, unit, as_int=False):
+    """A distance (or speed) as km, given the unit it arrived in. An unknown
+    unit is taken as km — that is what every connector assumed until now,
+    so nothing that worked changes."""
+    if value is None:
+        return None
+    try:
+        v = float(value)
+    except (TypeError, ValueError):
+        return None
+    if unit_name(unit) != 'mi':
+        # km stays exactly as before — int() truncates, as every connector
+        # did; a rounded odometer would read as "moved 1 km" once.
+        return int(v) if as_int else v
+    v *= KM_PER_MI
+    return int(round(v)) if as_int else v
+
+
 @dataclass
 class VehicleStatus:
     soc_percent: Optional[int] = None
@@ -73,6 +122,10 @@ class VehicleStatus:
     consumption_30d_wh_per_km: Optional[int] = None
     est_portable_charge_min: Optional[int] = None
     registration_date: Optional[str] = None
+    # v3.0.155: the unit the cloud reported distances in ('km'/'mi'/None).
+    # The values above are already km; this only tells the sync that a
+    # car's earlier history may have been stored in miles.
+    distance_unit: Optional[str] = None
     timestamp: datetime = field(default_factory=datetime.utcnow)
     raw_data: dict = field(default_factory=dict)
 

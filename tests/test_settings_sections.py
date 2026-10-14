@@ -114,6 +114,11 @@ else:
     umgebung = jinja2.Environment(
         loader=jinja2.FileSystemLoader(os.path.join(ROOT, 'templates')),
         autoescape=True)
+    # v3.0.155: the km/mi filters (`dist`, `per_dist`) — registered
+    # deliberately, from the same function the app uses.
+    sys.path.insert(0, ROOT)
+    from services.units import register_jinja
+    register_jinja(umgebung)
     vorlagen = sorted(Path(os.path.join(ROOT, 'templates')).rglob('*.html'))
     check(len(vorlagen) > 0, "there are templates to check")
     kaputt = []

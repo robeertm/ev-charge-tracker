@@ -147,14 +147,15 @@
                     <!-- km-Stand -->
                     <div class="mb-3">
                         <label for="odometer" class="form-label fw-bold">
-                            <i class="bi bi-speedometer"></i> {{ t('input.odometer') }}
+                            <i class="bi bi-speedometer"></i> {{ t('input.odometer') }} ({{ dist_unit() }})
                             <small class="text-muted fw-normal">{{ t('input.optional') }}</small>
                         </label>
                         <input type="number" class="form-control form-control-lg" id="odometer"
                                name="odometer" min="0" max="999999"
-                               value="{{ pre_charge.odometer if pre_charge and pre_charge.odometer else '' }}"
-                               placeholder="{{ last_charge.odometer if last_charge and last_charge.odometer else '' }}"
+                               value="{{ pre_charge.odometer|dist(0) if pre_charge and pre_charge.odometer else '' }}"
+                               placeholder="{{ last_charge.odometer|dist(0) if last_charge and last_charge.odometer else '' }}"
                                inputmode="numeric">
+                        <input type="hidden" name="odometer__km" value="{{ pre_charge.odometer if pre_charge and pre_charge.odometer else '' }}">
                     </div>
 
                     <!-- SoC -->
@@ -217,7 +218,7 @@
                                                name="start_fee_eur" step="0.01" min="0" max="500"
                                                placeholder="0.00" inputmode="decimal"
                                                value="{{ '%.2f'|format(pre_charge.start_fee_eur) if pre_charge and pre_charge.start_fee_eur is not none else '' }}">
-                                        <span class="input-group-text">€</span>
+                                        <span class="input-group-text">{{ cur() }}</span>
                                     </div>
                                 </div>
                                 <div class="col-6">
@@ -230,7 +231,7 @@
                                                name="blocking_fee_eur" step="0.01" min="0" max="500"
                                                placeholder="0.00" inputmode="decimal"
                                                value="{{ '%.2f'|format(pre_charge.blocking_fee_eur) if pre_charge and pre_charge.blocking_fee_eur is not none else '' }}">
-                                        <span class="input-group-text">€</span>
+                                        <span class="input-group-text">{{ cur() }}</span>
                                     </div>
                                 </div>
                             </div>
@@ -455,7 +456,7 @@ function updateCalcPrice() {
         total = startFee + blockFee;
     }
     if (total != null) {
-        let txt = '€' + total.toFixed(2);
+        let txt = U.curPre + total.toFixed(2);
         if (startFee || blockFee) {
             const base = (!isNaN(eur) && !isNaN(kwh)) ? (eur * kwh) : 0;
             const extra = startFee + blockFee;

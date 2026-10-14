@@ -11,6 +11,41 @@
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
     <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css" rel="stylesheet">
     <link href="{{ url_for('static', filename='css/custom.css') }}" rel="stylesheet">
+    <script>
+    // v3.0.155: km or miles. Every API number stays km (Home Assistant and
+    // other callers rely on it); the page converts what it shows and what
+    // it sends back. d = a length (km, km/h), r = a rate per length
+    // (kWh/100 km, €/100 km, kWh/km, g/km).
+    window.U = (function(c){
+      var f = c.f;
+      function n(v){ return (v === null || v === undefined || v === '' || isNaN(+v)) ? null : +v; }
+      function fix(v, nd){ return nd === undefined ? v : +v.toFixed(nd); }
+      return {
+        mi: c.unit === 'mi', dist: c.dist, speed: c.speed, cons: c.cons, per: c.per, per100: c.per100,
+        cur: c.cur, curPre: c.curPre, curCode: c.curCode,   // money: the sign only, never converted
+        d: function(km, nd){ var v = n(km); return v === null ? null : fix(v * f, nd); },
+        r: function(x, nd){ var v = n(x); return v === null ? null : fix(v / f, nd); },
+        toKm: function(v, nd){ v = n(v); return v === null ? null : fix(v / f, nd); },
+        rateToKm: function(v, nd){ v = n(v); return v === null ? null : fix(v * f, nd); },
+        // An input showing a stored km value in the chosen unit. read() gives
+        // the stored km back untouched when the field was not changed — a
+        // saved-but-unchanged form must not move an odometer by a rounding step.
+        show: function(input, km, nd){
+          var v = this.d(km, nd || 0);
+          input.value = v === null ? '' : v;
+          input.dataset.km = (km === null || km === undefined) ? '' : km;
+          input.dataset.shown = input.value;
+        },
+        read: function(input, nd){
+          var raw = String(input.value || '').trim().replace(',', '.');
+          if (raw === '') return null;
+          if (input.dataset.km && raw === input.dataset.shown) return +input.dataset.km;
+          var k = this.toKm(raw);
+          return k === null ? null : (nd ? +k.toFixed(nd) : Math.round(k));
+        }
+      };
+    })({{ units_js()|tojson }});
+    </script>
     {% block head %}{% endblock %}
 </head>
 <body>

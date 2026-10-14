@@ -306,8 +306,8 @@
                 bar.className = 'progress-bar ' + (d.soc > 50 ? 'bg-success' : d.soc > 20 ? 'bg-warning' : 'bg-danger');
             }
         }
-        if (d.range_km != null) setText('vRange', d.range_km + ' km');
-        if (d.odometer != null) setText('vOdo', d.odometer.toLocaleString('de') + ' km');
+        if (d.range_km != null) setText('vRange', U.d(d.range_km, 0) + ' ' + U.dist);
+        if (d.odometer != null) setText('vOdo', U.d(d.odometer, 0).toLocaleString('de') + ' ' + U.dist);
         let status = d.is_charging ? '<span class="text-success">' + T.charging + '</span>' :
                      d.is_plugged_in ? '<span class="text-info">' + T.plugged_in + '</span>' :
                      d.is_locked ? '<span class="text-secondary">' + T.locked + '</span>' : '<span class="text-warning">' + T.open + '</span>';
@@ -349,7 +349,7 @@
                 setHtml('vTires', '<span class="text-success"><i class="bi bi-check-circle"></i> ' + T.tire_ok + '</span>');
             }
         }
-        if (d.consumption_30d) setText('vConsumption30d', (d.consumption_30d / 10).toFixed(1) + ' kWh/100km');  // Wh/km → kWh/100km = /10
+        if (d.consumption_30d) setText('vConsumption30d', U.r(d.consumption_30d / 10).toFixed(1) + ' ' + U.cons);  // Wh/km → kWh/100km = /10
         setText('vPortableCharge', d.est_portable_charge_min != null ? Math.round(d.est_portable_charge_min / 60) + 'h ' + (d.est_portable_charge_min % 60) + 'min' : '—');
         if (d.registration_date) setText('vRegDate', new Date(d.registration_date).toLocaleDateString('de'));
         if (d.location_lat && d.location_lon) {
@@ -536,12 +536,12 @@
         <div class="row g-3" id="vhChartsRow">
             {% set vh_plots = [
                 ('vhSoc',   t('dash.battery')      ~ ' (SoC %)'),
-                ('vhRange', t('dash.range')        ~ ' (km)'),
-                ('vhOdo',   t('dash.odometer')     ~ ' (km)'),
+                ('vhRange', t('dash.range')        ~ ' (' ~ dist_unit() ~ ')'),
+                ('vhOdo',   t('dash.odometer')     ~ ' (' ~ dist_unit() ~ ')'),
                 ('vh12v',   t('dash.v12')          ~ ' (%)'),
                 ('vhSoh',   t('dash.soh')          ~ ' (%)'),
                 ('vhRegen', t('dash.regenerated')  ~ ' (' ~ t('dash.regen_measured') ~ ')'),
-                ('vhCons',  t('dash.avg_30d')      ~ ' (kWh/100km)'),
+                ('vhCons',  t('dash.avg_30d')      ~ ' (' ~ cons_unit() ~ ')'),
             ] %}
             {% for chart_id, title in vh_plots %}
             <div class="col-lg-4 col-md-6">
@@ -612,12 +612,12 @@
     const charts = {};
     const CHART_DEFS = [
         { id: 'vhSoc',   field: 'soc',             color: 'rgba(76, 175, 80, 1)',  fmt: v => v + '%',             label: {{ t('dash.battery')|tojson }} + ' (SoC %)' },
-        { id: 'vhRange', field: 'range_km',        color: 'rgba(33, 150, 243, 1)', fmt: v => v + ' km',           label: {{ t('dash.range')|tojson }} + ' (km)' },
-        { id: 'vhOdo',   field: 'odometer_km',     color: 'rgba(96, 125, 139, 1)', fmt: v => v.toLocaleString('de'), label: {{ t('dash.odometer')|tojson }} + ' (km)' },
+        { id: 'vhRange', field: 'range_km',        color: 'rgba(33, 150, 243, 1)', fmt: v => v + ' ' + U.dist,    label: {{ t('dash.range')|tojson }} + ' (' + U.dist + ')', conv: 'd' },
+        { id: 'vhOdo',   field: 'odometer_km',     color: 'rgba(96, 125, 139, 1)', fmt: v => v.toLocaleString('de'), label: {{ t('dash.odometer')|tojson }} + ' (' + U.dist + ')', conv: 'd' },
         { id: 'vh12v',   field: 'battery_12v',     color: 'rgba(255, 193, 7, 1)',  fmt: v => v + '%',             label: {{ t('dash.v12')|tojson }} + ' (%)', threshold: { value: {{ low_12v_threshold|default(60) }}, color: 'rgba(220, 53, 69, 0.9)', label: {{ t('dash.low_12v_threshold_label', pct=low_12v_threshold|default(60))|tojson }} } },
         { id: 'vhSoh',   field: 'soh',             color: 'rgba(244, 67, 54, 1)',  fmt: v => v + '%',             label: {{ t('dash.soh')|tojson }} + ' (%)', withAvg: true },
         { id: 'vhRegen', field: 'regen_kwh',       color: 'rgba(0, 188, 212, 1)',  fmt: v => v.toFixed(0),        label: {{ t('dash.regenerated')|tojson }} },
-        { id: 'vhCons',  field: 'consumption_30d', color: 'rgba(255, 152, 0, 1)',  fmt: v => v.toFixed(1),        label: {{ t('dash.avg_30d')|tojson }} + ' (kWh/100km)' },
+        { id: 'vhCons',  field: 'consumption_30d', color: 'rgba(255, 152, 0, 1)',  fmt: v => v.toFixed(1),        label: {{ t('dash.avg_30d')|tojson }} + ' (' + U.cons + ')', conv: 'r' },
     ];
 
     function pairs(ts, values) {
@@ -664,6 +664,8 @@
     function buildChartConfig(def, ts, values, opts) {
         opts = opts || {};
         const cfg = baseOpts(def.color, def.fmt, opts);
+        // v3.0.155: the series arrive in km — length or rate per length
+        if (def.conv) values = values.map(v => (v === null || v === undefined) ? v : U[def.conv](v, def.conv === 'd' ? 0 : 2));
         const data = pairs(ts, values);
         cfg.data.datasets[0].data = data;
         // v3.0.13: optional horizontal threshold line (e.g. 12 V lockout
@@ -913,9 +915,9 @@
         }
         const tempStr = d.temp_c != null ? (d.temp_c.toFixed(1) + '°C') : '—';
         box.innerHTML =
-            '<div class="display-6 text-info mb-1">' + d.range_km + ' km</div>' +
+            '<div class="display-6 text-info mb-1">' + U.d(d.range_km, 0) + ' ' + U.dist + '</div>' +
             '<div class="small text-muted">' +
-            'SoC ' + d.soc + '% &middot; ' + d.consumption + ' kWh/100km &middot; ' + tempStr +
+            'SoC ' + d.soc + '% &middot; ' + U.r(d.consumption, 1) + ' ' + U.cons + ' &middot; ' + tempStr +
             '</div>';
     }).catch(() => {});
 
@@ -925,13 +927,13 @@
         const h = d.highlights || {};
         const lines = [];
         if (h.cheapest_charge)
-            lines.push('<i class="bi bi-tag text-success"></i> {{ t("dash.h_cheapest") }} <strong>' + h.cheapest_charge.eur_per_kwh.toFixed(3) + ' €/kWh</strong>');
+            lines.push('<i class="bi bi-tag text-success"></i> {{ t("dash.h_cheapest") }} <strong>' + h.cheapest_charge.eur_per_kwh.toFixed(3) + ' ' + U.cur + '/kWh</strong>');
         if (h.most_expensive_charge)
-            lines.push('<i class="bi bi-tag text-danger"></i> {{ t("dash.h_expensive") }} <strong>' + h.most_expensive_charge.eur_per_kwh.toFixed(3) + ' €/kWh</strong>');
+            lines.push('<i class="bi bi-tag text-danger"></i> {{ t("dash.h_expensive") }} <strong>' + h.most_expensive_charge.eur_per_kwh.toFixed(3) + ' ' + U.cur + '/kWh</strong>');
         if (h.biggest_charge)
             lines.push('<i class="bi bi-battery-charging text-info"></i> {{ t("dash.h_biggest") }} <strong>' + h.biggest_charge.kwh.toFixed(1) + ' kWh</strong>');
         if (h.longest_trip)
-            lines.push('<i class="bi bi-signpost text-primary"></i> {{ t("dash.h_longest_trip") }} <strong>' + h.longest_trip.km + ' km</strong>');
+            lines.push('<i class="bi bi-signpost text-primary"></i> {{ t("dash.h_longest_trip") }} <strong>' + U.d(h.longest_trip.km, 1) + ' ' + U.dist + '</strong>');
         if (h.longest_park)
             lines.push('<i class="bi bi-p-square text-secondary"></i> {{ t("dash.h_longest_park") }} <strong>' + h.longest_park.days + ' d</strong>');
         box.innerHTML = lines.length ? lines.join('<br>') : '<div class="text-muted">{{ t("dash.h_empty") }}</div>';
@@ -979,9 +981,9 @@
         <div class="card kpi-card border-primary">
             <div class="card-body text-center p-2">
                 <div class="kpi-label">{{ t('dash.total_cost') }}</div>
-                <div class="kpi-value text-primary">€{{ "{:,.0f}".format(stats.total_cost).replace(",", ".") }}</div>
+                <div class="kpi-value text-primary">{{ cur_pre() }}{{ "{:,.0f}".format(stats.total_cost).replace(",", ".") }}</div>
                 {% if stats.total_thg_eur > 0 %}
-                <div class="kpi-label mt-1" style="text-transform:none; letter-spacing:0">{{ t('dash.net') }}: €{{ "{:,.0f}".format(stats.net_cost).replace(",", ".") }} ({{ t('dash.thg') }} −€{{ "{:,.0f}".format(stats.total_thg_eur).replace(",", ".") }})</div>
+                <div class="kpi-label mt-1" style="text-transform:none; letter-spacing:0">{{ t('dash.net') }}: {{ cur_pre() }}{{ "{:,.0f}".format(stats.net_cost).replace(",", ".") }} ({{ t('dash.thg') }} −{{ cur_pre() }}{{ "{:,.0f}".format(stats.total_thg_eur).replace(",", ".") }})</div>
                 {% endif %}
             </div>
         </div>
@@ -991,7 +993,7 @@
             <div class="card-body text-center p-2">
                 <div class="kpi-label">{{ t('dash.total_kwh') }}</div>
                 <div class="kpi-value text-info">{{ "{:,.0f}".format(stats.total_kwh).replace(",", ".") }} kWh</div>
-                <div class="kpi-label mt-1" style="text-transform:none; letter-spacing:0">{{ stats.total_charges }}× · Ø €{{ "%.2f"|format(stats.avg_eur_per_kwh) }}/kWh</div>
+                <div class="kpi-label mt-1" style="text-transform:none; letter-spacing:0">{{ stats.total_charges }}× · Ø {{ cur_pre() }}{{ "%.2f"|format(stats.avg_eur_per_kwh) }}/kWh</div>
             </div>
         </div>
     </div>
@@ -1022,8 +1024,8 @@
         <div class="card kpi-card border-primary">
             <div class="card-body text-center p-2">
                 <div class="kpi-label">{{ t('dash.odometer_label') }}</div>
-                <div class="kpi-value text-primary">{{ "{:,.0f}".format(stats.total_km).replace(",", ".") }} km</div>
-                <div class="kpi-label mt-1" style="text-transform:none; letter-spacing:0">{{ "%.2f"|format(stats.cost_per_100km) }} €/100km{% if stats.total_thg_eur > 0 %} ({{ t('dash.net') | lower }} {{ "%.2f"|format(stats.net_cost_per_100km) }}){% endif %}</div>
+                <div class="kpi-value text-primary">{{ "{:,.0f}".format(stats.total_km|dist).replace(",", ".") }} {{ dist_unit() }}</div>
+                <div class="kpi-label mt-1" style="text-transform:none; letter-spacing:0">{{ "%.2f"|format(stats.cost_per_100km|per_dist) }} {{ cur() }}/100 {{ dist_unit() }}{% if stats.total_thg_eur > 0 %} ({{ t('dash.net') | lower }} {{ "%.2f"|format(stats.net_cost_per_100km|per_dist) }}){% endif %}</div>
             </div>
         </div>
     </div>
@@ -1031,8 +1033,8 @@
         <div class="card kpi-card border-warning">
             <div class="card-body text-center p-2">
                 <div class="kpi-label">{{ t('dash.consumption') }}</div>
-                <div class="kpi-value text-warning">{{ "%.1f"|format(stats.consumption_with_recup) }}<small> kWh/100km</small></div>
-                <div class="kpi-label mt-1" style="text-transform:none; letter-spacing:0">{{ t('dash.without_recup') }} {{ "%.1f"|format(stats.consumption_without_recup) }} kWh/100km</div>
+                <div class="kpi-value text-warning">{{ "%.1f"|format(stats.consumption_with_recup|per_dist) }}<small> {{ cons_unit() }}</small></div>
+                <div class="kpi-label mt-1" style="text-transform:none; letter-spacing:0">{{ t('dash.without_recup') }} {{ "%.1f"|format(stats.consumption_without_recup|per_dist) }} {{ cons_unit() }}</div>
             </div>
         </div>
     </div>
@@ -1045,7 +1047,7 @@
                     {% if stats.historical_regen_kwh > 0 and stats.measured_regen_kwh is defined %}
                     {{ "{:,.0f}".format(stats.historical_regen_kwh).replace(",", ".") }} + {{ "%.1f"|format(stats.measured_regen_kwh) }} <small>({{ t('dash.regen_measured') }})</small>
                     {% else %}
-                    {{ stats.recup_cycles }} {{ t('dash.cycles') }} · {{ "%.3f"|format(stats.recup_rate_kwh_per_km) }} kWh/km
+                    {{ stats.recup_cycles }} {{ t('dash.cycles') }} · {{ "%.3f"|format(stats.recup_rate_kwh_per_km|per_dist) }} kWh/{{ dist_unit() }}
                     {% endif %}
                 </div>
             </div>
@@ -1055,7 +1057,7 @@
         <div class="card kpi-card border-secondary">
             <div class="card-body text-center p-2">
                 <div class="kpi-label">{{ t('dash.km_by_recup') }}</div>
-                <div class="kpi-value text-secondary">{{ "{:,.0f}".format(stats.recup_extra_km).replace(",", ".") }} km</div>
+                <div class="kpi-value text-secondary">{{ "{:,.0f}".format(stats.recup_extra_km|dist).replace(",", ".") }} {{ dist_unit() }}</div>
                 <div class="kpi-label mt-1" style="text-transform:none; letter-spacing:0">{{ "%.1f"|format(stats.recup_extra_km / stats.total_km * 100) }}% {{ t('dash.of_total') }}</div>
             </div>
         </div>
@@ -1097,7 +1099,7 @@
             <div class="col-6 col-md-2">
                 <div class="small text-muted">{{ t('dash.regen_total') }}</div>
                 <div class="fw-bold text-success">{{ "{:,.0f}".format(stats.regen_stats.lifetime).replace(",", ".") }} kWh</div>
-                <div class="small text-muted">≈ {{ "{:,.0f}".format(stats.regen_stats.lifetime_km_equiv).replace(",", ".") }} km</div>
+                <div class="small text-muted">≈ {{ "{:,.0f}".format(stats.regen_stats.lifetime_km_equiv|dist).replace(",", ".") }} {{ dist_unit() }}</div>
             </div>
         </div>
     </div>
@@ -1154,9 +1156,9 @@
                         <tr>
                             <td>{{ y.year }}</td>
                             <td>{{ "{:,.0f}".format(y.kwh) }}</td>
-                            <td>€{{ "{:,.0f}".format(y.cost) }}</td>
-                            <td class="text-success">{% if y.thg > 0 %}−€{{ "{:,.0f}".format(y.thg) }}{% else %}–{% endif %}</td>
-                            <td>€{{ "{:,.0f}".format(y.net_cost) }}</td>
+                            <td>{{ cur_pre() }}{{ "{:,.0f}".format(y.cost) }}</td>
+                            <td class="text-success">{% if y.thg > 0 %}−{{ cur_pre() }}{{ "{:,.0f}".format(y.thg) }}{% else %}–{% endif %}</td>
+                            <td>{{ cur_pre() }}{{ "{:,.0f}".format(y.net_cost) }}</td>
                         </tr>
                     {% endfor %}
                     </tbody>
@@ -1351,7 +1353,7 @@ makeExpandableChart('chartMonthlyCost', {
             backgroundColor: chartColors.primary,
             borderRadius: isMobile ? 2 : 4,
         }, {
-            label: 'Ø ' + monthlyCostAvg.toFixed(2) + ' €',
+            label: 'Ø ' + monthlyCostAvg.toFixed(2) + ' ' + U.cur,
             data: Array(labels.length).fill(monthlyCostAvg),
             type: 'line',
             borderColor: chartColors.danger,
@@ -1365,7 +1367,7 @@ makeExpandableChart('chartMonthlyCost', {
         plugins: { legend: mobileLegend },
         scales: {
             x: { ticks: mobileBarTicks },
-            y: { beginAtZero: true, ticks: { ...mobileYTicks, callback: v => '€' + v } }
+            y: { beginAtZero: true, ticks: { ...mobileYTicks, callback: v => U.curPre + v } }
         }
     }
 }, T.chart_cost_eur);
@@ -1376,7 +1378,7 @@ makeExpandableChart('chartCumulative', {
     data: {
         labels: {{ chart_data.cumulative_labels | tojson }},
         datasets: [{
-            label: T.cumulative_cost + ' (€)',
+            label: T.cumulative_cost + ' (' + U.cur + ')',
             data: {{ chart_data.cumulative_cost | tojson }},
             borderColor: chartColors.danger,
             backgroundColor: 'rgba(244, 67, 54, 0.1)',
@@ -1389,7 +1391,7 @@ makeExpandableChart('chartCumulative', {
         plugins: { legend: { display: false } },
         scales: {
             x: { ticks: mobileLineTicks },
-            y: { ticks: { ...mobileYTicks, callback: v => '€' + v.toLocaleString() } }
+            y: { ticks: { ...mobileYTicks, callback: v => U.curPre + v.toLocaleString() } }
         }
     }
 }, T.cumulative_cost);

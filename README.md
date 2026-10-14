@@ -257,6 +257,7 @@ never mix with a real history.
 ### UX
 - **Dark/Light mode** — toggle in navbar, synced across all tabs via localStorage
 - **6 languages** — German, English, French, Spanish, Italian, Dutch, all kept at **full parity** (every user-facing string translated in all six, not just de/en)
+- **Kilometres or miles, any currency** (v3.0.155) — distances, speeds and consumption in km or miles (kWh/100 km or kWh/100 mi), and the currency sign of your choice (€, $, £, CHF, kr …; prices are never converted, only the sign). A new install picks language, units and currency from the browser's language and country; everything can be set in Settings → Language · Units. Data is always stored in km, the API stays in km.
 
 ---
 
@@ -478,9 +479,11 @@ Configure in Settings > Vehicle:
 
 ---
 
-## Languages
+## Languages, units and currency
 
-Switchable from Settings > Language:
+Language, distance unit (km or miles) and currency sign are set in Settings > Language · Units — or, on a new install, detected from the browser (`en-US` → English, miles, US dollars). Language and units follow the device; the currency is detected once and then kept. An install that already has data keeps exactly what it showed before v3.0.155.
+
+Languages:
 
 - Deutsch
 - English
@@ -489,7 +492,7 @@ Switchable from Settings > Language:
 - Italiano
 - Nederlands
 
-1257 translated strings per language, kept at full parity across all six (standing order — every user-facing string is translated in all languages, not just German/English). German is the source and remains the fallback if a key is ever missing. New languages can be added by dropping a `<lang>.json` file into `translations/`.
+1772 translated strings per language, kept at full parity across all six (standing order — every user-facing string is translated in all languages, not just German/English). German is the source and remains the fallback if a key is ever missing. New languages can be added by dropping a `<lang>.json` file into `translations/`.
 
 ---
 

@@ -79,6 +79,7 @@ def get_due_items(current_odo_km: Optional[int] = None,
         reasons = []
 
         from services.i18n import t as _t
+        from services.units import dist
         if entry.next_due_date is not None:
             days_left = (entry.next_due_date - today).days
             if days_left < 0:
@@ -92,10 +93,10 @@ def get_due_items(current_odo_km: Optional[int] = None,
             km_left = entry.next_due_km - current_odo_km
             if km_left < 0:
                 severity = 'overdue'
-                reasons.append(_t('maint.overdue_km', km=f'{abs(km_left):,}'.replace(',', '.')))
+                reasons.append(_t('maint.overdue_km', km=f'{dist(abs(km_left), 0):,}'.replace(',', '.')))
             elif km_left <= 1500:
                 severity = severity or 'due_soon'
-                reasons.append(_t('maint.due_in_km', km=f'{km_left:,}'.replace(',', '.')))
+                reasons.append(_t('maint.due_in_km', km=f'{dist(km_left, 0):,}'.replace(',', '.')))
 
         if severity is not None:
             out.append({

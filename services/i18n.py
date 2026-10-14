@@ -55,6 +55,9 @@ def t(key, **kwargs):
         text = _load_lang(_DEFAULT_LANG).get(key)
     if text is None:
         text = default if default is not None else key
+    # v3.0.155: unit tokens ({u_dist}, {u_cons} …) follow the km/mi setting.
+    from services.units import fill
+    text = fill(text)
     if kwargs:
         try:
             text = text.format(**kwargs)
@@ -63,13 +66,32 @@ def t(key, **kwargs):
     return text
 
 
+def detect_language():
+    """The first language in the browser's list that the app speaks."""
+    try:
+        from flask import request
+        tags = [l for l, _q in request.accept_languages]
+    except Exception:
+        return None
+    codes = {c for c, _ in SUPPORTED_LANGUAGES}
+    for tag in tags:
+        base = str(tag).replace('_', '-').split('-')[0].lower()
+        if base in codes:
+            return base
+    return None
+
+
 def init_app(app):
     """Register t() as Jinja2 global and set language from AppConfig."""
     from models.database import AppConfig
 
     @app.before_request
     def _set_lang():
-        lang = AppConfig.get('app_language', _DEFAULT_LANG)
+        # v3.0.155: no stored choice (or "auto") → the browser's language,
+        # if the app speaks it. A stored choice always wins.
+        lang = AppConfig.get('app_language') or 'auto'
+        if lang == 'auto':
+            lang = detect_language() or _DEFAULT_LANG
         set_language(lang)
 
     app.jinja_env.globals['t'] = t

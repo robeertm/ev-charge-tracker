@@ -420,42 +420,42 @@
     function renderKPIs(data) {
         const s = data.summary;
         document.getElementById('kpiKwh').textContent = fmtNum(s.total_kwh, 1) + ' kWh';
-        document.getElementById('kpiKwhSub').textContent = s.count_charges + ' × · Ø ' + fmtNum(s.avg_eur_per_kwh, 3).replace('.', ',') + ' €/kWh';
-        document.getElementById('kpiCost').textContent = '€' + fmtNum(s.total_cost, 2);
+        document.getElementById('kpiKwhSub').textContent = s.count_charges + ' × · Ø ' + fmtNum(s.avg_eur_per_kwh, 3).replace('.', ',') + ' ' + U.cur + '/kWh';
+        document.getElementById('kpiCost').textContent = U.curPre + fmtNum(s.total_cost, 2);
         // v3.0.133: the ratio is formed only over the days that have kilometre
         // data; when that is a sub-span of the range, say so (dates only, language-neutral).
         const _rf = s.km_basis_from, _rt = s.km_basis_to, _rg = (data.range || {});
         const _ratioSpan = (s.avg_eur_per_100km > 0 && (_rf !== _rg.start || _rt !== _rg.end))
             ? ' · ' + fmtDateShort(_rf) + '–' + fmtDateShort(_rt) : '';
-        document.getElementById('kpiCostSub').textContent = s.avg_eur_per_100km > 0 ? fmtNum(s.avg_eur_per_100km, 2) + ' €/100km' + _ratioSpan : '';
-        document.getElementById('kpiKm').textContent = fmtNum(s.total_km, 0) + ' km';
-        document.getElementById('kpiKmSub').textContent = s.count_trips + ' ' + T.trips + (s.total_km > 0 ? ' · Ø ' + fmtNum(s.avg_efficiency_kwh_per_100km, 1) + ' kWh/100km' : '');
+        document.getElementById('kpiCostSub').textContent = s.avg_eur_per_100km > 0 ? fmtNum(U.r(s.avg_eur_per_100km), 2) + ' ' + U.cur + U.per100 + _ratioSpan : '';
+        document.getElementById('kpiKm').textContent = fmtNum(U.d(s.total_km), 0) + ' ' + U.dist;
+        document.getElementById('kpiKmSub').textContent = s.count_trips + ' ' + T.trips + (s.total_km > 0 ? ' · Ø ' + fmtNum(U.r(s.avg_efficiency_kwh_per_100km), 1) + ' ' + U.cons : '');
         document.getElementById('kpiCo2Saved').textContent = fmtNum(s.co2_saved_kg, 1) + ' kg';
         document.getElementById('kpiCo2Sub').textContent = (s.ice_co2_kg > 0 ? T.fossil_co2 + ' ' + fmtNum(s.ice_co2_kg, 1) + ' kg' : '');
 
-        document.getElementById('hlCostSaved').textContent = '€' + fmtNum(s.cost_saved_eur, 2);
-        document.getElementById('hlCostSavedSub').textContent = T.fossil_eur + ' €' + fmtNum(s.ice_cost_eur, 2);
+        document.getElementById('hlCostSaved').textContent = U.curPre + fmtNum(s.cost_saved_eur, 2);
+        document.getElementById('hlCostSavedSub').textContent = T.fossil_eur + ' ' + U.curPre + fmtNum(s.ice_cost_eur, 2);
 
         const hl = data.highlights || {};
         const bc = hl.biggest_charge;
         if (bc) {
             document.getElementById('hlBiggestCharge').textContent = fmtNum(bc.kwh, 1) + ' kWh';
-            document.getElementById('hlBiggestChargeSub').textContent = bc.date + ' · ' + (bc.type || '–') + ' · €' + fmtNum(bc.cost, 2);
+            document.getElementById('hlBiggestChargeSub').textContent = bc.date + ' · ' + (bc.type || '–') + ' · ' + U.curPre + fmtNum(bc.cost, 2);
         } else {
             document.getElementById('hlBiggestCharge').textContent = '–';
             document.getElementById('hlBiggestChargeSub').textContent = '';
         }
         const lt = hl.longest_trip;
         if (lt) {
-            document.getElementById('hlLongestTrip').textContent = fmtNum(lt.km, 1) + ' km';
-            document.getElementById('hlLongestTripSub').textContent = lt.date + ' · ' + (lt.drive_min || '–') + ' min' + (lt.max_speed ? ' · ⚡' + lt.max_speed + ' km/h' : '');
+            document.getElementById('hlLongestTrip').textContent = fmtNum(U.d(lt.km), 1) + ' ' + U.dist;
+            document.getElementById('hlLongestTripSub').textContent = lt.date + ' · ' + (lt.drive_min || '–') + ' min' + (lt.max_speed ? ' · ⚡' + U.d(lt.max_speed, 0) + ' ' + U.speed : '');
         } else {
             document.getElementById('hlLongestTrip').textContent = '–';
             document.getElementById('hlLongestTripSub').textContent = '';
         }
         const cc = hl.cheapest_charge;
         if (cc) {
-            document.getElementById('hlCheapestCharge').textContent = '€' + fmtNum(cc.eur_per_kwh, 4).replace('.', ',') + '/kWh';
+            document.getElementById('hlCheapestCharge').textContent = U.curPre + fmtNum(cc.eur_per_kwh, 4).replace('.', ',') + '/kWh';
             document.getElementById('hlCheapestChargeSub').textContent = cc.date + ' · ' + fmtNum(cc.kwh, 1) + ' kWh';
         } else {
             document.getElementById('hlCheapestCharge').textContent = '–';
@@ -467,14 +467,14 @@
         document.getElementById('kpiLossSub').textContent = s.avg_loss_pct > 0 ? '∅ ' + fmtNum(s.avg_loss_pct, 1) + ' %' : '';
         document.getElementById('kpiRegen').textContent = '+ ' + fmtNum(s.total_regen_kwh, 1) + ' kWh';
         document.getElementById('kpiRegenSub').textContent = (s.total_km > 0 && s.total_regen_kwh > 0)
-            ? fmtNum(s.total_regen_kwh / s.total_km * 100, 2) + ' kWh/100km' : '';
-        document.getElementById('kpiExtras').textContent = '€' + fmtNum(s.total_extras_eur, 2);
+            ? fmtNum(U.r(s.total_regen_kwh / s.total_km * 100), 2) + ' ' + U.cons : '';
+        document.getElementById('kpiExtras').textContent = U.curPre + fmtNum(s.total_extras_eur, 2);
         const eParts = [];
-        if (s.total_start_fee_eur > 0) eParts.push(T.start_fee + ' €' + fmtNum(s.total_start_fee_eur, 2));
-        if (s.total_blocking_fee_eur > 0) eParts.push(T.block_fee + ' €' + fmtNum(s.total_blocking_fee_eur, 2));
+        if (s.total_start_fee_eur > 0) eParts.push(T.start_fee + ' ' + U.curPre + fmtNum(s.total_start_fee_eur, 2));
+        if (s.total_blocking_fee_eur > 0) eParts.push(T.block_fee + ' ' + U.curPre + fmtNum(s.total_blocking_fee_eur, 2));
         document.getElementById('kpiExtrasSub').textContent = eParts.join(' · ');
         document.getElementById('kpiAvgPrice').textContent = s.avg_eur_per_kwh > 0
-            ? '€' + fmtNum(s.avg_eur_per_kwh, 3).replace('.', ',') + '/kWh' : '–';
+            ? U.curPre + fmtNum(s.avg_eur_per_kwh, 3).replace('.', ',') + '/kWh' : '–';
         document.getElementById('kpiAvgPriceSub').textContent = s.count_charges + ' × ' + T.charges;
     }
 
@@ -505,8 +505,8 @@
         const labels = s.bucket_labels || [];
 
         makeBar('plotKwh',  labels, s.kwh,    C.blue,   v => v + ' kWh');
-        makeBar('plotCost', labels, s.cost,   C.red,    v => '€' + v);
-        makeBar('plotKm',   labels, s.km,     C.green,  v => v + ' km');
+        makeBar('plotCost', labels, s.cost,   C.red,    v => U.curPre + v);
+        makeBar('plotKm',   labels, (s.km || []).map(v => v == null ? v : U.d(v, 1)), C.green, v => v + ' ' + U.dist);
         makeBar('plotCo2',  labels, s.co2_kg, C.orange, v => v + ' kg');
 
         // Charge type pie (counts + kWh in tooltip)
@@ -592,7 +592,7 @@
                 data: {
                     labels: eff.map(p => p.x),
                     datasets: [{
-                        data: eff.map(p => p.y),
+                        data: eff.map(p => p.y == null ? p.y : U.r(p.y, 2)),
                         borderColor: C.purple,
                         backgroundColor: C.purpleL,
                         fill: true, tension: 0.3, pointRadius: 2.5,
@@ -669,14 +669,14 @@
                     plugins: {
                         legend: {display: true, position: 'bottom'},
                         tooltip: {callbacks: {
-                            label: ctx => ctx.dataset.label + ' · ' + ctx.raw.x + ' · €' + ctx.raw.y.toFixed(4),
+                            label: ctx => ctx.dataset.label + ' · ' + ctx.raw.x + ' · ' + U.curPre + ctx.raw.y.toFixed(4),
                         }},
                     },
                     scales: {
                         x: {type: 'category',
                             labels: pp.map(p => p.x),
                             ticks: {font: {size: 9}, maxTicksLimit: 8, autoSkip: true}},
-                        y: {ticks: {font:{size:10}, callback: v => '€' + v.toFixed(2)}},
+                        y: {ticks: {font:{size:10}, callback: v => U.curPre + v.toFixed(2)}},
                     }
                 }
             });
@@ -703,7 +703,7 @@
                         legend: {display: false},
                         tooltip: {callbacks: {label: ctx => {
                             const o = ops[ctx.dataIndex];
-                            return `${o.kwh} kWh · €${o.cost} · ${o.count}×`;
+                            return `${o.kwh} kWh · ${U.curPre}${o.cost} · ${o.count}×`;
                         }}}
                     },
                     scales: {x: {ticks: {font: {size: 10}}}, y: {ticks: {font: {size: 10}}}}
@@ -763,7 +763,7 @@
                     plugins: {legend: {position: 'bottom', labels: {font: {size: 10}}}},
                     scales: {
                         x: {stacked: true, ticks: {font: {size: 9}, maxTicksLimit: 12, autoSkip: true}},
-                        y: {stacked: true, beginAtZero: true, ticks: {font: {size: 10}, callback: v => '€' + v}},
+                        y: {stacked: true, beginAtZero: true, ticks: {font: {size: 10}, callback: v => U.curPre + v}},
                     }
                 }
             });

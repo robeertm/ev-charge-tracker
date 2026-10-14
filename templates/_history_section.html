@@ -144,7 +144,7 @@
                        are hidden. Joining with " · " gives a single readable
                        muted line without claiming any extra horizontal width. #}
                     {% set _mobile_bits = [] %}
-                    {% if c.odometer %}{% set _ = _mobile_bits.append('{:,.0f} km'.format(c.odometer).replace(',', '.')) %}{% endif %}
+                    {% if c.odometer %}{% set _ = _mobile_bits.append(('{:,.0f} ' ~ dist_unit()).format(c.odometer|dist).replace(',', '.')) %}{% endif %}
                     {% if c.soc_from is not none %}{% set _ = _mobile_bits.append(c.soc_from|string + '→' + c.soc_to|string + '%') %}{% endif %}
                     {% if c.loss_pct is not none %}{% set _ = _mobile_bits.append('%.1f%% %s'|format(c.loss_pct, t('hist.loss'))) %}{% endif %}
                     {% if c.co2_kg is not none %}{% set _ = _mobile_bits.append('%s%.1f kg CO₂'|format('≈ ' if c.co2_estimated else '', c.co2_kg)) %}{% endif %}
@@ -174,11 +174,11 @@
                     {% endif %}
                 </td>
                 <td class="text-end">{{ "%.2f"|format(c.eur_per_kwh or 0) }}</td>
-                <td class="text-end fw-bold">€{{ "%.2f"|format(c.total_cost or 0) }}</td>
+                <td class="text-end fw-bold">{{ cur_pre() }}{{ "%.2f"|format(c.total_cost or 0) }}</td>
                 <td class="text-end d-none d-md-table-cell rowStop">
-                    <span class="editable-km" data-id="{{ c.id }}" role="button" title="{{ t('hist.click_edit_km') }}"
+                    <span class="editable-km" data-id="{{ c.id }}" data-km="{{ c.odometer if c.odometer else '' }}" role="button" title="{{ t('hist.click_edit_km') }}"
                           style="cursor:pointer; border-bottom:1px dashed #aaa;">
-                        {% if c.odometer %}{{ "{:,}".format(c.odometer).replace(",", ".") }}{% else %}—{% endif %}
+                        {% if c.odometer %}{{ "{:,}".format(c.odometer|dist(0)).replace(",", ".") }}{% else %}—{% endif %}
                     </span>
                 </td>
                 <td class="text-end d-none d-md-table-cell">
@@ -345,6 +345,7 @@
             <div class="col-6">
               <label class="form-label small mb-0 fw-semibold">{{ t('hist.km') }}</label>
               <input type="number" class="form-control form-control-sm" name="odometer" id="chgEditOdo" step="1" min="0">
+              <input type="hidden" name="odometer__km" id="chgEditOdoKm">
             </div>
             <div class="col-6">
               <label class="form-label small mb-0 fw-semibold">CO₂ g/kWh</label>
@@ -366,11 +367,11 @@
             <summary class="small text-muted">{{ t('input.extra_costs') }}</summary>
             <div class="row g-2 mt-1">
               <div class="col-6">
-                <label class="form-label small mb-0">{{ t('input.start_fee') }} (€)</label>
+                <label class="form-label small mb-0">{{ t('input.start_fee') }} ({{ cur() }})</label>
                 <input type="number" class="form-control form-control-sm" name="start_fee_eur" id="chgEditStartFee" step="0.01" min="0">
               </div>
               <div class="col-6">
-                <label class="form-label small mb-0">{{ t('input.blocking_fee') }} (€)</label>
+                <label class="form-label small mb-0">{{ t('input.blocking_fee') }} ({{ cur() }})</label>
                 <input type="number" class="form-control form-control-sm" name="blocking_fee_eur" id="chgEditBlockFee" step="0.01" min="0">
               </div>
             </div>
@@ -410,13 +411,12 @@
     document.querySelectorAll('.editable-km').forEach(span => {
         span.addEventListener('click', function () {
             const id = this.dataset.id;
-            const current = this.textContent.trim().replace(/\./g, '');
-            const val = current === '—' ? '' : current;
             const input = document.createElement('input');
             input.type = 'number';
             input.className = 'form-control form-control-sm text-end';
             input.style.width = '90px';
-            input.value = val;
+            // v3.0.155: edited in the chosen unit, stored in km
+            U.show(input, this.dataset.km ? +this.dataset.km : null);
             input.min = 0;
             input.inputMode = 'numeric';
             this.replaceWith(input);
@@ -424,12 +424,12 @@
             input.select();
 
             const save = async () => {
-                const newVal = input.value.trim();
+                const newVal = U.read(input);
                 try {
                     await fetch('/api/charge/' + id + '/odometer', {
                         method: 'POST',
                         headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({ odometer: newVal || null })
+                        body: JSON.stringify({ odometer: newVal })
                     });
                     location.reload();
                 } catch (e) {
@@ -536,6 +536,7 @@
             lat:     document.getElementById('chgEditLat'),
             lon:     document.getElementById('chgEditLon'),
             odo:     document.getElementById('chgEditOdo'),
+            odoKm:   document.getElementById('chgEditOdoKm'),
             co2:     document.getElementById('chgEditCo2'),
             loss:    document.getElementById('chgEditLoss'),
             notes:   document.getElementById('chgEditNotes'),
@@ -630,7 +631,8 @@
                 F.locName.value = d.location_name || '';
                 F.lat.value     = d.location_lat != null ? Number(d.location_lat).toFixed(6) : '';
                 F.lon.value     = d.location_lon != null ? Number(d.location_lon).toFixed(6) : '';
-                F.odo.value     = d.odometer != null ? d.odometer : '';
+                U.show(F.odo, d.odometer != null ? d.odometer : null);
+                F.odoKm.value   = d.odometer != null ? d.odometer : '';
                 F.co2.value     = d.co2_g_per_kwh != null ? d.co2_g_per_kwh : '';
                 F.loss.value    = d.loss_kwh != null ? d.loss_kwh : '';
                 F.notes.value   = d.notes || '';

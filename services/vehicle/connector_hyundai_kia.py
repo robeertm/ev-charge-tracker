@@ -296,7 +296,7 @@ def _friendly_auth_message(err: Exception, credential: str = '') -> str:
         )
     return ''
 
-from .base import VehicleConnector, VehicleStatus
+from .base import VehicleConnector, VehicleStatus, to_km, unit_name
 from .registry import describe, register
 
 logger = logging.getLogger(__name__)
@@ -611,7 +611,9 @@ class _HyundaiKiaBase(VehicleConnector):
             )
             # Save cached values before force refresh (some may be missing after wake)
             cached_odometer = vehicle.odometer
+            cached_odo_unit = getattr(vehicle, 'odometer_unit', None)
             cached_range = vehicle.ev_driving_range
+            cached_range_unit = getattr(vehicle, 'ev_driving_range_unit', None)
             cached_12v = vehicle.car_battery_percentage
             _record_force_refresh_attempt()
             _fut = _force_refresh_executor.submit(
@@ -630,11 +632,13 @@ class _HyundaiKiaBase(VehicleConnector):
             except Exception as _e:
                 _record_force_refresh_outcome('error', str(_e))
                 raise
-            # Restore missing values from cache
+            # Restore missing values from cache. The SDK's setters take a
+            # (value, unit) pair — handing them a bare number raised
+            # TypeError and lost the whole forced sync (fixed v3.0.155).
             if vehicle.odometer is None and cached_odometer is not None:
-                vehicle.odometer = cached_odometer
+                vehicle.odometer = (cached_odometer, cached_odo_unit)
             if vehicle.ev_driving_range is None and cached_range is not None:
-                vehicle.ev_driving_range = cached_range
+                vehicle.ev_driving_range = (cached_range, cached_range_unit)
             if vehicle.car_battery_percentage is None and cached_12v is not None:
                 vehicle.car_battery_percentage = cached_12v
         else:
@@ -643,14 +647,19 @@ class _HyundaiKiaBase(VehicleConnector):
                 label='update_vehicle_with_cached_state',
             )
 
+        # v3.0.155: the USA cloud answers in miles (the SDK names the unit);
+        # stored is km. Range falls back to the odometer's unit when the
+        # payload left its own unit out.
+        odo_unit = self._distance_unit(vehicle)
+        range_unit = getattr(vehicle, 'ev_driving_range_unit', None) or odo_unit
         return VehicleStatus(
             soc_percent=vehicle.ev_battery_percentage,
-            odometer_km=int(vehicle.odometer) if vehicle.odometer else None,
+            odometer_km=to_km(vehicle.odometer, odo_unit, as_int=True) if vehicle.odometer else None,
             is_charging=vehicle.ev_battery_is_charging or False,
             is_plugged_in=bool(vehicle.ev_battery_is_plugged_in),
             is_locked=vehicle.is_locked if vehicle.is_locked is not None else True,
             charge_power_kw=vehicle.ev_charging_power,
-            estimated_range_km=int(vehicle.ev_driving_range) if vehicle.ev_driving_range else None,
+            estimated_range_km=to_km(vehicle.ev_driving_range, range_unit, as_int=True) if vehicle.ev_driving_range else None,
             battery_12v_percent=vehicle.car_battery_percentage,
             battery_soh_percent=vehicle.ev_battery_soh_percentage,
             charge_limit_ac=vehicle.ev_charge_limits_ac,
@@ -683,8 +692,18 @@ class _HyundaiKiaBase(VehicleConnector):
             consumption_30d_wh_per_km=vehicle.power_consumption_30d,
             est_portable_charge_min=vehicle.ev_estimated_portable_charge_duration,
             registration_date=str(vehicle.registration_date) if vehicle.registration_date else None,
+            distance_unit=unit_name(odo_unit),
             raw_data=_dump_vehicle(vehicle),
         )
+
+    def _distance_unit(self, vehicle):
+        """The unit of this car's distances: what the SDK says, else what
+        its region implies (the USA implementations hard-code miles)."""
+        named = unit_name(getattr(vehicle, 'odometer_unit', None))
+        if named:
+            return named
+        region = (self.credentials.get('region') or 'EU').strip().upper()
+        return 'mi' if region == 'US' else 'km'
 
 class KiaConnector(_HyundaiKiaBase):
     BRAND_ID = 1

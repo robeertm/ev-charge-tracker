@@ -64,7 +64,7 @@
                         {% endif %}
                     </td>
                     <td class="text-end">{% if s.soc_percent is not none %}{{ s.soc_percent }}%{% else %}—{% endif %}</td>
-                    <td class="text-end d-none d-md-table-cell">{% if s.odometer_km %}{{ "{:,}".format(s.odometer_km).replace(",", ".") }}{% else %}—{% endif %}</td>
+                    <td class="text-end d-none d-md-table-cell">{% if s.odometer_km %}{{ "{:,}".format(s.odometer_km|dist(0)).replace(",", ".") }}{% else %}—{% endif %}</td>
                     <td class="text-end d-none d-md-table-cell">
                         {% if s.battery_soh_percent is not none %}
                             {{ "%.1f"|format(s.battery_soh_percent) }}%

@@ -18,6 +18,8 @@ from services.stats_service import (
 from services.trips_service import get_trips, get_trip_summary
 from services.maintenance_service import list_entries as list_maintenance, get_summary as get_maint_summary
 from services.highlights_service import get_highlights
+from services import units as _U
+from services.i18n import t as _t
 
 # Colors
 C_PRIMARY = '#2196F3'
@@ -56,10 +58,10 @@ def _generate_charts(stats, monthly, chart_data, acdc, tmp_dir):
     ax.bar(labels, costs, color=C_PRIMARY, alpha=0.8)
     if costs:
         avg = sum(costs) / len(costs)
-        ax.axhline(avg, color=C_DANGER, linestyle='--', linewidth=1.5, label=f'Ø {avg:.2f} €')
+        ax.axhline(avg, color=C_DANGER, linestyle='--', linewidth=1.5, label=f'Ø {avg:.2f} {_U.cur()}')
         ax.legend()
-    ax.set_ylabel('€')
-    ax.set_title('Monatliche Ladekosten', fontweight='bold')
+    ax.set_ylabel(_U.cur())
+    ax.set_title(_t('dash.monthly_cost'), fontweight='bold')
     plt.xticks(rotation=45, ha='right')
     charts['monthly_cost'] = _save_chart(fig, tmp_dir, 'monthly_cost')
 
@@ -72,7 +74,7 @@ def _generate_charts(stats, monthly, chart_data, acdc, tmp_dir):
         ax.axhline(avg, color=C_DANGER, linestyle='--', linewidth=1.5, label=f'Ø {avg:.1f} kWh')
         ax.legend()
     ax.set_ylabel('kWh')
-    ax.set_title('Monatlich geladene kWh', fontweight='bold')
+    ax.set_title(_t('rpdf.monthly_kwh'), fontweight='bold')
     plt.xticks(rotation=45, ha='right')
     charts['monthly_kwh'] = _save_chart(fig, tmp_dir, 'monthly_kwh')
 
@@ -85,7 +87,7 @@ def _generate_charts(stats, monthly, chart_data, acdc, tmp_dir):
         ax.axhline(avg, color=C_DANGER, linestyle='--', linewidth=1.5, label=f'Ø {avg:.2f} kg')
         ax.legend()
     ax.set_ylabel('kg CO₂')
-    ax.set_title('Monatliche CO₂-Emissionen', fontweight='bold')
+    ax.set_title(_t('dash.monthly_co2'), fontweight='bold')
     plt.xticks(rotation=45, ha='right')
     charts['monthly_co2'] = _save_chart(fig, tmp_dir, 'monthly_co2')
 
@@ -96,8 +98,8 @@ def _generate_charts(stats, monthly, chart_data, acdc, tmp_dir):
     ax.plot(range(len(cum_labels)), chart_data['cumulative_cost'], color=C_DANGER, linewidth=2)
     ax.set_xticks(range(0, len(cum_labels), max(1, len(cum_labels)//12)))
     ax.set_xticklabels([cum_labels[i] for i in range(0, len(cum_labels), max(1, len(cum_labels)//12))], rotation=45, ha='right')
-    ax.set_ylabel('€')
-    ax.set_title('Kumulierte Ladekosten', fontweight='bold')
+    ax.set_ylabel(_U.cur())
+    ax.set_title(_t('rpdf.cum_cost'), fontweight='bold')
     charts['cumulative_cost'] = _save_chart(fig, tmp_dir, 'cumulative_cost')
 
     # 5. Cumulative kWh
@@ -107,20 +109,20 @@ def _generate_charts(stats, monthly, chart_data, acdc, tmp_dir):
     ax.set_xticks(range(0, len(cum_labels), max(1, len(cum_labels)//12)))
     ax.set_xticklabels([cum_labels[i] for i in range(0, len(cum_labels), max(1, len(cum_labels)//12))], rotation=45, ha='right')
     ax.set_ylabel('kWh')
-    ax.set_title('Kumuliert geladene kWh', fontweight='bold')
+    ax.set_title(_t('rpdf.cum_kwh'), fontweight='bold')
     charts['cumulative_kwh'] = _save_chart(fig, tmp_dir, 'cumulative_kwh')
 
     # 6. CO2 Savings vs Verbrenner (Break-Even)
     fig, ax = plt.subplots(figsize=(8, 3.5))
     savings = chart_data['cumulative_co2_savings']
     battery_co2 = chart_data['battery_production_co2']
-    ax.plot(range(len(cum_labels)), savings, color=C_SUCCESS, linewidth=2, label='CO₂-Ersparnis')
-    ax.axhline(battery_co2, color=C_DANGER, linestyle='--', linewidth=1.5, label=f'Akkuproduktion ({battery_co2:.0f} kg)')
+    ax.plot(range(len(cum_labels)), savings, color=C_SUCCESS, linewidth=2, label=_t('rpdf.co2_saving'))
+    ax.axhline(battery_co2, color=C_DANGER, linestyle='--', linewidth=1.5, label=_t('rpdf.battery_prod', kg=f'{battery_co2:.0f}'))
     ax.fill_between(range(len(cum_labels)), savings, alpha=0.2, color=C_SUCCESS)
     ax.set_xticks(range(0, len(cum_labels), max(1, len(cum_labels)//12)))
     ax.set_xticklabels([cum_labels[i] for i in range(0, len(cum_labels), max(1, len(cum_labels)//12))], rotation=45, ha='right')
     ax.set_ylabel('kg CO₂')
-    ax.set_title('CO₂-Ersparnis vs. Verbrenner (Break-Even)', fontweight='bold')
+    ax.set_title(_t('rpdf.co2_breakeven'), fontweight='bold')
     ax.legend()
     charts['co2_breakeven'] = _save_chart(fig, tmp_dir, 'co2_breakeven')
 
@@ -129,7 +131,7 @@ def _generate_charts(stats, monthly, chart_data, acdc, tmp_dir):
         fig, axes = plt.subplots(1, 3, figsize=(8, 3))
         colors_map = {'AC': C_SUCCESS, 'DC': C_WARNING, 'PV': C_PV}
         for i, (metric, title, unit) in enumerate([
-            ('total_kwh', 'kWh', 'kWh'), ('total_cost', 'Kosten', '€'), ('count', 'Ladevorgänge', '')
+            ('total_kwh', 'kWh', 'kWh'), ('total_cost', _t('rpdf.cost'), _U.cur()), ('count', _t('set.db_charges'), '')
         ]):
             vals = []
             lbls = []
@@ -151,10 +153,10 @@ def _generate_charts(stats, monthly, chart_data, acdc, tmp_dir):
     ax.plot(labels, cpk, color=C_INFO, linewidth=2, marker='o', markersize=3)
     if cpk:
         avg = sum(cpk) / len(cpk)
-        ax.axhline(avg, color=C_DANGER, linestyle='--', linewidth=1, label=f'Ø {avg:.2f} €/kWh')
+        ax.axhline(avg, color=C_DANGER, linestyle='--', linewidth=1, label=f'Ø {avg:.2f} {_U.cur()}/kWh')
         ax.legend()
-    ax.set_ylabel('€/kWh')
-    ax.set_title('Preisentwicklung pro kWh', fontweight='bold')
+    ax.set_ylabel(_U.cur() + '/kWh')
+    ax.set_title(_t('rpdf.price_trend_kwh'), fontweight='bold')
     plt.xticks(rotation=45, ha='right')
     charts['price_trend'] = _save_chart(fig, tmp_dir, 'price_trend')
 
@@ -162,8 +164,8 @@ def _generate_charts(stats, monthly, chart_data, acdc, tmp_dir):
     fig, ax = plt.subplots(figsize=(8, 2.5))
     counts = chart_data['monthly_count']
     ax.bar(labels, counts, color=C_INFO, alpha=0.8)
-    ax.set_ylabel('Anzahl')
-    ax.set_title('Ladevorgänge pro Monat', fontweight='bold')
+    ax.set_ylabel(_t('dash.count'))
+    ax.set_title(_t('rpdf.charges_per_month'), fontweight='bold')
     plt.xticks(rotation=45, ha='right')
     charts['monthly_count'] = _save_chart(fig, tmp_dir, 'monthly_count')
 
@@ -175,11 +177,11 @@ def _generate_charts(stats, monthly, chart_data, acdc, tmp_dir):
         x = range(len(years))
         w = 0.25
         ax.bar([i - w for i in x], [y['kwh'] for y in yearly], w, label='kWh', color=C_SUCCESS)
-        ax.bar(x, [y['cost'] for y in yearly], w, label='Kosten €', color=C_PRIMARY)
+        ax.bar(x, [y['cost'] for y in yearly], w, label=_t('rpdf.cost') + ' ' + _U.cur(), color=C_PRIMARY)
         ax.bar([i + w for i in x], [y['co2'] for y in yearly], w, label='CO₂ kg', color=C_WARNING)
         ax.set_xticks(x)
         ax.set_xticklabels(years)
-        ax.set_title('Jahresvergleich', fontweight='bold')
+        ax.set_title(_t('rpdf.yearly_cmp'), fontweight='bold')
         ax.legend()
         charts['yearly_comparison'] = _save_chart(fig, tmp_dir, 'yearly_comparison')
 
@@ -217,13 +219,15 @@ def _generate_vehicle_history_charts(vh, tmp_dir):
         return _save_chart(fig, tmp_dir, name)
 
     out = {}
-    out['vh_soc']    = _line_chart('vh_soc',    series['soc'],             '%',           'SoC Verlauf',            C_SUCCESS)
-    out['vh_range']  = _line_chart('vh_range',  series['range_km'],        'km',          'Reichweite',             C_PRIMARY)
-    out['vh_odo']    = _line_chart('vh_odo',    series['odometer_km'],     'km',          'Tachostand',             C_DARK)
-    out['vh_12v']    = _line_chart('vh_12v',    series['battery_12v'],     '%',           '12V Batterie',           C_WARNING)
+    out['vh_soc']    = _line_chart('vh_soc',    series['soc'],             '%',           _t('rpdf.vh_soc'),        C_SUCCESS)
+    _d = lambda vals: [_U.dist(v) for v in vals]
+    _r = lambda vals: [_U.per_dist(v) for v in vals]
+    out['vh_range']  = _line_chart('vh_range',  _d(series['range_km']),    _U.dist_label(), _t('dash.range'),       C_PRIMARY)
+    out['vh_odo']    = _line_chart('vh_odo',    _d(series['odometer_km']), _U.dist_label(), _t('dash.odometer_label'), C_DARK)
+    out['vh_12v']    = _line_chart('vh_12v',    series['battery_12v'],     '%',           _t('rpdf.v12'),           C_WARNING)
     out['vh_soh']    = _line_chart('vh_soh',    series['soh'],             '%',           'SoH (State of Health)',  C_DANGER)
-    out['vh_regen']  = _line_chart('vh_regen',  series['regen_kwh'],       'kWh',         'Rekuperation (gemessen, kumuliert)', C_INFO)
-    out['vh_cons']   = _line_chart('vh_cons',   series['consumption_30d'], 'kWh/100km',  'O 30 Tage Verbrauch',    C_PV)
+    out['vh_regen']  = _line_chart('vh_regen',  series['regen_kwh'],       'kWh',         _t('rpdf.vh_regen'),      C_INFO)
+    out['vh_cons']   = _line_chart('vh_cons',   _r(series['consumption_30d']), _U.cons_label(), _t('rpdf.vh_cons'), C_PV)
     return {k: v for k, v in out.items() if v}
 
 
@@ -231,7 +235,14 @@ class EVReport(FPDF):
     @staticmethod
     def _clean(text):
         """Replace Unicode chars that latin-1 can't handle."""
-        return str(text).replace('—', '-').replace('–', '-').replace('·', '-').replace('²', '2').replace('₂', '2').replace('Ø', 'O').replace('€', 'EUR ')
+        out = str(text).replace('—', '-').replace('–', '-').replace('·', '-').replace('²', '2').replace('₂', '2').replace('Ø', 'O').replace('€', _U.cur_code() + ' ')
+        # v3.0.155: a currency sign the core font cannot draw (zł, ₹, ₩ …)
+        # becomes its ISO code — fpdf would refuse the whole report otherwise
+        try:
+            out.encode('latin-1')
+        except UnicodeEncodeError:
+            out = out.replace(_U.cur(), _U.cur_code() + ' ')
+        return out
 
     def header(self):
         self.set_font('Helvetica', 'B', 14)
@@ -240,14 +251,15 @@ class EVReport(FPDF):
         self.set_font('Helvetica', '', 8)
         self.set_text_color(120, 120, 120)
         car = AppConfig.get('car_model', 'EV')
-        self.cell(0, 5, self._clean(f'{car} - Erstellt am {date.today().strftime("%d.%m.%Y")}'), align='C', new_x='LMARGIN', new_y='NEXT')
+        self.cell(0, 5, self._clean(_t('rpdf.created', car=car, date=date.today().strftime("%d.%m.%Y"))), align='C', new_x='LMARGIN', new_y='NEXT')
         self.ln(3)
 
     def footer(self):
         self.set_y(-15)
         self.set_font('Helvetica', 'I', 7)
         self.set_text_color(150, 150, 150)
-        self.cell(0, 10, f'Seite {self.page_no()}/{{nb}} - EV Charge Tracker', align='C')
+        # '{nb}' is fpdf's page-count alias — passed through as itself
+        self.cell(0, 10, self._clean(_t('rpdf.page', n=self.page_no(), nb='{nb}')), align='C')
 
     def section_title(self, title):
         self.set_font('Helvetica', 'B', 11)
@@ -332,34 +344,34 @@ def generate_report():
     pdf.add_page()
 
     # === Page 1: Overview KPIs ===
-    pdf.section_title('Gesamtübersicht')
+    pdf.section_title(_t('rpdf.overview'))
 
     kpi_rows = [
         [
-            ('Ladekosten', f"EUR {stats['total_cost']:,.0f}", ''),
-            ('Geladen', f"{stats['total_kwh']:,.0f}", 'kWh'),
-            ('Ladevorgaenge', str(stats['total_charges']), ''),
+            (_t('dash.total_cost'), f"{_U.cur_code()} {stats['total_cost']:,.0f}", ''),
+            (_t('dash.total_kwh'), f"{stats['total_kwh']:,.0f}", 'kWh'),
+            (_t('set.db_charges'), str(stats['total_charges']), ''),
             ('CO2', f"{stats['total_co2_kg']:,.1f}", 'kg'),
         ],
         [
-            ('O Preis', f"EUR {stats['avg_eur_per_kwh']:.2f}", '/kWh'),
-            ('CO2-Ersparnis', f"{stats['co2_savings_pct']:.0f}", '%'),
-            ('THG-Quote', f"EUR {stats['total_thg_eur']:,.0f}", ''),
-            ('Netto-Kosten', f"EUR {stats['net_cost']:,.0f}", ''),
+            (_t('report.kpi_avg_price'), f"{_U.cur_code()} {stats['avg_eur_per_kwh']:.2f}", '/kWh'),
+            (_t('rpdf.co2_saving'), f"{stats['co2_savings_pct']:.0f}", '%'),
+            (_t('rpdf.thg_quota'), f"{_U.cur_code()} {stats['total_thg_eur']:,.0f}", ''),
+            (_t('rpdf.net_cost'), f"{_U.cur_code()} {stats['net_cost']:,.0f}", ''),
         ],
     ]
     if stats.get('total_km', 0) > 0:
         kpi_rows.append([
-            ('Tachostand', f"{stats['total_km']:,.0f}", 'km'),
-            ('Verbrauch', f"{stats['consumption_with_recup']:.1f}", 'kWh/100km'),
-            ('Kosten/100km', f"EUR {stats['cost_per_100km']:.2f}", ''),
-            ('Rekuperation', f"{stats['total_recuperation']:,.0f}", 'kWh'),
+            (_t('dash.odometer_label'), f"{_U.dist(stats['total_km']):,.0f}", _U.dist_label()),
+            (_t('dash.consumption'), f"{_U.per_dist(stats['consumption_with_recup']):.1f}", _U.cons_label()),
+            (_t('rpdf.cost_per100'), f"{_U.cur_code()} {_U.per_dist(stats['cost_per_100km']):.2f}", ''),
+            (_t('dash.recuperation'), f"{stats['total_recuperation']:,.0f}", 'kWh'),
         ])
         kpi_rows.append([
-            ('Ladezyklen', str(stats['charge_cycles']), ''),
-            ('Rekup-Zyklen', str(stats['recup_cycles']), ''),
-            ('km durch Rekup.', f"{stats['recup_extra_km']:,}", 'km'),
-            ('Netto/100km', f"EUR {stats['net_cost_per_100km']:.2f}", ''),
+            (_t('dash.charge_cycles'), str(stats['charge_cycles']), ''),
+            (_t('rpdf.recup_cycles'), str(stats['recup_cycles']), ''),
+            (_t('dash.km_by_recup'), f"{_U.dist(stats['recup_extra_km'], 0):,}", _U.dist_label()),
+            (_t('rpdf.net_per100'), f"{_U.cur_code()} {_U.per_dist(stats['net_cost_per_100km']):.2f}", ''),
         ])
     pdf.kpi_table(kpi_rows)
 
@@ -368,57 +380,57 @@ def generate_report():
     if first and last:
         pdf.set_font('Helvetica', 'I', 8)
         pdf.set_text_color(120, 120, 120)
-        pdf.cell(0, 5, pdf._clean(f'Zeitraum: {first.strftime("%d.%m.%Y")} bis {last.strftime("%d.%m.%Y")}'), align='C', new_x='LMARGIN', new_y='NEXT')
+        pdf.cell(0, 5, pdf._clean(_t('rpdf.period', a=first.strftime("%d.%m.%Y"), b=last.strftime("%d.%m.%Y"))), align='C', new_x='LMARGIN', new_y='NEXT')
         pdf.ln(3)
 
     # === Charts ===
-    pdf.section_title('Monatliche Ladekosten')
+    pdf.section_title(_t('dash.monthly_cost'))
     pdf.add_chart(charts.get('monthly_cost', ''))
 
-    pdf.section_title('Monatlich geladene kWh')
+    pdf.section_title(_t('rpdf.monthly_kwh'))
     pdf.add_chart(charts.get('monthly_kwh', ''))
 
-    pdf.section_title('Monatliche CO₂-Emissionen')
+    pdf.section_title(_t('dash.monthly_co2'))
     pdf.add_chart(charts.get('monthly_co2', ''))
 
     pdf.add_page()
-    pdf.section_title('Kumulierte Ladekosten')
+    pdf.section_title(_t('rpdf.cum_cost'))
     pdf.add_chart(charts.get('cumulative_cost', ''))
 
-    pdf.section_title('Kumuliert geladene kWh')
+    pdf.section_title(_t('rpdf.cum_kwh'))
     pdf.add_chart(charts.get('cumulative_kwh', ''))
 
-    pdf.section_title('CO₂-Ersparnis vs. Verbrenner')
+    pdf.section_title(_t('rpdf.co2_vs_ice'))
     pdf.add_chart(charts.get('co2_breakeven', ''))
 
     pdf.add_page()
-    pdf.section_title('Preisentwicklung')
+    pdf.section_title(_t('rpdf.price_trend'))
     pdf.add_chart(charts.get('price_trend', ''))
 
-    pdf.section_title('Ladevorgänge pro Monat')
+    pdf.section_title(_t('rpdf.charges_per_month'))
     pdf.add_chart(charts.get('monthly_count', ''))
 
     if 'acdc_pie' in charts:
-        pdf.section_title('AC / DC / PV Vergleich')
+        pdf.section_title(_t('rpdf.acdc_cmp'))
         pdf.add_chart(charts.get('acdc_pie', ''))
 
     if 'yearly_comparison' in charts:
-        pdf.section_title('Jahresvergleich')
+        pdf.section_title(_t('rpdf.yearly_cmp'))
         pdf.add_chart(charts.get('yearly_comparison', ''))
 
     # === Vehicle history (if data available) ===
     if vh_charts and vehicle_history:
         pdf.add_page()
-        pdf.section_title('Fahrzeug-Historie')
+        pdf.section_title(_t('rpdf.vehicle_history'))
         sm = vehicle_history['summary']
         last = sm['last']
-        info_parts = [f"Datenpunkte: {sm['count']}"]
+        info_parts = [_t('rpdf.datapoints', n=sm['count'])]
         if sm.get('km_driven'):
-            info_parts.append(f"Gefahren: {sm['km_driven']:,} km")
+            info_parts.append(_t('rpdf.driven', d=f"{_U.dist(sm['km_driven'], 0):,} {_U.dist_label()}"))
         if sm.get('soh_delta') is not None:
             info_parts.append(f"SoH Delta: {sm['soh_delta']:+.1f} %")
         if sm.get('regen_delta') is not None:
-            info_parts.append(f"Rekup. kumuliert: {sm['regen_delta']:+.0f} kWh")
+            info_parts.append(_t('rpdf.regen_cum', x=f"{sm['regen_delta']:+.0f}"))
         pdf.set_font('Helvetica', 'I', 8)
         pdf.set_text_color(120, 120, 120)
         pdf.cell(0, 5, pdf._clean(' - '.join(info_parts)), align='C', new_x='LMARGIN', new_y='NEXT')
@@ -431,35 +443,35 @@ def generate_report():
         if last.get('lat') and last.get('lon'):
             pdf.set_font('Helvetica', '', 8)
             pdf.set_text_color(33, 33, 33)
-            pdf.cell(0, 5, pdf._clean(f"Letzter Standort: {last['lat']:.5f}, {last['lon']:.5f}"),
+            pdf.cell(0, 5, pdf._clean(_t('rpdf.last_location', pos=f"{last['lat']:.5f}, {last['lon']:.5f}")),
                      align='C', new_x='LMARGIN', new_y='NEXT')
 
     # === Recuperation by period (combined measured + km × rate fallback) ===
     regen_stats = stats.get('regen_stats')
     if regen_stats:
         pdf.add_page()
-        pdf.section_title('Rekuperation nach Zeitraum')
+        pdf.section_title(_t('dash.regen_by_period'))
         pdf.set_font('Helvetica', 'I', 8)
         pdf.set_text_color(120, 120, 120)
         first_sync = regen_stats.get('first_sync')
-        since_part = f"seit {first_sync[:10]} - " if first_sync else ''
+        since_part = _t('rpdf.since', date=first_sync[:10]) if first_sync else ''
         pdf.cell(0, 5, pdf._clean(
-            f"Gemessen + Schaetzung wo Messwert fehlt - {since_part}"
-            f"Rate: {regen_stats['rate_kwh_per_km']:.3f} kWh/km"
+            _t('rpdf.regen_note', since=since_part,
+               rate=f"{_U.per_dist(regen_stats['rate_kwh_per_km']):.3f} kWh/{_U.dist_label()}")
         ), align='C', new_x='LMARGIN', new_y='NEXT')
         pdf.ln(3)
         regen_kpi = [
             [
-                ('Heute', f"{regen_stats['today']:.1f}", 'kWh'),
-                ('Woche', f"{regen_stats['this_week']:.1f}", 'kWh'),
-                ('Monat', f"{regen_stats['this_month']:.1f}", 'kWh'),
-                ('30 Tage', f"{regen_stats['last_30d']:.1f}", 'kWh'),
+                (_t('dash.regen_today'), f"{regen_stats['today']:.1f}", 'kWh'),
+                (_t('dash.regen_week'), f"{regen_stats['this_week']:.1f}", 'kWh'),
+                (_t('dash.regen_month'), f"{regen_stats['this_month']:.1f}", 'kWh'),
+                (_t('dash.regen_30d'), f"{regen_stats['last_30d']:.1f}", 'kWh'),
             ],
             [
-                ('90 Tage', f"{regen_stats['last_90d']:.1f}", 'kWh'),
-                ('Jahr', f"{regen_stats['this_year']:.1f}", 'kWh'),
-                ('Gesamt', f"{regen_stats['lifetime']:,.0f}", 'kWh'),
-                ('~ km aequivalent', f"{regen_stats['lifetime_km_equiv']:,}", 'km'),
+                (_t('dash.vh_range_90d'), f"{regen_stats['last_90d']:.1f}", 'kWh'),
+                (_t('dash.regen_year'), f"{regen_stats['this_year']:.1f}", 'kWh'),
+                (_t('dash.regen_total'), f"{regen_stats['lifetime']:,.0f}", 'kWh'),
+                (_t('rpdf.equiv'), f"{_U.dist(regen_stats['lifetime_km_equiv'], 0):,}", _U.dist_label()),
             ],
         ]
         pdf.kpi_table(regen_kpi)
@@ -468,25 +480,25 @@ def generate_report():
     highlights = get_highlights()
     if highlights:
         pdf.add_page()
-        pdf.section_title('Highlights')
+        pdf.section_title(_t('dash.highlights'))
         pdf.set_font('Helvetica', '', 9)
         pdf.set_text_color(33, 33, 33)
         rows = []
         if 'cheapest_charge' in highlights:
             c = highlights['cheapest_charge']
-            rows.append(('Guenstigste Ladung', f"EUR {c['eur_per_kwh']:.3f}/kWh ({c['kwh']:.1f} kWh, {c['type']}, {c['date']})"))
+            rows.append((_t('report.hl_cheapest_charge'), f"{_U.cur_code()} {c['eur_per_kwh']:.3f}/kWh ({c['kwh']:.1f} kWh, {c['type']}, {c['date']})"))
         if 'most_expensive_charge' in highlights:
             c = highlights['most_expensive_charge']
-            rows.append(('Teuerste Ladung', f"EUR {c['eur_per_kwh']:.3f}/kWh ({c['kwh']:.1f} kWh, {c['type']}, {c['date']})"))
+            rows.append((_t('rpdf.hl_expensive'), f"{_U.cur_code()} {c['eur_per_kwh']:.3f}/kWh ({c['kwh']:.1f} kWh, {c['type']}, {c['date']})"))
         if 'biggest_charge' in highlights:
             c = highlights['biggest_charge']
-            rows.append(('Groesste Ladung', f"{c['kwh']:.1f} kWh ({c['type']}, {c['date']})"))
+            rows.append((_t('report.hl_biggest_charge'), f"{c['kwh']:.1f} kWh ({c['type']}, {c['date']})"))
         if 'longest_trip' in highlights:
             t = highlights['longest_trip']
-            rows.append(('Laengste Fahrt', f"{t['km']} km"))
+            rows.append((_t('report.hl_longest_trip'), f"{_U.dist(t['km'], mi_nd=1)} {_U.dist_label()}"))
         if 'longest_park' in highlights:
             p = highlights['longest_park']
-            rows.append(('Laengste Standzeit', f"{p['days']} Tage ({p['label']})"))
+            rows.append((_t('rpdf.hl_longest_park'), _t('rpdf.days_label', days=p['days'], label=p['label'])))
         for label, value in rows:
             pdf.cell(60, 6, pdf._clean(label), border='B')
             pdf.cell(0, 6, pdf._clean(value), border='B', new_x='LMARGIN', new_y='NEXT')
@@ -497,19 +509,20 @@ def generate_report():
     if trips:
         trip_summary = get_trip_summary()
         pdf.add_page()
-        pdf.section_title('Fahrtenbuch')
+        pdf.section_title(_t('nav.trips'))
         pdf.set_font('Helvetica', 'I', 8)
         pdf.set_text_color(120, 120, 120)
         info_line = (
-            f"{trip_summary['count']} Fahrten - {trip_summary['total_km']:,.0f} km - "
-            f"Home<->Work: {trip_summary['home_work_km']:,.0f} km"
+            _t('rpdf.trips_line', n=trip_summary['count'],
+               total=f"{_U.dist(trip_summary['total_km']):,.0f} {_U.dist_label()}",
+               hw=f"{_U.dist(trip_summary['home_work_km']):,.0f} {_U.dist_label()}")
         )
         if trip_summary.get('total_regen_kwh'):
-            info_line += f" - Rekup: {trip_summary['total_regen_kwh']:,.1f} kWh"
+            info_line += ' - ' + _t('rpdf.trips_regen', x=f"{trip_summary['total_regen_kwh']:,.1f}")
         pdf.cell(0, 5, pdf._clean(info_line), align='C', new_x='LMARGIN', new_y='NEXT')
         pdf.ln(2)
 
-        headers = ['Datum', 'Von', 'Nach', 'km', 'SoC', 'Rekup']
+        headers = [_t('edit.date'), _t('trips.col_from'), _t('trips.col_to'), _U.dist_label(), 'SoC', _t('dash.recup_label')]
         cw = [22, 72, 72, 14, 14, 16]
         rows = []
         for tr in trips[:80]:
@@ -521,7 +534,7 @@ def generate_report():
             soc = f"-{tr['soc_used']}%" if tr.get('soc_used') else '-'
             regen = f"+{tr['regen_kwh']:.1f}" if tr.get('regen_kwh') else '-'
             rows.append([d, from_, to_,
-                         str(tr['km']) if tr['km'] else '-', soc, regen])
+                         str(_U.dist(tr['km'], mi_nd=1)) if tr['km'] else '-', soc, regen])
         pdf.add_table(headers, rows, cw)
 
     # === Maintenance log ===
@@ -529,13 +542,13 @@ def generate_report():
     if maint:
         m_summary = get_maint_summary()
         pdf.add_page()
-        pdf.section_title('Wartungs-Logbuch')
+        pdf.section_title(_t('maint.title'))
         pdf.set_font('Helvetica', 'I', 8)
         pdf.set_text_color(120, 120, 120)
-        pdf.cell(0, 5, pdf._clean(f"{m_summary['count']} Eintraege - Gesamt EUR {m_summary['total_cost']:.2f}"),
+        pdf.cell(0, 5, pdf._clean(_t('rpdf.maint_line', n=m_summary['count'], cost=f"{_U.cur_code()} {m_summary['total_cost']:.2f}")),
                  align='C', new_x='LMARGIN', new_y='NEXT')
         pdf.ln(2)
-        headers = ['Datum', 'Typ', 'Bezeichnung', 'km', 'EUR']
+        headers = [_t('edit.date'), _t('hist.type'), _t('maint.field_title'), _U.dist_label(), _U.cur_code()]
         cw = [22, 30, 88, 22, 22]
         rows = []
         for e in maint:
@@ -543,16 +556,17 @@ def generate_report():
                 e.date.strftime('%d.%m.%Y'),
                 (e.item_type or '')[:14],
                 (e.title or '')[:42],
-                f"{e.odometer_km:,}".replace(',', '.') if e.odometer_km else '-',
+                f"{_U.dist(e.odometer_km, 0):,}".replace(',', '.') if e.odometer_km else '-',
                 f"{e.cost_eur:.2f}" if e.cost_eur else '-',
             ])
         pdf.add_table(headers, rows, cw)
 
     # === Tables ===
     pdf.add_page()
-    pdf.section_title('AC / DC / PV Statistik')
+    pdf.section_title(_t('rpdf.acdc_stats'))
     if acdc:
-        headers = ['Typ', 'Anzahl', 'kWh', 'Kosten €', 'Ø €/kWh', 'Ø kWh/Ladung', 'Ø Verlust %']
+        headers = [_t('hist.type'), _t('dash.count'), 'kWh', _t('rpdf.cost') + ' ' + _U.cur_code(), 'Ø ' + _U.cur_code() + '/kWh',
+                   _t('rpdf.avg_kwh_charge'), _t('dash.avg_loss')]
         rows = []
         for ct in ['AC', 'DC', 'PV']:
             if ct in acdc:
@@ -562,19 +576,21 @@ def generate_report():
         pdf.add_table(headers, rows)
     pdf.ln(5)
 
-    pdf.section_title('Jahresübersicht')
+    pdf.section_title(_t('rpdf.yearly_overview'))
     if yearly:
-        headers = ['Jahr', 'Anzahl', 'kWh', 'Kosten €', 'CO₂ kg', 'THG €', 'Netto €']
+        headers = [_t('dash.year'), _t('dash.count'), 'kWh', _t('rpdf.cost') + ' ' + _U.cur_code(), 'CO₂ kg',
+                   _t('dash.thg') + ' ' + _U.cur_code(), _t('dash.net') + ' ' + _U.cur_code()]
         rows = [[str(y['year']), str(y['count']), f"{y['kwh']:.0f}", f"{y['cost']:.0f}",
                  f"{y['co2']:.0f}", f"{y['thg']:.0f}", f"{y['net_cost']:.0f}"] for y in yearly]
         pdf.add_table(headers, rows)
     pdf.ln(5)
 
-    pdf.section_title('Monatsübersicht')
+    pdf.section_title(_t('rpdf.monthly_overview'))
     if monthly:
-        headers = ['Monat', 'Anzahl', 'kWh', 'Kosten €', 'CO₂ kg', 'Ø €/kWh', 'km', 'Verlust %']
+        headers = [_t('dash.regen_month'), _t('dash.count'), 'kWh', _t('rpdf.cost') + ' ' + _U.cur_code(), 'CO₂ kg', 'Ø ' + _U.cur_code() + '/kWh',
+                   _U.dist_label(), _t('report.lbl_loss') + ' %']
         rows = [[m['label'], str(m['count']), f"{m['kwh']:.0f}", f"{m['cost']:.0f}",
-                 f"{m['co2']:.0f}", f"{m['cost_per_kwh']:.2f}", str(m['km']), f"{m['avg_loss_pct']:.1f}"]
+                 f"{m['co2']:.0f}", f"{m['cost_per_kwh']:.2f}", str(_U.dist(m['km'], mi_nd=0)), f"{m['avg_loss_pct']:.1f}"]
                 for m in monthly]
         cw = [22, 16, 20, 22, 20, 22, 22, 22]
         pdf.add_table(headers, rows, cw)

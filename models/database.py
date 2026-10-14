@@ -120,6 +120,13 @@ class Vehicle(db.Model):
     # Both optional; NULL = not entered.
     battery_chemistry = db.Column(db.String(16))
     battery_cells_series = db.Column(db.Integer)
+    # v3.0.155: the unit this car's cloud reports distances in ('km'|'mi',
+    # NULL = not judged yet). Stored values are ALWAYS km — the connector
+    # converts on arrival. history_unit_fixed_at = when the history this
+    # car had recorded in miles before v3.0.155 was converted to km
+    # (services/unit_history; NULL = never, or undone).
+    distance_source_unit = db.Column(db.String(2))
+    history_unit_fixed_at = db.Column(db.DateTime)
     battery_soh_baseline = db.Column(db.Float)
     battery_co2_per_kwh = db.Column(db.Float)
     max_ac_kw = db.Column(db.Float)
@@ -195,6 +202,9 @@ class Vehicle(db.Model):
             'max_ac_kw': self.max_ac_kw,
             'fossil_co2_per_km': self.fossil_co2_per_km,
             'recuperation_kwh_per_km': self.recuperation_kwh_per_km,
+            'distance_source_unit': self.distance_source_unit,
+            'history_unit_fixed_at': (self.history_unit_fixed_at.isoformat()
+                                      if self.history_unit_fixed_at else None),
             'api_brand': self.api_brand,
             'api_username': self.api_username,
             'api_pin': self.api_pin,

@@ -25,6 +25,7 @@ from datetime import datetime, date, timedelta
 from typing import Optional
 
 from models.database import db, VehicleTrip, AppConfig
+from .base import to_km
 
 logger = logging.getLogger(__name__)
 
@@ -161,6 +162,16 @@ def fetch_day_trip_info(target_date: date, vehicle_id=None) -> dict:
 
     out['total_sdk_trips'] = len(day_info.trip_list)
 
+    # v3.0.155: a US account reports trips in miles and mph (the SDK has no
+    # unit on a trip, only on the odometer) — stored is km and km/h.
+    try:
+        unit = connector._distance_unit(vehicle)
+    except Exception:
+        unit = 'km'
+
+    def _len(v, as_int=False):
+        return to_km(v, unit, as_int=as_int) if v is not None else None
+
     for trip in day_info.trip_list:
         start = _parse_start_time(target_date, getattr(trip, 'hhmmss', None))
         if start is None:
@@ -179,9 +190,9 @@ def fetch_day_trip_info(target_date: date, vehicle_id=None) -> dict:
                 start_time=start,
                 drive_minutes=getattr(trip, 'drive_time', None),
                 idle_minutes=getattr(trip, 'idle_time', None),
-                distance_km=getattr(trip, 'distance', None),
-                avg_speed_kmh=getattr(trip, 'avg_speed', None),
-                max_speed_kmh=getattr(trip, 'max_speed', None),
+                distance_km=_len(getattr(trip, 'distance', None)),
+                avg_speed_kmh=_len(getattr(trip, 'avg_speed', None)),
+                max_speed_kmh=_len(getattr(trip, 'max_speed', None), as_int=True),
                 source='sdk_day_trip_info',
                 fetched_at=datetime.now(),
             )
@@ -195,9 +206,9 @@ def fetch_day_trip_info(target_date: date, vehicle_id=None) -> dict:
             for attr, val in [
                 ('drive_minutes',  getattr(trip, 'drive_time', None)),
                 ('idle_minutes',   getattr(trip, 'idle_time', None)),
-                ('distance_km',    getattr(trip, 'distance', None)),
-                ('avg_speed_kmh',  getattr(trip, 'avg_speed', None)),
-                ('max_speed_kmh',  getattr(trip, 'max_speed', None)),
+                ('distance_km',    _len(getattr(trip, 'distance', None))),
+                ('avg_speed_kmh',  _len(getattr(trip, 'avg_speed', None))),
+                ('max_speed_kmh',  _len(getattr(trip, 'max_speed', None), as_int=True)),
             ]:
                 if val is not None and getattr(existing, attr) != val:
                     setattr(existing, attr, val)

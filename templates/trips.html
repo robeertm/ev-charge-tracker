@@ -63,7 +63,7 @@
         <div class="card kpi-card border-info">
             <div class="card-body text-center p-2">
                 <div class="kpi-label">{{ t('trips.total_km') }}</div>
-                <div class="kpi-value text-info">{{ "{:,.0f}".format(summary.total_km).replace(",", ".") }} km</div>
+                <div class="kpi-value text-info">{{ "{:,.0f}".format(summary.total_km|dist).replace(",", ".") }} {{ dist_unit() }}</div>
             </div>
         </div>
     </div>
@@ -71,7 +71,7 @@
         <div class="card kpi-card border-success">
             <div class="card-body text-center p-2">
                 <div class="kpi-label">{{ t('trips.home_work') }}</div>
-                <div class="kpi-value text-success">{{ "{:,.0f}".format(summary.home_work_km).replace(",", ".") }} km</div>
+                <div class="kpi-value text-success">{{ "{:,.0f}".format(summary.home_work_km|dist).replace(",", ".") }} {{ dist_unit() }}</div>
             </div>
         </div>
     </div>
@@ -134,7 +134,7 @@
                         {% if active_vehicle_filter == 'all' %}<th>{{ t('trips.col_vehicle') }}</th>{% endif %}
                         <th>{{ t('trips.col_from') }}</th>
                         <th>{{ t('trips.col_to') }}</th>
-                        <th class="text-end">km</th>
+                        <th class="text-end">{{ dist_unit() }}</th>
                         <th class="text-end">SoC</th>
                         <th class="text-end">{{ t('trips.col_regen') }}</th>
                         <th></th>
@@ -149,7 +149,7 @@
                             {% if tr.from.departed_at %}{{ tr.from.departed_at[:16] | replace('T', ' ') }}{% endif %}
                             {% if tr.drive_min %}
                             <i class="bi bi-cloud-check text-info ms-1" style="font-size:.75rem"
-                               title="{{ t('trips.source_sdk') }} · {{ tr.drive_min }}min{% if tr.avg_speed_kmh %} · Ø {{ tr.avg_speed_kmh }}km/h{% endif %}{% if tr.max_speed_kmh %} · max {{ tr.max_speed_kmh }}km/h{% endif %}"></i>
+                               title="{{ t('trips.source_sdk') }} · {{ tr.drive_min }}min{% if tr.avg_speed_kmh %} · Ø {{ tr.avg_speed_kmh|dist(mi_nd=0) }}{{ speed_unit() }}{% endif %}{% if tr.max_speed_kmh %} · max {{ tr.max_speed_kmh|dist(mi_nd=0) }}{{ speed_unit() }}{% endif %}"></i>
                             {% endif %}
                         </td>
                         {% if active_vehicle_filter == 'all' %}
@@ -179,7 +179,7 @@
                             {% elif tr.to.address %}{{ tr.to.address }}
                             {% else %}<span class="text-muted fst-italic trip-resolving">{{ t('trips.resolving') }}</span>{% endif %}
                         </td>
-                        <td class="text-end">{% if tr.km %}{{ tr.km }}{% endif %}</td>
+                        <td class="text-end">{% if tr.km %}{{ tr.km|dist(mi_nd=1) }}{% endif %}</td>
                         <td class="text-end">{% if tr.soc_used %}{% if tr.soc_estimated %}<i class="bi bi-asterisk small text-muted" title="{{ t('trips.soc_estimated') }}"></i> {% endif %}−{{ tr.soc_used }}%{% endif %}</td>
                         <td class="text-end {% if tr.regen_estimated %}text-success-emphasis{% else %}text-success{% endif %}">
                             {% if tr.regen_kwh %}
@@ -869,7 +869,8 @@
             // and departure (instantaneous-stop semantics — same odo
             // / SoC). Server falls back to time-interpolation between
             // the parent PEs when omitted.
-            const odoVal = odoEl && odoEl.value !== '' ? parseInt(odoEl.value, 10) : null;
+            // typed in the chosen unit, sent as km (v3.0.155)
+            const odoVal = odoEl && odoEl.value !== '' ? U.toKm(parseInt(odoEl.value, 10), 0) : null;
             if (odoVal !== null && !isNaN(odoVal)) {
                 stop.odometer_arrived = odoVal;
                 stop.odometer_departed = odoVal;
@@ -1372,8 +1373,8 @@
         q('tripEditAddress', side).value = d.address || '';
         q('tripEditArrivedAt', side).value = toLocalDtString(d.arrived_at);
         q('tripEditDepartedAt', side).value = toLocalDtString(d.departed_at);
-        q('tripEditOdoArrived', side).value = d.odometer_arrived ?? '';
-        q('tripEditOdoDeparted', side).value = d.odometer_departed ?? '';
+        U.show(q('tripEditOdoArrived', side), d.odometer_arrived ?? null);
+        U.show(q('tripEditOdoDeparted', side), d.odometer_departed ?? null);
         q('tripEditSocArrived', side).value = d.soc_arrived ?? '';
         q('tripEditSocDeparted', side).value = d.soc_departed ?? '';
         q('tripEditLat', side).value = d.lat != null ? d.lat.toFixed(6) : '';
@@ -1510,8 +1511,12 @@
             ['tripEditSocArrived', 'soc_arrived'],
             ['tripEditSocDeparted', 'soc_departed'],
         ]) {
-            const v = q(cls, side).value;
-            out[key] = v === '' ? null : parseInt(v, 10);
+            const el = q(cls, side);
+            const v = el.value;
+            // odometers: typed in the chosen unit; an unchanged field
+            // sends the stored km back untouched (no rounding drift)
+            out[key] = v === '' ? null
+                : (key.startsWith('odometer_') ? U.read(el) : parseInt(v, 10));
         }
         return out;
     }

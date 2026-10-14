@@ -403,9 +403,12 @@ def build_report(start: date, end: date, lang: str = 'de',
         dow_km[t.trip_date.weekday()] += _safe(t.distance_km)
 
     # ── Trip length distribution ───────────────────────────────────
-    trip_buckets = [('< 5 km', 0), ('5–20', 0), ('20–50', 0), ('50–100', 0), ('100+', 0)]
+    # v3.0.155: the bounds are in the unit the owner reads — 5/20/50/100 mi
+    # in miles, not 3.1/12.4/… (a bucket edge is a round number to a person)
+    from services.units import dist as _dist, dist_label as _dist_label
+    trip_buckets = [('< 5 ' + _dist_label(), 0), ('5–20', 0), ('20–50', 0), ('50–100', 0), ('100+', 0)]
     for t in trips:
-        d = _safe(t.distance_km)
+        d = _dist(_safe(t.distance_km))
         if d < 5:        trip_buckets[0] = (trip_buckets[0][0], trip_buckets[0][1] + 1)
         elif d < 20:     trip_buckets[1] = (trip_buckets[1][0], trip_buckets[1][1] + 1)
         elif d < 50:     trip_buckets[2] = (trip_buckets[2][0], trip_buckets[2][1] + 1)

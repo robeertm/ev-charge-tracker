@@ -1848,6 +1848,9 @@ def geocode_missing_events(limit: int = 50) -> int:
     # threads for the whole walk regardless of journal mode.
     pending = [(e.id, e.lat, e.lon) for e in rows]
     lang = _AppConfig.get('app_language', 'de')
+    if lang not in ('de', 'en', 'fr', 'es', 'it', 'nl'):   # v3.0.155: "auto"
+        from services.i18n import get_language
+        lang = get_language()
     filled = 0
     for evt_id, lat, lon in pending:
         try:

@@ -60,6 +60,7 @@ from datetime import date, datetime
 from statistics import median
 
 from models.database import Charge, Vehicle, ObdReading
+from services import units as _U
 from services import battery_analysis as BA
 from services.stats_service import (
     get_soh_baseline, get_summary_stats, get_vehicle_history,
@@ -1179,7 +1180,7 @@ def generate_certificate(vehicle_id):
         batt_val += f" / {veh['gross_kwh']:.1f} kWh brutto"
     pdf.kv(t('cert.veh_battery', default='Akku (Nennkapazitaet)'), batt_val)
     pdf.kv(t('cert.veh_odometer', default='Tachostand'),
-           f"{data['odometer_km']:,} km".replace(',', '.'))
+           f"{_U.dist(data['odometer_km'], 0):,} {_U.dist_label()}".replace(',', '.'))
     pdf.kv(t('cert.veh_first_reg', default='Erstzulassung'),
            veh.get('first_registered_at') or t('cert.na', default='nicht hinterlegt'))
     pdf.kv(t('cert.veh_age', default='Batteriealter'),
@@ -1345,7 +1346,7 @@ def generate_certificate(vehicle_id):
            _fmt(beh['avg_soc_window'], '{:.0f} %-Punkte'))
     pdf.kv(t('cert.beh_charges', default='Ladevorgaenge / Fahrleistung'),
            f"{_fmt(beh['total_charges'], '{}')} / "
-           f"{_fmt(beh['total_km'], '{:,} km').replace(',', '.')}")
+           f"{_fmt(_U.dist(beh['total_km'], 0), '{:,} ' + _U.dist_label()).replace(',', '.')}")
 
     # ── SoH trend chart ──────────────────────────────────────────────
     if chart:

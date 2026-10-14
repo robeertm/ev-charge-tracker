@@ -22,7 +22,7 @@ except ImportError:
     CarConnectivity = None  # type: ignore
     HAS_CARCONNECTIVITY = False
 
-from .base import VehicleConnector, VehicleStatus
+from .base import VehicleConnector, VehicleStatus, to_km, unit_name
 from .registry import describe, register
 
 
@@ -205,7 +205,8 @@ class VAGConnector(VehicleConnector):
                 soc = int(level.value)
             rng = getattr(ed, 'range', None)
             if rng is not None and getattr(rng, 'value', None) is not None:
-                estimated_range = int(rng.value)
+                # v3.0.155: carconnectivity names the unit (Length.KM / .MI)
+                estimated_range = to_km(rng.value, getattr(rng, 'unit', None), as_int=True)
 
         # Charging info. ``ch.state.value`` is the carconnectivity
         # EnumAttribute's inner enum member, not a plain string. A naive
@@ -233,8 +234,11 @@ class VAGConnector(VehicleConnector):
 
         # Odometer
         odometer = None
+        odo_unit = None
         if hasattr(vehicle, 'odometer') and vehicle.odometer and hasattr(vehicle.odometer, 'value'):
-            odometer = int(vehicle.odometer.value) if vehicle.odometer.value is not None else None
+            odo_unit = getattr(vehicle.odometer, 'unit', None)
+            odometer = (to_km(vehicle.odometer.value, odo_unit, as_int=True)
+                        if vehicle.odometer.value is not None else None)
 
         return VehicleStatus(
             soc_percent=soc,
@@ -242,6 +246,7 @@ class VAGConnector(VehicleConnector):
             is_charging=is_charging,
             charge_power_kw=charge_power,
             estimated_range_km=estimated_range,
+            distance_unit=unit_name(odo_unit),
             raw_data=_dump_vag_vehicle(vehicle),
         )
 

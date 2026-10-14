@@ -171,7 +171,7 @@
     var head = '';
     if (r.energy_kwh != null) {
       var bits = [Number(r.energy_kwh).toFixed(2) + ' kWh'];
-      if (r.cost_eur != null) bits.push(Number(r.cost_eur).toFixed(2) + ' €');
+      if (r.cost_eur != null) bits.push(Number(r.cost_eur).toFixed(2) + ' ' + ((window.U && window.U.cur) || '€'));
       if (r.measured && r.solar_share != null) {
         bits.push(Math.round(r.solar_share * 100) + ' % ' +
                   T('wb.self_supplied', 'selbst erzeugt'));

@@ -1,5 +1,65 @@
 # Changelog
 
+## v3.0.155 (2026-10-14)
+
+### Kilometres or miles, any currency — and it sets itself from your browser
+
+Asked for by an owner of a US car: the app only spoke kilometres and euros.
+
+- **Distances in km or miles**, everywhere: dashboard, history, driving log,
+  maintenance, report page, PDF report, battery certificate, CSV export of the
+  driving log. Speeds in mph, consumption in **kWh/100 mi** (the figure on a US
+  window sticker — it points the same way as kWh/100 km, so lower is still
+  better), rates such as kWh/km or g CO₂/km per mile.
+- **Typed in the chosen unit, stored in km.** Odometer fields (charge, edit,
+  maintenance, OBD, trip editor, trip split) take miles when miles are chosen.
+  A form that is only saved, not changed, gives back the stored value
+  untouched: 37 750 km shows as 23 457 mi, and 23 457 mi back would be 37 751
+  km — saving an unchanged form never moves an odometer by a rounding step.
+- **Currency sign**: €, $, £, CHF, kr, zł and 22 more. Only the sign changes —
+  prices are never converted, they were typed in your currency in the first
+  place. PDFs print the ISO code (USD, GBP …), because the PDF font cannot draw
+  every sign.
+- **Automatic from the browser**: a new install picks language, units and
+  currency from the browser's language and country (en-US → English, miles,
+  dollars; de-CH → German, km, CHF). Language and units follow the device;
+  the currency is detected once and then kept, so a phone set to en-US never
+  puts "$" in front of prices typed in euros. Everything can be set by hand in
+  Settings → Language · Units, and a choice made there always wins.
+- **Existing installs keep what they showed.** On the first start of this
+  version an install with data writes down its current state — German, euros
+  and km for every install that was on the German default — so nothing changes
+  for anyone who did not ask for it.
+- The API (`/api/...`) stays in km, so Home Assistant and other integrations
+  keep working unchanged.
+
+### A US Kia/Hyundai stored miles as kilometres
+
+The Kia/Hyundai cloud reports the odometer, range and trips of a US account in
+miles, and the app wrote those numbers into its kilometre columns as they came:
+30 000 miles became "30 000 km", and every trip, km/h and kWh/100 km derived
+from them was off by 1.609 without anything looking wrong. The connectors now
+convert at the door (Kia/Hyundai by the unit the SDK names or by region,
+VW group by the unit carconnectivity names; Tesla already did).
+
+The history such a car recorded before is converted **once, per car**, at the
+first start of this version: odometers, ranges, trip distances, speeds,
+consumption, maintenance and OBD odometers. A copy of the database file is
+written next to it first, the conversion is one transaction, and the car
+remembers that it was converted, so it can never happen twice. A car whose
+cloud first reports miles later is converted on that first sync. Anyone who
+typed miles by hand into a car without an API can convert in Settings, with a
+backup and an undo.
+
+### Also fixed
+
+- After a forced refresh that lost the odometer or range, restoring them from
+  the cache handed the Kia/Hyundai SDK a bare number where it expects
+  (value, unit) — the whole forced sync failed with a TypeError.
+- The PDF report was German-only; it is now translated into all six languages.
+- The CSV export of the driving log had German column names in every
+  language.
+
 ## v3.0.154 (2026-10-13)
 
 ### The battery gets its own pages

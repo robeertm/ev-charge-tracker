@@ -69,7 +69,7 @@
               </select>
             </div>
             <div class="col-6">
-              <label class="form-label small mb-1">{{ t('obd.odometer', default='km-Stand (optional)') }}</label>
+              <label class="form-label small mb-1">{{ t('obd.odometer', default='Tachostand (optional)') }} ({{ dist_unit() }})</label>
               <input type="number" class="form-control form-control-sm" id="obdOdo" min="0" step="1">
             </div>
           </div>
@@ -801,7 +801,7 @@
     progress(0.98);
     const odo = document.getElementById('obdOdo').value;
     const body = { profile: key, frames };
-    if (odo) body.odometer_km = parseInt(odo, 10);
+    if (odo) body.odometer_km = U.toKm(parseInt(odo, 10), 0);  // typed in the chosen unit
     body.source = tr._kind || 'elm327';
     const res = await fetch(`/api/vehicles/${VID}/obd/ingest`, {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
@@ -1291,7 +1291,7 @@
     if (!liveLastFrames) return;
     const body = { profile: liveKey, frames: liveLastFrames, source: 'elm327-live' };
     const odo = document.getElementById('obdOdo').value;
-    if (odo) body.odometer_km = parseInt(odo, 10);
+    if (odo) body.odometer_km = U.toKm(parseInt(odo, 10), 0);  // typed in the chosen unit
     try {
       const res = await fetch(`/api/vehicles/${VID}/obd/ingest`, {
         method: 'POST', headers: { 'Content-Type': 'application/json' },

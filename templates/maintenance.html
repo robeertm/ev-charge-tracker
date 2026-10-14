@@ -43,7 +43,7 @@
         <span><i class="bi bi-list-ul"></i> {{ t('maint.list_title') }}</span>
         {% if summary.count %}
         <span class="text-muted small">
-            {{ summary.count }} {{ t('maint.entries') }} · {{ "%.2f"|format(summary.total_cost) }} €
+            {{ summary.count }} {{ t('maint.entries') }} · {{ "%.2f"|format(summary.total_cost) }} {{ cur() }}
         </span>
         {% endif %}
     </div>
@@ -56,8 +56,8 @@
                         {% if active_vehicle_filter == 'all' %}<th>{{ t('maint.col_vehicle') }}</th>{% endif %}
                         <th>{{ t('maint.field_type') }}</th>
                         <th>{{ t('maint.field_title') }}</th>
-                        <th class="text-end">km</th>
-                        <th class="text-end">€</th>
+                        <th class="text-end">{{ dist_unit() }}</th>
+                        <th class="text-end">{{ cur() }}</th>
                     </tr>
                 </thead>
                 <tbody>
@@ -77,7 +77,7 @@
                         {% endif %}
                         <td><span class="badge bg-secondary">{{ e.item_type }}</span></td>
                         <td>{{ e.title or '—' }}</td>
-                        <td class="text-end">{% if e.odometer_km %}{{ '{:,.0f}'.format(e.odometer_km).replace(',', '.') }}{% endif %}</td>
+                        <td class="text-end">{% if e.odometer_km %}{{ '{:,.0f}'.format(e.odometer_km|dist).replace(',', '.') }}{% endif %}</td>
                         <td class="text-end">{% if e.cost_eur %}{{ "%.2f"|format(e.cost_eur) }}{% endif %}</td>
                     </tr>
                 {% else %}
@@ -126,7 +126,8 @@
             </div>
             <div class="col-6">
               <label class="form-label small mb-1 fw-semibold">{{ t('maint.field_odo') }}</label>
-              <input type="number" name="odometer_km" id="maintOdo" class="form-control form-control-sm" value="{{ current_odo or '' }}">
+              <input type="number" name="odometer_km" id="maintOdo" class="form-control form-control-sm" value="{{ current_odo|dist(0) if current_odo else '' }}" data-km="{{ current_odo or '' }}" data-shown="{{ current_odo|dist(0) if current_odo else '' }}">
+              <input type="hidden" name="odometer_km__km" id="maintOdoKm" value="{{ current_odo or '' }}">
             </div>
             <div class="col-6">
               <label class="form-label small mb-1 fw-semibold">{{ t('maint.field_cost') }}</label>
@@ -139,6 +140,7 @@
             <div class="col-6">
               <label class="form-label small mb-1 fw-semibold">{{ t('maint.field_next_km') }}</label>
               <input type="number" name="next_due_km" id="nextKmInput" class="form-control form-control-sm">
+              <input type="hidden" name="next_due_km__km" id="nextKmKm">
             </div>
             <div class="col-6">
               <label class="form-label small mb-1 fw-semibold">{{ t('maint.field_next_date') }}</label>
@@ -185,8 +187,11 @@ function _maintSetup() {
             const intv = INTERVALS[this.value] || {};
             const kmIn = document.getElementById('nextKmInput');
             const dateIn = document.getElementById('nextDateInput');
+            // v3.0.155: shown in the chosen unit; the interval rounded to a
+            // whole hundred there (30 000 km → 18 600 mi, not 18 641).
+            document.getElementById('nextKmKm').value = '';
             if (intv.km && currentOdo) {
-                kmIn.value = currentOdo + intv.km;
+                kmIn.value = U.d(currentOdo, 0) + (U.mi ? Math.round(U.d(intv.km) / 100) * 100 : intv.km);
             } else { kmIn.value = ''; }
             if (intv.months) {
                 const d = new Date();
@@ -206,7 +211,9 @@ function _maintSetup() {
     function resetForm() {
         form.reset();
         document.getElementById('maintDate').value = TODAY_ISO;
-        document.getElementById('maintOdo').value = currentOdo != null ? currentOdo : '';
+        U.show(document.getElementById('maintOdo'), currentOdo);
+        document.getElementById('maintOdoKm').value = currentOdo != null ? currentOdo : '';
+        document.getElementById('nextKmKm').value = '';
     }
 
     function openForNew() {
@@ -231,10 +238,12 @@ function _maintSetup() {
             document.getElementById('itemTypeSel').value = d.item_type || 'other';
             document.getElementById('maintTitle').value = d.title || '';
             document.getElementById('maintDate').value = d.date || '';
-            document.getElementById('maintOdo').value = d.odometer_km != null ? d.odometer_km : '';
+            U.show(document.getElementById('maintOdo'), d.odometer_km);
+            document.getElementById('maintOdoKm').value = d.odometer_km != null ? d.odometer_km : '';
             document.getElementById('maintCost').value = d.cost_eur != null ? d.cost_eur : '';
             document.getElementById('maintNotes').value = d.notes || '';
-            document.getElementById('nextKmInput').value = d.next_due_km != null ? d.next_due_km : '';
+            U.show(document.getElementById('nextKmInput'), d.next_due_km);
+            document.getElementById('nextKmKm').value = d.next_due_km != null ? d.next_due_km : '';
             document.getElementById('nextDateInput').value = d.next_due_date || '';
         } catch (e) {
             console.error('maintenance fetch failed:', e);
