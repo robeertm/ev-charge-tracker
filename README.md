@@ -399,10 +399,13 @@ needed.
 After installing, configure credentials in Settings > Vehicle API. Optional background sync polls your vehicle at a configurable interval (1-12h).
 
 **¹ Kia/Hyundai:** signing in with username and password works — but only on
-**Python 3.12 or newer**. The sign-in needs `hyundai-kia-connect-api` ≥ 4.26.5,
+**Python 3.12 or newer**. The sign-in needs `hyundai-kia-connect-api` ≥ 4.35.3,
 and every release of that SDK from 4.23.1 onward declares `Requires-Python
 >=3.12`. The Docker image ships 3.12, so a container install signs in like
-every other brand here.
+every other brand here. This direct route is **unofficial and fragile**: on
+14 Oct 2026 the maker tightened its login (HTTP 400 code 9035) and the SDK had
+to be fixed (4.35.3) to get past it — it can break again. For a route the maker
+sanctions, use the **Pleos** brands (footnote ⁴).
 
 A **native** install on an older interpreter cannot install that SDK at all —
 Raspberry Pi OS bookworm still ships Python 3.11, where `pip install

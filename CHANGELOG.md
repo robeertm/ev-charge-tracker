@@ -1,5 +1,26 @@
 # Changelog
 
+## v3.0.159 (2026-10-15)
+
+### Kia/Hyundai direct sign-in works again — with a clear warning
+
+On 14 October 2026 Kia/Hyundai Europe tightened their login and the direct
+sign-in started failing with HTTP 400 code 9035. The community library that
+the app already uses published a fix (`hyundai_kia_connect_api` 4.35.3), and
+this release bumps the pinned version so a rebuilt image gets past the block
+again — so customers can read their cars again without switching anything.
+
+- **SDK pin raised to 4.35.3** in the catalog and in the image requirements,
+  kept in step.
+- **A clear warning now sits on the Kia/Hyundai password box**, in all six
+  languages: this direct route is unofficial, the maker actively works
+  against it and it can stop working again at any time (and a failed attempt
+  can log you out of the official app). The official Pleos API stays the
+  stable alternative.
+- **If the block returns** (a 9035 even with the new SDK), the app still
+  stops signing in by itself and its message now points at both an app update
+  and Pleos, instead of the old password checklist.
+
 ## v3.0.158 (2026-10-14)
 
 ### Any car Home Assistant already knows — and the XPENG G6, prepared

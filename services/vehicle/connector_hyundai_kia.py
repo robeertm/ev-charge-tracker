@@ -372,8 +372,10 @@ KIA_CREDENTIAL_FIELDS = [
      "label_key": "cred.email", "context": "Kia Connect"},
     {"key": "password", "label": "Passwort (Kia Connect Account)", "type": "password",
      "label_key": "cred.password", "context": "Kia Connect",
-     "help_key": "cred.help_password_direct",
-     "help": "Dein normales Kia-Connect-Passwort — die App meldet sich direkt an."},
+     "help_key": "cred.help_kia_hyundai_direct",
+     "help": "Dein normales Kia-Connect-Passwort — die App meldet sich direkt an. "
+             "Hinweis: Kia/Hyundai arbeiten gegen Fremd-Apps; dieser Weg kann "
+             "jederzeit wieder ausfallen. Dann hilft die offizielle Pleos-API."},
     {"key": "pin", "label": "PIN (4-stellig aus Kia Connect App)", "type": "password",
      "label_key": "cred.pin", "context": "Kia Connect",
      "optional": True, "help_key": "cred.help_pin"},
@@ -385,8 +387,10 @@ HYUNDAI_CREDENTIAL_FIELDS = [
      "label_key": "cred.email", "context": "Bluelink"},
     {"key": "password", "label": "Passwort (Bluelink Account)", "type": "password",
      "label_key": "cred.password", "context": "Bluelink",
-     "help_key": "cred.help_password_direct",
-     "help": "Dein normales Bluelink-Passwort — die App meldet sich direkt an."},
+     "help_key": "cred.help_kia_hyundai_direct",
+     "help": "Dein normales Bluelink-Passwort — die App meldet sich direkt an. "
+             "Hinweis: Kia/Hyundai arbeiten gegen Fremd-Apps; dieser Weg kann "
+             "jederzeit wieder ausfallen. Dann hilft die offizielle Pleos-API."},
     {"key": "pin", "label": "PIN (4-stellig aus Bluelink App)", "type": "password",
      "label_key": "cred.pin", "context": "Bluelink",
      "optional": True, "help_key": "cred.help_pin"},

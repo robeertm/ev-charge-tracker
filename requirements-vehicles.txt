@@ -16,9 +16,11 @@
 # skipped, and the app keeps the brands it can serve.
 
 # Kia UVO / Hyundai Bluelink.
-# >=4.26.5 for the headless CCI password sign-in (needs Python >=3.12; on
-# 3.11 this line is skipped and the app routes users to the browser token).
-hyundai-kia-connect-api>=4.26.5
+# >=4.35.3 (needs Python >=3.12; on 3.11 this line is skipped and the app
+# routes users to the browser token). 4.35.3 is the current maintained
+# upstream release, which restores EU sign-in after the maker's 14 Oct 2026
+# server change that had answered HTTP 400 code 9035 (kia_uvo#1939).
+hyundai-kia-connect-api>=4.35.3
 
 # VW group. `carconnectivity` is the shared base; one connector per brand.
 # All five are needed — the registry registers vw, skoda, seat, cupra AND

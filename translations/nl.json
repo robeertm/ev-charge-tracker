@@ -1771,7 +1771,7 @@
   "wb.discard_ask": "Deze meting echt weggooien? Een lading die erop steunt blijft ongemoeid — alleen een meting zonder gekoppelde lading kan weg.",
   "wb.discard_refused": "Op deze meting steunt een lading. Koppel hem eerst los en gooi hem dan weg.",
   "upd.automatic_hint": "Updates installeren zich hier zelf: een nieuwe versie wordt na de rooktest gepubliceerd en door de wachtercontainer toegepast — zonder iets te doen. Laadt de auto, dan wacht de update tot het laden klaar is.",
-  "hk.err_vendor_block": "Sinds 14-10-2026 laten Kia/Hyundai in Europa geen aanmelding van apps van derden meer toe (code 9035, ‘ongebruikelijke activiteit’). Je e-mailadres en wachtwoord kloppen — de fabrikant blokkeert de toegang zelf, een nieuw wachtwoord helpt niet. De uitweg is de officiële Pleos-API: uitleg en knop onder Instellingen → Voertuigen. Elke nieuwe poging zou je ook uit de officiële app gooien — daarom meldt deze app zich niet meer vanzelf aan; alleen met de knop ‘Verbinding testen’ wordt het opnieuw geprobeerd.",
+  "hk.err_vendor_block": "Kia/Hyundai weigeren de aanmelding op dit moment (code 9035, ‘ongebruikelijke activiteit’). Je e-mailadres en wachtwoord kloppen — de fabrikant blokkeert de directe toegang en een nieuw wachtwoord helpt niet. Een app-update herstelt vaak de directe route; de blijvend stabiele optie is de officiële Pleos-API (uitleg en knop onder Instellingen → Voertuigen). De app blijft het niet vanzelf proberen — elke poging zou je ook uit de officiële Kia/Hyundai-app loggen — alleen met ‘Verbinding testen’ of na een herstart.",
   "cred.help_pleos_key": "Op pleos.ai: accountmenu → ‘My Vehicle Data API’ → merk kiezen → ‘Get API Key’ → aanmelden met je Kia-/Hyundai-account. Daar staan Client ID en Client Secret.",
   "pleos.switch_title": "Kia/Hyundai blokkeren de aanmelding — stap over op de officiële API",
   "pleos.switch_body": "Sinds 14-10-2026 weigert de fabrikant in heel Europa elke aanmelding van derden (code 9035) — ook met het juiste wachtwoord, ook in Home Assistant. De officiële Pleos-API van de fabrikant levert de gegevens nog wel: laadniveau, laden, actieradius, kilometerstand, locatie, deuren en klimaat. Niet inbegrepen: 12V-accu, laadvermogen en bediening op afstand. Alles wat al is vastgelegd blijft bewaard.",
@@ -1811,5 +1811,6 @@
   "ha.role_range": "Actieradius",
   "ha.role_charging": "Laden",
   "ha.role_plug": "Stekker",
-  "ha.role_location": "Locatie"
+  "ha.role_location": "Locatie",
+  "cred.help_kia_hyundai_direct": "Je gewone {context}-wachtwoord — de app meldt zich direct aan. Let op: Kia/Hyundai werken actief tegen apps van derden; deze directe route kan op elk moment weer uitvallen en je uit de officiële app loggen. De officiële Pleos-API is het stabiele alternatief."
 }

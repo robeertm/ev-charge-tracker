@@ -1771,7 +1771,7 @@
   "wb.discard_ask": "Really discard this reading? A charge built on one is left alone — only a reading no charge is matched to can go.",
   "wb.discard_refused": "A charge entry is built on this reading. Detach it first, then discard.",
   "upd.automatic_hint": "Updates install themselves on this install: a new version is published after the smoke test and picked up by the watcher container — nothing to do. While the car is charging the update waits until the charge is over.",
-  "hk.err_vendor_block": "Since 14 Oct 2026 Kia/Hyundai no longer let third-party apps sign in in Europe (code 9035, “unusual activity”). Your e-mail and password are correct — the manufacturer blocks the access itself, a new password will not help. The way out is the official Pleos API: instructions and a button under Settings → Vehicles. Every further attempt would also log you out of the official app — so this app no longer signs in by itself; it only tries again when you press “Test connection”.",
+  "hk.err_vendor_block": "Kia/Hyundai are refusing the sign-in right now (code 9035, “unusual activity”). Your e-mail and password are correct — the maker is blocking the direct access, a new password will not help. An app update often restores the direct route; the lasting, stable option is the official Pleos API (instructions and a button under Settings → Vehicles). The app will not keep asking by itself — every attempt would also log you out of the official Kia/Hyundai app — it only tries again with “Test connection” or after a restart.",
   "cred.help_pleos_key": "On pleos.ai: account menu → “My Vehicle Data API” → pick the brand → “Get API Key” → sign in with your Kia/Hyundai account. The Client ID and Client Secret are shown there.",
   "pleos.switch_title": "Kia/Hyundai block the sign-in — switch to the official API",
   "pleos.switch_body": "Since 14 Oct 2026 the manufacturer rejects every third-party sign-in across Europe (code 9035) — even with the right password, Home Assistant included. The manufacturer’s official Pleos API still provides the data: state of charge, charging, range, odometer, location, doors and climate. Not included: 12 V battery, charging power and remote control. Everything recorded so far is kept.",
@@ -1811,5 +1811,6 @@
   "ha.role_range": "Range",
   "ha.role_charging": "Charging",
   "ha.role_plug": "Plug",
-  "ha.role_location": "Location"
+  "ha.role_location": "Location",
+  "cred.help_kia_hyundai_direct": "Your normal {context} password — the app signs in directly. Note: Kia/Hyundai actively work against third-party apps; this direct route can stop working again at any time and may log you out of the official app. The official Pleos API is the stable alternative."
 }

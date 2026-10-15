@@ -1771,7 +1771,7 @@
   "wb.discard_ask": "Diese Messung wirklich verwerfen? Eine Ladung, die darauf beruht, bleibt unberührt — verworfen wird nur, was keiner Ladung zugeordnet ist.",
   "wb.discard_refused": "Auf dieser Messung beruht eine Ladung. Erst abhängen, dann verwerfen.",
   "upd.automatic_hint": "Updates installieren sich hier selbst: eine neue Fassung wird nach der Rauchprobe veröffentlicht und vom Wächter-Container eingespielt — ohne Zutun. Lädt das Fahrzeug gerade, wartet das Update, bis die Ladung zu Ende ist.",
-  "hk.err_vendor_block": "Kia/Hyundai lassen seit 14.10.2026 in Europa keine Anmeldung von Drittprogrammen mehr zu (Code 9035 „ungewöhnliche Aktivität“). Deine E-Mail und dein Passwort sind richtig — der Hersteller blockiert den Zugang selbst, ein neues Passwort hilft nicht. Ausweg: die offizielle Pleos-API. Anleitung und Knopf unter Einstellungen → Fahrzeuge. Jeder weitere Versuch würde dich auch aus der offiziellen App werfen — deshalb meldet sich die App nicht mehr von selbst an; neu versucht wird nur mit „Verbindung testen“.",
+  "hk.err_vendor_block": "Kia/Hyundai lehnen die Anmeldung gerade ab (Code 9035 „ungewöhnliche Aktivität“). Deine E-Mail und dein Passwort sind richtig — der Hersteller sperrt den direkten Zugang, ein neues Passwort hilft nicht. Oft bringt ein App-Update den direkten Weg zurück; dauerhaft stabil ist die offizielle Pleos-API (Anleitung und Knopf unter Einstellungen → Fahrzeuge). Die App fragt von selbst nicht weiter nach — sonst würde jeder Versuch dich auch aus der offiziellen Kia-/Hyundai-App werfen —, erst wieder mit „Verbindung testen“ oder nach einem Neustart.",
   "cred.help_pleos_key": "Auf pleos.ai: Konto-Menü → „My Vehicle Data API“ → Marke wählen → „Get API Key“ → mit dem Kia-/Hyundai-Konto anmelden. Dort stehen Client ID und Client Secret.",
   "pleos.switch_title": "Kia/Hyundai blockiert die Anmeldung — Umstieg auf die offizielle API",
   "pleos.switch_body": "Seit 14.10.2026 weist der Hersteller in ganz Europa jede Anmeldung von Drittprogrammen ab (Code 9035) — auch bei richtigem Passwort, auch in Home Assistant. Die offizielle Pleos-API des Herstellers liefert die Daten weiter: Ladestand, Laden, Reichweite, Kilometerstand, Standort, Türen und Klima. Nicht dabei: 12-V-Batterie, Ladeleistung und Fernsteuerung. Alles bisher Aufgezeichnete bleibt erhalten.",
@@ -1811,5 +1811,6 @@
   "ha.role_range": "Reichweite",
   "ha.role_charging": "Laden",
   "ha.role_plug": "Stecker",
-  "ha.role_location": "Standort"
+  "ha.role_location": "Standort",
+  "cred.help_kia_hyundai_direct": "Dein normales {context}-Passwort — die App meldet sich direkt an. Hinweis: Kia/Hyundai arbeiten aktiv gegen Fremd-Apps; dieser direkte Weg kann jederzeit wieder ausfallen und dich dabei aus der offiziellen App abmelden. Stabil und offiziell ist die Pleos-API."
 }

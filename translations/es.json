@@ -1771,7 +1771,7 @@
   "wb.discard_ask": "¿Descartar realmente esta medición? Una carga basada en ella no se toca: solo se descarta una medición sin carga asignada.",
   "wb.discard_refused": "Una carga se basa en esta medición. Sepárala primero y después descártala.",
   "upd.automatic_hint": "Las actualizaciones se instalan solas aquí: una versión nueva se publica tras la prueba de humo y el contenedor vigilante la aplica, sin hacer nada. Si el coche está cargando, la actualización espera a que termine la carga.",
-  "hk.err_vendor_block": "Desde el 14/10/2026 Kia/Hyundai ya no permiten en Europa el inicio de sesión de aplicaciones de terceros (código 9035, «actividad inusual»). Tu correo y tu contraseña son correctos: es el fabricante quien bloquea el acceso y una contraseña nueva no ayuda. La salida es la API oficial de Pleos: instrucciones y botón en Ajustes → Vehículos. Cada nuevo intento también te sacaría de la app oficial, así que esta app ya no inicia sesión por sí sola; solo lo vuelve a intentar al pulsar «Probar conexión».",
+  "hk.err_vendor_block": "Kia/Hyundai están rechazando el inicio de sesión ahora mismo (código 9035, «actividad inusual»). Tu correo y tu contraseña son correctos: es el fabricante quien bloquea el acceso directo y una contraseña nueva no ayuda. Una actualización de la app suele restablecer la vía directa; la opción estable y duradera es la API oficial de Pleos (instrucciones y botón en Ajustes → Vehículos). La app no sigue intentándolo por sí sola —cada intento también te cerraría la sesión en la app oficial—, solo vuelve a intentarlo con «Probar conexión» o tras reiniciar.",
   "cred.help_pleos_key": "En pleos.ai: menú de la cuenta → «My Vehicle Data API» → elegir la marca → «Get API Key» → iniciar sesión con la cuenta de Kia/Hyundai. Ahí aparecen el Client ID y el Client Secret.",
   "pleos.switch_title": "Kia/Hyundai bloquean el inicio de sesión: cambia a la API oficial",
   "pleos.switch_body": "Desde el 14/10/2026 el fabricante rechaza en toda Europa cualquier inicio de sesión de terceros (código 9035), incluso con la contraseña correcta y también en Home Assistant. La API oficial Pleos del fabricante sigue entregando los datos: nivel de carga, carga, autonomía, kilometraje, ubicación, puertas y climatización. No incluye: batería de 12 V, potencia de carga ni control remoto. Todo lo registrado hasta ahora se conserva.",
@@ -1811,5 +1811,6 @@
   "ha.role_range": "Autonomía",
   "ha.role_charging": "Carga",
   "ha.role_plug": "Conector",
-  "ha.role_location": "Ubicación"
+  "ha.role_location": "Ubicación",
+  "cred.help_kia_hyundai_direct": "Tu contraseña habitual de {context}: la app inicia sesión directamente. Nota: Kia/Hyundai actúan activamente contra las apps de terceros; esta vía directa puede dejar de funcionar en cualquier momento y cerrarte la sesión en la app oficial. La API oficial de Pleos es la alternativa estable."
 }
