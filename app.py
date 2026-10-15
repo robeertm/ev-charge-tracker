@@ -3317,13 +3317,26 @@ def register_routes(app):
         from models.database import Vehicle
         v = Vehicle.query.get_or_404(vid)
         from services.battery_cert_service import generate_certificate
+        from services.i18n import get_language, set_language, SUPPORTED_LANGUAGES
+        # ?lang=en lets the owner pull the certificate in another language
+        # (e.g. English for a foreign buyer) without changing the whole app.
+        # An unknown code is ignored and the current language stays.
+        _req_lang = (request.args.get('lang') or '').strip().lower()
+        _prev_lang = get_language()
+        _codes = {c for c, _ in SUPPORTED_LANGUAGES}
+        _switch = _req_lang in _codes and _req_lang != _prev_lang
         try:
+            if _switch:
+                set_language(_req_lang)
             pdf_bytes = generate_certificate(vid)
         except Exception as e:
             app.logger.exception('battery certificate generation failed')
             flash(t('flash.cert_failed', name=v.name, error=str(e),
                     default='Zertifikat für {name} fehlgeschlagen: {error}'), 'danger')
             return redirect('/settings#sec-fleet')
+        finally:
+            if _switch:
+                set_language(_prev_lang)
         if not pdf_bytes:
             flash(t('flash.cert_no_data', name=v.name,
                     default='Für {name} konnte kein Batteriezustand (SoH) ermittelt '
@@ -3334,7 +3347,8 @@ def register_routes(app):
                   'warning')
             return redirect('/settings#sec-fleet')
         safe_name = ''.join(ch if ch.isalnum() else '_' for ch in (v.name or 'EV'))
-        filename = f'Batteriezertifikat_{safe_name}_{date.today().strftime("%Y%m%d")}.pdf'
+        _suffix = f'_{_req_lang.upper()}' if _switch else ''
+        filename = f'Batteriezertifikat_{safe_name}_{date.today().strftime("%Y%m%d")}{_suffix}.pdf'
         # ?inline=1 serves the PDF for in-page preview (e.g. embedded on the
         # OBD page) instead of forcing a download; the export button omits it.
         inline = request.args.get('inline') in ('1', 'true', 'yes')

@@ -1,5 +1,24 @@
 # Changelog
 
+## v3.0.160 (2026-10-15)
+
+### Battery certificate: English on request, clearer SoH, layout fixes
+
+- **Download the certificate in English** (or any of the six languages) via
+  `?lang=xx`, with a "PDF in English" button on the OBD page — handy for a
+  foreign buyer — without changing the whole app's language.
+- **The vehicle's BMS SoH is kept but labelled honestly.** On some cars
+  (e.g. a Niro) the cloud/BMS value is a *relative* figure that climbs above
+  100 % and is not a true state of health. It now carries a plain caveat, the
+  trend chart gets the same note, and the reliable OBD-register SoH is shown
+  right beside it.
+- **Layout fixes:** `Ø` and `°C` now print correctly (were `O` and `C`); a
+  long key no longer runs under its value; and a note no longer spills a
+  single word onto an otherwise empty page.
+- **The capacity chart title is now plain language** — "Electricity for one
+  full charge (0 → 100 %), metered at the wallbox, per half-year" instead of
+  the old wording nobody could parse.
+
 ## v3.0.159 (2026-10-15)
 
 ### Kia/Hyundai direct sign-in works again — with a clear warning

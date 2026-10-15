@@ -780,7 +780,9 @@ def _window_chart(window, tmp_dir):
 # general rule below — the list is for legibility, not for safety.
 _LATIN1_NICE = {
     '—': '-', '–': '-', '‑': '-', '−': '-', '·': '-', '•': '-',
-    '²': '2', '₂': '2', 'Ø': 'O', '€': 'EUR ', '→': '->',
+    # 'Ø' (U+00D8, average) and '°' are BOTH in latin-1, so they are kept and
+    # not mapped away — the certificate prints 'Ø' and '°C' as-is.
+    '²': '2', '₂': '2', '€': 'EUR ', '→': '->',
     '≥': '>=', '≤': '<=', '±': '+/-', '≈': '~',
     '“': '"', '”': '"', '„': '"', '‘': "'", '’': "'", '…': '...',
 }
@@ -845,7 +847,12 @@ try:
         def kv(self, label, value, lw=55):
             self.set_font('Helvetica', '', 9)
             self.set_text_color(110, 110, 110)
-            self.cell(lw, 6, self._clean(label))
+            lbl = self._clean(label)
+            # A label wider than the fixed column used to run UNDER the value
+            # ("...Messzeitraum#27.2%"). Give an over-long label the room it
+            # needs so the value always starts cleanly after it.
+            col = lw if self.get_string_width(lbl) <= lw - 2 else self.get_string_width(lbl) + 3
+            self.cell(col, 6, lbl)
             self.set_font('Helvetica', 'B', 9)
             self.set_text_color(33, 33, 33)
             self.cell(0, 6, self._clean(value), new_x='LMARGIN', new_y='NEXT')
@@ -984,8 +991,13 @@ def _page_cells(pdf, data, tmp_dir):
     temps = read.get('cell_temps') or []
     if temps:
         pdf.kv(t('cert.cells_temps', default='Modultemperaturen'),
-               ' / '.join('%g' % v for v in temps) + ' C')
+               ' / '.join('%g' % v for v in temps) + ' °C')
     if stats['all_equal']:
+        # Keep this ~4-line note together: near the bottom of a page it used
+        # to spill its last word ("aussagekraeftiger.") onto an otherwise
+        # empty next page. Break first if there isn't room for the whole note.
+        if pdf.get_y() + 26 > pdf.h - 20:
+            pdf.add_page()
         _para(pdf, t('cert.cells_equal_note',
                      default='Alle Zellen liegen innerhalb eines Messschritts gleich auf. Das ist in der '
                              'Mitte des Ladestands typisch: dort ist die Spannungskurve flach und das BMS '
@@ -1261,17 +1273,29 @@ def generate_certificate(vehicle_id):
         pdf.kv(t('cert.window_kv', default='Angezeigtes Fenster'),
                t('cert.window_kv_val', default='{c:+.1f} % seit {ref} - Details in der Anlage',
                  c=win['change_pct'], ref=_halbjahr(win['ref_period'])))
-    # BMS (Flash-equivalent)
+    # BMS (Flash-equivalent). The cloud-reported value is a RELATIVE raw
+    # figure and on some cars (e.g. this Niro) reads well above 100 %, so it
+    # is NOT a true SoH. It is kept because it still carries a signal — but
+    # with a plain caveat, and the reliable OBD-register SoH right beside it.
+    _obd_soh_here = (data.get('obd') or {}).get('soh_pct')
     if bms['current'] is not None:
-        pdf.kv(t('cert.bms_soh', default='BMS-SoH (Fahrzeug)'),
+        pdf.kv(t('cert.bms_soh', default='BMS-SoH (Fahrzeug, relativ)'),
                f"{bms['current']:.1f} %"
                + (f"  (Basiswert {bms['baseline']:.0f})" if bms['baseline'] != 100 else ''))
         if bms['delta'] is not None:
             pdf.kv(t('cert.bms_delta', default='BMS-SoH Veraenderung (Messzeitraum)'),
                    f"{bms['delta']:+.1f} %  ({bms['sample_count']} Syncs)")
+        _para(pdf, t('cert.bms_relative_note',
+                     default='Der vom Fahrzeug gemeldete BMS-Wert ist ein RELATIVER Rohwert und kann '
+                             'ueber 100 % liegen - er ist KEIN direkter State of Health. Verlaesslich '
+                             'ist der direkt aus dem BMS-Register gelesene OBD-Wert (siehe unten).'))
     else:
-        pdf.kv(t('cert.bms_soh', default='BMS-SoH (Fahrzeug)'),
+        pdf.kv(t('cert.bms_soh', default='BMS-SoH (Fahrzeug, relativ)'),
                t('cert.bms_none', default='vom Fahrzeug nicht gemeldet'))
+    # The physically meaningful SoH, read straight from the BMS register by OBD.
+    if _obd_soh_here is not None:
+        pdf.kv(t('cert.soh_obd_here', default='SoH laut OBD (BMS-Register, verlaesslich)'),
+               f"{_obd_soh_here:.1f} %")
 
     # ── OBD cell snapshot (direct BMS read) ──────────────────────────
     obd = data.get('obd')
@@ -1299,8 +1323,8 @@ def generate_certificate(vehicle_id):
                    f"{spread:.0f} mV ({verdict})")
         if obd.get('temp_min_c') is not None and obd.get('temp_max_c') is not None:
             pdf.kv(t('cert.obd_temp', default='Batterietemperatur min / max'),
-                   f"{obd['temp_min_c']:.0f} / {obd['temp_max_c']:.0f} C"
-                   + (f" (O {obd['temp_avg_c']:.0f} C)" if obd.get('temp_avg_c') is not None else ""))
+                   f"{obd['temp_min_c']:.0f} / {obd['temp_max_c']:.0f} °C"
+                   + (f" (Ø {obd['temp_avg_c']:.0f} °C)" if obd.get('temp_avg_c') is not None else ""))
         if obd.get('pack_voltage_v') is not None:
             pv = f"{obd['pack_voltage_v']:.1f} V"
             if obd.get('pack_current_a') is not None:
@@ -1350,11 +1374,18 @@ def generate_certificate(vehicle_id):
 
     # ── SoH trend chart ──────────────────────────────────────────────
     if chart:
-        if pdf.get_y() + 60 > pdf.h - 20:
+        if pdf.get_y() + 66 > pdf.h - 20:
             pdf.add_page()
         pdf.section(t('cert.sec_trend', default='SoH-Verlauf'))
         pdf.image(chart, x=(pdf.w - 170) / 2, w=170)
-        pdf.ln(2)
+        pdf.ln(1)
+        # The plotted BMS line is the RELATIVE raw value and may run above
+        # 100 % — so the curve is read for its shape, not as an absolute SoH.
+        _para(pdf, t('cert.chart_soh_note',
+                     default='Gezeigt wird der relative BMS-Rohwert - er kann ueber 100 % liegen und ist '
+                             'kein absoluter SoH. Aussagekraeftig ist der Verlauf (die Form), nicht die '
+                             'Hoehe. Der belastbare Absolutwert ist der OBD-Wert oben.'))
+        pdf.ln(1)
 
     # ── Data basis + limitations ─────────────────────────────────────
     if pdf.get_y() + 55 > pdf.h - 20:
