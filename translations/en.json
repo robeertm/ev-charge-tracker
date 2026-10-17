@@ -1821,7 +1821,7 @@
   "renault.err_login": "Renault/Dacia rejected the sign-in: e-mail or password is wrong. Use the same details as in the My Renault / My Dacia app.",
   "renault.err_no_account": "Signed in, but there is no My Renault / My Dacia account for this login. Is the region set correctly?",
   "renault.err_no_vehicle": "Signed in, but no vehicle (or not the VIN you entered) is linked to the account. Is the car added in the My Renault / My Dacia app, and is the region set correctly?",
-  "renault.err_2fa": "Renault/Dacia is asking for an e-mail confirmation code for this account right now. The EV tracker cannot enter it yet. Workaround: sign in once on the My Renault / My Dacia website in a browser and confirm the code there, then press “Test connection” here again — Renault usually stops asking after that.",
+  "renault.err_2fa": "Renault/Dacia is asking for an e-mail confirmation code for this account. Open Settings → Vehicles and press “Test connection”: Renault then e-mails you the code, which you enter in the app.",
   "set.api_region_cn": "China",
   "set.api_region_de": "Germany",
   "set.api_region_at": "Austria",
@@ -1829,5 +1829,18 @@
   "set.api_region_it": "Italy",
   "set.api_region_es": "Spain",
   "set.api_region_nl": "Netherlands",
-  "set.api_region_gb": "United Kingdom"
+  "set.api_region_gb": "United Kingdom",
+  "renault.code_sent": "Renault has sent a confirmation code to {email}. Enter it to finish connecting.",
+  "renault.code_title": "Enter confirmation code",
+  "renault.code_intro": "Renault/Dacia wants to confirm the sign-in for “{name}” and has e-mailed you a code.",
+  "renault.code_label": "Code from the e-mail",
+  "renault.code_submit": "Confirm",
+  "renault.code_hint": "The code is only valid for a few minutes. Afterwards Renault remembers this tracker for about 30 days and won’t ask again in that time.",
+  "renault.code_resend": "Send a new code",
+  "renault.code_back": "Back to vehicles",
+  "renault.code_wrong": "That code is not correct. Please type it again exactly as in the e-mail.",
+  "renault.code_expired": "This confirmation has expired. Use “Send a new code” to get a fresh one.",
+  "renault.code_format": "Please enter just the code from the e-mail (4–10 digits or letters).",
+  "renault.code_ok": "“{name}” is connected — Renault confirmed the sign-in.",
+  "wiz.enter_code": "Enter code"
 }

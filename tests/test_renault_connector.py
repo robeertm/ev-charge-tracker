@@ -55,8 +55,9 @@ LOCATION = {'gpsLatitude': 48.85, 'gpsLongitude': 2.35, 'lastUpdateTime': '2026-
 
 
 @pytest.fixture
-def fake_net(monkeypatch):
+def fake_net(monkeypatch, tmp_path):
     """Replace only the network; keep renault-api's own parsing."""
+    monkeypatch.setattr(cr, 'STATE_DIR', str(tmp_path / 'renault'))
     calls = {'login': [], 'vehicles_for': []}
     state = {'battery': dict(BATTERY), 'login_error': None, 'vehicles': VEHICLES}
 
@@ -160,14 +161,16 @@ def test_wrong_password_says_so(fake_net):
     assert c.test_connection() is False
 
 
-def test_an_email_code_request_explains_the_way_out(fake_net):
+def test_an_email_code_request_in_the_background_points_to_the_test_button(fake_net):
+    """The sync cannot ask the owner for a code — it says where to get one.
+    (The code flow itself: tests/test_renault_code.py.)"""
     _, state = fake_net
     state['login_error'] = gigya_exc.PendingTwoFactorAuthenticationException(
         403101, 'Pending Two-Factor Authentication', 'reg-token')
     with pytest.raises(RuntimeError) as e:
-        _conn().verify_credentials()
+        _conn().get_status()
     assert 'renault.err_2fa' not in str(e.value)       # translated, not the raw key
-    assert 'browser' in str(e.value).lower() or 'Browser' in str(e.value)
+    assert not getattr(e.value, 'code_needed', False)
 
 
 def test_verify_lets_the_real_reason_through(fake_net, monkeypatch):

@@ -1821,7 +1821,7 @@
   "renault.err_login": "Renault/Dacia ha rifiutato l’accesso: e-mail o password errate. Usa gli stessi dati dell’app My Renault / My Dacia.",
   "renault.err_no_account": "Accesso riuscito, ma non esiste un account My Renault / My Dacia per queste credenziali. La regione è corretta?",
   "renault.err_no_vehicle": "Accesso riuscito, ma all’account non è collegato alcun veicolo (o non il VIN inserito). L’auto è aggiunta nell’app My Renault / My Dacia e la regione è corretta?",
-  "renault.err_2fa": "Renault/Dacia sta chiedendo un codice di conferma via e-mail per questo account. L’EV tracker non può ancora inserirlo. Soluzione: accedi una volta al sito My Renault / My Dacia da un browser e conferma lì il codice, poi premi di nuovo «Testa connessione» qui — di solito Renault non lo chiede più.",
+  "renault.err_2fa": "Renault/Dacia richiede un codice di conferma via e-mail per questo account. Apri Impostazioni → Veicoli e premi «Testa connessione»: Renault ti invierà il codice da inserire nell’app.",
   "set.api_region_cn": "Cina",
   "set.api_region_de": "Germania",
   "set.api_region_at": "Austria",
@@ -1829,5 +1829,18 @@
   "set.api_region_it": "Italia",
   "set.api_region_es": "Spagna",
   "set.api_region_nl": "Paesi Bassi",
-  "set.api_region_gb": "Regno Unito"
+  "set.api_region_gb": "Regno Unito",
+  "renault.code_sent": "Renault ha inviato un codice di conferma a {email}. Inseriscilo per completare la connessione.",
+  "renault.code_title": "Inserisci il codice di conferma",
+  "renault.code_intro": "Renault/Dacia vuole confermare l’accesso per «{name}» e ti ha inviato un codice via e-mail.",
+  "renault.code_label": "Codice dall’e-mail",
+  "renault.code_submit": "Conferma",
+  "renault.code_hint": "Il codice vale solo pochi minuti. Dopo, Renault ricorda questo tracker per circa 30 giorni e in quel periodo non lo richiede.",
+  "renault.code_resend": "Invia un nuovo codice",
+  "renault.code_back": "Torna ai veicoli",
+  "renault.code_wrong": "Il codice non è corretto. Ridigitalo esattamente come nell’e-mail.",
+  "renault.code_expired": "Questa conferma è scaduta. Usa «Invia un nuovo codice» per riceverne uno nuovo.",
+  "renault.code_format": "Inserisci solo il codice dell’e-mail (4–10 cifre o lettere).",
+  "renault.code_ok": "«{name}» è connesso: Renault ha confermato l’accesso.",
+  "wiz.enter_code": "Inserisci codice"
 }

@@ -140,7 +140,9 @@ PACKAGES: Dict[str, List[str]] = {
     'seatcupra':   ['carconnectivity', 'carconnectivity-connector-seatcupra'],
     'audi':        ['carconnectivity', 'carconnectivity-connector-audi'],
     'tesla':       ['teslapy'],
-    'renault':     ['renault-api', 'aiohttp'],
+    # 0.6.0 is the first renault-api that can answer Renault's e-mail
+    # code (Gigya 403101); the code page needs it.
+    'renault':     ['renault-api>=0.6.1', 'aiohttp'],
     'polestar':    ['pypolestar'],
     'mg':          ['saic-ismart-client-ng'],
     'smart':       ['pySmartHashtag'],

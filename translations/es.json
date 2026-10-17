@@ -1821,7 +1821,7 @@
   "renault.err_login": "Renault/Dacia ha rechazado el inicio de sesión: el correo o la contraseña no son correctos. Usa los mismos datos que en la app My Renault / My Dacia.",
   "renault.err_no_account": "Sesión iniciada, pero no hay ninguna cuenta My Renault / My Dacia para este acceso. ¿Está bien elegida la región?",
   "renault.err_no_vehicle": "Sesión iniciada, pero no hay ningún vehículo (o no el VIN indicado) vinculado a la cuenta. ¿Está el coche añadido en la app My Renault / My Dacia y la región bien elegida?",
-  "renault.err_2fa": "Renault/Dacia pide ahora un código de confirmación por correo para esta cuenta. El EV tracker todavía no puede introducirlo. Solución: inicia sesión una vez en la web de My Renault / My Dacia en un navegador y confirma allí el código; después pulsa de nuevo «Probar conexión» aquí — normalmente Renault deja de pedirlo.",
+  "renault.err_2fa": "Renault/Dacia pide un código de confirmación por correo para esta cuenta. Abre Ajustes → Vehículos y pulsa «Probar conexión»: Renault te enviará el código, que introduces en la app.",
   "set.api_region_cn": "China",
   "set.api_region_de": "Alemania",
   "set.api_region_at": "Austria",
@@ -1829,5 +1829,18 @@
   "set.api_region_it": "Italia",
   "set.api_region_es": "España",
   "set.api_region_nl": "Países Bajos",
-  "set.api_region_gb": "Reino Unido"
+  "set.api_region_gb": "Reino Unido",
+  "renault.code_sent": "Renault ha enviado un código de confirmación a {email}. Introdúcelo para completar la conexión.",
+  "renault.code_title": "Introducir código de confirmación",
+  "renault.code_intro": "Renault/Dacia quiere confirmar el inicio de sesión de «{name}» y te ha enviado un código por correo.",
+  "renault.code_label": "Código del correo",
+  "renault.code_submit": "Confirmar",
+  "renault.code_hint": "El código solo es válido unos minutos. Después Renault recuerda este tracker durante unos 30 días y no vuelve a pedirlo en ese tiempo.",
+  "renault.code_resend": "Enviar un código nuevo",
+  "renault.code_back": "Volver a vehículos",
+  "renault.code_wrong": "El código no es correcto. Vuelve a escribirlo exactamente como en el correo.",
+  "renault.code_expired": "Esta confirmación ha caducado. Usa «Enviar un código nuevo» para recibir otro.",
+  "renault.code_format": "Introduce solo el código del correo (4–10 dígitos o letras).",
+  "renault.code_ok": "«{name}» está conectado: Renault ha confirmado el inicio de sesión.",
+  "wiz.enter_code": "Introducir código"
 }

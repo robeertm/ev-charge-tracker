@@ -1821,7 +1821,7 @@
   "renault.err_login": "Renault/Dacia heeft de aanmelding geweigerd: e-mail of wachtwoord klopt niet. Gebruik dezelfde gegevens als in de app My Renault / My Dacia.",
   "renault.err_no_account": "Aangemeld, maar er hoort geen My Renault-/My Dacia-account bij deze login. Is de regio goed ingesteld?",
   "renault.err_no_vehicle": "Aangemeld, maar er is geen voertuig (of niet het ingevoerde VIN) aan het account gekoppeld. Staat de auto in de app My Renault / My Dacia, en is de regio goed ingesteld?",
-  "renault.err_2fa": "Renault/Dacia vraagt voor dit account op dit moment een bevestigingscode per e-mail. De EV-tracker kan die nog niet invoeren. Oplossing: meld je één keer in een browser aan op de My Renault-/My Dacia-website en bevestig daar de code, druk daarna hier opnieuw op „Verbinding testen” — meestal vraagt Renault er daarna niet meer om.",
+  "renault.err_2fa": "Renault/Dacia vraagt voor dit account een bevestigingscode per e-mail. Open Instellingen → Voertuigen en druk op „Verbinding testen”: Renault mailt je dan de code, die je in de app invoert.",
   "set.api_region_cn": "China",
   "set.api_region_de": "Duitsland",
   "set.api_region_at": "Oostenrijk",
@@ -1829,5 +1829,18 @@
   "set.api_region_it": "Italië",
   "set.api_region_es": "Spanje",
   "set.api_region_nl": "Nederland",
-  "set.api_region_gb": "Verenigd Koninkrijk"
+  "set.api_region_gb": "Verenigd Koninkrijk",
+  "renault.code_sent": "Renault heeft een bevestigingscode naar {email} gestuurd. Voer die in om de verbinding af te ronden.",
+  "renault.code_title": "Bevestigingscode invoeren",
+  "renault.code_intro": "Renault/Dacia wil de aanmelding voor „{name}” bevestigen en heeft je een code gemaild.",
+  "renault.code_label": "Code uit de e-mail",
+  "renault.code_submit": "Bevestigen",
+  "renault.code_hint": "De code is maar een paar minuten geldig. Daarna onthoudt Renault deze tracker ongeveer 30 dagen en vraagt in die tijd niet opnieuw.",
+  "renault.code_resend": "Nieuwe code sturen",
+  "renault.code_back": "Terug naar voertuigen",
+  "renault.code_wrong": "Die code klopt niet. Typ hem nog eens precies over uit de e-mail.",
+  "renault.code_expired": "Deze bevestiging is verlopen. Gebruik „Nieuwe code sturen” voor een nieuwe code.",
+  "renault.code_format": "Voer alleen de code uit de e-mail in (4–10 cijfers of letters).",
+  "renault.code_ok": "„{name}” is verbonden — Renault heeft de aanmelding bevestigd.",
+  "wiz.enter_code": "Code invoeren"
 }

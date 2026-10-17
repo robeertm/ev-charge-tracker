@@ -1,5 +1,21 @@
 # Changelog
 
+## v3.0.163 (2026-10-17)
+
+### Renault / Dacia: enter the e-mail confirmation code in the app
+
+- Renault now asks some accounts for a **confirmation code by e-mail** at
+  sign-in. When you press **Test connection**, Renault mails you the code
+  and the app opens a small page to enter it. After that Renault remembers
+  this tracker for about 30 days and the background sync signs in without
+  a code.
+- The background sync never requests a code on its own (no mail flood); if
+  Renault asks again later, the sync error tells you to press *Test
+  connection*.
+- A wrong code can simply be typed again; "Send a new code" requests a fresh
+  one. Pressing Test twice within a minute sends only one mail.
+- Requires `renault-api` 0.6.1 or newer (included in the container image).
+
 ## v3.0.162 (2026-10-17)
 
 ### Region choices in your language

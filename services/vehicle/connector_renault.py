@@ -1,6 +1,10 @@
 """Renault / Dacia connector via renault-api."""
 import asyncio
+import hashlib
+import json
 import logging
+import os
+import time
 
 try:
     from renault_api.renault_client import RenaultClient
@@ -13,6 +17,19 @@ from .base import VehicleConnector, VehicleStatus, plausible_percent
 from .registry import describe, register
 
 logger = logging.getLogger(__name__)
+
+try:
+    from config import DATA_DIR
+except Exception:                          # pragma: no cover
+    DATA_DIR = os.path.join(os.path.dirname(__file__), '..', '..', 'data')
+
+# Renault asks some accounts for an e-mail code (Gigya 403101). Between
+# "send me the code" and "here it is" lie two web requests, so the open
+# challenge is kept here for a few minutes; afterwards only the device IDs
+# stay — with them Gigya remembers this tracker for about 30 days.
+STATE_DIR = os.path.join(DATA_DIR, 'renault')
+PENDING_TTL = 15 * 60        # a challenge older than this is not completed
+RESEND_GAP = 60              # pressing Test twice must not mail twice
 
 CREDENTIAL_FIELDS = [
     {"key": "username", "label": "E-Mail (MyRenault / MyDacia)", "type": "text",
@@ -74,28 +91,142 @@ def _wants_code(exc) -> bool:
     return 'PendingTwoFactorAuthenticationException' in names or '403101' in str(exc)
 
 
+class RenaultCodeNeeded(RuntimeError):
+    """Renault mailed a code; the owner has to type it in.
+
+    ``code_needed`` lets the web layer recognise it without importing this
+    module (renault-api is optional).
+    """
+    code_needed = True
+
+    def __init__(self, message, email_hint=''):
+        super().__init__(message)
+        self.email_hint = email_hint
+
+
+def _state_path(username: str) -> str:
+    # Hashed: the e-mail address does not belong in a file name.
+    key = hashlib.sha256((username or '').strip().lower().encode()).hexdigest()[:32]
+    return os.path.join(STATE_DIR, key + '.json')
+
+
+def _load_state(username: str) -> dict:
+    try:
+        with open(_state_path(username), encoding='utf-8') as f:
+            d = json.load(f)
+        return d if isinstance(d, dict) else {}
+    except (OSError, ValueError):
+        return {}
+
+
+def _save_state(username: str, state: dict) -> None:
+    os.makedirs(STATE_DIR, exist_ok=True)
+    p = _state_path(username)
+    tmp = p + '.tmp'
+    fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    with os.fdopen(fd, 'w', encoding='utf-8') as f:
+        json.dump(state, f)
+    os.replace(tmp, p)
+
+
+def _fresh_pending(state: dict):
+    pend = state.get('pending') or {}
+    if pend and time.time() - pend.get('ts', 0) < PENDING_TTL:
+        return pend
+    return None
+
+
 class _RenaultBase(VehicleConnector):
     BRAND = None  # 'renault' or 'dacia'
 
-    async def _fetch(self, force=False):
+    def _client(self, websession):
         # ``or``: the region field is optional, and an empty value is ''
         # rather than missing — renault-api cannot look up a '' locale.
         locale = self.credentials.get('locale') or 'de_DE'
-        async with ClientSession() as websession:
-            # ``websession=``, not ``session=``: ``session`` is renault-api's
-            # own RenaultSession. Handing it the aiohttp session made
-            # ``client.session`` the aiohttp object, and every sign-in ended
-            # in "'ClientSession' object has no attribute 'login'".
-            client = RenaultClient(websession=websession, locale=locale)
-            try:
-                await client.session.login(self.credentials['username'],
-                                           self.credentials['password'])
-            except Exception as e:
-                if _wants_code(e):
+        # ``websession=``, not ``session=``: ``session`` is renault-api's
+        # own RenaultSession. Handing it the aiohttp session made
+        # ``client.session`` the aiohttp object, and every sign-in ended
+        # in "'ClientSession' object has no attribute 'login'".
+        return RenaultClient(websession=websession, locale=locale)
+
+    async def _login(self, client, request_code=False):
+        user = self.credentials['username']
+        state = _load_state(user)
+        if state.get('device_ids'):
+            client.session.set_device_ids(state['device_ids'])
+        try:
+            await client.session.login(user, self.credentials['password'])
+        except Exception as e:
+            if _wants_code(e):
+                if not request_code:
+                    # Background sync: never mail a code nobody asked for.
                     raise RuntimeError(_t('renault.err_2fa')) from e
-                if _is_bad_login(e):
-                    raise RuntimeError(_t('renault.err_login')) from e
+                await self._send_code(client.session, state)
+            if _is_bad_login(e):
+                raise RuntimeError(_t('renault.err_login')) from e
+            raise
+
+    async def _send_code(self, session, state):
+        """Ask Renault to mail the code, keep the challenge, raise CodeNeeded."""
+        user = self.credentials['username']
+        pend = _fresh_pending(state)
+        if pend and time.time() - pend['ts'] < RESEND_GAP:
+            raise RenaultCodeNeeded(_t('renault.code_sent', email=pend.get('email') or '?'),
+                                    pend.get('email', ''))
+        emails = await session.get_two_factor_auth_emails()
+        if not emails:
+            raise RuntimeError(_t('renault.err_2fa'))
+        await session.request_two_factor_auth_code(emails[0].id)
+        tfa = getattr(session, '_pending_tfa', None)
+        hint = emails[0].obfuscated or ''
+        state['pending'] = {
+            'ts': time.time(), 'email': hint,
+            'reg_token': tfa.reg_token, 'gigya_assertion': tfa.gigya_assertion,
+            'phv_token': tfa.phv_token,
+        }
+        # The code belongs to THIS device: the same IDs must come back
+        # with it, so they are stored now, not after the code.
+        state['device_ids'] = session.device_ids
+        _save_state(user, state)
+        raise RenaultCodeNeeded(_t('renault.code_sent', email=hint or '?'), hint)
+
+    async def _submit_code(self, code):
+        from renault_api.renault_session import _PendingTwoFactorAuth
+        user = self.credentials['username']
+        state = _load_state(user)
+        pend = _fresh_pending(state)
+        if not pend:
+            raise RuntimeError(_t('renault.code_expired'))
+        async with ClientSession() as websession:
+            client = self._client(websession)
+            session = client.session
+            session.set_device_ids(state.get('device_ids') or {})
+            # renault-api keeps the challenge in memory only; between two
+            # web requests it has to be put back from what was stored.
+            session._pending_tfa = _PendingTwoFactorAuth(
+                login_id=user, password=self.credentials['password'],
+                reg_token=pend['reg_token'], gigya_assertion=pend['gigya_assertion'],
+                phv_token=pend['phv_token'])
+            try:
+                await session.complete_two_factor_auth(code.strip(), remember_device=True)
+            except Exception as e:
+                names = {c.__name__ for c in type(e).__mro__}
+                if 'InvalidVerificationCodeException' in names:
+                    raise RuntimeError(_t('renault.code_wrong')) from e
                 raise
+            state.pop('pending', None)
+            state['device_ids'] = session.device_ids
+            state['confirmed_at'] = time.time()
+            _save_state(user, state)
+
+    def submit_code(self, code: str) -> None:
+        """Finish the e-mail confirmation with the code the owner typed."""
+        _run_async(self._submit_code(code))
+
+    async def _fetch(self, force=False, request_code=False):
+        async with ClientSession() as websession:
+            client = self._client(websession)
+            await self._login(client, request_code=request_code)
             person = await client.get_person()
             # The models are camelCase (accountId, accountType) — the
             # snake_case names this used to read do not exist.
@@ -181,7 +312,9 @@ class _RenaultBase(VehicleConnector):
         # Let the real reason through: "wrong password", "no car on this
         # account" and a library error each need something different from
         # the owner, and the generic "rejected" hid the bug above.
-        _run_async(self._fetch())
+        # A person pressed Test: this is the one place allowed to have
+        # Renault mail a confirmation code.
+        _run_async(self._fetch(request_code=True))
 
     def get_status(self, force=False) -> VehicleStatus:
         return _run_async(self._fetch(force))

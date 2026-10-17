@@ -32,7 +32,7 @@ carconnectivity-connector-seatcupra
 carconnectivity-connector-audi
 
 teslapy>=2.0.0                 # Tesla
-renault-api>=0.2.0             # Renault / Dacia
+renault-api>=0.6.1             # Renault / Dacia (0.6: e-mail code / 2FA)
 aiohttp                        # required by renault-api's async client
 pypolestar>=1.0.0              # Polestar
 saic-ismart-client-ng>=0.5.0   # MG (SAIC iSMART)

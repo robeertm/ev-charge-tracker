@@ -1,6 +1,7 @@
 """EV Charge Tracker - Main Flask Application."""
 import io
 import json
+import re
 import os
 import shutil
 import subprocess
@@ -3590,10 +3591,44 @@ def register_routes(app):
                 return jsonify({'ok': True, 'message': msg})
             flash(msg, 'success')
         except Exception as e:
+            # Renault/Dacia mailed a confirmation code: not a failure, a
+            # second step. Send the owner to the page that takes the code.
+            if getattr(e, 'code_needed', False):
+                code_url = f'/vehicles/{vid}/code'
+                if _ajax:
+                    return jsonify({'ok': False, 'code_needed': True, 'code_url': code_url,
+                                    'error': str(e)}), 200
+                flash(str(e), 'info')
+                return redirect(code_url)
             if _ajax:
                 return jsonify({'ok': False, 'error': t('flash.vehicle_test_failed', name=v.name, error=str(e))}), 200
             flash(t('flash.vehicle_test_failed', name=v.name, error=str(e)), 'danger')
         return redirect('/settings#sec-fleet')
+
+    @app.route('/vehicles/<int:vid>/code', methods=['GET', 'POST'])
+    def vehicles_code(vid):
+        """Take the e-mail code Renault/Dacia sent, finish the sign-in."""
+        from models.database import Vehicle
+        from services.vehicle.catalog import credentials_of
+        v = Vehicle.query.get_or_404(vid)
+        if (v.api_brand or '').lower() not in ('renault', 'dacia'):
+            return redirect('/settings#sec-fleet')
+        error = None
+        if request.method == 'POST':
+            code = re.sub(r'\s+', '', request.form.get('code', ''))
+            if not re.fullmatch(r'[0-9A-Za-z]{4,10}', code or ''):
+                error = t('renault.code_format')
+            else:
+                try:
+                    from services.vehicle import get_connector
+                    connector = get_connector(v.api_brand.lower(), credentials_of(v))
+                    connector.submit_code(code)
+                    connector.verify_credentials()
+                    flash(t('renault.code_ok', name=v.name), 'success')
+                    return redirect('/settings#sec-fleet')
+                except Exception as e:
+                    error = str(e)
+        return render_template('vehicle_code.html', v=v, error=error)
 
     # ── Škoda: official API ────────────────────────────────────────
     @app.route('/api/vehicle/<int:vid>/skoda/switch', methods=['POST'])

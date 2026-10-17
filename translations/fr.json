@@ -1821,7 +1821,7 @@
   "renault.err_login": "Renault/Dacia a refusé la connexion : e-mail ou mot de passe incorrect. Utilisez les mêmes identifiants que dans l’application My Renault / My Dacia.",
   "renault.err_no_account": "Connexion réussie, mais aucun compte My Renault / My Dacia n’est lié à cet identifiant. La région est-elle correcte ?",
   "renault.err_no_vehicle": "Connexion réussie, mais aucun véhicule (ou pas le VIN saisi) n’est associé au compte. La voiture est-elle ajoutée dans l’application My Renault / My Dacia, et la région est-elle correcte ?",
-  "renault.err_2fa": "Renault/Dacia demande en ce moment un code de confirmation par e-mail pour ce compte. L’EV tracker ne peut pas encore le saisir. Solution : connectez-vous une fois sur le site My Renault / My Dacia dans un navigateur et confirmez le code, puis appuyez de nouveau sur « Tester la connexion » ici — en général, Renault ne le redemande plus ensuite.",
+  "renault.err_2fa": "Renault/Dacia demande un code de confirmation par e-mail pour ce compte. Ouvrez Paramètres → Véhicules et appuyez sur « Tester la connexion » : Renault vous envoie alors le code, à saisir dans l’application.",
   "set.api_region_cn": "Chine",
   "set.api_region_de": "Allemagne",
   "set.api_region_at": "Autriche",
@@ -1829,5 +1829,18 @@
   "set.api_region_it": "Italie",
   "set.api_region_es": "Espagne",
   "set.api_region_nl": "Pays-Bas",
-  "set.api_region_gb": "Royaume-Uni"
+  "set.api_region_gb": "Royaume-Uni",
+  "renault.code_sent": "Renault a envoyé un code de confirmation à {email}. Saisissez-le pour terminer la connexion.",
+  "renault.code_title": "Saisir le code de confirmation",
+  "renault.code_intro": "Renault/Dacia souhaite confirmer la connexion pour « {name} » et vous a envoyé un code par e-mail.",
+  "renault.code_label": "Code reçu par e-mail",
+  "renault.code_submit": "Confirmer",
+  "renault.code_hint": "Le code n’est valable que quelques minutes. Ensuite, Renault mémorise ce tracker pendant environ 30 jours et ne redemande pas de code pendant ce temps.",
+  "renault.code_resend": "Envoyer un nouveau code",
+  "renault.code_back": "Retour aux véhicules",
+  "renault.code_wrong": "Ce code n’est pas correct. Recopiez-le exactement comme dans l’e-mail.",
+  "renault.code_expired": "Cette confirmation a expiré. Utilisez « Envoyer un nouveau code » pour en recevoir un nouveau.",
+  "renault.code_format": "Saisissez uniquement le code de l’e-mail (4 à 10 chiffres ou lettres).",
+  "renault.code_ok": "« {name} » est connecté — Renault a confirmé la connexion.",
+  "wiz.enter_code": "Saisir le code"
 }

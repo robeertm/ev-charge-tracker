@@ -1821,7 +1821,7 @@
   "renault.err_login": "Renault/Dacia hat die Anmeldung abgelehnt: E-Mail oder Passwort stimmen nicht. Bitte dieselben Daten wie in der App My Renault / My Dacia eintragen.",
   "renault.err_no_account": "Anmeldung erfolgreich, aber zu diesem Konto gibt es kein My-Renault-/My-Dacia-Konto. Ist die Region richtig gewählt?",
   "renault.err_no_vehicle": "Anmeldung erfolgreich, aber im Konto ist kein Fahrzeug (oder nicht die eingetragene FIN) verknüpft. Ist das Auto in der App My Renault / My Dacia hinzugefügt? Ist die Region richtig gewählt?",
-  "renault.err_2fa": "Renault/Dacia verlangt für dieses Konto gerade einen Bestätigungscode per E-Mail. Den kann der EV-Tracker noch nicht eingeben. Abhilfe: einmal im Browser auf der My-Renault-/My-Dacia-Website anmelden und den Code dort bestätigen, danach hier erneut „Verbindung testen“ — meist fragt Renault dann nicht mehr.",
+  "renault.err_2fa": "Renault/Dacia verlangt für dieses Konto einen Bestätigungscode per E-Mail. Öffne Einstellungen → Fahrzeuge und drücke „Verbindung testen“: Renault schickt dir dann den Code, den du in der App eingibst.",
   "set.api_region_cn": "China",
   "set.api_region_de": "Deutschland",
   "set.api_region_at": "Österreich",
@@ -1829,5 +1829,18 @@
   "set.api_region_it": "Italien",
   "set.api_region_es": "Spanien",
   "set.api_region_nl": "Niederlande",
-  "set.api_region_gb": "Vereinigtes Königreich"
+  "set.api_region_gb": "Vereinigtes Königreich",
+  "renault.code_sent": "Renault hat einen Bestätigungscode an {email} geschickt. Gib ihn ein, um die Verbindung abzuschließen.",
+  "renault.code_title": "Bestätigungscode eingeben",
+  "renault.code_intro": "Renault/Dacia möchte die Anmeldung für „{name}“ bestätigen und hat dir einen Code per E-Mail geschickt.",
+  "renault.code_label": "Code aus der E-Mail",
+  "renault.code_submit": "Bestätigen",
+  "renault.code_hint": "Der Code gilt nur wenige Minuten. Danach merkt sich Renault diesen Tracker für etwa 30 Tage und fragt in dieser Zeit nicht erneut.",
+  "renault.code_resend": "Neuen Code anfordern",
+  "renault.code_back": "Zurück zu den Fahrzeugen",
+  "renault.code_wrong": "Der Code stimmt nicht. Bitte noch einmal genau aus der E-Mail abtippen.",
+  "renault.code_expired": "Diese Bestätigung ist abgelaufen. Fordere mit „Neuen Code anfordern“ einen frischen Code an.",
+  "renault.code_format": "Bitte nur den Code aus der E-Mail eingeben (4–10 Ziffern oder Buchstaben).",
+  "renault.code_ok": "„{name}“ ist verbunden — Renault hat die Anmeldung bestätigt.",
+  "wiz.enter_code": "Code eingeben"
 }

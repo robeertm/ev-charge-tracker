@@ -21,7 +21,7 @@ cryptography>=42.0.0  # for self-signed HTTPS cert generation
 # carconnectivity-connector-skoda        # Skoda MySkoda
 # carconnectivity-connector-seatcupra    # Seat / Cupra
 # teslapy>=2.0.0                  # Tesla
-# renault-api>=0.2.0              # Renault / Dacia (+ aiohttp)
+# renault-api>=0.6.1              # Renault / Dacia (+ aiohttp)
 # pypolestar>=1.0.0               # Polestar
 # saic-ismart-client-ng>=0.5.0   # MG (SAIC iSMART)
 # pySmartHashtag>=0.1.0           # Smart #1 / #3

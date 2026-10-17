@@ -221,6 +221,7 @@
     wiz_password_required: {{ t('wiz.password_required')|tojson }},
     wiz_signing_in:        {{ t('wiz.signing_in')|tojson }},
     wiz_signin_fail_hint:  {{ t('wiz.signin_fail_hint')|tojson }},
+    wiz_enter_code:        {{ t('wiz.enter_code')|tojson }},
     wiz_login_prompt:      {{ t('wiz.login_prompt')|tojson }},
     wiz_token_login_btn:   {{ t('wiz.token_login_btn')|tojson }},
     wiz_connected:         {{ t('wiz.connected')|tojson }},
@@ -466,6 +467,9 @@
       if(d.ok){
         q('cwTokenStatus').innerHTML='<span class="text-success fw-bold"><i class="bi bi-check-circle"></i> '+(T.wiz_connected||'Verbunden!')+'</span>';
         resetTokenBtn(); nextBtn.disabled=false; showStep(4);
+      } else if(d.code_needed){
+        q('cwTokenStatus').innerHTML='<span class="text-primary">'+(d.error||'')+'</span><div class="mt-2"><a class="btn btn-sm btn-primary" href="'+d.code_url+'"><i class="bi bi-envelope-check"></i> '+(T.wiz_enter_code||'Code eingeben')+'</a></div>';
+        resetTokenBtn();
       } else {
         q('cwTokenStatus').innerHTML='<span class="text-danger">'+(d.error||'')+'</span><div class="small text-muted mt-1">'+(T.wiz_signin_fail_hint||'Prüfe E-Mail und Passwort. Klappt es nicht, nutze den Browser-Login weiter unten.')+'</div>';
         resetTokenBtn();
@@ -534,6 +538,8 @@
       const res=q('cwTestResult'); res.style.display='';
       res.innerHTML = d.ok
         ? '<div class="text-success"><i class="bi bi-check-circle-fill fs-1"></i><div class="mt-2 fw-bold">'+(d.message||T.wiz_test_ok||'Verbindung OK!')+'</div></div>'
+        : d.code_needed
+        ? '<div class="text-primary"><i class="bi bi-envelope-check fs-1"></i><div class="mt-2">'+(d.error||'')+'</div><a class="btn btn-primary mt-2" href="'+d.code_url+'"><i class="bi bi-envelope-check"></i> '+(T.wiz_enter_code||'Code eingeben')+'</a></div>'
         : '<div class="text-warning"><i class="bi bi-exclamation-triangle-fill fs-1"></i><div class="mt-2">'+(d.error||'')+'</div><div class="small text-muted mt-1">'+(T.wiz_test_fail_hint||'Das Auto ist trotzdem angelegt — du kannst die Zugangsdaten später korrigieren.')+'</div></div>';
     }catch(e){ q('cwTestSpinner').style.display='none'; q('cwTestResult').style.display=''; q('cwTestResult').innerHTML='<span class="text-danger">'+e.message+'</span>'; }
   }
