@@ -181,7 +181,12 @@ class VehicleConnector(ABC):
         raise their own, better message.
         """
         if not self.test_connection():
-            raise RuntimeError('Die hinterlegten Zugangsdaten wurden abgelehnt.')
+            try:
+                from services.i18n import t
+                msg = t('vehicle.err_credentials_rejected')
+            except Exception:              # pragma: no cover
+                msg = 'The stored sign-in details were rejected.'
+            raise RuntimeError(msg)
 
     # ── optional: remote control ──────────────────────────────────────
     # Not abstract on purpose. A connector that says nothing supports

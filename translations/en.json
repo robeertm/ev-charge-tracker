@@ -1816,5 +1816,10 @@
   "cert.bms_relative_note": "The BMS value reported by the vehicle is a RELATIVE raw figure and can exceed 100 % – it is NOT a direct state of health. The reliable value is the OBD reading taken straight from the BMS register (see below).",
   "cert.soh_obd_here": "SoH via OBD (BMS register, reliable)",
   "cert.chart_soh_note": "Shown is the relative BMS raw value – it can exceed 100 % and is not an absolute SoH. What matters is the trend (the shape), not the level. The dependable absolute figure is the OBD value above.",
-  "obd.cert_export_en": "PDF in English"
+  "obd.cert_export_en": "PDF in English",
+  "vehicle.err_credentials_rejected": "The stored sign-in details were rejected.",
+  "renault.err_login": "Renault/Dacia rejected the sign-in: e-mail or password is wrong. Use the same details as in the My Renault / My Dacia app.",
+  "renault.err_no_account": "Signed in, but there is no My Renault / My Dacia account for this login. Is the region set correctly?",
+  "renault.err_no_vehicle": "Signed in, but no vehicle (or not the VIN you entered) is linked to the account. Is the car added in the My Renault / My Dacia app, and is the region set correctly?",
+  "renault.err_2fa": "Renault/Dacia is asking for an e-mail confirmation code for this account right now. The EV tracker cannot enter it yet. Workaround: sign in once on the My Renault / My Dacia website in a browser and confirm the code there, then press “Test connection” here again — Renault usually stops asking after that."
 }

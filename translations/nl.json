@@ -1816,5 +1816,10 @@
   "cert.bms_relative_note": "De door het voertuig gemelde BMS-waarde is een RELATIEF ruw getal en kan boven 100 % liggen – het is GEEN directe state of health. Betrouwbaar is de OBD-waarde die rechtstreeks uit het BMS-register is gelezen (zie onder).",
   "cert.soh_obd_here": "SoH via OBD (BMS-register, betrouwbaar)",
   "cert.chart_soh_note": "Getoond wordt de relatieve ruwe BMS-waarde – die kan boven 100 % liggen en is geen absolute SoH. Het gaat om het verloop (de vorm), niet om de hoogte. De betrouwbare absolute waarde is de OBD-waarde hierboven.",
-  "obd.cert_export_en": "PDF in het Engels"
+  "obd.cert_export_en": "PDF in het Engels",
+  "vehicle.err_credentials_rejected": "De opgeslagen inloggegevens zijn geweigerd.",
+  "renault.err_login": "Renault/Dacia heeft de aanmelding geweigerd: e-mail of wachtwoord klopt niet. Gebruik dezelfde gegevens als in de app My Renault / My Dacia.",
+  "renault.err_no_account": "Aangemeld, maar er hoort geen My Renault-/My Dacia-account bij deze login. Is de regio goed ingesteld?",
+  "renault.err_no_vehicle": "Aangemeld, maar er is geen voertuig (of niet het ingevoerde VIN) aan het account gekoppeld. Staat de auto in de app My Renault / My Dacia, en is de regio goed ingesteld?",
+  "renault.err_2fa": "Renault/Dacia vraagt voor dit account op dit moment een bevestigingscode per e-mail. De EV-tracker kan die nog niet invoeren. Oplossing: meld je één keer in een browser aan op de My Renault-/My Dacia-website en bevestig daar de code, druk daarna hier opnieuw op „Verbinding testen” — meestal vraagt Renault er daarna niet meer om."
 }

@@ -1,5 +1,26 @@
 # Changelog
 
+## v3.0.161 (2026-10-17)
+
+### Renault / Dacia: sign-in and sync work
+
+- **Renault and Dacia could not sign in at all.** The connector handed the
+  web session to the wrong parameter of `renault-api`, so every sync failed
+  with `'ClientSession' object has no attribute 'login'` and "Test
+  connection" said the credentials were rejected — even when they were
+  correct. Fixed, together with three misread fields behind it (account
+  type and ID, the model name, and the charging state).
+- **"Charging" means charging.** Renault reports a state code; only "charge
+  in progress" counts now, not "waiting for a planned charge", "charge
+  ended" or "flap open".
+- **The car is found on any of your accounts**, and a VIN entered in the
+  vehicle form selects that car when the account has several.
+- **"Test connection" tells you why** it failed: wrong e-mail or password,
+  no car on the account, a region mismatch, or Renault asking for an e-mail
+  confirmation code (with the workaround: sign in once on the My Renault /
+  My Dacia website, then test again). The generic "credentials rejected"
+  message is now translated for every brand instead of always German.
+
 ## v3.0.160 (2026-10-15)
 
 ### Battery certificate: English on request, clearer SoH, layout fixes

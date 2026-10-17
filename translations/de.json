@@ -1816,5 +1816,10 @@
   "cert.bms_relative_note": "Der vom Fahrzeug gemeldete BMS-Wert ist ein RELATIVER Rohwert und kann über 100 % liegen – er ist KEIN direkter State of Health. Verlässlich ist der direkt aus dem BMS-Register gelesene OBD-Wert (siehe unten).",
   "cert.soh_obd_here": "SoH laut OBD (BMS-Register, verlässlich)",
   "cert.chart_soh_note": "Gezeigt wird der relative BMS-Rohwert – er kann über 100 % liegen und ist kein absoluter SoH. Aussagekräftig ist der Verlauf (die Form), nicht die Höhe. Der belastbare Absolutwert ist der OBD-Wert oben.",
-  "obd.cert_export_en": "PDF auf Englisch"
+  "obd.cert_export_en": "PDF auf Englisch",
+  "vehicle.err_credentials_rejected": "Die hinterlegten Zugangsdaten wurden abgelehnt.",
+  "renault.err_login": "Renault/Dacia hat die Anmeldung abgelehnt: E-Mail oder Passwort stimmen nicht. Bitte dieselben Daten wie in der App My Renault / My Dacia eintragen.",
+  "renault.err_no_account": "Anmeldung erfolgreich, aber zu diesem Konto gibt es kein My-Renault-/My-Dacia-Konto. Ist die Region richtig gewählt?",
+  "renault.err_no_vehicle": "Anmeldung erfolgreich, aber im Konto ist kein Fahrzeug (oder nicht die eingetragene FIN) verknüpft. Ist das Auto in der App My Renault / My Dacia hinzugefügt? Ist die Region richtig gewählt?",
+  "renault.err_2fa": "Renault/Dacia verlangt für dieses Konto gerade einen Bestätigungscode per E-Mail. Den kann der EV-Tracker noch nicht eingeben. Abhilfe: einmal im Browser auf der My-Renault-/My-Dacia-Website anmelden und den Code dort bestätigen, danach hier erneut „Verbindung testen“ — meist fragt Renault dann nicht mehr."
 }

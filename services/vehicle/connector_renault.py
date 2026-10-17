@@ -9,7 +9,7 @@ try:
 except ImportError:
     HAS_RENAULT = False
 
-from .base import VehicleConnector, VehicleStatus
+from .base import VehicleConnector, VehicleStatus, plausible_percent
 from .registry import describe, register
 
 logger = logging.getLogger(__name__)
@@ -46,33 +46,85 @@ def _run_async(coro):
     return asyncio.run(coro)
 
 
+def _t(key, **kw):
+    try:
+        from services.i18n import t
+        return t(key, **kw)
+    except Exception:                      # pragma: no cover
+        return key
+
+
+def _is_bad_login(exc) -> bool:
+    """Gigya's answer for a wrong e-mail or password.
+
+    Matched by class name as well, so an older renault-api without
+    ``InvalidCredentialsException`` still gets the clear message.
+    """
+    names = {c.__name__ for c in type(exc).__mro__}
+    return 'InvalidCredentialsException' in names
+
+
+def _wants_code(exc) -> bool:
+    """Gigya 403101: the account asks for an e-mail code first.
+
+    Renault switches this on and off per account; after one sign-in in a
+    browser it usually stops asking, so the message says exactly that.
+    """
+    names = {c.__name__ for c in type(exc).__mro__}
+    return 'PendingTwoFactorAuthenticationException' in names or '403101' in str(exc)
+
+
 class _RenaultBase(VehicleConnector):
     BRAND = None  # 'renault' or 'dacia'
 
     async def _fetch(self, force=False):
-        locale = self.credentials.get('locale', 'de_DE')
-        async with ClientSession() as session:
-            client = RenaultClient(session=session, locale=locale)
-            await client.session.login(self.credentials['username'], self.credentials['password'])
+        # ``or``: the region field is optional, and an empty value is ''
+        # rather than missing — renault-api cannot look up a '' locale.
+        locale = self.credentials.get('locale') or 'de_DE'
+        async with ClientSession() as websession:
+            # ``websession=``, not ``session=``: ``session`` is renault-api's
+            # own RenaultSession. Handing it the aiohttp session made
+            # ``client.session`` the aiohttp object, and every sign-in ended
+            # in "'ClientSession' object has no attribute 'login'".
+            client = RenaultClient(websession=websession, locale=locale)
+            try:
+                await client.session.login(self.credentials['username'],
+                                           self.credentials['password'])
+            except Exception as e:
+                if _wants_code(e):
+                    raise RuntimeError(_t('renault.err_2fa')) from e
+                if _is_bad_login(e):
+                    raise RuntimeError(_t('renault.err_login')) from e
+                raise
             person = await client.get_person()
-            accounts = person.accounts
-            # Find Kamereon account
-            account = None
-            for a in accounts:
-                if a.account_type == 'MYRENAULT':
-                    account = await client.get_api_account(a.account_id)
-                    break
-            if not account:
-                for a in accounts:
-                    account = await client.get_api_account(a.account_id)
-                    break
-            if not account:
-                raise RuntimeError("Kein Renault/Dacia-Account gefunden")
+            # The models are camelCase (accountId, accountType) — the
+            # snake_case names this used to read do not exist.
+            accounts = [a for a in (person.accounts or []) if a.accountId]
+            wanted = {'renault': 'MYRENAULT', 'dacia': 'MYDACIA'}.get(self.BRAND)
+            accounts.sort(key=lambda a: a.accountType != wanted)
+            if not accounts:
+                raise RuntimeError(_t('renault.err_no_account'))
 
-            vehicles = await account.get_vehicles()
-            if not vehicles.vehicleLinks:
-                raise RuntimeError("Kein Fahrzeug im Account gefunden")
-            vin = vehicles.vehicleLinks[0].vin
+            # An owner can have the car on another account than the first
+            # one (MyRenault next to SFDC, say), so look in each.
+            want_vin = (self.credentials.get('vin') or '').strip().upper()
+            account = link = None
+            for a in accounts:
+                acc = await client.get_api_account(a.accountId)
+                try:
+                    links = (await acc.get_vehicles()).vehicleLinks or []
+                except Exception as e:
+                    logger.info(f"Renault account {a.accountType}: no vehicles ({e})")
+                    continue
+                for l in links:
+                    if l.vin and (not want_vin or l.vin.upper() == want_vin):
+                        account, link = acc, l
+                        break
+                if link:
+                    break
+            if not link:
+                raise RuntimeError(_t('renault.err_no_vehicle'))
+            vin = link.vin
             vehicle = await account.get_api_vehicle(vin)
 
             battery = await vehicle.get_battery_status()
@@ -87,11 +139,18 @@ class _RenaultBase(VehicleConnector):
             except Exception:
                 pass
 
-            soc = battery.batteryLevel if battery else None
-            is_charging = battery.chargingStatus is not None and battery.chargingStatus > 0 if battery else False
-            is_plugged = battery.plugStatus is not None and battery.plugStatus > 0 if battery else False
+            soc = plausible_percent(battery.batteryLevel) if battery else None
+            # chargingStatus is a state code, not a flag: 0.1 waiting for a
+            # planned charge, 0.2 charge ended, 0.3 waiting for current,
+            # 0.4 flap open — only 1.0 means energy is flowing in.
+            is_charging = bool(battery and battery.chargingStatus is not None
+                               and battery.chargingStatus >= 1.0)
+            is_plugged = bool(battery and battery.plugStatus is not None
+                              and battery.plugStatus > 0)
             range_km = battery.batteryAutonomy if battery else None
             odometer = int(cockpit.totalMileage) if cockpit and cockpit.totalMileage else None
+            details = link.vehicleDetails
+            model = details.model.label if details and details.model else None
 
             return VehicleStatus(
                 soc_percent=soc,
@@ -102,8 +161,8 @@ class _RenaultBase(VehicleConnector):
                 location_lat=location.gpsLatitude if location else None,
                 location_lon=location.gpsLongitude if location else None,
                 last_updated=str(battery.timestamp) if battery and battery.timestamp else None,
-                vehicle_name=vehicles.vehicleLinks[0].vehicleDetails.model if vehicles.vehicleLinks[0].vehicleDetails else None,
-                vehicle_model=vehicles.vehicleLinks[0].vehicleDetails.model if vehicles.vehicleLinks[0].vehicleDetails else None,
+                vehicle_name=model,
+                vehicle_model=model,
                 raw_data={'vin': vin},
             )
 
@@ -117,6 +176,12 @@ class _RenaultBase(VehicleConnector):
 
     def test_connection(self) -> bool:
         return self.authenticate()
+
+    def verify_credentials(self) -> None:
+        # Let the real reason through: "wrong password", "no car on this
+        # account" and a library error each need something different from
+        # the owner, and the generic "rejected" hid the bug above.
+        _run_async(self._fetch())
 
     def get_status(self, force=False) -> VehicleStatus:
         return _run_async(self._fetch(force))
