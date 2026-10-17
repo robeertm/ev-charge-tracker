@@ -59,7 +59,8 @@ def fake_net(monkeypatch, tmp_path):
     """Replace only the network; keep renault-api's own parsing."""
     monkeypatch.setattr(cr, 'STATE_DIR', str(tmp_path / 'renault'))
     calls = {'login': [], 'vehicles_for': []}
-    state = {'battery': dict(BATTERY), 'login_error': None, 'vehicles': VEHICLES}
+    state = {'battery': dict(BATTERY), 'login_error': None, 'vehicles': VEHICLES,
+             'battery_error': None, 'sfdc_links': []}
 
     async def login(self, login_id, password):
         calls['login'].append((login_id, password, self._locale if hasattr(self, '_locale') else None))
@@ -72,7 +73,7 @@ def fake_net(monkeypatch, tmp_path):
     async def get_account_vehicles(self, account_id):
         calls['vehicles_for'].append(account_id)
         body = state['vehicles'] if account_id == 'acc-myr' else {
-            'accountId': account_id, 'country': 'FR', 'vehicleLinks': []}
+            'accountId': account_id, 'country': 'FR', 'vehicleLinks': state['sfdc_links']}
         return schemas.KamereonVehiclesResponseSchema.load(body)
 
     async def get_vehicle_details(self, account_id, vin):
@@ -81,8 +82,15 @@ def fake_net(monkeypatch, tmp_path):
 
     async def http_request(self, method, endpoint, json=None, *, schema=None):
         # renault-api resolves the short name to the model's full path
-        # (``…/cars/{vin}/battery-status`` …); answer by its last part.
+        # (``…/accounts/{id}/…/cars/{vin}/battery-status`` …); answer by its last part.
+        calls.setdefault('data', []).append(endpoint)
         last = endpoint.split('?')[0].rstrip('/').rsplit('/', 1)[-1]
+        err = state['battery_error']
+        if isinstance(err, dict):           # refused on some accounts only
+            err = next((b for acc, b in err.items() if f'/accounts/{acc}/' in endpoint), None)
+        if last == 'battery-status' and err:
+            # A Kamereon error body, read the way renault-api reads it.
+            schemas.KamereonResponseSchema.loads(err).raise_for_error_code()
         return _data({'battery-status': state['battery'], 'cockpit': COCKPIT,
                       'location': LOCATION}[last])
 
@@ -182,6 +190,64 @@ def test_verify_lets_the_real_reason_through(fake_net, monkeypatch):
         _conn().verify_credentials()
 
 
+# What Kamereon sends while the car does not share its data (issue #3, seen
+# the same way in home-assistant/core#115701): the second message carries the
+# reason, renault-api keeps only the first.
+PRIVACY_403 = json.dumps({
+    'type': 'FUNCTIONAL',
+    'messages': [
+        {'code': 'err.func.wired.lkcd-authorization.failure', 'message': 'Access is denied for this resource'},
+        {'code': 'err.func.wired.lkcd-authorization.failure', 'message': 'Privacy mode currently ON'}],
+    'errors': [
+        {'errorCode': 'err.func.wired.lkcd-authorization.failure', 'errorMessage': 'Access is denied for this resource'},
+        {'errorCode': 'err.func.wired.lkcd-authorization.failure', 'errorMessage': 'Privacy mode currently ON'}],
+    'error_reference': 'FUNCTIONAL'})
+
+
+@pytest.mark.parametrize('body', [
+    PRIVACY_403,
+    json.dumps({'errors': [{'errorCode': 'err.func.privacy.on', 'errorMessage': 'Privacy mode ON'}]}),
+])
+def test_privacy_mode_in_the_car_says_what_to_switch_on(fake_net, body):
+    _, state = fake_net
+    state['battery_error'] = body
+    with pytest.raises(RuntimeError) as ei:
+        _conn().verify_credentials()
+    assert str(ei.value) == cr._t('renault.err_privacy')
+    assert 'lkcd' not in str(ei.value)
+
+
+def test_a_refused_account_hands_over_to_the_next_one_with_the_same_car(fake_net):
+    calls, state = fake_net
+    state['battery_error'] = {'acc-myr': PRIVACY_403}
+    state['sfdc_links'] = VEHICLES['vehicleLinks']
+    st = _conn().get_status()
+    assert st.soc_percent == 63 and st.raw_data['vin'] == VIN
+    assert calls['vehicles_for'] == ['acc-myr', 'acc-sfdc']
+    assert any('/accounts/acc-sfdc/' in e for e in calls['data'])
+
+
+def test_a_refusal_never_switches_to_another_car(fake_net):
+    calls, state = fake_net
+    state['battery_error'] = {'acc-myr': PRIVACY_403}
+    other = 'VF1AG000000000999'
+    state['sfdc_links'] = [{'vin': other, 'vehicleDetails': {
+        'vin': other, 'model': {'code': 'XCB1VE', 'label': 'MEGANE E-TECH', 'group': '971'}}}]
+    with pytest.raises(RuntimeError) as ei:
+        _conn().get_status()
+    assert str(ei.value) == cr._t('renault.err_privacy')
+    assert not any(other in e for e in calls['data'])
+
+
+def test_another_kamereon_error_still_comes_through(fake_net):
+    _, state = fake_net
+    state['battery_error'] = json.dumps(
+        {'errors': [{'errorCode': 'err.func.wired.overloaded', 'errorMessage': 'Too many requests'}]})
+    with pytest.raises(Exception) as ei:
+        _conn().get_status()
+    assert getattr(ei.value, 'error_code', None) == 'err.func.wired.overloaded'
+
+
 def test_the_client_gets_the_aiohttp_session_as_websession():
     src = (ROOT / 'services' / 'vehicle' / 'connector_renault.py').read_text(encoding='utf-8')
     assert 'RenaultClient(session=' not in src
@@ -190,7 +256,7 @@ def test_the_client_gets_the_aiohttp_session_as_websession():
 
 def test_new_messages_exist_in_every_language():
     keys = ('renault.err_login', 'renault.err_2fa', 'renault.err_no_account',
-            'renault.err_no_vehicle', 'vehicle.err_credentials_rejected')
+            'renault.err_no_vehicle', 'renault.err_privacy', 'vehicle.err_credentials_rejected')
     for lang in LANGS:
         d = json.loads((ROOT / 'translations' / f'{lang}.json').read_text(encoding='utf-8'))
         for k in keys:

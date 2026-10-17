@@ -1821,6 +1821,7 @@
   "renault.err_login": "Renault/Dacia a refusé la connexion : e-mail ou mot de passe incorrect. Utilisez les mêmes identifiants que dans l’application My Renault / My Dacia.",
   "renault.err_no_account": "Connexion réussie, mais aucun compte My Renault / My Dacia n’est lié à cet identifiant. La région est-elle correcte ?",
   "renault.err_no_vehicle": "Connexion réussie, mais aucun véhicule (ou pas le VIN saisi) n’est associé au compte. La voiture est-elle ajoutée dans l’application My Renault / My Dacia, et la région est-elle correcte ?",
+  "renault.err_privacy": "Connexion réussie, mais Renault ne transmet pas les données de la voiture : le mode privé est activé dans le véhicule, ou le partage des données est désactivé. Voiture à l’arrêt, activez le partage des données sur l’écran de la voiture, dans le profil conducteur lié à My Renault / My Dacia (Mégane/Scénic E-Tech : icône du profil en haut à gauche). Puis relancez « Tester la connexion ».",
   "renault.err_2fa": "Renault/Dacia demande un code de confirmation par e-mail pour ce compte. Ouvrez Paramètres → Véhicules et appuyez sur « Tester la connexion » : Renault vous envoie alors le code, à saisir dans l’application.",
   "set.api_region_cn": "Chine",
   "set.api_region_de": "Allemagne",

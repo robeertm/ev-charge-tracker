@@ -91,6 +91,19 @@ def _wants_code(exc) -> bool:
     return 'PendingTwoFactorAuthenticationException' in names or '403101' in str(exc)
 
 
+# Kamereon refuses the car's data while the car does not share it. Renault
+# answers with the bare "Access is denied for this resource" (lkcd) and puts
+# the real reason, "Privacy mode currently ON", in a second message that
+# renault-api drops — so the code alone has to tell the owner.
+PRIVACY_CODES = {'err.func.privacy.on', 'err.func.wired.lkcd-authorization.failure'}
+
+
+def _privacy_on(exc) -> bool:
+    names = {c.__name__ for c in type(exc).__mro__}
+    return ('PrivacyModeOnException' in names
+            or getattr(exc, 'error_code', None) in PRIVACY_CODES)
+
+
 class RenaultCodeNeeded(RuntimeError):
     """Renault mailed a code; the owner has to type it in.
 
@@ -237,9 +250,13 @@ class _RenaultBase(VehicleConnector):
                 raise RuntimeError(_t('renault.err_no_account'))
 
             # An owner can have the car on another account than the first
-            # one (MyRenault next to SFDC, say), so look in each.
+            # one (MyRenault next to SFDC, say), so look in each. And an
+            # account that lists the car may still be refused its data (the
+            # car's privacy mode, or an old account after a change of
+            # owner): then the SAME car is tried on the next account —
+            # never another car, whose values would land in this history.
             want_vin = (self.credentials.get('vin') or '').strip().upper()
-            account = link = None
+            vin = link = vehicle = battery = refused = None
             for a in accounts:
                 acc = await client.get_api_account(a.accountId)
                 try:
@@ -247,18 +264,30 @@ class _RenaultBase(VehicleConnector):
                 except Exception as e:
                     logger.info(f"Renault account {a.accountType}: no vehicles ({e})")
                     continue
-                for l in links:
-                    if l.vin and (not want_vin or l.vin.upper() == want_vin):
-                        account, link = acc, l
-                        break
-                if link:
-                    break
-            if not link:
+                want = vin or want_vin
+                l = next((l for l in links if l.vin
+                          and (not want or l.vin.upper() == want)), None)
+                if not l:
+                    continue
+                vin = l.vin.upper()
+                v = await acc.get_api_vehicle(l.vin)
+                try:
+                    battery = await v.get_battery_status()
+                except Exception as e:
+                    if not _privacy_on(e):
+                        raise
+                    logger.info(f"Renault account {a.accountType}: car data refused "
+                                f"({getattr(e, 'error_code', e)})")
+                    refused = e
+                    continue
+                link, vehicle = l, v
+                break
+            if not vin:
                 raise RuntimeError(_t('renault.err_no_vehicle'))
+            if not link:
+                raise RuntimeError(_t('renault.err_privacy')) from refused
             vin = link.vin
-            vehicle = await account.get_api_vehicle(vin)
 
-            battery = await vehicle.get_battery_status()
             cockpit = None
             location = None
             try:

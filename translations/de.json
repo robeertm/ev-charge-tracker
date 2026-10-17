@@ -1821,6 +1821,7 @@
   "renault.err_login": "Renault/Dacia hat die Anmeldung abgelehnt: E-Mail oder Passwort stimmen nicht. Bitte dieselben Daten wie in der App My Renault / My Dacia eintragen.",
   "renault.err_no_account": "Anmeldung erfolgreich, aber zu diesem Konto gibt es kein My-Renault-/My-Dacia-Konto. Ist die Region richtig gewählt?",
   "renault.err_no_vehicle": "Anmeldung erfolgreich, aber im Konto ist kein Fahrzeug (oder nicht die eingetragene FIN) verknüpft. Ist das Auto in der App My Renault / My Dacia hinzugefügt? Ist die Region richtig gewählt?",
+  "renault.err_privacy": "Anmeldung erfolgreich, aber Renault gibt die Daten des Autos nicht heraus: Im Fahrzeug ist der Datenschutzmodus an bzw. das Teilen der Daten aus. Schalte im stehenden Auto am Bildschirm das Teilen der Daten ein, und zwar im Fahrerprofil, das mit My Renault / My Dacia verbunden ist (Mégane/Scénic E-Tech: Profil-Symbol oben links). Drücke danach erneut „Verbindung testen“.",
   "renault.err_2fa": "Renault/Dacia verlangt für dieses Konto einen Bestätigungscode per E-Mail. Öffne Einstellungen → Fahrzeuge und drücke „Verbindung testen“: Renault schickt dir dann den Code, den du in der App eingibst.",
   "set.api_region_cn": "China",
   "set.api_region_de": "Deutschland",

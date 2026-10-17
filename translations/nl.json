@@ -1821,6 +1821,7 @@
   "renault.err_login": "Renault/Dacia heeft de aanmelding geweigerd: e-mail of wachtwoord klopt niet. Gebruik dezelfde gegevens als in de app My Renault / My Dacia.",
   "renault.err_no_account": "Aangemeld, maar er hoort geen My Renault-/My Dacia-account bij deze login. Is de regio goed ingesteld?",
   "renault.err_no_vehicle": "Aangemeld, maar er is geen voertuig (of niet het ingevoerde VIN) aan het account gekoppeld. Staat de auto in de app My Renault / My Dacia, en is de regio goed ingesteld?",
+  "renault.err_privacy": "Aangemeld, maar Renault geeft de gegevens van de auto niet vrij: in de auto staat de privacymodus aan of het delen van gegevens uit. Zet met de auto stilstaand het delen van gegevens aan op het scherm van de auto, in het bestuurdersprofiel dat aan My Renault / My Dacia gekoppeld is (Mégane/Scénic E-Tech: profielicoon linksboven). Druk daarna opnieuw op „Verbinding testen”.",
   "renault.err_2fa": "Renault/Dacia vraagt voor dit account een bevestigingscode per e-mail. Open Instellingen → Voertuigen en druk op „Verbinding testen”: Renault mailt je dan de code, die je in de app invoert.",
   "set.api_region_cn": "China",
   "set.api_region_de": "Duitsland",

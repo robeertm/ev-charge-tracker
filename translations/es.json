@@ -1821,6 +1821,7 @@
   "renault.err_login": "Renault/Dacia ha rechazado el inicio de sesión: el correo o la contraseña no son correctos. Usa los mismos datos que en la app My Renault / My Dacia.",
   "renault.err_no_account": "Sesión iniciada, pero no hay ninguna cuenta My Renault / My Dacia para este acceso. ¿Está bien elegida la región?",
   "renault.err_no_vehicle": "Sesión iniciada, pero no hay ningún vehículo (o no el VIN indicado) vinculado a la cuenta. ¿Está el coche añadido en la app My Renault / My Dacia y la región bien elegida?",
+  "renault.err_privacy": "Sesión iniciada, pero Renault no entrega los datos del coche: el modo privacidad está activado en el vehículo o el uso compartido de datos está desactivado. Con el coche parado, activa el uso compartido de datos en la pantalla del coche, en el perfil de conductor vinculado a My Renault / My Dacia (Mégane/Scénic E-Tech: icono del perfil arriba a la izquierda). Después pulsa de nuevo «Probar conexión».",
   "renault.err_2fa": "Renault/Dacia pide un código de confirmación por correo para esta cuenta. Abre Ajustes → Vehículos y pulsa «Probar conexión»: Renault te enviará el código, que introduces en la app.",
   "set.api_region_cn": "China",
   "set.api_region_de": "Alemania",
