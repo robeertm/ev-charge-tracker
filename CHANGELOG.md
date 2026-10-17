@@ -1,5 +1,19 @@
 # Changelog
 
+## v3.0.165 (2026-10-17)
+
+### Renault / Dacia: a clear message when the car does not share its data
+
+- When the car's **privacy mode** is on, or data sharing is switched off in
+  the car, Renault signs you in but refuses the car's data. Test connection
+  showed Renault's raw code (`err.func.wired.lkcd-authorization.failure`,
+  "Access is denied for this resource"). Now it says what to do: with the car
+  parked, switch data sharing on at the car's screen, in the driver profile
+  linked to My Renault / My Dacia, then test again.
+- If your login has the car on more than one Renault account and one of them
+  is refused, the same car is tried on the next account. It never switches
+  to a different car.
+
 ## v3.0.164 (2026-10-17)
 
 ### Renault / Dacia: the setup wizard signs in at step 3 and asks for the code there
