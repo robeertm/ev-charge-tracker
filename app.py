@@ -1096,7 +1096,10 @@ def _credential_fields_for_ui():
                 # text box. Renault's region is a locale like "de_DE" and
                 # MG's is lower-case "eu" — both are values nobody should
                 # have to guess the spelling of.
-                'options': list(f.get('options') or []),
+                # Option labels are translated like field labels — the
+                # hard-coded ones were German ("Frankreich") in every UI.
+                'options': [dict(o, label=t(o['label_key']) if o.get('label_key') else o.get('label', ''))
+                            for o in (f.get('options') or [])],
             })
         out[b.key] = felder
     return out

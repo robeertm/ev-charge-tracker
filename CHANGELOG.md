@@ -1,5 +1,13 @@
 # Changelog
 
+## v3.0.162 (2026-10-17)
+
+### Region choices in your language
+
+- The region list in the vehicle form (Renault/Dacia countries, Kia/Hyundai
+  and MG regions) was German in every language — "Frankreich", "Europa".
+  It now follows the app language: a French owner picks "France".
+
 ## v3.0.161 (2026-10-17)
 
 ### Renault / Dacia: sign-in and sync work

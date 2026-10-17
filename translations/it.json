@@ -1821,5 +1821,13 @@
   "renault.err_login": "Renault/Dacia ha rifiutato l’accesso: e-mail o password errate. Usa gli stessi dati dell’app My Renault / My Dacia.",
   "renault.err_no_account": "Accesso riuscito, ma non esiste un account My Renault / My Dacia per queste credenziali. La regione è corretta?",
   "renault.err_no_vehicle": "Accesso riuscito, ma all’account non è collegato alcun veicolo (o non il VIN inserito). L’auto è aggiunta nell’app My Renault / My Dacia e la regione è corretta?",
-  "renault.err_2fa": "Renault/Dacia sta chiedendo un codice di conferma via e-mail per questo account. L’EV tracker non può ancora inserirlo. Soluzione: accedi una volta al sito My Renault / My Dacia da un browser e conferma lì il codice, poi premi di nuovo «Testa connessione» qui — di solito Renault non lo chiede più."
+  "renault.err_2fa": "Renault/Dacia sta chiedendo un codice di conferma via e-mail per questo account. L’EV tracker non può ancora inserirlo. Soluzione: accedi una volta al sito My Renault / My Dacia da un browser e conferma lì il codice, poi premi di nuovo «Testa connessione» qui — di solito Renault non lo chiede più.",
+  "set.api_region_cn": "Cina",
+  "set.api_region_de": "Germania",
+  "set.api_region_at": "Austria",
+  "set.api_region_fr": "Francia",
+  "set.api_region_it": "Italia",
+  "set.api_region_es": "Spagna",
+  "set.api_region_nl": "Paesi Bassi",
+  "set.api_region_gb": "Regno Unito"
 }

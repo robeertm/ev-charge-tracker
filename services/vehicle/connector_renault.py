@@ -22,13 +22,13 @@ CREDENTIAL_FIELDS = [
     {"key": "locale", "label": "Region", "type": "select", "label_key": "cred.region",
      "optional": True,
      "options": [
-         {"value": "de_DE", "label": "Deutschland"},
-         {"value": "at_AT", "label": "Oesterreich"},
-         {"value": "fr_FR", "label": "Frankreich"},
-         {"value": "it_IT", "label": "Italien"},
-         {"value": "es_ES", "label": "Spanien"},
-         {"value": "nl_NL", "label": "Niederlande"},
-         {"value": "en_GB", "label": "UK"},
+         {"value": "de_DE", "label": "Deutschland", "label_key": "set.api_region_de"},
+         {"value": "at_AT", "label": "Oesterreich", "label_key": "set.api_region_at"},
+         {"value": "fr_FR", "label": "Frankreich", "label_key": "set.api_region_fr"},
+         {"value": "it_IT", "label": "Italien", "label_key": "set.api_region_it"},
+         {"value": "es_ES", "label": "Spanien", "label_key": "set.api_region_es"},
+         {"value": "nl_NL", "label": "Niederlande", "label_key": "set.api_region_nl"},
+         {"value": "en_GB", "label": "UK", "label_key": "set.api_region_gb"},
      ]},
 ]
 

@@ -355,10 +355,10 @@ REGIONS = {
 _REGION_FIELD = {
     "key": "region", "label": "Region", "type": "select",
     "label_key": "cred.region", "optional": True,
-    "options": [{"value": "EU", "label": "Europa"},
-                {"value": "US", "label": "USA"},
-                {"value": "CA", "label": "Kanada"},
-                {"value": "KR", "label": "Korea"}],
+    "options": [{"value": "EU", "label": "Europa", "label_key": "set.api_region_eu"},
+                {"value": "US", "label": "USA", "label_key": "set.api_region_us"},
+                {"value": "CA", "label": "Kanada", "label_key": "set.api_region_ca"},
+                {"value": "KR", "label": "Korea", "label_key": "set.api_region_kr"}],
 }
 
 # Kia/Hyundai: since hyundai_kia_connect_api 4.26.3 the EU SDK does a headless

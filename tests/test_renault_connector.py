@@ -195,3 +195,28 @@ def test_new_messages_exist_in_every_language():
     # the base message is no longer German-only in the code
     base = (ROOT / 'services' / 'vehicle' / 'base.py').read_text(encoding='utf-8')
     assert "RuntimeError('Die hinterlegten Zugangsdaten wurden abgelehnt.')" not in base
+
+
+@pytest.mark.parametrize('lang, renault_fr, kia_eu', [
+    ('fr', 'France', 'Europe'), ('en', 'France', 'Europe'), ('de', 'Frankreich', 'Europa'),
+    ('it', 'Francia', 'Europa'), ('nl', 'Frankrijk', 'Europa'), ('es', 'Francia', 'Europa')])
+def test_region_choices_speak_the_ui_language(lang, renault_fr, kia_eu):
+    """The region list was German in every language ("Frankreich",
+    "Oesterreich", "Europa") — a French owner had to find "Frankreich"."""
+    import app as A
+    from services.i18n import get_language, set_language
+    vorher = get_language()
+    try:
+        set_language(lang)
+        felder = A._credential_fields_for_ui()
+    finally:
+        set_language(vorher)
+
+    def options(brand):
+        f = next(f for f in felder[brand] if f.get('options'))
+        return {o['value']: o['label'] for o in f['options']}
+    assert options('renault')['fr_FR'] == renault_fr
+    assert options('kia')['EU'] == kia_eu
+    for brand in ('renault', 'dacia', 'kia', 'hyundai', 'mg'):
+        for label in options(brand).values():
+            assert label and not label.startswith('set.'), (brand, label)

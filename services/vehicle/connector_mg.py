@@ -24,8 +24,8 @@ CREDENTIAL_FIELDS = [
     {"key": "region", "label": "Region", "type": "select", "label_key": "cred.region",
      "optional": True,
      "options": [
-         {"value": "eu", "label": "Europa"},
-         {"value": "cn", "label": "China"},
+         {"value": "eu", "label": "Europa", "label_key": "set.api_region_eu"},
+         {"value": "cn", "label": "China", "label_key": "set.api_region_cn"},
      ]},
 ]
 
