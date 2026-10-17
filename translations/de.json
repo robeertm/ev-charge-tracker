@@ -1842,5 +1842,6 @@
   "renault.code_expired": "Diese Bestätigung ist abgelaufen. Fordere mit „Neuen Code anfordern“ einen frischen Code an.",
   "renault.code_format": "Bitte nur den Code aus der E-Mail eingeben (4–10 Ziffern oder Buchstaben).",
   "renault.code_ok": "„{name}“ ist verbunden — Renault hat die Anmeldung bestätigt.",
-  "wiz.enter_code": "Code eingeben"
+  "wiz.enter_code": "Code eingeben",
+  "wiz.continue_anyway": "Du kannst trotzdem mit „Weiter“ fortfahren und die Zugangsdaten später korrigieren."
 }

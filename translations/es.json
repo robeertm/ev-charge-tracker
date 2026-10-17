@@ -1842,5 +1842,6 @@
   "renault.code_expired": "Esta confirmación ha caducado. Usa «Enviar un código nuevo» para recibir otro.",
   "renault.code_format": "Introduce solo el código del correo (4–10 dígitos o letras).",
   "renault.code_ok": "«{name}» está conectado: Renault ha confirmado el inicio de sesión.",
-  "wiz.enter_code": "Introducir código"
+  "wiz.enter_code": "Introducir código",
+  "wiz.continue_anyway": "Puedes continuar igualmente con «Siguiente» y corregir los datos de acceso más tarde."
 }

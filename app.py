@@ -3614,6 +3614,7 @@ def register_routes(app):
         if (v.api_brand or '').lower() not in ('renault', 'dacia'):
             return redirect('/settings#sec-fleet')
         error = None
+        _ajax = request.form.get('ajax') == '1'
         if request.method == 'POST':
             code = re.sub(r'\s+', '', request.form.get('code', ''))
             if not re.fullmatch(r'[0-9A-Za-z]{4,10}', code or ''):
@@ -3624,10 +3625,14 @@ def register_routes(app):
                     connector = get_connector(v.api_brand.lower(), credentials_of(v))
                     connector.submit_code(code)
                     connector.verify_credentials()
+                    if _ajax:               # Einrichtungsassistent: Code direkt im Schritt 3
+                        return jsonify({'ok': True, 'message': t('renault.code_ok', name=v.name)})
                     flash(t('renault.code_ok', name=v.name), 'success')
                     return redirect('/settings#sec-fleet')
                 except Exception as e:
                     error = str(e)
+            if _ajax:
+                return jsonify({'ok': False, 'error': error}), 200
         return render_template('vehicle_code.html', v=v, error=error)
 
     # ── Škoda: official API ────────────────────────────────────────

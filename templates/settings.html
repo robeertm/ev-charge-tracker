@@ -2954,7 +2954,14 @@
                 opt.value = o.value; opt.textContent = o.label;
                 neu.appendChild(opt);
             });
-            neu.value = alt.value || (f.options[0] || {}).value || '';
+            // Steht der bisherige Wert (z. B. "EU") nicht in der Liste, bliebe
+            // die Auswahl leer und '' würde gespeichert — dann Browsersprache.
+            const werte = (f.options || []).map(o => o.value);
+            const sprache = (navigator.language || '').replace('-', '_').toLowerCase();
+            neu.value = werte.indexOf(alt.value) !== -1 ? alt.value
+                : (werte.find(v => v.toLowerCase() === sprache)
+                   || werte.find(v => v.toLowerCase().slice(0, 2) === sprache.slice(0, 2))
+                   || werte[0] || '');
         } else {
             neu.type = 'text';
             neu.value = alt.value || '';

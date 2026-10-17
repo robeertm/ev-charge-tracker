@@ -1842,5 +1842,6 @@
   "renault.code_expired": "This confirmation has expired. Use “Send a new code” to get a fresh one.",
   "renault.code_format": "Please enter just the code from the e-mail (4–10 digits or letters).",
   "renault.code_ok": "“{name}” is connected — Renault confirmed the sign-in.",
-  "wiz.enter_code": "Enter code"
+  "wiz.enter_code": "Enter code",
+  "wiz.continue_anyway": "You can still continue with “Next” and correct the sign-in details later."
 }

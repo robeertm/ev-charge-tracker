@@ -164,6 +164,21 @@
                   <div class="form-text small cw-cred-help"></div>
                 </div>
               </div>
+              {# Renault/Dacia: "Weiter" meldet sich hier sofort an. Will Renault
+                 einen E-Mail-Code, wird er gleich hier eingegeben — vorher
+                 geschah die Anmeldung erst in Schritt 5, und wer in Schritt 3
+                 auf eine Rückmeldung wartete, bekam keine. Das Code-Feld hat
+                 bewusst KEIN name: es gehört nicht ins Fahrzeug-Formular. #}
+              <div id="cwSignStatus" class="small mt-2"></div>
+              <div id="cwCodeBox" class="mt-2" style="display:none">
+                <label class="form-label small" for="cw_code">{{ t('renault.code_label') }}</label>
+                <div class="input-group input-group-sm" style="max-width:320px">
+                  <input type="text" class="form-control" id="cw_code" inputmode="numeric" autocomplete="one-time-code" maxlength="12">
+                  <button type="button" class="btn btn-primary" id="cwCodeSend">{{ t('renault.code_submit') }}</button>
+                </div>
+                <div class="form-text small">{{ t('renault.code_hint') }}</div>
+                <button type="button" class="btn btn-link btn-sm p-0" id="cwCodeResend">{{ t('renault.code_resend') }}</button>
+              </div>
             </div>
           </div>
 
@@ -222,6 +237,7 @@
     wiz_signing_in:        {{ t('wiz.signing_in')|tojson }},
     wiz_signin_fail_hint:  {{ t('wiz.signin_fail_hint')|tojson }},
     wiz_enter_code:        {{ t('wiz.enter_code')|tojson }},
+    wiz_continue_anyway:   {{ t('wiz.continue_anyway')|tojson }},
     wiz_login_prompt:      {{ t('wiz.login_prompt')|tojson }},
     wiz_token_login_btn:   {{ t('wiz.token_login_btn')|tojson }},
     wiz_connected:         {{ t('wiz.connected')|tojson }},
@@ -258,6 +274,18 @@
   const CRED_KEY_LINK_W = {{ t('cred.key_link')|tojson }};
 
   // Beschriftung und Sichtbarkeit der Zugangsfelder je Marke.
+  // Ein Platzhalter wie "EU" steht in Renaults Liste nicht — dann blieb die
+  // Auswahl LEER, gespeichert wurde '' und daraus still Deutschland. Jetzt:
+  // bisheriger Wert, sonst die Browsersprache (fr-FR → fr_FR), sonst der erste.
+  function waehleOption(optionen, bisher){
+    const werte = (optionen || []).map(o => o.value);
+    if(werte.indexOf(bisher) !== -1) return bisher;
+    const sprache = (navigator.language || '').replace('-', '_').toLowerCase();
+    return werte.find(v => v.toLowerCase() === sprache)
+        || werte.find(v => v.toLowerCase().slice(0, 2) === sprache.slice(0, 2))
+        || werte[0] || '';
+  }
+
   function zeigeCredFelder(){
     const felder = (sel && CRED_FELDER[sel.key]) || [];
     const nachSpalte = {};
@@ -280,7 +308,7 @@
             opt.value = o.value; opt.textContent = o.label;
             neu.appendChild(opt);
           });
-          neu.value = eingabe.value || (f.options[0] || {}).value || '';
+          neu.value = waehleOption(f.options, eingabe.value);
         } else { neu.type = 'text'; neu.value = eingabe.value || ''; }
         eingabe.replaceWith(neu); eingabe = neu;
       }
@@ -438,7 +466,62 @@
     alert(d.error||'Fehler'); return false;
   }
 
+  // Marken, deren Anmeldung einen E-Mail-Code verlangen kann: dort prüft
+  // "Weiter" in Schritt 3 sofort. Schlägt es fehl, steht der Grund da, und ein
+  // zweites "Weiter" geht trotzdem weiter (Zugangsdaten später korrigierbar).
+  const CODE_BRANDS = ['renault', 'dacia'];
+  let angemeldet = false, trotzdemWeiter = false;
+  function signStatus(cls, text, spinner){
+    const st = q('cwSignStatus'); st.innerHTML = '';
+    const span = document.createElement('span'); span.className = cls;
+    if(spinner){ const sp = document.createElement('span'); sp.className = 'spinner-border spinner-border-sm me-1'; span.appendChild(sp); }
+    span.appendChild(document.createTextNode(text)); st.appendChild(span);
+  }
+  async function anmeldenSchritt3(){
+    signStatus('text-primary', T.wiz_signing_in || 'Melde beim Hersteller an…', true);
+    if(!await saveVehicle()){ signStatus('text-danger', ''); return 'fail'; }
+    try{
+      const fd = new FormData(); fd.append('ajax', '1');
+      const d = await (await fetch('/vehicles/' + savedId + '/test', {method:'POST', body:fd})).json();
+      if(d.ok){ signStatus('text-success fw-bold', T.wiz_connected || 'Verbunden!'); q('cwCodeBox').style.display='none'; return 'ok'; }
+      if(d.code_needed){
+        signStatus('text-primary', d.error || '');
+        q('cwCodeBox').style.display = ''; q('cw_code').value = ''; q('cw_code').focus();
+        return 'code';
+      }
+      signStatus('text-danger', (d.error || '') + ' ' + (T.wiz_continue_anyway || ''));
+      return 'fail';
+    }catch(e){ signStatus('text-danger', e.message); return 'fail'; }
+  }
+  async function codeSenden(){
+    const code = q('cw_code').value.trim(); if(!code) return;
+    const b = q('cwCodeSend'); b.disabled = true;
+    signStatus('text-primary', T.wiz_signing_in || 'Melde an…', true);
+    try{
+      const fd = new FormData(); fd.append('ajax', '1'); fd.append('code', code);
+      const d = await (await fetch('/vehicles/' + savedId + '/code', {method:'POST', body:fd})).json();
+      if(d.ok){
+        angemeldet = true; q('cwCodeBox').style.display = 'none';
+        signStatus('text-success fw-bold', d.message || T.wiz_connected || 'Verbunden!');
+        showStep(4);
+      } else { signStatus('text-danger', d.error || ''); q('cw_code').select(); }
+    }catch(e){ signStatus('text-danger', e.message); }
+    b.disabled = false;
+  }
+  q('cwCodeSend').addEventListener('click', codeSenden);
+  q('cw_code').addEventListener('keydown', ev => { if(ev.key === 'Enter'){ ev.preventDefault(); codeSenden(); } });
+  q('cwCodeResend').addEventListener('click', anmeldenSchritt3);
+  ['cw_username_creds', 'cw_password_creds'].forEach(id => q(id).addEventListener('input', () => { angemeldet = false; trotzdemWeiter = false; }));
+
   nextBtn.addEventListener('click', async ()=>{
+    if(step===3 && sel && !sel.token && CODE_BRANDS.indexOf(sel.key) !== -1 && !angemeldet && !trotzdemWeiter){
+      nextBtn.disabled = true;
+      const r = await anmeldenSchritt3();
+      nextBtn.disabled = false;
+      if(r === 'fail'){ trotzdemWeiter = true; return; }
+      if(r !== 'ok') return;
+      angemeldet = true;
+    }
     if(step===2){ if(!await saveVehicle()) return; }
     if(step===4){ if(!await saveVehicle()) return; runTest(); }
     if(step<5) showStep(step+1);
@@ -548,7 +631,8 @@
 
   // reset on open
   modalEl.addEventListener('show.bs.modal', ()=>{
-    step=1; sel=null; savedId=null;
+    step=1; sel=null; savedId=null; angemeldet=false; trotzdemWeiter=false;
+    q('cwSignStatus').innerHTML=''; q('cwCodeBox').style.display='none';
     form.reset(); q('cw_vehicle_id').value=''; q('cw_api_brand').value='';
     renderBrands(); showStep(1);
   });

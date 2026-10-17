@@ -1,5 +1,22 @@
 # Changelog
 
+## v3.0.164 (2026-10-17)
+
+### Renault / Dacia: the setup wizard signs in at step 3 and asks for the code there
+
+- In the setup wizard, Renault and Dacia sign in as soon as you press
+  **Next** after entering e-mail and password. If Renault asks for an e-mail
+  confirmation code, a code field appears right there — no separate page.
+  Before, the sign-in only happened at the very last step, so nothing seemed
+  to happen after entering the credentials.
+- If the sign-in fails, the reason is shown and a second **Next** continues
+  anyway; the details can be corrected later.
+- **Region preselected from your browser language.** The region list started
+  empty when the previous value wasn't one of Renault's (e.g. a Kia-style
+  "EU"), and an empty region silently meant Germany. Now the browser language
+  picks it (a French browser → France), otherwise the first entry. Same fix
+  in the vehicle edit form.
+
 ## v3.0.163 (2026-10-17)
 
 ### Renault / Dacia: enter the e-mail confirmation code in the app

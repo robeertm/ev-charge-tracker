@@ -136,7 +136,7 @@ def test_code_texts_exist_in_every_language():
     keys = ('renault.code_sent', 'renault.code_title', 'renault.code_intro', 'renault.code_label',
             'renault.code_submit', 'renault.code_hint', 'renault.code_resend', 'renault.code_back',
             'renault.code_wrong', 'renault.code_expired', 'renault.code_format', 'renault.code_ok',
-            'renault.err_2fa', 'wiz.enter_code')
+            'renault.err_2fa', 'wiz.enter_code', 'wiz.continue_anyway')
     for lang in LANGS:
         d = json.loads((ROOT / 'translations' / f'{lang}.json').read_text(encoding='utf-8'))
         for k in keys:
@@ -181,6 +181,14 @@ r = c.post("/vehicles/%%d/code" %% vid, data={"code": "123456"})
 out["ok_status"], out["ok_location"] = r.status_code, r.headers.get("Location", "")
 r = c.post("/vehicles/%%d/test" %% vid, data={"ajax": "1"})
 out["after"] = r.get_json()
+# Einrichtungsassistent: Code per ajax, Antwort als JSON (zweites Konto)
+fake.install(setattr, tfa=True)
+with app.app_context():
+    v = Vehicle.query.get(vid); v.api_username = "second@example.invalid"; db.session.commit()
+out["wiz_need"] = c.post("/vehicles/%%d/test" %% vid, data={"ajax": "1"}).get_json()
+out["wiz_wrong"] = c.post("/vehicles/%%d/code" %% vid, data={"ajax": "1", "code": "999999"}).get_json()
+out["wiz_ok"] = c.post("/vehicles/%%d/code" %% vid, data={"ajax": "1", "code": "123456"}).get_json()
+out["wizard_html"] = c.get("/settings").get_data(as_text=True)
 print(json.dumps(out))
 '''
 
@@ -199,6 +207,18 @@ def test_the_web_flow_test_code_page_and_back():
     assert out['short_code_stays'] and out['wrong_code_stays'], out
     assert out['ok_status'] == 302 and out['ok_location'].endswith('/settings#sec-fleet'), out
     assert out['after']['ok'] is True, out['after']
+    # the wizard takes the code in step 3, as JSON
+    assert out['wiz_need'].get('code_needed') is True, out['wiz_need']
+    assert out['wiz_wrong']['ok'] is False and out['wiz_wrong']['error'], out['wiz_wrong']
+    assert out['wiz_ok']['ok'] is True and 'Megane' in out['wiz_ok']['message'], out['wiz_ok']
+    html = out['wizard_html']
+    assert 'id="cwCodeBox"' in html and 'id="cw_code"' in html and "CODE_BRANDS = ['renault', 'dacia']" in html
+    # the code input must not be part of the vehicle form (no name attribute)
+    import re as _re
+    tag = _re.search(r'<input[^>]*id="cw_code"[^>]*>', html).group(0)
+    assert 'name=' not in tag, tag
+    # a placeholder region ("EU") no longer leaves Renault's list empty
+    assert 'function waehleOption' in html and 'neu.value = waehleOption(f.options, eingabe.value)' in html
 
 
 def test_the_image_installs_a_renault_api_that_knows_the_code():

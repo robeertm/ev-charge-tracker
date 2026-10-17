@@ -1842,5 +1842,6 @@
   "renault.code_expired": "Deze bevestiging is verlopen. Gebruik „Nieuwe code sturen” voor een nieuwe code.",
   "renault.code_format": "Voer alleen de code uit de e-mail in (4–10 cijfers of letters).",
   "renault.code_ok": "„{name}” is verbonden — Renault heeft de aanmelding bevestigd.",
-  "wiz.enter_code": "Code invoeren"
+  "wiz.enter_code": "Code invoeren",
+  "wiz.continue_anyway": "Je kunt toch verder met „Volgende” en de inloggegevens later aanpassen."
 }
