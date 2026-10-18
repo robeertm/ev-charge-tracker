@@ -1922,5 +1922,15 @@
   "cert.made_with": "Created with EV Charge Tracker {v} on {d}.",
   "cert.head_left": "Battery report · {n}",
   "cert.pts": "{v:+.1f} pts",
-  "cert.pp": "{v:.0f} percentage points"
+  "cert.pp": "{v:.0f} percentage points",
+  "cert.by_type": "Charged by type",
+  "cert.type_ac": "AC – wallbox and charging post",
+  "cert.type_dc": "DC – fast charger",
+  "cert.type_pv": "PV – solar power",
+  "cert.total": "Total",
+  "cert.th_type": "Type",
+  "cert.th_charges": "Charges",
+  "cert.th_energy": "Energy",
+  "cert.th_share": "Share",
+  "cert.th_avg": "Ø per charge"
 }

@@ -1922,5 +1922,15 @@
   "cert.made_with": "Erstellt mit EV Charge Tracker {v} am {d}.",
   "cert.head_left": "Batteriebericht · {n}",
   "cert.pts": "{v:+.1f} Pkt",
-  "cert.pp": "{v:.0f} %-Punkte"
+  "cert.pp": "{v:.0f} %-Punkte",
+  "cert.by_type": "Geladen nach Art",
+  "cert.type_ac": "AC – Wallbox und Ladesäule",
+  "cert.type_dc": "DC – Schnelllader",
+  "cert.type_pv": "PV – Solarstrom",
+  "cert.total": "Gesamt",
+  "cert.th_type": "Art",
+  "cert.th_charges": "Ladungen",
+  "cert.th_energy": "Energie",
+  "cert.th_share": "Anteil",
+  "cert.th_avg": "Ø je Ladung"
 }

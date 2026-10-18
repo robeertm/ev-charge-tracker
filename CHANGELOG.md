@@ -1,5 +1,14 @@
 # Changelog
 
+## v3.0.170 (2026-10-18)
+
+### Battery certificate: how much was charged by AC and by DC
+
+- The usage section now shows **charged by type**: a share bar (AC / DC / PV)
+  and a table with the number of charges, the energy, its share and the
+  average per charge for AC (wallbox and charging post), DC (fast charger)
+  and PV, plus the total. Until now only the DC share in percent was printed.
+
 ## v3.0.169 (2026-10-18)
 
 ### Battery certificate: tidy rating badges and table alignment

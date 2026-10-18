@@ -1922,5 +1922,15 @@
   "cert.made_with": "Creato con EV Charge Tracker {v} il {d}.",
   "cert.head_left": "Rapporto batteria · {n}",
   "cert.pts": "{v:+.1f} pt",
-  "cert.pp": "{v:.0f} punti percentuali"
+  "cert.pp": "{v:.0f} punti percentuali",
+  "cert.by_type": "Ricarica per tipo",
+  "cert.type_ac": "AC – wallbox e colonnina",
+  "cert.type_dc": "DC – ricarica rapida",
+  "cert.type_pv": "PV – energia solare",
+  "cert.total": "Totale",
+  "cert.th_type": "Tipo",
+  "cert.th_charges": "Ricariche",
+  "cert.th_energy": "Energia",
+  "cert.th_share": "Quota",
+  "cert.th_avg": "Ø per ricarica"
 }

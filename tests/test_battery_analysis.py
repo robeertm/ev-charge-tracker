@@ -303,3 +303,26 @@ def test_a_snapshot_is_one_read_and_a_flat_history_draws_no_empty_map(tmp_path):
         uneven = [dict(rows[1], cell_voltages=cells[:40] + [3.48] + cells[41:]),
                   dict(rows[0], cell_voltages=[4.12] * 40 + [4.08] + [4.12] * 57)]
         assert bc._cell_history_heatmap(uneven, str(tmp_path), 20.0)
+
+
+def test_the_certificate_says_how_much_went_in_by_ac_and_by_dc(app_ctx):
+    from datetime import timedelta
+    from models.database import db, Charge
+    from services import battery_cert_service as bc
+    from services.i18n import set_language
+    if not bc._HAVE_FPDF:
+        pytest.skip('fpdf not installed')
+    pymupdf = pytest.importorskip('pymupdf')
+    set_language('de')
+    v = _seed(app_ctx)
+    for i in range(4):
+        db.session.add(Charge(vehicle_id=v.id, date=date(2025, 3, 1) + timedelta(days=9 * i),
+                              charge_type='DC', soc_from=15, soc_to=80, kwh_loaded=50.0))
+    db.session.commit()
+    beh = bc.compute_battery_health(v.id)['behaviour']
+    assert beh['dc_count'] == 4 and beh['dc_kwh'] == 200.0 and beh['ac_count'] > 0
+    text = '\n'.join(p.get_text() for p in
+                     pymupdf.open(stream=bytes(bc.generate_certificate(v.id)), filetype='pdf'))
+    assert 'Geladen nach Art' in text
+    assert 'DC – Schnelllader' in text and '200 kWh' in text
+    assert 'AC – Wallbox und Ladesäule' in text and 'Gesamt' in text

@@ -547,6 +547,9 @@ def compute_battery_health(vehicle_id):
             'ac_kwh': round(ac_kwh, 1),
             'dc_kwh': round(dc_kwh, 1),
             'pv_kwh': round(pv_kwh, 1),
+            'ac_count': acdc.get('AC', {}).get('count', 0) or 0,
+            'dc_count': acdc.get('DC', {}).get('count', 0) or 0,
+            'pv_count': acdc.get('PV', {}).get('count', 0) or 0,
             'dc_share_pct': dc_share,
             'equiv_full_cycles': equiv_cycles,
             'min_soc': min_soc,
@@ -1921,6 +1924,53 @@ def _t_use(pdf, data, ctx):
          f"{_fmt(_U.dist(beh['total_km'], 0), '{:,} ' + _U.dist_label()).replace(',', '.')}"),
     ]
     pdf.meta_grid(items, cols=3)
+    _charged_by_type(pdf, beh)
+
+
+# AC / DC / PV in the report's palette (teal, ochre, green).
+_TYPE_COLOURS = {'AC': (15, 107, 107), 'DC': (176, 122, 18), 'PV': (46, 125, 79)}
+
+
+def _charged_by_type(pdf, beh):
+    """How much went in by AC, by DC (fast charging) and from PV: a share
+    bar and a table. DC is the figure a buyer asks about."""
+    kinds = [(k, beh.get(k.lower() + '_kwh') or 0, beh.get(k.lower() + '_count') or 0)
+             for k in ('AC', 'DC', 'PV')]
+    kinds = [x for x in kinds if x[1] > 0 or x[2] > 0]
+    total = sum(k for _, k, _ in kinds)
+    if not kinds or total <= 0:
+        return
+    pdf.sub(t('cert.by_type', default='Geladen nach Art'), need=40)
+    # share bar
+    x, y, w, h = pdf.l_margin, pdf.get_y() + 1, pdf.cw, 6
+    pdf.set_font(pdf.f_mono, 'B', 6.8)
+    for typ, kwh, _ in kinds:
+        seg = w * kwh / total
+        if seg <= 0:
+            continue
+        pdf.set_fill_color(*_TYPE_COLOURS[typ])
+        pdf.rect(x, y, seg, h, style='F')
+        label = '%s %.0f %%' % (typ, kwh / total * 100)
+        if pdf.get_string_width(label) + 3 < seg:
+            pdf.set_xy(x, y)
+            pdf.set_text_color(255, 255, 255)
+            pdf.cell(seg, h, label, align='C')
+        x += seg
+    pdf.set_xy(pdf.l_margin, y + h + 3)
+    names = {'AC': t('cert.type_ac', default='AC – Wallbox und Ladesäule'),
+             'DC': t('cert.type_dc', default='DC – Schnelllader'),
+             'PV': t('cert.type_pv', default='PV – Solarstrom')}
+    rows = []
+    for typ, kwh, n in kinds:
+        rows.append([names[typ], str(n), '%.0f kWh' % kwh, '%.1f %%' % (kwh / total * 100),
+                     ('%.1f kWh' % (kwh / n)) if n else '—'])
+    n_all = sum(n for _, _, n in kinds)
+    rows.append([t('cert.total', default='Gesamt'), str(n_all), '%.0f kWh' % total, '100.0 %',
+                 ('%.1f kWh' % (total / n_all)) if n_all else '—'])
+    pdf.table([t('cert.th_type', default='Art'), t('cert.th_charges', default='Ladungen'),
+               t('cert.th_energy', default='Energie'), t('cert.th_share', default='Anteil'),
+               t('cert.th_avg', default='Ø je Ladung')],
+              rows, [34, 14, 18, 14, 20], ['L', 'R', 'R', 'R', 'R'])
 
 
 def _t_basis(pdf, data, ctx):

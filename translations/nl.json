@@ -1922,5 +1922,15 @@
   "cert.made_with": "Gemaakt met EV Charge Tracker {v} op {d}.",
   "cert.head_left": "Batterijrapport · {n}",
   "cert.pts": "{v:+.1f} ptn",
-  "cert.pp": "{v:.0f} procentpunt"
+  "cert.pp": "{v:.0f} procentpunt",
+  "cert.by_type": "Geladen per soort",
+  "cert.type_ac": "AC – wallbox en laadpaal",
+  "cert.type_dc": "DC – snellader",
+  "cert.type_pv": "PV – zonnestroom",
+  "cert.total": "Totaal",
+  "cert.th_type": "Soort",
+  "cert.th_charges": "Laadbeurten",
+  "cert.th_energy": "Energie",
+  "cert.th_share": "Aandeel",
+  "cert.th_avg": "Ø per laadbeurt"
 }
