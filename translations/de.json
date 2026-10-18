@@ -1524,7 +1524,7 @@
   "cert.buffer_left_val": "{k:.1f} kWh  (etwa {u:.0f} % des Puffers verbraucht)",
   "cert.buffer_spent_note": "Das angezeigte Fenster ist stabil, das BMS zählt aber bereits Alterung: sie wurde mit dem Puffer ausgeglichen. Ist er aufgebraucht, sinkt die nutzbare Kapazität ab jetzt mit jeder weiteren Alterung sichtbar.",
   "cert.obdcap_sec": "Kapazität aus den BMS-Zählern",
-  "cert.obdcap_val": "{v}  (BMS {a:.0f} -> {b:.0f} %, {ah} Ah)",
+  "cert.obdcap_val": "{v}  (BMS {a:g} -> {b:g} %, {ah} Ah)",
   "cert.obdcap_howto": "Noch keine Messung. So geht sie ohne Labor: einmal direkt nach dem Laden auf 100 % auslesen, dann fahren ohne zu laden und bei etwa 20 % noch einmal auslesen. Das BMS zählt dazwischen jede entnommene Amperestunde – geteilt durch die Ladestandspunkte ergibt das die Kapazität, ohne jede Annahme über Ladeverluste.",
   "cert.bufview_sec": "Der Puffer von außen: Anzeige gegen BMS",
   "cert.bufview_row": "Anzeige {d:.0f} %  /  BMS {b:.1f} %  (Abstand {g:+.1f})",
@@ -1846,5 +1846,8 @@
   "renault.code_format": "Bitte nur den Code aus der E-Mail eingeben (4–10 Ziffern oder Buchstaben).",
   "renault.code_ok": "„{name}“ ist verbunden — Renault hat die Anmeldung bestätigt.",
   "wiz.enter_code": "Code eingeben",
-  "wiz.continue_anyway": "Du kannst trotzdem mit „Weiter“ fortfahren und die Zugangsdaten später korrigieren."
+  "wiz.continue_anyway": "Du kannst trotzdem mit „Weiter“ fortfahren und die Zugangsdaten später korrigieren.",
+  "obd.s_cum_charge_kwh": "Kumuliert geladen (Energie)",
+  "obd.s_cum_discharge_kwh": "Kumuliert entladen (Energie)",
+  "cert.obdcap_note": "Das BMS zählt Amperestunden und Kilowattstunden genau, seinen Ladestand schätzt es. Ein Punkt Abweichung am Anfang oder Ende verschiebt das Ergebnis um rund 1,5 %. Belastbar wird es erst über mehrere solche Fahrten."
 }

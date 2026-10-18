@@ -372,6 +372,8 @@
       'aux_battery_v': t('obd.s_aux', default='12V-Batterie'),
       'cumulative_charge_ah': t('obd.s_cum_charge', default='Kumuliert geladen'),
       'cumulative_discharge_ah': t('obd.s_cum_discharge', default='Kumuliert entladen'),
+      'cumulative_charge_kwh': t('obd.s_cum_charge_kwh', default='Kumuliert geladen (Energie)'),
+      'cumulative_discharge_kwh': t('obd.s_cum_discharge_kwh', default='Kumuliert entladen (Energie)'),
     }|tojson }}
   };
 
@@ -1100,6 +1102,8 @@
       { k: 'aux_battery_v', unit: 'V', digits: 1, min: 11, max: 15, tone: 'primary' },
       { k: 'cumulative_charge_ah', unit: 'Ah', digits: 1, tone: 'plain' },
       { k: 'cumulative_discharge_ah', unit: 'Ah', digits: 1, tone: 'plain' },
+      { k: 'cumulative_charge_kwh', unit: 'kWh', digits: 1, tone: 'plain' },
+      { k: 'cumulative_discharge_kwh', unit: 'kWh', digits: 1, tone: 'plain' },
     ]},
   ];
 

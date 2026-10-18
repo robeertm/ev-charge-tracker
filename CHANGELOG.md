@@ -1,5 +1,29 @@
 # Changelog
 
+## v3.0.167 (2026-10-18)
+
+### OBD (Kia / Hyundai): the battery counters were read from the wrong bytes
+
+- The Kia / Hyundai profile (Kona, e-Niro, Soul — BMS 7E4) stored the battery's
+  cumulative **energy** counters (kWh) as its cumulative **charge** counters
+  (Ah). The real Ah counters sit eight bytes earlier. Found on a real drive:
+  216 km from BMS 94.5 % to 25.5 % without charging moved the "Ah" counter by
+  49 — that is a 69 Ah, 26 kWh pack on a car with 180 Ah and 64 kWh. The
+  battery certificate printed exactly that under "Capacity from the BMS
+  counters".
+- The offsets are fixed, and the energy counters get their own fields (also in
+  the live view). Reads you already saved are decoded again from their stored
+  raw frames on the first start — nothing to do.
+- The capacity from two reads now takes kWh straight from the battery's own
+  energy counters instead of Ah × mean pack voltage.
+- A snapshot saved right after a read no longer counts as a second
+  measurement of the same drive.
+- The certificate shows the end date of a measurement that spans several days
+  and says that the battery's state of charge is an estimate, so one
+  measurement is not yet a verdict.
+- README: a note asking for help — please open an issue when your car does not
+  work as it should.
+
 ## v3.0.166 (2026-10-18)
 
 ### Renault / Dacia: partial data instead of a failure, and no more guessing the reason

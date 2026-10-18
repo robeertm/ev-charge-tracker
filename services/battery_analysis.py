@@ -230,11 +230,18 @@ def obd_capacity(readings, nominal_cell_v=None, cells_series=None,
     """Capacity from the BMS's own Ah counters between two reads.
 
     ``readings`` are dicts (timestamp, soc_bms_pct, cumulative_charge_ah,
-    cumulative_discharge_ah, pack_voltage_v) — oldest first or any order.
+    cumulative_discharge_ah, pack_voltage_v, and where the BMS has them
+    cumulative_charge_kwh / cumulative_discharge_kwh) — any order.
     For every pair at least ``min_dsoc`` BMS-SoC points apart and at most
     ``max_gap_days`` apart: net Ah out of the pack ÷ SoC points × 100.
     No charging loss, no wall meter, no assumption — the BMS counted it.
-    kWh uses the mean of the two pack voltages (or nominal × cells).
+    kWh comes from the BMS's own energy counters when both reads carry
+    them (v3.0.167), else from the mean of the two pack voltages (or
+    nominal × cells).
+
+    Reads of the same moment (a snapshot saved right after a read, same
+    BMS SoC, within the hour) count once — otherwise one drive shows up as
+    four measurements.
     Returns the list of measurements, newest pair last.
     """
     rs = [r for r in readings
@@ -247,6 +254,14 @@ def obd_capacity(readings, nominal_cell_v=None, cells_series=None,
         t = r['timestamp']
         return datetime.fromisoformat(t[:26]) if isinstance(t, str) else t
     rs.sort(key=ts)
+    einmal = []
+    for r in rs:
+        p = einmal[-1] if einmal else None
+        if (p and p['soc_bms_pct'] == r['soc_bms_pct']
+                and (ts(r) - ts(p)).total_seconds() <= 3600):
+            continue
+        einmal.append(r)
+    rs = einmal
     raus = []
     for i in range(len(rs)):
         for j in range(i + 1, len(rs)):
@@ -261,6 +276,13 @@ def obd_capacity(readings, nominal_cell_v=None, cells_series=None,
             if ah_out == 0 or (ah_out > 0) != (dsoc > 0):
                 continue                  # counters and SoC disagree on direction
             cap_ah = ah_out / dsoc * 100.0
+            kwh_out = None
+            if all(x.get(k) is not None for x in (a, b)
+                   for k in ('cumulative_charge_kwh', 'cumulative_discharge_kwh')):
+                kwh_out = ((b['cumulative_discharge_kwh'] - a['cumulative_discharge_kwh'])
+                           - (b['cumulative_charge_kwh'] - a['cumulative_charge_kwh']))
+                if kwh_out == 0 or (kwh_out > 0) != (dsoc > 0):
+                    kwh_out = None
             volts = [v for v in (a.get('pack_voltage_v'), b.get('pack_voltage_v')) if v]
             if volts:
                 pack_v = sum(volts) / len(volts)
@@ -268,13 +290,19 @@ def obd_capacity(readings, nominal_cell_v=None, cells_series=None,
                 pack_v = nominal_cell_v * cells_series
             else:
                 pack_v = None
+            if kwh_out is not None:
+                cap_kwh = round(kwh_out / dsoc * 100.0, 1)
+            else:
+                cap_kwh = round(cap_ah * pack_v / 1000.0, 1) if pack_v else None
             raus.append({
                 'from': ts(a).isoformat(timespec='minutes'),
                 'to': ts(b).isoformat(timespec='minutes'),
                 'soc_from': a['soc_bms_pct'], 'soc_to': b['soc_bms_pct'],
                 'ah': round(abs(ah_out), 1),
+                'kwh': round(abs(kwh_out), 1) if kwh_out is not None else None,
                 'capacity_ah': round(cap_ah, 1),
-                'capacity_kwh': round(cap_ah * pack_v / 1000.0, 1) if pack_v else None,
+                'capacity_kwh': cap_kwh,
+                'kwh_counted': kwh_out is not None,
             })
     return raus
 

@@ -1524,7 +1524,7 @@
   "cert.buffer_left_val": "{k:.1f} kWh  (ongeveer {u:.0f} % van de buffer verbruikt)",
   "cert.buffer_spent_note": "Het weergegeven venster is stabiel, maar het BMS telt al veroudering: die is met de buffer gecompenseerd. Is de buffer op, dan daalt de bruikbare capaciteit voortaan zichtbaar met elke verdere veroudering.",
   "cert.obdcap_sec": "Capaciteit uit de BMS-tellers",
-  "cert.obdcap_val": "{v}  (BMS {a:.0f} -> {b:.0f} %, {ah} Ah)",
+  "cert.obdcap_val": "{v}  (BMS {a:g} -> {b:g} %, {ah} Ah)",
   "cert.obdcap_howto": "Nog geen meting. Zo gaat het zonder laboratorium: één keer uitlezen direct na het laden tot 100 %, dan rijden zonder te laden en bij ongeveer 20 % opnieuw uitlezen. Daartussen telt het BMS elke onttrokken ampère-uur – gedeeld door de laadpunten is dat de capaciteit, zonder enige aanname over laadverliezen.",
   "cert.bufview_sec": "De buffer van buitenaf: weergave tegenover BMS",
   "cert.bufview_row": "weergave {d:.0f} %  /  BMS {b:.1f} %  (verschil {g:+.1f})",
@@ -1846,5 +1846,8 @@
   "renault.code_format": "Voer alleen de code uit de e-mail in (4–10 cijfers of letters).",
   "renault.code_ok": "„{name}” is verbonden — Renault heeft de aanmelding bevestigd.",
   "wiz.enter_code": "Code invoeren",
-  "wiz.continue_anyway": "Je kunt toch verder met „Volgende” en de inloggegevens later aanpassen."
+  "wiz.continue_anyway": "Je kunt toch verder met „Volgende” en de inloggegevens later aanpassen.",
+  "obd.s_cum_charge_kwh": "Cumulatief geladen (energie)",
+  "obd.s_cum_discharge_kwh": "Cumulatief ontladen (energie)",
+  "cert.obdcap_note": "Het BMS telt ampère-uren en kilowatturen nauwkeurig, maar zijn laadtoestand is een schatting. Eén punt verschil aan het begin of eind verschuift het resultaat met ongeveer 1,5 %. Pas over meerdere van zulke ritten wordt het betrouwbaar."
 }

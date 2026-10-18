@@ -1524,7 +1524,7 @@
   "cert.buffer_left_val": "{k:.1f} kWh  (environ {u:.0f} % de la réserve consommée)",
   "cert.buffer_spent_note": "La fenêtre affichée est stable, mais le BMS compte déjà du vieillissement : il a été compensé par la réserve. Une fois celle-ci épuisée, la capacité utilisable baissera visiblement à chaque vieillissement supplémentaire.",
   "cert.obdcap_sec": "Capacité d'après les compteurs du BMS",
-  "cert.obdcap_val": "{v}  (BMS {a:.0f} -> {b:.0f} %, {ah} Ah)",
+  "cert.obdcap_val": "{v}  (BMS {a:g} -> {b:g} %, {ah} Ah)",
   "cert.obdcap_howto": "Pas encore de mesure. Voici comment sans laboratoire : une lecture juste après une charge à 100 %, puis rouler sans recharger et relire vers 20 %. Entre les deux, le BMS compte chaque ampère-heure prélevé – divisé par les points de charge, cela donne la capacité, sans aucune hypothèse sur les pertes de charge.",
   "cert.bufview_sec": "La réserve vue de l'extérieur : affichage contre BMS",
   "cert.bufview_row": "affichage {d:.0f} %  /  BMS {b:.1f} %  (écart {g:+.1f})",
@@ -1846,5 +1846,8 @@
   "renault.code_format": "Saisissez uniquement le code de l’e-mail (4 à 10 chiffres ou lettres).",
   "renault.code_ok": "« {name} » est connecté — Renault a confirmé la connexion.",
   "wiz.enter_code": "Saisir le code",
-  "wiz.continue_anyway": "Vous pouvez quand même continuer avec « Suivant » et corriger les identifiants plus tard."
+  "wiz.continue_anyway": "Vous pouvez quand même continuer avec « Suivant » et corriger les identifiants plus tard.",
+  "obd.s_cum_charge_kwh": "Charge cumulée (énergie)",
+  "obd.s_cum_discharge_kwh": "Décharge cumulée (énergie)",
+  "cert.obdcap_note": "Le BMS compte précisément les ampères-heures et les kilowattheures, mais son état de charge est une estimation. Un point d'écart au début ou à la fin décale le résultat d'environ 1,5 %. Il ne devient fiable qu'avec plusieurs trajets de ce type."
 }

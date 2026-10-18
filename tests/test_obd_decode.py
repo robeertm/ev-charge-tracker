@@ -56,8 +56,11 @@ def _mk_220101():
     r[26] = 205                     # cell max 205 * 0.02 = 4.10 V
     r[28] = 200                     # cell min 200 * 0.02 = 4.00 V
     r[32] = 138                     # aux 12V 138 * 0.1 = 13.8 V
-    r[41:45] = [0, 0, 0x27, 0x10]   # cum charge 10000 * 0.1 = 1000.0 Ah
-    r[45:49] = [0, 0, 0x13, 0x88]   # cum discharge 5000 * 0.1 = 500.0 Ah
+    # v3.0.167: Ah charged / Ah discharged / kWh charged / kWh discharged.
+    r[33:37] = [0, 0, 0x27, 0x10]   # cum charge 10000 * 0.1 = 1000.0 Ah
+    r[37:41] = [0, 0, 0x13, 0x88]   # cum discharge 5000 * 0.1 = 500.0 Ah
+    r[41:45] = [0, 0, 0x0E, 0x10]   # cum charge 3600 * 0.1 = 360.0 kWh
+    r[45:49] = [0, 0, 0x07, 0x08]   # cum discharge 1800 * 0.1 = 180.0 kWh
     return r
 
 
@@ -125,6 +128,9 @@ def main():
     check('soh 98.5', abs(d['soh_pct'] - 98.5) < 0.01)
     check('soc display 79.0', abs(d['soc_display_pct'] - 79.0) < 0.01)
     check('cum charge 1000.0', abs(d['cumulative_charge_ah'] - 1000.0) < 0.01)
+    check('cum discharge 500.0', abs(d['cumulative_discharge_ah'] - 500.0) < 0.01)
+    check('cum charge 360.0 kWh', abs(d['cumulative_charge_kwh'] - 360.0) < 0.01)
+    check('cum discharge 180.0 kWh', abs(d['cumulative_discharge_kwh'] - 180.0) < 0.01)
     # Derived live power = pack V × pack A / 1000 = 360.0 × -15.0 / 1000 = -5.4 kW
     check('power_kw -5.4', abs(d['power_kw'] + 5.4) < 0.01)
 
@@ -289,8 +295,14 @@ def main():
     check('real cell max 3.84', abs(rd['cell_max_v'] - 3.84) < 0.001)
     check('real cell delta 20 mV', abs(rd['cell_delta_mv'] - 20.0) < 0.5)
     check('real no bogus 5.1V cell', max(rd['cell_voltages']) < 4.3)
-    check('real cum charge 20993.6', abs(rd['cumulative_charge_ah'] - 20993.6) < 0.1)
-    check('real cum discharge 20028.8', abs(rd['cumulative_discharge_ah'] - 20028.8) < 0.1)
+    # v3.0.167: 20993.6 / 20028.8 are the ENERGY counters (kWh); the Ah
+    # counters sit eight bytes earlier. kWh / Ah must be a pack voltage.
+    check('real cum charge 56333.9 Ah', abs(rd['cumulative_charge_ah'] - 56333.9) < 0.1)
+    check('real cum discharge 55665.8 Ah', abs(rd['cumulative_discharge_ah'] - 55665.8) < 0.1)
+    check('real cum charge 20993.6 kWh', abs(rd['cumulative_charge_kwh'] - 20993.6) < 0.1)
+    check('real cum discharge 20028.8 kWh', abs(rd['cumulative_discharge_kwh'] - 20028.8) < 0.1)
+    volt = rd['cumulative_discharge_kwh'] * 1000 / rd['cumulative_discharge_ah']
+    check('real kWh/Ah is a pack voltage (300-420 V)', 300 < volt < 420)
 
     # ── little-endian + (raw-k)*scale + multi-byte/offset cells ─────────
     check('unsigned 2-byte LE', od._u([0x10, 0x27], 0, 2, le=True) == 0x2710)

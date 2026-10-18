@@ -295,6 +295,8 @@ def _obd_reads(vehicle_id):
             'cell_max_v': row.cell_max_v, 'cell_min_v': row.cell_min_v,
             'cumulative_charge_ah': row.cumulative_charge_ah,
             'cumulative_discharge_ah': row.cumulative_discharge_ah,
+            'cumulative_charge_kwh': getattr(row, 'cumulative_charge_kwh', None),
+            'cumulative_discharge_kwh': getattr(row, 'cumulative_discharge_kwh', None),
             'cell_voltages': cells, 'cell_temps': temps,
         })
     return raus
@@ -1101,10 +1103,17 @@ def _page_capacity(pdf, data, tmp_dir):
         for m in obd_cap[-4:]:
             val = '%.1f Ah' % m['capacity_ah']
             if m.get('capacity_kwh'):
-                val += ' / ~%.1f kWh' % m['capacity_kwh']
-            pdf.kv('%s -> %s' % (_short_ts(m['from']), _short_ts(m['to'])[-5:]),
-                   t('cert.obdcap_val', default='{v}  (BMS {a:.0f} -> {b:.0f} %, {ah} Ah)',
+                val += (' / %.1f kWh' if m.get('kwh_counted') else ' / ~%.1f kWh') % m['capacity_kwh']
+            bis = _short_ts(m['to'])
+            if m['from'][:10] == m['to'][:10]:
+                bis = bis[-5:]           # same day: the time is enough
+            pdf.kv('%s -> %s' % (_short_ts(m['from']), bis),
+                   t('cert.obdcap_val', default='{v}  (BMS {a:g} -> {b:g} %, {ah} Ah)',
                      v=val, a=m['soc_from'], b=m['soc_to'], ah=m['ah']), lw=48)
+        _para(pdf, t('cert.obdcap_note',
+                     default='Das BMS zaehlt Amperestunden und Kilowattstunden genau, seinen Ladestand '
+                             'schaetzt es. Ein Punkt Abweichung am Anfang oder Ende verschiebt das Ergebnis '
+                             'um rund 1,5 %. Belastbar wird es erst ueber mehrere solche Fahrten.'))
     else:
         _para(pdf, t('cert.obdcap_howto',
                      default='Noch keine Messung. So geht sie ohne Labor: einmal direkt nach dem Laden auf 100 % '
@@ -1454,3 +1463,32 @@ def generate_certificate(vehicle_id):
         pass
 
     return pdf.output()
+
+
+def obd_zaehler_neu_lesen():
+    """Decode the four BMS counters of every stored Kia/Hyundai read again
+    from its raw frames (v3.0.167). Returns how many reads changed.
+
+    Only the counter columns are touched; a read whose frames no longer
+    decode keeps what it had."""
+    import json as _json
+    from models.database import db, ObdReading
+    from services.vehicle.obd_decode import decode
+    keys = ('cumulative_charge_ah', 'cumulative_discharge_ah',
+            'cumulative_charge_kwh', 'cumulative_discharge_kwh')
+    n = 0
+    for r in ObdReading.query.filter_by(profile='kia_hyundai_ext').all():
+        try:
+            frames = _json.loads(r.raw_json) if r.raw_json else None
+            d = decode(r.profile, frames) if frames else None
+        except Exception:
+            d = None
+        if not d or d.get('error') or d.get('cumulative_charge_ah') is None:
+            continue
+        neu = {k: d.get(k) for k in keys}
+        if any(getattr(r, k) != v for k, v in neu.items()):
+            for k, v in neu.items():
+                setattr(r, k, v)
+            n += 1
+    db.session.commit()
+    return n

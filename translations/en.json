@@ -1524,7 +1524,7 @@
   "cert.buffer_left_val": "{k:.1f} kWh  (about {u:.0f} % of the buffer spent)",
   "cert.buffer_spent_note": "The displayed window is stable, but the BMS already counts ageing: it has been offset with the buffer. Once the buffer is used up, the usable capacity will fall visibly with every further bit of ageing.",
   "cert.obdcap_sec": "Capacity from the BMS counters",
-  "cert.obdcap_val": "{v}  (BMS {a:.0f} -> {b:.0f} %, {ah} Ah)",
+  "cert.obdcap_val": "{v}  (BMS {a:g} -> {b:g} %, {ah} Ah)",
   "cert.obdcap_howto": "No measurement yet. This is how it works without a lab: read once right after charging to 100 %, then drive without charging and read again at about 20 %. In between the BMS counts every ampere-hour taken out – divided by the SoC points that is the capacity, without any assumption about charging losses.",
   "cert.bufview_sec": "The buffer from the outside: display versus BMS",
   "cert.bufview_row": "display {d:.0f} %  /  BMS {b:.1f} %  (gap {g:+.1f})",
@@ -1846,5 +1846,8 @@
   "renault.code_format": "Please enter just the code from the e-mail (4–10 digits or letters).",
   "renault.code_ok": "“{name}” is connected — Renault confirmed the sign-in.",
   "wiz.enter_code": "Enter code",
-  "wiz.continue_anyway": "You can still continue with “Next” and correct the sign-in details later."
+  "wiz.continue_anyway": "You can still continue with “Next” and correct the sign-in details later.",
+  "obd.s_cum_charge_kwh": "Cumulative charged (energy)",
+  "obd.s_cum_discharge_kwh": "Cumulative discharged (energy)",
+  "cert.obdcap_note": "The BMS counts amp-hours and kilowatt-hours precisely, but its state of charge is an estimate. One point off at the start or end shifts the result by about 1.5 %. It becomes reliable only over several such drives."
 }

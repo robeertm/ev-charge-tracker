@@ -1,5 +1,15 @@
 # EV Charge Tracker
 
+> [!NOTE]
+> **Help wanted: not every car model is fully supported yet.** The tracker talks
+> to 15 brands, but each one can only be tested on the cars at hand. If something
+> does not work for yours — the connection test fails, values are missing, numbers
+> look wrong — please [open an issue](https://github.com/robeertm/ev-charge-tracker/issues/new)
+> and paste the error message together with your brand, model, region and the
+> app version (bottom of every page). Log lines help too — remove your e-mail
+> address and passwords first.
+> Every report makes the app better for everyone who drives that car.
+
 > **Self-hosted dashboard for tracking your electric vehicle charges** — costs, kWh, CO2, recuperation, charging losses, live vehicle status, a self-generated **battery-health certificate**, and in-browser **OBD/ELM327** cell readout. Multi-vehicle / fleet support, connects to 15 EV brands via API. Available in 6 languages.
 
 [![Latest Release](https://img.shields.io/github/v/release/robeertm/ev-charge-tracker)](https://github.com/robeertm/ev-charge-tracker/releases)

@@ -219,6 +219,12 @@ def create_app(config_class=Config):
             if col_name not in sync_columns:
                 db.session.execute(text(f'ALTER TABLE vehicle_syncs ADD COLUMN {col_name} {col_type}'))
 
+        # v3.0.167: the BMS energy counters get their own columns.
+        _obd_columns = [c['name'] for c in inspector.get_columns('obd_readings')]
+        for col_name in ('cumulative_charge_kwh', 'cumulative_discharge_kwh'):
+            if col_name not in _obd_columns:
+                db.session.execute(text(f'ALTER TABLE obd_readings ADD COLUMN {col_name} REAL'))
+
         # Migrate: add location columns to charges (for Ladestationen-Memory)
         if 'location_lat' not in columns:
             db.session.execute(text('ALTER TABLE charges ADD COLUMN location_lat REAL'))
@@ -713,6 +719,21 @@ def create_app(config_class=Config):
                 notify_service._state_write(_zustand)
         except Exception as _e:
             logger.debug(f"version notice not sent: {_e}")
+
+        # v3.0.167: the Kia/Hyundai profile stored the kWh counters as Ah.
+        # The raw frames of every read are kept, so the counters are decoded
+        # again from them — no guessing, no scaling of stored numbers.
+        if AppConfig.get('v3_0_167_obd_zaehler_neu', '') != 'done':
+            try:
+                from services.battery_cert_service import obd_zaehler_neu_lesen
+                _n = obd_zaehler_neu_lesen()
+                AppConfig.set('v3_0_167_obd_zaehler_neu', 'done')
+                if _n:
+                    logger.info("v3.0.167: re-decoded the BMS counters of %d OBD read(s) "
+                                "from their raw frames" % _n)
+            except Exception as _e:
+                db.session.rollback()
+                logger.warning(f"v3.0.167 OBD counter re-decode failed: {_e}")
 
         if AppConfig.get('regen_scale_fix_v1', '') != 'done':
             db.session.execute(text(
@@ -3515,6 +3536,8 @@ def register_routes(app):
             temp_avg_c=decoded.get('temp_avg_c'),
             cumulative_charge_ah=decoded.get('cumulative_charge_ah'),
             cumulative_discharge_ah=decoded.get('cumulative_discharge_ah'),
+            cumulative_charge_kwh=decoded.get('cumulative_charge_kwh'),
+            cumulative_discharge_kwh=decoded.get('cumulative_discharge_kwh'),
             # v3.0.158: a profile that reads the odometer (XPENG 220101)
             # fills it when the form left it empty.
             odometer_km=_int(data.get('odometer_km') or decoded.get('odometer_km')),

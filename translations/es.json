@@ -1524,7 +1524,7 @@
   "cert.buffer_left_val": "{k:.1f} kWh  (aprox. {u:.0f} % de la reserva gastada)",
   "cert.buffer_spent_note": "La ventana mostrada es estable, pero el BMS ya cuenta envejecimiento: se ha compensado con la reserva. Una vez agotada, la capacidad utilizable bajará visiblemente con cada envejecimiento adicional.",
   "cert.obdcap_sec": "Capacidad según los contadores del BMS",
-  "cert.obdcap_val": "{v}  (BMS {a:.0f} -> {b:.0f} %, {ah} Ah)",
+  "cert.obdcap_val": "{v}  (BMS {a:g} -> {b:g} %, {ah} Ah)",
   "cert.obdcap_howto": "Aún no hay medición. Así se hace sin laboratorio: leer una vez justo después de cargar al 100 %, conducir sin cargar y volver a leer a un 20 % aprox. Entre medias el BMS cuenta cada amperio-hora extraído; dividido por los puntos de carga da la capacidad, sin suponer nada sobre las pérdidas de carga.",
   "cert.bufview_sec": "La reserva desde fuera: indicación frente a BMS",
   "cert.bufview_row": "indicación {d:.0f} %  /  BMS {b:.1f} %  (diferencia {g:+.1f})",
@@ -1846,5 +1846,8 @@
   "renault.code_format": "Introduce solo el código del correo (4–10 dígitos o letras).",
   "renault.code_ok": "«{name}» está conectado: Renault ha confirmado el inicio de sesión.",
   "wiz.enter_code": "Introducir código",
-  "wiz.continue_anyway": "Puedes continuar igualmente con «Siguiente» y corregir los datos de acceso más tarde."
+  "wiz.continue_anyway": "Puedes continuar igualmente con «Siguiente» y corregir los datos de acceso más tarde.",
+  "obd.s_cum_charge_kwh": "Carga acumulada (energía)",
+  "obd.s_cum_discharge_kwh": "Descarga acumulada (energía)",
+  "cert.obdcap_note": "El BMS cuenta con precisión los amperios-hora y los kilovatios-hora, pero su estado de carga es una estimación. Un punto de diferencia al inicio o al final desplaza el resultado en torno a un 1,5 %. Solo es fiable tras varios trayectos así."
 }

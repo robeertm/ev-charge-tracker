@@ -305,8 +305,21 @@ PROFILES = {
             'cell_max_v':      {'pid': '220101', 'byte': 26, 'len': 1, 'scale': 0.02},
             'cell_min_v':      {'pid': '220101', 'byte': 28, 'len': 1, 'scale': 0.02},
             'aux_battery_v':   {'pid': '220101', 'byte': 32, 'len': 1, 'scale': 0.1},
-            'cumulative_charge_ah':    {'pid': '220101', 'byte': 41, 'len': 4, 'scale': 0.1},
-            'cumulative_discharge_ah': {'pid': '220101', 'byte': 45, 'len': 4, 'scale': 0.1},
+            # 🔴 v3.0.167: four 4-byte counters in a row — Ah charged (33),
+            # Ah discharged (37), kWh charged (41), kWh discharged (45),
+            # then the operating time in seconds (49). Until 3.0.166 the
+            # "Ah" fields read 41/45, i.e. the ENERGY counters. Verified on
+            # two reads of a Kia Niro EV (2026-10-15 at BMS 94.5 % and
+            # 2026-10-18 at 25.5 % after 216 km, no charge between):
+            # kWh/Ah over the car's life = 20763.4/57702.1 = 360 V and
+            # 21780.9/58448.0 = 373 V — a pack voltage, as it must be; on
+            # the drive 49.1 kWh / 135.3 Ah = 363 V, between the 405 V at
+            # the start and the 345 V at the end. Read as Ah, the old
+            # fields made a 69 Ah pack out of a 180 Ah one.
+            'cumulative_charge_ah':     {'pid': '220101', 'byte': 33, 'len': 4, 'scale': 0.1},
+            'cumulative_discharge_ah':  {'pid': '220101', 'byte': 37, 'len': 4, 'scale': 0.1},
+            'cumulative_charge_kwh':    {'pid': '220101', 'byte': 41, 'len': 4, 'scale': 0.1},
+            'cumulative_discharge_kwh': {'pid': '220101', 'byte': 45, 'len': 4, 'scale': 0.1},
             # SoH + display SoC live in 220105 (same +1 shift).
             'soh_pct':         {'pid': '220105', 'byte': 28, 'len': 2, 'scale': 0.1},
             'soc_display_pct': {'pid': '220105', 'byte': 34, 'len': 1, 'scale': 0.5},

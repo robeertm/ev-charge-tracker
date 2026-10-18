@@ -764,6 +764,10 @@ class ObdReading(db.Model):
     # Optional counters some BMS expose
     cumulative_charge_ah = db.Column(db.Float)
     cumulative_discharge_ah = db.Column(db.Float)
+    # v3.0.167: the BMS energy counters. Until 3.0.166 the Kia/Hyundai
+    # profile wrote THESE into the *_ah columns above.
+    cumulative_charge_kwh = db.Column(db.Float)
+    cumulative_discharge_kwh = db.Column(db.Float)
     odometer_km = db.Column(db.Integer)
 
     cell_voltages_json = db.Column(db.Text)  # JSON list[float] volts
@@ -798,6 +802,10 @@ class ObdReading(db.Model):
             'temp_max_c': self.temp_max_c,
             'temp_avg_c': self.temp_avg_c,
             'odometer_km': self.odometer_km,
+            'cumulative_charge_ah': self.cumulative_charge_ah,
+            'cumulative_discharge_ah': self.cumulative_discharge_ah,
+            'cumulative_charge_kwh': self.cumulative_charge_kwh,
+            'cumulative_discharge_kwh': self.cumulative_discharge_kwh,
             'cell_voltages': _arr(self.cell_voltages_json),
             'cell_temps': _arr(self.cell_temps_json),
         }
