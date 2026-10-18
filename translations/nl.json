@@ -4,6 +4,7 @@
   "cert.id": "Certificaatnr.",
   "cert.generated": "Aangemaakt",
   "cert.footer": "Geen officieel certificaat · EV Charge Tracker · {u}",
+  "cert.footer_ref": "Rapportnr. {id}",
   "cert.na": "niet opgegeven",
   "cert.of": "van",
   "cert.grade_a": "Uitstekend",

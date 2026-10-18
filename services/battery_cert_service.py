@@ -887,6 +887,7 @@ try:
             super().__init__(format='A4')
             self.set_margins(18, 16, 18)
             self.head_left, self.head_right, self.ref = head_left, head_right, ref
+            self.total = None       # page count, known on the second pass
             d = _font_dir()
             self.uni = False
             if d:
@@ -939,19 +940,29 @@ try:
             self.set_y(18)
 
         def footer(self):
-            self.set_y(-13)
+            # Two rows, each measured: the report number carries the odometer
+            # and grows with it — fixed thirds let it run into the middle text.
+            self.set_y(-15)
             self.set_draw_color(*_RULE)
             self.set_line_width(0.2)
             self.line(self.l_margin, self.get_y() - 1, self.w - self.r_margin, self.get_y() - 1)
-            self.set_font(self.f_mono, '', 6.3)
             self.color(_MUTED)
-            third = self.cw / 3
-            self.cell(third, 5, self._clean(self.ref))
-            self.cell(third, 5, self._clean(t(
-                'cert.footer', default='Kein offizielles Zertifikat · EV Charge Tracker · {u}',
-                u=APP_URL.split('://', 1)[1])), align='C')
-            self.cell(third, 5, self._clean(t('cert.page_n', default='Seite {p} von {n}',
-                                              p=self.page_no(), n='{nb}')), align='R')
+            note = self._clean(t('cert.footer', default='Kein offizielles Zertifikat · EV Charge Tracker · {u}',
+                                 u=APP_URL.split('://', 1)[1]))
+            # fpdf aligns '{nb}' by the width of the placeholder, not of the
+            # number put in later — right-aligned it stood three digits short
+            page = self._clean(t('cert.page_n', default='Seite {p} von {n}', p=self.page_no(),
+                                 n=self.total or '{nb}'))
+            ref = self._clean(t('cert.footer_ref', default='Bericht-Nr. {id}', id=self.ref)) if self.ref else ''
+            size = 6.3
+            self.set_font(self.f_mono, '', size)
+            while size > 4.5 and self.get_string_width(note) + self.get_string_width(page) + 6 > self.cw:
+                size -= 0.2
+                self.set_font(self.f_mono, '', size)
+            page_w = self.get_string_width(page) + 2
+            self.cell(self.cw - page_w, 3.6, note)
+            self.cell(page_w, 3.6, page, align='R', new_x='LMARGIN', new_y='NEXT')
+            self.cell(self.cw, 3.6, ref)
 
         # ── type
         def eyebrow(self, text, w=0):
@@ -2106,11 +2117,21 @@ def generate_certificate(vehicle_id):
     ctx['num'] = {name: i + 1 for i, (name, _) in enumerate(order)}
 
     veh = data['vehicle']
-    pdf = _CertPDF(head_left=t('cert.head_left', default='Batteriebericht · {n}', n=veh['name'] or ''),
-                   head_right=data['generated_at'].strftime('%d.%m.%Y'),
-                   ref=data['cert_id'])
-    pdf.set_auto_page_break(auto=True, margin=18)
-    _place_topics(pdf, [fn for _, fn in order], data, ctx)
+
+    def build(total=None):
+        pdf = _CertPDF(head_left=t('cert.head_left', default='Batteriebericht · {n}', n=veh['name'] or ''),
+                       head_right=data['generated_at'].strftime('%d.%m.%Y'),
+                       ref=data['cert_id'])
+        pdf.total = total
+        pdf.set_auto_page_break(auto=True, margin=18)
+        _place_topics(pdf, [fn for _, fn in order], data, ctx)
+        return pdf
+
+    # Twice: the first pass counts the pages, the second prints "page x of n"
+    # with the real n. The footer has its own fixed space, so both passes
+    # break the pages the same way.
+    pdf = build()
+    pdf = build(pdf.page)
 
     for f in os.listdir(tmp_dir):
         try:

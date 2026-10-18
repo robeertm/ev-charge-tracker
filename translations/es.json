@@ -4,6 +4,7 @@
   "cert.id": "N.º de certificado",
   "cert.generated": "Creado",
   "cert.footer": "Certificado no oficial · EV Charge Tracker · {u}",
+  "cert.footer_ref": "Informe n.º {id}",
   "cert.na": "no disponible",
   "cert.of": "de",
   "cert.grade_a": "Excelente",

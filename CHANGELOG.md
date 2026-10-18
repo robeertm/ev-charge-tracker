@@ -1,5 +1,19 @@
 # Changelog
 
+## v3.0.173 (2026-10-18)
+
+### Battery certificate: footer text no longer overlaps
+
+- The footer was cut into three fixed thirds. The report number contains the
+  odometer, so with a real car (`EVBC-001-93000-…`) it ran into the longer
+  footer text of v3.0.172. The footer now has two measured rows: notice, app
+  and address left with the page number right; the report number below. If a
+  language's text is too wide, the font shrinks instead of overlapping.
+- "Page x of n" now sits flush right: the PDF is laid out twice, so the real
+  page count is known (it used to be aligned by the width of a placeholder).
+- New test: on every page, in all six languages, with a six-digit odometer,
+  no text may cover other text.
+
 ## v3.0.172 (2026-10-18)
 
 ### Battery certificate names the app that made it
