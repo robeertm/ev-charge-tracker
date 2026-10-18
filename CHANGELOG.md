@@ -1,5 +1,32 @@
 # Changelog
 
+## v3.0.168 (2026-10-18)
+
+### Battery certificate: rebuilt as a proper test report
+
+- **Laid out like a test report:** a header with the report number and a
+  stamp (grade and SoH), master data in columns, numbered sections, a verdict
+  box, key-figure cards, a checkpoint table (target / actual / rating) and
+  signature lines at the end. Real Unicode fonts (the DejaVu family that
+  ships with matplotlib), so umlauts, °, Ø and arrows print as they are.
+- **A red box on the first page** says plainly that this is not an official
+  certificate and not an accredited battery test.
+- **Most important first:** summary, checkpoints, then the capacity
+  measurement from the BMS counters (now with a start / end table and its own
+  cards, and a key-figure card on the first page), then state of health,
+  cells, buffer, displayed window, usage and method.
+- **One topic per page.** A second topic shares a page only when it fits
+  there completely — each topic is measured in a draft PDF before it is
+  placed, so no section breaks off at the foot of a page any more.
+- The cell history map is left out when every cell sat on the pack mean in
+  every read (it was an empty grey field); one sentence says so instead.
+  Snapshots saved right after a read no longer appear twice in the cell
+  history or the buffer table.
+- Text fixes: no more "see annex" / "see below" pointing nowhere, German
+  certificate texts with proper umlauts, the method section no longer
+  describes the per-charge capacity measurement dropped in 3.0.154, and the
+  warranty card no longer prints "km" for owners who chose miles.
+
 ## v3.0.167 (2026-10-18)
 
 ### OBD (Kia / Hyundai): the battery counters were read from the wrong bytes

@@ -259,5 +259,47 @@ def test_the_certificate_with_its_battery_pages_renders_in_every_language(app_ct
     text = '\n'.join(p.get_text() for p in doc)
     assert doc.page_count >= 4
     assert '98' in text and '#41' in text            # the weak cell is named
-    assert 'Anlage 1' in text if lang == 'de' else 'Annex' in text or 'Anexo' in text \
-        or 'Annexe' in text or 'Allegato' in text or 'Bijlage' in text
+    # v3.0.168: no annex any more — each topic has its own numbered section,
+    # headed in the reader's language.
+    tr = json.load(open(os.path.join(ROOT, 'translations', f'{lang}.json'), encoding='utf-8'))
+    for key in ('cert.topic_cells', 'cert.sec_capmeas', 'cert.sec_checks', 'cert.not_official_title'):
+        assert tr[key] in text, (lang, key)
+
+
+# ── v3.0.168: the certificate as a test report ─────────────────────────
+def test_every_page_opens_with_a_topic_and_the_cover_carries_the_red_box(app_ctx):
+    """One topic per page (two only when both fit completely): no page may
+    start with the tail of the previous topic. And the first page says in a
+    red box that this is not an official certificate."""
+    import re
+    from services import battery_cert_service as bc
+    from services.i18n import set_language
+    if not bc._HAVE_FPDF:
+        pytest.skip('fpdf not installed')
+    pymupdf = pytest.importorskip('pymupdf')
+    set_language('de')
+    v = _seed(app_ctx)
+    doc = pymupdf.open(stream=bytes(bc.generate_certificate(v.id)), filetype='pdf')
+    pages = [[ln for ln in p.get_text().splitlines() if ln.strip()] for p in doc]
+    assert 'Kein offizielles Zertifikat' in pages[0]
+    assert any(ln.startswith('Seite 1 von %d' % doc.page_count) for ln in pages[0])
+    for i, lines in enumerate(pages[1:], start=2):
+        # running head (title, date), then the numbered section heading
+        assert re.match(r'^\d+\s+·\s+\S', lines[2]), (i, lines[:4])
+
+
+def test_a_snapshot_is_one_read_and_a_flat_history_draws_no_empty_map(tmp_path):
+    from services import battery_cert_service as bc
+    cells = [3.52] * 98
+    reads = [dict(timestamp='2026-10-15T17:16:23', soc_bms_pct=94.5, cell_voltages=[4.12] * 98),
+             dict(timestamp='2026-10-15T17:26:25', soc_bms_pct=94.5, cell_voltages=[4.12] * 98),
+             dict(timestamp='2026-10-18T11:11:23', soc_bms_pct=25.5, cell_voltages=cells),
+             dict(timestamp='2026-10-18T11:12:11', soc_bms_pct=25.5, cell_voltages=cells)]
+    rows = bc._distinct_cell_reads(reads)
+    assert [r['timestamp'][11:16] for r in rows] == ['17:16', '11:11']
+    # every cell on the mean in every read: a grey field says nothing
+    assert bc._cell_history_heatmap(rows, str(tmp_path), 20.0) is None
+    if bc._mpl()[1]:
+        uneven = [dict(rows[1], cell_voltages=cells[:40] + [3.48] + cells[41:]),
+                  dict(rows[0], cell_voltages=[4.12] * 40 + [4.08] + [4.12] * 57)]
+        assert bc._cell_history_heatmap(uneven, str(tmp_path), 20.0)

@@ -303,8 +303,17 @@ def obd_capacity(readings, nominal_cell_v=None, cells_series=None,
                 'capacity_ah': round(cap_ah, 1),
                 'capacity_kwh': cap_kwh,
                 'kwh_counted': kwh_out is not None,
+                # The two reads themselves, for the measurement table.
+                'start': _ends(a), 'end': _ends(b),
             })
     return raus
+
+
+def _ends(r):
+    return {'timestamp': r.get('timestamp'), 'soc_bms': r.get('soc_bms_pct'),
+            'soc_display': r.get('soc_display_pct'), 'pack_v': r.get('pack_voltage_v'),
+            'ah_in': r.get('cumulative_charge_ah'), 'ah_out': r.get('cumulative_discharge_ah'),
+            'kwh_in': r.get('cumulative_charge_kwh'), 'kwh_out': r.get('cumulative_discharge_kwh')}
 
 
 def buffer_view(readings, max_cell_v=None):

@@ -174,10 +174,12 @@ def test_the_certificate_prints_the_corrected_capacity(app):
             set_language(lang); units.set_unit('km'); units.set_currency('EUR')
             pdf = bytes(bc.generate_certificate(v.id))
             text = '\n'.join(p.get_text() for p in pymupdf.open(stream=pdf, filetype='pdf'))
-            assert '190.6 Ah / 69.3 kWh' in text, lang
-            # a measurement over three days names the day it ended
-            assert '-> 18.10.26 11:11' in text, lang
-            assert '(BMS 94.5 -> 25.5 %' in text, lang     # no rounding to 94 -> 26
+            # v3.0.168: a key-figure card on the first page and its own section
+            assert '69.3 kWh' in text and '190.6 Ah' in text, lang
+            assert 'BMS 94.5 → 25.5 %' in text, lang       # no rounding to 94 -> 26
+            # the measurement table names both ends, day and time
+            assert '15.10.26 17:16' in text and '18.10.26 11:11' in text, lang
+            assert '131.5 Ah' in text, lang
             assert '26.0 kWh' not in text
             assert note in text
     finally:
