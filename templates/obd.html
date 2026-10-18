@@ -763,7 +763,8 @@
       // ATZ resets the chip; give it more time.
       await cmd(tr, line, line.toUpperCase() === 'ATZ' ? 4000 : 2500);
     }
-    await cmd(tr, 'ATSH' + prof.header, 2500);
+    // 29-bit: the lower three id bytes; ATCP in the init set the top byte.
+    await cmd(tr, 'ATSH' + (prof.atsh || prof.header), 2500);
   }
   async function pollFrames(tr, prof, onProgress) {
     const cafOff = cafOffFor(prof.init);

@@ -117,6 +117,73 @@ def reassemble(raw: str, expect=None):
             return None
 
     prefix = _expected_prefix(expect)
+    plain = [_tokens(line) for line in raw.splitlines()]
+    plain = [tl for tl in plain if tl[1]]
+    split = [_split_29bit(tl) for tl in plain]
+    # 🔴 A real ELM327 with ATS1 + ATH1 prints a 29-bit id as FOUR bytes —
+    # "18 DA F1 DB 10 14 62 90 01 …" — not as one 8-char token. Read as data,
+    # 0x18 looks like a First Frame and nothing decodes (VW MEB, Zoe ZE50).
+    # The id is taken off when every line carries the same 4-byte id, or when
+    # only that reading yields the answer we asked for.
+    if _all_29bit(plain):
+        return _iso_tp(split, prefix)
+    # One line on its own can't be a First Frame (that needs its consecutive
+    # frames), so "1x …" alone is an id byte 0x10–0x1F, not data.
+    if (not prefix and len(plain) == 1 and split[0] is not plain[0]
+            and int(plain[0][1][0], 16) >> 4 == 1):
+        return _iso_tp(split, None)
+    got = _iso_tp(plain, prefix)
+    if got is None and prefix and any(a is not b for a, b in zip(plain, split)):
+        got = _iso_tp(split, prefix)
+    return got
+
+
+def _tokens(line):
+    """One printed line → ``(can_id, [hex tokens])``. Drops the ELM327 prompt
+    char wherever it lands (it may be glued to the end of the last data line)
+    and a leading 3-char (11-bit) or 8-char (29-bit, spaces off) CAN id: a
+    PCI/data byte is always 2 hex chars."""
+    line = line.strip().upper().replace('\t', ' ').replace('>', ' ').strip()
+    if not line or line == 'OK':
+        return (None, [])
+    toks = [tk for tk in line.split(' ') if tk]
+    can_id = None
+    if len(toks) > 1 and _is_hex(toks[0]) and len(toks[0]) in (3, 8):
+        can_id = toks[0]
+        toks = toks[1:]
+    # Some adapters glue everything into one token — split into bytes.
+    if len(toks) == 1 and _is_hex(toks[0]) and len(toks[0]) > 2 and len(toks[0]) % 2 == 0:
+        t = toks[0]
+        toks = [t[i:i + 2] for i in range(0, len(t), 2)]
+    if not all(_is_hex(tk) and len(tk) <= 2 for tk in toks):
+        return (can_id, [])
+    return (can_id, toks)
+
+
+def _split_29bit(tl):
+    """The same line read as ``<4-byte 29-bit id> <PCI> <data…>``. Only a line
+    without an id token yet, with an id byte that fits 29 bits (≤ 0x1F) and at
+    least one frame byte after the id, can be one. Returns ``tl`` itself
+    otherwise."""
+    can_id, toks = tl
+    if can_id is None and len(toks) >= 5 and len(toks[0]) == 2 and int(toks[0], 16) <= 0x1F:
+        return (''.join(toks[:4]), toks[4:])
+    return tl
+
+
+def _all_29bit(lines):
+    """True when the reply is plainly 29-bit with spaces on: two or more data
+    lines and every one starts with the same 4-byte id. A headerless 11-bit
+    reply never does — its first byte is the PCI (10, 21, 22 …)."""
+    if len(lines) < 2:
+        return False
+    ids = {tuple(toks[:4]) for can_id, toks in lines
+           if can_id is None and len(toks) >= 5 and int(toks[0], 16) <= 0x1F}
+    return len(ids) == 1 and all(_split_29bit(tl) is not tl for tl in lines)
+
+
+def _iso_tp(lines, prefix):
+    """ISO-TP reassembly over already tokenised ``(can_id, tokens)`` lines."""
     payload: list[int] = []
     total_len = None
     started = False
@@ -128,28 +195,7 @@ def reassemble(raw: str, expect=None):
     ff_id = None
     seq_next = None
 
-    for line in raw.splitlines():
-        # Drop the ELM327 prompt char wherever it lands (it may be glued to
-        # the end of the last data line, not always on its own).
-        line = line.strip().upper().replace('\t', ' ').replace('>', ' ').strip()
-        if not line or line == 'OK':
-            continue
-        toks = [tk for tk in line.split(' ') if tk]
-        if not toks:
-            continue
-        # Drop a leading CAN-id token (11-bit like "7EC" = 3 chars, or
-        # 29-bit 8-char). A PCI/data byte is always 2 hex chars, so a 3- or
-        # 8-char leading hex token is the arbitration id, not data.
-        can_id = None
-        if len(toks) > 1 and _is_hex(toks[0]) and len(toks[0]) in (3, 8):
-            can_id = toks[0]
-            toks = toks[1:]
-        # Some adapters glue everything into one token — split into bytes.
-        if len(toks) == 1 and _is_hex(toks[0]) and len(toks[0]) > 2 and len(toks[0]) % 2 == 0:
-            t = toks[0]
-            toks = [t[i:i + 2] for i in range(0, len(t), 2)]
-        if not all(_is_hex(tk) and len(tk) <= 2 for tk in toks):
-            continue
+    for can_id, toks in lines:
         by = [int(tk, 16) for tk in toks]
         if not by:
             continue
@@ -285,13 +331,22 @@ def _init_29bit(req, resp):
     Used by the VW MEB platform (17FC007B/17FE007B) and the Renault Zoe ZE50
     LBC (18DADBF1/18DAF1DB), whose BMS is addressed with a full 4-byte CAN id
     rather than the 11-bit 7Ex range. ``req``/``resp`` are the 8-hex ids; the
-    client appends ``ATSH<req>`` afterwards. NOTE: setting a 29-bit header via
-    a single ATSH<8hex> works on the STN/OBDLink and most v1.5 clones the app
-    recommends; a strict genuine ELM327 that only takes a 3-byte ATSH would
-    need ATCP for the priority byte — such adapters simply return NO DATA here
-    and the ECU-scan hint kicks in, and the raw frames are stored regardless."""
+    client appends ``ATSH`` with :func:`wire_header` afterwards: the lower
+    three bytes, with the priority byte set here by ATCP. That pair is what
+    every ELM327 since v1.0 understands; a single 4-byte ATSH is not."""
     return ['ATZ', 'ATE0', 'ATL0', 'ATS1', 'ATH1', 'ATSP7', 'ATAT1',
-            'ATCAF0', 'ATCRA' + resp, 'ATFCSH' + req, 'ATFCSD300000', 'ATFCSM1']
+            'ATCAF0', 'ATCP' + req[:2], 'ATCRA' + resp, 'ATFCSH' + req,
+            'ATFCSD300000', 'ATFCSM1']
+
+
+def wire_header(prof):
+    """The header the client sends with ATSH. A 29-bit id goes out as its
+    lower three bytes; the top byte (priority) is set by ATCP in the init.
+    🔴 ``ATSH18DADBF1`` (four bytes) only works on STN chips and newer
+    firmware — a common v1.5 ELM327 answers "?" and keeps its default
+    header, so the BMS never hears the request."""
+    h = prof['header']
+    return h[2:] if len(h) == 8 else h
 
 
 # A cell an ``optional`` spec may add must read like a cell: anything outside
@@ -692,16 +747,16 @@ def scan_plan():
 
 def _scan_headers(raw):
     """Distinct CAN arbitration ids (responder headers) seen in raw ELM327
-    text — the 3- or 8-char leading hex token on each data line."""
+    text — the 3- or 8-char leading hex token on each data line, or the four
+    id bytes a 29-bit reply starts with when spaces are on (the scan runs
+    with ATH1, so a line that starts with a 2-char byte carries a 29-bit id)."""
     if not raw:
         return []
     found = []
     for line in raw.splitlines():
-        line = line.strip().upper().replace('\t', ' ').replace('>', ' ').strip()
-        toks = [tk for tk in line.split(' ') if tk]
-        if len(toks) > 1 and _is_hex(toks[0]) and len(toks[0]) in (3, 8):
-            if toks[0] not in found:
-                found.append(toks[0])
+        can_id, toks = _split_29bit(_tokens(line))
+        if can_id and can_id not in found:
+            found.append(can_id)
     return found
 
 

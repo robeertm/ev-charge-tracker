@@ -1,5 +1,24 @@
 # Changelog
 
+## v3.0.175 (2026-10-18)
+
+### OBD: 29-bit cars (VW MEB, Renault Zoe ZE50) read with a real ELM327
+
+Two faults kept every 29-bit battery read empty on a standard adapter:
+
+- **Reply format.** With spaces and headers on, an ELM327 prints a 29-bit id
+  as four bytes (`18 DA F1 DB 10 14 62 90 01 …`). The decoder only knew the
+  glued `18DAF1DB` form, took `18` for the start of the message and decoded
+  nothing. It now recognises the four id bytes — when every line carries the
+  same id, or when only that reading gives the answer that was asked for.
+  11-bit and headerless replies are read exactly as before; a missing frame
+  is still refused, a frame from another ECU in between still skipped.
+- **Request header.** The header went out as one 4-byte `ATSH18DADBF1`, which
+  only STN chips and newer firmware accept; a common v1.5 ELM327 answers `?`
+  and keeps its default header. It now goes out as `ATCP18` + `ATSHDADBF1`
+  (VW: `ATCP17` + `ATSHFC007B`), which every ELM327 understands.
+- The ECU scan lists 29-bit responders printed the same way.
+
 ## v3.0.174 (2026-10-18)
 
 ### Battery certificate: every calculation audited

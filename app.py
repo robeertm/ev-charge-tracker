@@ -3453,7 +3453,7 @@ def register_routes(app):
         client stays a dumb transport and all knowledge lives server-side."""
         from models.database import Vehicle
         from services.vehicle.obd_decode import (
-            profile_for_brand, get_profile, PROFILES)
+            profile_for_brand, get_profile, PROFILES, wire_header)
         v = Vehicle.query.get_or_404(vid)
         # Explicit override via ?profile= wins; else derive from brand.
         key = request.args.get('profile') or profile_for_brand(v.brand or v.api_brand)
@@ -3472,6 +3472,7 @@ def register_routes(app):
             'label': prof['label'],
             'note': _note(prof),
             'header': prof['header'],
+            'atsh': wire_header(prof),
             'init': prof['init'],
             'pids': prof['pids'],
             'available': [{'key': k, 'label': p['label'], 'note': _note(p)}
