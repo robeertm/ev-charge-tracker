@@ -1093,18 +1093,27 @@ try:
                             self.rect(x + 3, y + h - 3.5, (w - 6) * frac, 1.4, style='F')
                 self.set_xy(self.l_margin, y + h + gap)
 
-        def pill(self, x, y, text, tone='info', h=4.6):
-            fg = _TONES.get(tone, _TONES['info'])[0]
+        def pill_width(self, text):
             self.set_font(self.f_mono, 'B', 6.2)
-            label = self._clean(text.upper())
             self.set_char_spacing(0.3)
-            w = self.get_string_width(label) + 4.5
+            w = self.get_string_width(self._clean(text.upper())) + 6
+            self.set_char_spacing(0)
+            return w
+
+        def pill(self, x, y, text, tone='info', h=4.8, w=None):
+            """A rating badge: tinted ground, hairline in the tone, label
+            centred. ``w`` gives every badge of a column the same width."""
+            fg, bg = _TONES.get(tone, _TONES['info'])
+            w = w or self.pill_width(text)
+            self.set_fill_color(*bg)
             self.set_draw_color(*fg)
-            self.set_line_width(0.3)
-            self.rect(x, y, w, h, style='D', round_corners=True, corner_radius=h / 2)
+            self.set_line_width(0.25)
+            self.rect(x, y, w, h, style='DF', round_corners=True, corner_radius=1.3)
+            self.set_font(self.f_mono, 'B', 6.2)
+            self.set_char_spacing(0.3)
             self.set_xy(x, y)
             self.color(fg)
-            self.cell(w, h, label, align='C')
+            self.cell(w, h, self._clean(text.upper()), align='C')
             self.set_char_spacing(0)
             return w
 
@@ -1126,6 +1135,11 @@ try:
                 self.set_draw_color(*_RULE)
                 self.set_line_width(0.3)
                 self.line(self.l_margin, self.get_y(), self.w - self.r_margin, self.get_y())
+            pill_w = {}
+            for row in rows:
+                for k, c in enumerate(row):
+                    if isinstance(c, tuple):
+                        pill_w[k] = max(pill_w.get(k, 0), self.pill_width(c[1]))
             head()
             for row in rows:
                 hs = []
@@ -1133,22 +1147,27 @@ try:
                     if isinstance(c, tuple):
                         hs.append(1)
                     else:
-                        hs.append(self._lines(c, w - 2, self.f_sans, '', 8.2))
+                        hs.append(self._lines(c, w - 2 * self.c_margin, self.f_sans, '', 8.2))
                 rh = max(hs) * 4.4 + 2.6
                 if self.get_y() + rh > self.h - self.b_margin:
                     self.add_page()
                     head()
                 y = self.get_y()
                 x = self.l_margin
-                for w, c, a in zip(widths, row, aligns):
+                for k, (w, c, a) in enumerate(zip(widths, row, aligns)):
                     if isinstance(c, tuple):
-                        self.pill(x + 1, y + (rh - 4.6) / 2, c[1], c[2])
+                        # same width for every badge of the column, left edge
+                        # under the column heading's text
+                        pw = min(pill_w[k], w - 2 * self.c_margin)
+                        self.pill(x + self.c_margin, y + (rh - 4.8) / 2, c[1], c[2], w=pw)
                     else:
-                        self.set_xy(x + 1, y + 1.3)
+                        # header and value both sit inside the cell margin,
+                        # so a value starts exactly under its heading
+                        self.set_xy(x, y + 1.3)
                         mono = a == 'R'
                         self.set_font(self.f_mono if mono else self.f_sans, '', 8 if mono else 8.2)
                         self.color(_INK)
-                        self.multi_cell(w - 2, 4.4, self._clean(c), align=a)
+                        self.multi_cell(w, 4.4, self._clean(c), align=a)
                     x += w
                 self.set_xy(self.l_margin, y + rh)
                 self.set_draw_color(*_RULE_SOFT)
@@ -1538,7 +1557,7 @@ def _t_checks(pdf, data, ctx):
                       else t('cert.r_left', default='vorhanden'), 'warn' if u >= 60 else 'ok')])
     pdf.table([t('cert.th_check', default='Prüfpunkt'), t('cert.th_target', default='Soll'),
                t('cert.th_actual', default='Ist'), t('cert.th_rating', default='Bewertung')],
-              rows, [34, 18, 30, 18], ['L', 'L', 'L', 'L'])
+              rows, [33, 15, 28, 24], ['L', 'L', 'L', 'L'])
     pdf.caption(t('cert.checks_note',
                   default='Die Soll-Werte sind Richtwerte dieser App (übliche Garantiegrenze der Hersteller, '
                           'übliche Zell-Spreizung) – keine Normwerte.'))

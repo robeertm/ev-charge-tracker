@@ -1,5 +1,15 @@
 # Changelog
 
+## v3.0.169 (2026-10-18)
+
+### Battery certificate: tidy rating badges and table alignment
+
+- Every rating badge in a column now has the same width, a tinted ground and
+  properly rounded corners; the rating column is wide enough for the longest
+  label ("above average" no longer runs past the edge).
+- Table values start exactly under their column headings (they sat about
+  1 mm to the right), and the badges line up under the "Rating" heading.
+
 ## v3.0.168 (2026-10-18)
 
 ### Battery certificate: rebuilt as a proper test report
