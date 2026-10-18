@@ -859,6 +859,9 @@ _TONES = {
     'info': (_ACCENT, _ACCENT_SOFT),
     'muted': (_MUTED, _RULE_SOFT),
 }
+# Printed in full on the report: a buyer holding the paper has to be able to
+# find the app that made it — "this app" names nothing on a printout.
+APP_URL = 'https://github.com/robeertm/ev-charge-tracker'
 
 
 def _tone_for_grade(letter):
@@ -945,8 +948,8 @@ try:
             third = self.cw / 3
             self.cell(third, 5, self._clean(self.ref))
             self.cell(third, 5, self._clean(t(
-                'cert.footer', default='Selbst erstelltes Zertifikat - EV Charge Tracker - '
-                                       'keine akkreditierte Prüfung')), align='C')
+                'cert.footer', default='Kein offizielles Zertifikat · EV Charge Tracker · {u}',
+                u=APP_URL.split('://', 1)[1])), align='C')
             self.cell(third, 5, self._clean(t('cert.page_n', default='Seite {p} von {n}',
                                               p=self.page_no(), n='{nb}')), align='R')
 
@@ -1351,8 +1354,8 @@ def _t_cover(pdf, data, ctx):
              name=veh['name'] or '—', d=data['generated_at'].strftime('%d.%m.%Y')), w=left_w)
     pdf.ln(1.5)
     pdf.lead(t('cert.lead',
-               default='Selbst ermittelt aus Lade-, Fahrzeug- und OBD-Daten dieser App. '
-                       'Bericht-Nr. {id}.', id=data['cert_id']), w=left_w)
+               default='Vom EV Charge Tracker selbst ermittelt aus den Lade-, Fahrzeug- und '
+                       'OBD-Daten des Halters. Bericht-Nr. {id}.', id=data['cert_id']), w=left_w)
     bottom = pdf.get_y()
     pdf.stamp(pdf.w - pdf.r_margin - 44, top + 1, 44, 21, tone,
               t('cert.stamp_grade', default='NOTE {g}', g=grade['letter']),
@@ -1376,11 +1379,34 @@ def _t_cover(pdf, data, ctx):
         p.color((120, 24, 20))
         p.multi_cell(w, 4, p._clean(t(
             'cert.not_official',
-            default='Dieses Dokument ist eine Selbsteinschätzung aus den Daten dieser App – keine '
-                    'akkreditierte Batterieprüfung und kein Gutachten. Für Kauf, Verkauf oder '
-                    'Garantie nur zusammen mit einer unabhängigen Messung verwenden.')),
+            default='Dieses Dokument ist eine Selbsteinschätzung des Halters, berechnet vom EV Charge '
+                    'Tracker – keine akkreditierte Batterieprüfung und kein Gutachten. Für Kauf, '
+                    'Verkauf oder Garantie nur zusammen mit einer unabhängigen Messung verwenden.')),
             new_x='LMARGIN', new_y='NEXT')
     pdf.boxed(_TONES['crit'][0], _TONES['crit'][1], rot, border=_TONES['crit'][0])
+
+    # Which app made this — with the address written out to type in.
+    def app(p, x, w):
+        y = p.get_y()
+        p.set_font(p.f_mono, 'B', 8.8)
+        p.color(_ACCENT)
+        p.set_xy(x, y)
+        p.cell(w, 5, APP_URL, align='R')
+        p.set_xy(x, y)
+        p.set_font(p.f_sans, 'B', 8.8)
+        p.color(_INK)
+        p.cell(w, 5, p._clean(t('cert.app_title', default='Erstellt mit dem EV Charge Tracker')),
+               new_x='LMARGIN', new_y='NEXT')
+        p.set_x(x)
+        p.set_font(p.f_sans, '', 7.8)
+        p.color(_INK2)
+        p.multi_cell(w, 3.9, p._clean(t(
+            'cert.app_what',
+            default='Kostenlose Open-Source-App, die der Halter selbst betreibt: Sie zeichnet Ladungen '
+                    'auf, liest das Auto über die Hersteller-Verbindung und per OBD-Adapter aus dem BMS. '
+                    'Quelltext und Rechenwege sind öffentlich.')),
+            new_x='LMARGIN', new_y='NEXT')
+    pdf.boxed(_ACCENT, (255, 255, 255), app, bar=_ACCENT, border=_RULE)
 
     # Master data
     brandmodel = ' · '.join([p for p in (veh['brand'], veh['model']) if p]) or '—'
@@ -1562,7 +1588,7 @@ def _t_checks(pdf, data, ctx):
                t('cert.th_actual', default='Ist'), t('cert.th_rating', default='Bewertung')],
               rows, [33, 15, 28, 24], ['L', 'L', 'L', 'L'])
     pdf.caption(t('cert.checks_note',
-                  default='Die Soll-Werte sind Richtwerte dieser App (übliche Garantiegrenze der Hersteller, '
+                  default='Die Soll-Werte sind Richtwerte des EV Charge Tracker (übliche Garantiegrenze der Hersteller, '
                           'übliche Zell-Spreizung) – keine Normwerte.'))
 
 
@@ -2007,8 +2033,8 @@ def _t_basis(pdf, data, ctx):
     pdf.cell(half, 4.5, pdf._clean(t('cert.sig_owner', default='Unterschrift Halter')),
              new_x='LMARGIN', new_y='NEXT')
     pdf.ln(4)
-    pdf.caption(t('cert.made_with', default='Erstellt mit EV Charge Tracker {v} am {d}.',
-                  v=ctx.get('version', ''), d=data['generated_at'].strftime('%d.%m.%Y %H:%M')))
+    pdf.caption(t('cert.made_with', default='Erstellt mit EV Charge Tracker {v} am {d} – {u}',
+                  u=APP_URL, v=ctx.get('version', ''), d=data['generated_at'].strftime('%d.%m.%Y %H:%M')))
 
 
 # Gap between two topics sharing a page.

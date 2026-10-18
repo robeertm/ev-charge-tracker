@@ -182,5 +182,11 @@ def test_the_certificate_prints_the_corrected_capacity(app):
             assert '131.5 Ah' in text, lang
             assert '26.0 kWh' not in text
             assert note in text
+            # v3.0.172: the printout names the app and spells out where to find it —
+            # on the first page in full, and in every page's footer
+            pages = [p.get_text() for p in pymupdf.open(stream=pdf, filetype='pdf')]
+            assert 'https://github.com/robeertm/ev-charge-tracker' in pages[0], lang
+            assert all('github.com/robeertm/ev-charge-tracker' in p for p in pages), lang
+            assert 'this app' not in text and 'dieser App' not in text, lang
     finally:
         set_language('de')

@@ -1,5 +1,18 @@
 # Changelog
 
+## v3.0.172 (2026-10-18)
+
+### Battery certificate names the app that made it
+
+- A printed report said "a self-assessment from this app's data" — on paper
+  nobody can tell which app. The first page now has a box **"Made with EV
+  Charge Tracker"**: what the app is (free, open source, run by the owner,
+  reads the car's connected service and the BMS via OBD) and the address
+  **written out in full** to type in: `https://github.com/robeertm/ev-charge-tracker`.
+- Every page footer carries the address too; the report's lead, the red
+  "not an official certificate" box and the checks note name EV Charge
+  Tracker instead of "this app". All six languages.
+
 ## v3.0.171 (2026-10-18)
 
 ### Renault / Dacia: find the right car, the way Home Assistant does
