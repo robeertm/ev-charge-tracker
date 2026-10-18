@@ -58,9 +58,13 @@ LOCATION = {'gpsLatitude': 48.85, 'gpsLongitude': 2.35, 'lastUpdateTime': '2026-
 def fake_net(monkeypatch, tmp_path):
     """Replace only the network; keep renault-api's own parsing."""
     monkeypatch.setattr(cr, 'STATE_DIR', str(tmp_path / 'renault'))
-    calls = {'login': [], 'vehicles_for': []}
+    calls = {'login': [], 'vehicles_for': [], 'details': [], 'country': []}
     state = {'battery': dict(BATTERY), 'login_error': None, 'vehicles': VEHICLES,
-             'battery_error': None, 'sfdc_links': []}
+             'battery_error': None, 'sfdc_links': [],
+             # which endpoints the error in battery_error applies to
+             'denied_endpoints': ('battery-status',),
+             # refuse only when asked with this country (None: always)
+             'refuse_country': None}
 
     async def login(self, login_id, password):
         calls['login'].append((login_id, password, self._locale if hasattr(self, '_locale') else None))
@@ -77,6 +81,7 @@ def fake_net(monkeypatch, tmp_path):
         return schemas.KamereonVehiclesResponseSchema.load(body)
 
     async def get_vehicle_details(self, account_id, vin):
+        calls['details'].append(vin)
         return schemas.KamereonVehicleDetailsResponseSchema.load(
             VEHICLES['vehicleLinks'][-1]['vehicleDetails'])
 
@@ -88,7 +93,11 @@ def fake_net(monkeypatch, tmp_path):
         err = state['battery_error']
         if isinstance(err, dict):           # refused on some accounts only
             err = next((b for acc, b in err.items() if f'/accounts/{acc}/' in endpoint), None)
-        if last == 'battery-status' and err:
+        country = await self._get_country()
+        calls['country'].append(country)
+        if state['refuse_country'] and country != state['refuse_country']:
+            err = None
+        if last in state['denied_endpoints'] and err:
             # A Kamereon error body, read the way renault-api reads it.
             schemas.KamereonResponseSchema.loads(err).raise_for_error_code()
         return _data({'battery-status': state['battery'], 'cockpit': COCKPIT,
@@ -204,17 +213,79 @@ PRIVACY_403 = json.dumps({
     'error_reference': 'FUNCTIONAL'})
 
 
-@pytest.mark.parametrize('body', [
-    PRIVACY_403,
-    json.dumps({'errors': [{'errorCode': 'err.func.privacy.on', 'errorMessage': 'Privacy mode ON'}]}),
-])
-def test_privacy_mode_in_the_car_says_what_to_switch_on(fake_net, body):
+ALL_DATA = ('battery-status', 'cockpit', 'location')
+PRIVACY_ON = json.dumps({'errors': [{'errorCode': 'err.func.privacy.on', 'errorMessage': 'Privacy mode ON'}]})
+
+
+def test_privacy_mode_in_the_car_says_what_to_switch_on(fake_net):
+    # Only err.func.privacy.on names the privacy mode for sure (v3.0.166).
     _, state = fake_net
-    state['battery_error'] = body
+    state['battery_error'], state['denied_endpoints'] = PRIVACY_ON, ALL_DATA
     with pytest.raises(RuntimeError) as ei:
         _conn().verify_credentials()
     assert str(ei.value) == cr._t('renault.err_privacy')
+
+
+def test_a_refusal_without_reason_does_not_claim_privacy_mode(fake_net):
+    """Issue #4: v3.0.165 told an owner whose privacy mode was OFF to switch it
+    off. lkcd only says "denied" — the message must not invent a reason."""
+    _, state = fake_net
+    state['battery_error'], state['denied_endpoints'] = PRIVACY_403, ALL_DATA
+    with pytest.raises(RuntimeError) as ei:
+        _conn().verify_credentials()
+    assert str(ei.value) == cr._t('renault.err_data_denied')
     assert 'lkcd' not in str(ei.value)
+    assert str(ei.value) != cr._t('renault.err_privacy')
+
+
+def test_only_the_battery_refused_still_gives_odometer_and_position(fake_net):
+    """Like Home Assistant: keep what Renault hands out instead of failing."""
+    _, state = fake_net
+    state['battery_error'] = PRIVACY_403
+    state['sfdc_links'] = VEHICLES['vehicleLinks']          # refused on both accounts
+    st = _conn().get_status()
+    assert st.soc_percent is None and st.is_charging is False
+    assert st.odometer_km == 12345 and st.location_lat == 48.85
+    assert st.raw_data['vin'] == VIN
+
+
+def test_the_test_button_says_when_only_part_of_the_data_comes(fake_net):
+    _, state = fake_net
+    state['battery_error'] = PRIVACY_403
+    assert _conn().verify_credentials() == cr._t('renault.partial_no_soc')
+    state['battery_error'] = None
+    assert _conn().verify_credentials() is None
+
+
+def test_no_extra_details_request(fake_net):
+    """The details come with the vehicle list; fetching them again is one more
+    request Renault can refuse (and Home Assistant never sends it)."""
+    calls, _ = fake_net
+    _conn().get_status()
+    assert calls['details'] == []
+
+
+def test_a_refusal_for_the_wrong_country_is_retried_with_the_accounts_country(fake_net):
+    """An empty region means Germany; the account here is French. Renault
+    refuses with country=DE — ask again as FR, and remember it."""
+    calls, state = fake_net
+    state['battery_error'], state['denied_endpoints'] = PRIVACY_403, ALL_DATA
+    state['refuse_country'] = 'DE'
+    st = _conn(locale='').get_status()
+    assert st.soc_percent == 63
+    assert 'DE' in calls['country'] and calls['country'][-1] == 'FR'
+    # next time: asked as FR straight away, no refusal first
+    calls['country'].clear()
+    assert _conn(locale='').get_status().soc_percent == 63
+    assert set(calls['country']) == {'FR'}
+
+
+def test_no_retry_when_the_country_already_matches(fake_net):
+    calls, state = fake_net
+    state['battery_error'], state['denied_endpoints'] = PRIVACY_403, ALL_DATA
+    with pytest.raises(RuntimeError):
+        _conn().get_status()                              # fr_FR, account FR
+    assert len(calls['login']) == 1
 
 
 def test_a_refused_account_hands_over_to_the_next_one_with_the_same_car(fake_net):
@@ -228,14 +299,14 @@ def test_a_refused_account_hands_over_to_the_next_one_with_the_same_car(fake_net
 
 
 def test_a_refusal_never_switches_to_another_car(fake_net):
+    # Since v3.0.166 a refused battery gives partial data — of the SAME car.
     calls, state = fake_net
     state['battery_error'] = {'acc-myr': PRIVACY_403}
     other = 'VF1AG000000000999'
     state['sfdc_links'] = [{'vin': other, 'vehicleDetails': {
         'vin': other, 'model': {'code': 'XCB1VE', 'label': 'MEGANE E-TECH', 'group': '971'}}}]
-    with pytest.raises(RuntimeError) as ei:
-        _conn().get_status()
-    assert str(ei.value) == cr._t('renault.err_privacy')
+    st = _conn().get_status()
+    assert st.raw_data['vin'] == VIN and st.soc_percent is None
     assert not any(other in e for e in calls['data'])
 
 
@@ -256,7 +327,8 @@ def test_the_client_gets_the_aiohttp_session_as_websession():
 
 def test_new_messages_exist_in_every_language():
     keys = ('renault.err_login', 'renault.err_2fa', 'renault.err_no_account',
-            'renault.err_no_vehicle', 'renault.err_privacy', 'vehicle.err_credentials_rejected')
+            'renault.err_no_vehicle', 'renault.err_privacy', 'renault.err_data_denied',
+            'renault.partial_no_soc', 'vehicle.err_credentials_rejected')
     for lang in LANGS:
         d = json.loads((ROOT / 'translations' / f'{lang}.json').read_text(encoding='utf-8'))
         for k in keys:

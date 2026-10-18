@@ -1,5 +1,27 @@
 # Changelog
 
+## v3.0.166 (2026-10-18)
+
+### Renault / Dacia: partial data instead of a failure, and no more guessing the reason
+
+- **Correction to 3.0.165:** when Renault refuses a car's data with
+  `err.func.wired.lkcd-authorization.failure` ("Access is denied for this
+  resource"), the tracker said the car's privacy mode was on. That was a guess:
+  Renault gives no reason with this code, and owners with privacy mode off get
+  it too. *Test connection* now says the data was refused and lists what to
+  check (battery level in the My Renault app, region, connected services). Only
+  Renault's own privacy-mode code still mentions privacy mode.
+- **Partial data:** if Renault refuses only the battery data, the tracker still
+  reads odometer and position (like Home Assistant does) instead of failing.
+  *Test connection* says so next to "connected".
+- **Region vs. account country:** an empty region meant Germany, so a French
+  account was asked as `DE`. If Renault refuses the data and your account
+  belongs to another country, the tracker asks once more with the account's
+  country and remembers it when that works.
+- One request less per sync: the car is set up with the details Renault already
+  sent in the vehicle list (renault-api otherwise fetches them again, and that
+  extra request could be refused as well).
+
 ## v3.0.165 (2026-10-17)
 
 ### Renault / Dacia: a clear message when the car does not share its data

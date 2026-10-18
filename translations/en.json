@@ -1822,6 +1822,8 @@
   "renault.err_no_account": "Signed in, but there is no My Renault / My Dacia account for this login. Is the region set correctly?",
   "renault.err_no_vehicle": "Signed in, but no vehicle (or not the VIN you entered) is linked to the account. Is the car added in the My Renault / My Dacia app, and is the region set correctly?",
   "renault.err_privacy": "Signed in, but Renault won't hand out the car's data: privacy mode is on in the car, or data sharing is off. With the car parked, switch data sharing on at the car's screen, in the driver profile linked to My Renault / My Dacia (Mégane/Scénic E-Tech: profile icon top left). Then press “Test connection” again.",
+  "renault.err_data_denied": "Signed in, but Renault does not hand out this car's data (access denied) and gives no reason. Please check: does the My Renault / My Dacia app show the battery level? Does the region match the country of your account? Are the connected services active?",
+  "renault.partial_no_soc": "Only part of the data from Renault: no battery level and no charging state — odometer and position are read.",
   "renault.err_2fa": "Renault/Dacia is asking for an e-mail confirmation code for this account. Open Settings → Vehicles and press “Test connection”: Renault then e-mails you the code, which you enter in the app.",
   "set.api_region_cn": "China",
   "set.api_region_de": "Germany",

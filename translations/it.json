@@ -1822,6 +1822,8 @@
   "renault.err_no_account": "Accesso riuscito, ma non esiste un account My Renault / My Dacia per queste credenziali. La regione è corretta?",
   "renault.err_no_vehicle": "Accesso riuscito, ma all’account non è collegato alcun veicolo (o non il VIN inserito). L’auto è aggiunta nell’app My Renault / My Dacia e la regione è corretta?",
   "renault.err_privacy": "Accesso riuscito, ma Renault non fornisce i dati dell’auto: nel veicolo è attiva la modalità privacy oppure la condivisione dei dati è disattivata. Ad auto ferma, attiva la condivisione dei dati sullo schermo dell’auto, nel profilo conducente collegato a My Renault / My Dacia (Mégane/Scénic E-Tech: icona del profilo in alto a sinistra). Poi premi di nuovo «Testa connessione».",
+  "renault.err_data_denied": "Accesso riuscito, ma Renault non fornisce i dati di quest’auto (accesso negato) e non ne indica il motivo. Da verificare: l’app My Renault / My Dacia mostra il livello della batteria? La regione corrisponde al paese del tuo account? I servizi connessi sono attivi?",
+  "renault.partial_no_soc": "Solo dati parziali da Renault: nessun livello della batteria né stato di carica; vengono letti chilometraggio e posizione.",
   "renault.err_2fa": "Renault/Dacia richiede un codice di conferma via e-mail per questo account. Apri Impostazioni → Veicoli e premi «Testa connessione»: Renault ti invierà il codice da inserire nell’app.",
   "set.api_region_cn": "Cina",
   "set.api_region_de": "Germania",

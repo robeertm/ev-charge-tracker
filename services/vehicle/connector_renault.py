@@ -91,17 +91,45 @@ def _wants_code(exc) -> bool:
     return 'PendingTwoFactorAuthenticationException' in names or '403101' in str(exc)
 
 
-# Kamereon refuses the car's data while the car does not share it. Renault
-# answers with the bare "Access is denied for this resource" (lkcd) and puts
-# the real reason, "Privacy mode currently ON", in a second message that
-# renault-api drops — so the code alone has to tell the owner.
-PRIVACY_CODES = {'err.func.privacy.on', 'err.func.wired.lkcd-authorization.failure'}
+# Only this code means the car's privacy mode for sure (renault-api maps it to
+# PrivacyModeOnException).
+PRIVACY_CODES = {'err.func.privacy.on'}
+# A refusal WITHOUT a stated reason. v3.0.165 read lkcd as "privacy mode"
+# from one foreign log; an owner with privacy mode off got it too (issue #4),
+# and renault-api documents no meaning. So: say it is refused, not why.
+DENIED_CODES = {'err.func.wired.lkcd-authorization.failure', 'err.func.403'}
 
 
 def _privacy_on(exc) -> bool:
     names = {c.__name__ for c in type(exc).__mro__}
     return ('PrivacyModeOnException' in names
             or getattr(exc, 'error_code', None) in PRIVACY_CODES)
+
+
+def _data_denied(exc) -> bool:
+    """Renault refused this request. Matched by code only — a server error
+    must never pass for a refusal."""
+    names = {c.__name__ for c in type(exc).__mro__}
+    return (_privacy_on(exc) or 'AccessDeniedException' in names
+            or getattr(exc, 'error_code', None) in DENIED_CODES)
+
+
+def _mask_vin(vin) -> str:
+    vin = str(vin or '')
+    return vin[:3] + '…' + vin[-4:] if len(vin) > 7 else '…'
+
+
+def _country(locale) -> str:
+    return (locale or '').split('_')[-1].upper()
+
+
+class _Refused(Exception):
+    """Renault gave nothing at all for the car; carries what a retry needs."""
+
+    def __init__(self, key, cause, asked, account_country):
+        super().__init__(key)
+        self.key, self.cause = key, cause
+        self.asked, self.account_country = asked, account_country
 
 
 class RenaultCodeNeeded(RuntimeError):
@@ -152,15 +180,35 @@ def _fresh_pending(state: dict):
 class _RenaultBase(VehicleConnector):
     BRAND = None  # 'renault' or 'dacia'
 
-    def _client(self, websession):
+    def _locale(self):
         # ``or``: the region field is optional, and an empty value is ''
         # rather than missing — renault-api cannot look up a '' locale.
-        locale = self.credentials.get('locale') or 'de_DE'
+        return self.credentials.get('locale') or 'de_DE'
+
+    def _client(self, websession, country=None):
         # ``websession=``, not ``session=``: ``session`` is renault-api's
         # own RenaultSession. Handing it the aiohttp session made
         # ``client.session`` the aiohttp object, and every sign-in ended
         # in "'ClientSession' object has no attribute 'login'".
-        return RenaultClient(websession=websession, locale=locale)
+        # ``country`` goes into every Kamereon request; by default it
+        # follows the region. A remembered account country overrides it.
+        kw = {'country': country} if country else {}
+        return RenaultClient(websession=websession, locale=self._locale(), **kw)
+
+    @staticmethod
+    def _vehicle_for(acc, link):
+        """The car with the details we already hold. Without them renault-api
+        GETs ``…/vehicles/{vin}/details`` only to pick the endpoint — one more
+        request Renault can refuse, and its refusal looks like a refusal of
+        the data itself (Home Assistant never sends it)."""
+        if not getattr(link, 'vehicleDetails', None):
+            return None
+        try:
+            from renault_api.renault_vehicle import RenaultVehicle
+            return RenaultVehicle(account_id=acc.account_id, vin=link.vin,
+                                  session=acc.session, vehicle_details=link.vehicleDetails)
+        except Exception:                  # another renault-api: the old way
+            return None
 
     async def _login(self, client, request_code=False):
         user = self.credentials['username']
@@ -237,8 +285,32 @@ class _RenaultBase(VehicleConnector):
         _run_async(self._submit_code(code))
 
     async def _fetch(self, force=False, request_code=False):
+        user = self.credentials['username']
+        merk = _load_state(user).get('country')
+        try:
+            return await self._fetch_once(request_code, merk)
+        except _Refused as r:
+            # Renault refused the data, and the account belongs to another
+            # country than the one we asked with (an empty region means
+            # Germany): ask once more with the account's country, and
+            # remember it when that works.
+            if r.account_country and r.account_country != r.asked:
+                logger.info(f"Renault: refused with country {r.asked}, account is "
+                            f"{r.account_country} — retrying with {r.account_country}")
+                try:
+                    st = await self._fetch_once(request_code, r.account_country)
+                except _Refused:
+                    raise RuntimeError(_t(r.key)) from r.cause
+                state = _load_state(user)
+                state['country'] = r.account_country
+                _save_state(user, state)
+                return st
+            raise RuntimeError(_t(r.key)) from r.cause
+
+    async def _fetch_once(self, request_code, country):
         async with ClientSession() as websession:
-            client = self._client(websession)
+            client = self._client(websession, country)
+            asked = (country or _country(self._locale())).upper()
             await self._login(client, request_code=request_code)
             person = await client.get_person()
             # The models are camelCase (accountId, accountType) — the
@@ -250,17 +322,20 @@ class _RenaultBase(VehicleConnector):
                 raise RuntimeError(_t('renault.err_no_account'))
 
             # An owner can have the car on another account than the first
-            # one (MyRenault next to SFDC, say), so look in each. And an
-            # account that lists the car may still be refused its data (the
-            # car's privacy mode, or an old account after a change of
-            # owner): then the SAME car is tried on the next account —
-            # never another car, whose values would land in this history.
+            # one (MyRenault next to SFDC, say), so look in each. An account
+            # that lists the car may still be refused its battery data: then
+            # the SAME car is tried on the next account — never another car,
+            # whose values would land in this history.
             want_vin = (self.credentials.get('vin') or '').strip().upper()
-            vin = link = vehicle = battery = refused = None
+            vin = link = vehicle = battery = None
+            refused = None              # (error, vehicle, link) of the first refusal
+            privacy_sure = False
+            acc_country = None
             for a in accounts:
                 acc = await client.get_api_account(a.accountId)
                 try:
-                    links = (await acc.get_vehicles()).vehicleLinks or []
+                    vs = await acc.get_vehicles()
+                    links = vs.vehicleLinks or []
                 except Exception as e:
                     logger.info(f"Renault account {a.accountType}: no vehicles ({e})")
                     continue
@@ -270,22 +345,30 @@ class _RenaultBase(VehicleConnector):
                 if not l:
                     continue
                 vin = l.vin.upper()
-                v = await acc.get_api_vehicle(l.vin)
+                acc_country = acc_country or (getattr(vs, 'country', None) or '').upper() or None
+                v = self._vehicle_for(acc, l) or await acc.get_api_vehicle(l.vin)
                 try:
                     battery = await v.get_battery_status()
                 except Exception as e:
-                    if not _privacy_on(e):
+                    if not _data_denied(e):
                         raise
-                    logger.info(f"Renault account {a.accountType}: car data refused "
-                                f"({getattr(e, 'error_code', e)})")
-                    refused = e
+                    privacy_sure = privacy_sure or _privacy_on(e)
+                    logger.info(
+                        f"Renault account {a.accountType}: battery-status refused "
+                        f"({getattr(e, 'error_code', '?')}: {getattr(e, 'error_details', e)}); "
+                        f"asked as {asked}, account country {getattr(vs, 'country', None)}, "
+                        f"car {_mask_vin(l.vin)}")
+                    refused = refused or (e, v, l)
                     continue
                 link, vehicle = l, v
                 break
             if not vin:
                 raise RuntimeError(_t('renault.err_no_vehicle'))
             if not link:
-                raise RuntimeError(_t('renault.err_privacy')) from refused
+                # No account handed out the battery data. Like Home Assistant,
+                # keep what Renault does give (odometer, position) — from the
+                # same car on the account that listed it first.
+                _, vehicle, link = refused
             vin = link.vin
 
             cockpit = None
@@ -298,6 +381,9 @@ class _RenaultBase(VehicleConnector):
                 location = await vehicle.get_location()
             except Exception:
                 pass
+            if battery is None and cockpit is None and location is None:
+                raise _Refused('renault.err_privacy' if privacy_sure else 'renault.err_data_denied',
+                               refused[0], asked, acc_country)
 
             soc = plausible_percent(battery.batteryLevel) if battery else None
             # chargingStatus is a state code, not a flag: 0.1 waiting for a
@@ -337,13 +423,18 @@ class _RenaultBase(VehicleConnector):
     def test_connection(self) -> bool:
         return self.authenticate()
 
-    def verify_credentials(self) -> None:
+    def verify_credentials(self):
         # Let the real reason through: "wrong password", "no car on this
         # account" and a library error each need something different from
         # the owner, and the generic "rejected" hid the bug above.
         # A person pressed Test: this is the one place allowed to have
         # Renault mail a confirmation code.
-        _run_async(self._fetch(request_code=True))
+        st = _run_async(self._fetch(request_code=True))
+        # Connected, but Renault kept the battery data back: say so next to
+        # "connected" instead of letting it look complete.
+        if st is not None and st.soc_percent is None:
+            return _t('renault.partial_no_soc')
+        return None
 
     def get_status(self, force=False) -> VehicleStatus:
         return _run_async(self._fetch(force))
