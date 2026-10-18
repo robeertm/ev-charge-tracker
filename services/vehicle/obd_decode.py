@@ -120,6 +120,13 @@ def reassemble(raw: str, expect=None):
     payload: list[int] = []
     total_len = None
     started = False
+    # 🔴 Consecutive frames carry a sequence number (1..F, then 0). Without
+    # checking it, one dropped line shifted every byte behind it: the Ah
+    # counters read 424 million and the certificate printed a capacity of
+    # 107 million Ah. A gap now drops the read; a repeated frame is skipped;
+    # a frame from another ECU (other CAN id) is not ours.
+    ff_id = None
+    seq_next = None
 
     for line in raw.splitlines():
         # Drop the ELM327 prompt char wherever it lands (it may be glued to
@@ -133,7 +140,9 @@ def reassemble(raw: str, expect=None):
         # Drop a leading CAN-id token (11-bit like "7EC" = 3 chars, or
         # 29-bit 8-char). A PCI/data byte is always 2 hex chars, so a 3- or
         # 8-char leading hex token is the arbitration id, not data.
+        can_id = None
         if len(toks) > 1 and _is_hex(toks[0]) and len(toks[0]) in (3, 8):
+            can_id = toks[0]
             toks = toks[1:]
         # Some adapters glue everything into one token — split into bytes.
         if len(toks) == 1 and _is_hex(toks[0]) and len(toks[0]) > 2 and len(toks[0]) % 2 == 0:
@@ -165,15 +174,28 @@ def reassemble(raw: str, expect=None):
             total_len = ((by[0] & 0x0F) << 8) | by[1]
             payload = data
             started = True
+            ff_id, seq_next = can_id, 1
         elif pci_hi == 2:          # Consecutive Frame: 2N <7 data bytes>
             if not started:
                 continue
+            if ff_id and can_id and can_id != ff_id:
+                continue           # another ECU talking in between
+            seq = by[0] & 0x0F
+            if seq_next is not None:
+                if seq == (seq_next - 1) & 0x0F:
+                    continue       # the same frame printed twice
+                if seq != seq_next:
+                    return None    # a frame is missing — never decode shifted bytes
+                seq_next = (seq_next + 1) & 0x0F
             payload.extend(by[1:])
         # pci_hi == 3 (flow control) shouldn't appear in a response — ignore.
 
     if not payload:
         return None
     if total_len is not None:
+        # A reply cut short at the END stays usable: fields past the end read
+        # as None (``_u``), nothing shifts. Only a gap in the MIDDLE shifts
+        # bytes — that is what the sequence check above refuses.
         payload = payload[:total_len]
     return payload
 

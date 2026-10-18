@@ -81,9 +81,16 @@ MIN_SOC_WINDOW = 25
 CAP_LOW_FRAC = 0.40
 CAP_HIGH_FRAC = 1.15
 # Industry-average calendar+cycle degradation used only for the "better /
-# worse than average" benchmark line. ~2.3 %/yr is the widely-cited fleet
-# mean (Geotab 2019, ~6300 EVs). Purely informational.
+# worse than average" benchmark line. 2.3 %/yr is Geotab's fleet mean in its
+# 2025 battery report (21 models; checked 2026-10-18 — the 2024 report said
+# 1.8 %, the newer one with more recent models says 2.3 %). Informational.
 AVG_DEGRADATION_PCT_PER_YEAR = 2.3
+# A SoH outside this band is a decode or API artefact, not a battery. The
+# headline takes at most 100 %: a pack is not healthier than new.
+SOH_PLAUSIBLE = (20.0, 110.0)     # an old Leaf at 40 % is real; 3481.9 is not
+# The headline "measured" SoH is the recent state, not a lifetime median:
+# samples within this many days of the newest one, when there are enough.
+RECENT_DAYS = 365
 
 # Grade scale (SoH % → letter, label-key, hex colour). Aligned with the
 # industry-common A–F resale grading (professional testers often publish
@@ -111,18 +118,25 @@ def grade_for_soh(soh):
     return _GRADE_TABLE[-1][1:]
 
 
-def _measured_capacity(vehicle_id, nominal_kwh):
-    """Coulomb-count usable capacity from wide-window charge sessions.
+def _measured_capacity(vehicle_id, nominal_kwh, gross_kwh=None):
+    """Coulomb-count usable capacity from wide-window, METERED charges.
 
-    For every charge that filled at least ``MIN_SOC_WINDOW`` SoC points we
-    take the energy that actually entered the battery (gross kWh minus the
-    logged charging loss) and extrapolate to a full 0→100 % pack:
+    For every metered charge that filled at least ``MIN_SOC_WINDOW`` SoC
+    points and carries a logged charging loss we take the energy that
+    entered the battery (wall energy minus that loss) and extrapolate:
 
         session_capacity = net_kwh / (soc_window / 100)
 
-    Returns a dict with the median capacity (robust to outliers), the
-    sample count, and the samples split early-vs-recent so the certificate
-    can show a degradation trend. Returns ``None`` when nothing qualifies.
+    🔴 Three kinds of rows are NOT measurements and are left out:
+      * estimated charges (auto-detected, kWh = ΔSoC × capacity / efficiency)
+        — they return the configured capacity, see ``BA.is_metered``;
+      * rows without a logged loss — wall energy is not battery energy; an
+        AC charge at 88 % efficiency read a 90 % pack as 100 %;
+      * capacities above the gross pack (or 115 % of net without a gross).
+
+    The headline value is the median of the last ``RECENT_DAYS`` before the
+    newest sample (when that holds three or more), not a lifetime median —
+    four years of slow ageing otherwise read as the state two years ago.
     """
     if not nominal_kwh or nominal_kwh <= 0:
         return None
@@ -136,82 +150,92 @@ def _measured_capacity(vehicle_id, nominal_kwh):
 
     lo = CAP_LOW_FRAC * nominal_kwh
     hi = CAP_HIGH_FRAC * nominal_kwh
+    if gross_kwh and gross_kwh > nominal_kwh:
+        hi = min(hi, gross_kwh)
     samples = []  # (date, capacity_kwh)
-    gross_per_window = []
+    estimated = 0
     for c in q.all():
         window = (c.soc_to or 0) - (c.soc_from or 0)
         if window < MIN_SOC_WINDOW:
             continue
         gross = c.kwh_loaded or 0
-        if gross <= 0:
+        if gross <= 0 or c.loss_kwh is None:
             continue
-        # Energy actually stored = gross from the wall minus charging loss.
-        # loss_kwh is None on legacy rows → treat as 0 (slightly optimistic
-        # for AC, negligible for DC where the loss is small anyway).
-        net = gross - (c.loss_kwh or 0)
+        if not BA.is_metered(c, (nominal_kwh,), _EST_EFFICIENCIES):
+            estimated += 1
+            continue
+        net = gross - c.loss_kwh
         if net <= 0:
             continue
         cap = net / (window / 100.0)
         if cap < lo or cap > hi:
             continue
         samples.append((c.date, round(cap, 2)))
-        gross_per_window.append(gross / window)
 
     if not samples:
         return None
 
-    caps = [s[1] for s in samples]
-    med = median(caps)
+    caps = [s_[1] for s_ in samples]
 
     # 🔴 THE MEASUREMENT THAT MEASURED THE SETTING (v3.0.154)
     # ``Charge.calculate_fields`` fills a missing loss as
     # ``kwh_loaded - soc_charged/100 * battery_kwh`` — so ``net / window`` is
-    # the configured capacity again, charge after charge. On a real car with
-    # four years of metered charges every single sample read 64.00 kWh while
-    # the energy per SoC point at the wall ranged over 15 %. A capacity that
-    # stays constant to the third digit while its raw input scatters is not
-    # a measurement; it is refused here and the certificate says why.
-    # Measured on that car: 284 of 323 samples were 64.00 to the cent, the
-    # rest came from a handful of hand-entered losses — so the test is "most
-    # samples share ONE value", not "all of them".
+    # the configured capacity again, charge after charge. Measured on a real
+    # car: 284 of 323 samples were 64.00 to the cent. Real metered charges
+    # never agree to the cent, so "most samples share ONE value" is circular
+    # — whatever the raw wall energy did (v3.0.174: the old extra condition
+    # on the raw spread let estimated charges through, whose raw spread is 0).
     if len(samples) >= 3:
         from collections import Counter
-        gross_pw = [g for g in gross_per_window if g > 0]
         dominant, count = Counter(round(c, 2) for c in caps).most_common(1)[0]
-        raw_spread = (max(gross_pw) - min(gross_pw)) / median(gross_pw) if gross_pw else 0
-        if count / len(caps) > 0.5 and raw_spread > 0.02:
+        if count / len(caps) > 0.5:
             return {'circular': True, 'capacity_kwh': dominant,
                     'sample_count': len(samples)}
 
-    # SoH is capped at 100 %: a *measured* usable capacity above nominal is a
-    # measurement artefact (charging-loss under-counting on legacy rows, ±1 %
-    # SoC quantisation), not a battery that is healthier than new. Without the
-    # cap an optimistic median reads e.g. "109 %", which is physically
-    # meaningless and inflates the grade. Capacity is still shown as measured.
+    # SoH is capped at 100 %: a measured capacity above nominal is a
+    # measurement artefact (±1 % SoC quantisation), not a battery healthier
+    # than new. The capacity itself is still shown as measured.
     def _soh(cap_kwh):
         return round(min(cap_kwh / nominal_kwh * 100, 100.0), 1)
 
-    # Trend: compare the earliest third to the most-recent third when we
-    # have enough samples to make the split meaningful.
+    newest = samples[-1][0]
+    recent = [s_ for s_ in samples
+              if newest and s_[0] and (newest - s_[0]).days <= RECENT_DAYS]
+    basis = recent if len(recent) >= 3 else samples
+    used = [s_[1] for s_ in basis]
+    # The same test on the samples the headline is made of: 30 recent
+    # estimates at 64.00 behind 270 real old ones are circular all the same.
+    if len(used) >= 3:
+        from collections import Counter
+        dominant, count = Counter(round(c, 2) for c in used).most_common(1)[0]
+        if count / len(used) > 0.5:
+            return {'circular': True, 'capacity_kwh': dominant, 'sample_count': len(used)}
+    med = median(used)
+
     trend = None
     if len(samples) >= 6:
         third = max(1, len(samples) // 3)
-        early = median([s[1] for s in samples[:third]])
-        recent = median([s[1] for s in samples[-third:]])
+        early = median([s_[1] for s_ in samples[:third]])
+        late = median([s_[1] for s_ in samples[-third:]])
         trend = {
             'early_capacity_kwh': round(early, 2),
-            'recent_capacity_kwh': round(recent, 2),
+            'recent_capacity_kwh': round(late, 2),
             'early_soh': _soh(early),
-            'recent_soh': _soh(recent),
+            'recent_soh': _soh(late),
             'from': samples[0][0].isoformat() if samples[0][0] else None,
             'to': samples[-1][0].isoformat() if samples[-1][0] else None,
         }
     return {
         'capacity_kwh': round(med, 2),
         'soh_pct': _soh(med),
-        'sample_count': len(samples),
-        'min_capacity_kwh': round(min(caps), 2),
-        'max_capacity_kwh': round(max(caps), 2),
+        'sample_count': len(basis),
+        'sample_total': len(samples),
+        'recent_only': basis is recent and len(recent) < len(samples),
+        'basis_from': basis[0][0].isoformat() if basis[0][0] else None,
+        'basis_to': basis[-1][0].isoformat() if basis[-1][0] else None,
+        'estimated_skipped': estimated,
+        'min_capacity_kwh': round(min(used), 2),
+        'max_capacity_kwh': round(max(used), 2),
         'trend': trend,
         'window_pct': MIN_SOC_WINDOW,
     }
@@ -227,19 +251,22 @@ def _latest_obd(vehicle_id):
     q = ObdReading.query.order_by(ObdReading.timestamp.desc())
     if vehicle_id is not None:
         q = q.filter(ObdReading.vehicle_id == vehicle_id)
-    row = q.first()
-    if row is None:
-        return None
 
     def _arr(blob):
         try:
             return _json.loads(blob) if blob else None
         except (ValueError, TypeError):
             return None
+    # 🔴 The newest PLAUSIBLE read — the same filter as ``_obd_reads``. The
+    # broken decode of 2026-08-08 (a 5.10 V cell, SoH 3481.9 %) would
+    # otherwise be printed as "SoH laut OBD, verlässlich: 3481.9 %".
+    row = next((r for r in q.all() if _cells_plausible(_arr(r.cell_voltages_json))), None)
+    if row is None:
+        return None
 
     return {
         'timestamp': row.timestamp.isoformat() if row.timestamp else None,
-        'soh_pct': row.soh_pct,
+        'soh_pct': row.soh_pct if _soh_plausible(row.soh_pct) else None,
         'soc_bms_pct': row.soc_bms_pct,
         'pack_voltage_v': row.pack_voltage_v,
         'pack_current_a': row.pack_current_a,
@@ -272,7 +299,6 @@ def _obd_reads(vehicle_id):
     q = ObdReading.query.order_by(ObdReading.timestamp.asc())
     if vehicle_id is not None:
         q = q.filter(ObdReading.vehicle_id == vehicle_id)
-    lo, hi = BA_CELL_BAND
     raus = []
     for row in q.all():
         try:
@@ -283,23 +309,39 @@ def _obd_reads(vehicle_id):
             temps = _json.loads(row.cell_temps_json) if row.cell_temps_json else None
         except (ValueError, TypeError):
             temps = None
-        if cells and any((not isinstance(v, (int, float))) or v < lo or v > hi for v in cells):
-            continue
-        if row.soh_pct is not None and row.soh_pct > 110:
+        if not _cells_plausible(cells):
             continue
         raus.append({
             'timestamp': row.timestamp.isoformat() if row.timestamp else None,
             'profile': row.profile,
             'soc_bms_pct': row.soc_bms_pct, 'soc_display_pct': row.soc_display_pct,
-            'soh_pct': row.soh_pct, 'pack_voltage_v': row.pack_voltage_v,
+            'soh_pct': row.soh_pct if _soh_plausible(row.soh_pct) else None,
+            'pack_voltage_v': row.pack_voltage_v,
             'cell_max_v': row.cell_max_v, 'cell_min_v': row.cell_min_v,
             'cumulative_charge_ah': row.cumulative_charge_ah,
             'cumulative_discharge_ah': row.cumulative_discharge_ah,
             'cumulative_charge_kwh': getattr(row, 'cumulative_charge_kwh', None),
             'cumulative_discharge_kwh': getattr(row, 'cumulative_discharge_kwh', None),
             'cell_voltages': cells, 'cell_temps': temps,
+            # for the cells section: every value of ONE read
+            'pack_current_a': row.pack_current_a, 'aux_battery_v': row.aux_battery_v,
+            'cell_avg_v': row.cell_avg_v, 'cell_delta_mv': row.cell_delta_mv,
+            'temp_min_c': row.temp_min_c, 'temp_max_c': row.temp_max_c,
+            'temp_avg_c': row.temp_avg_c, 'cell_count': row.cell_count,
         })
     return raus
+
+
+def _cells_plausible(cells):
+    """A cell outside the decoder's band means the whole read decoded wrong
+    (the 5.10 V phantom cell): drop the read."""
+    lo, hi = BA_CELL_BAND
+    return not (cells and any((not isinstance(v, (int, float))) or v < lo or v > hi for v in cells))
+
+
+def _soh_plausible(soh):
+    """An impossible SoH alone blanks the SoH, not the rest of the read."""
+    return soh is not None and SOH_PLAUSIBLE[0] <= soh <= SOH_PLAUSIBLE[1]
 
 
 # The same band the decoder uses for optional cells.
@@ -325,6 +367,51 @@ def _window_analysis(vehicle_id, nominal_kwh):
     return BA.window_trend(samples)
 
 
+def _capacity_check(m, net, gross, obd_soh):
+    """Can the capacity from the BMS counters be true — and does it agree
+    with the BMS's own SoH?
+
+    🔴 It is kWh per 100 % of the BMS's OWN state of charge. On a 2020 Kia
+    Niro (64 net / 67.5 gross, BMS SoH 93 %) a 216-km drive gave 190.6 Ah —
+    the Ah of the gross pack when NEW, to 1 %. Then the BMS refers its SoC to
+    a fixed capacity and this figure measures that reference, not today's
+    pack. One drive cannot prove it, but it must never read "passed".
+
+    Tolerance: one SoC point at either end moves the result by 100/ΔSoC %,
+    plus 2 % for counters and voltage (more when the kWh is only derived).
+    Whether a car's BMS SoC spans the net window or the gross pack is not
+    known, so the SoH comparison accepts either: a conflict only when the
+    value is outside the tolerance of BOTH net × SoH and gross × SoH."""
+    if not m or not m.get('capacity_kwh'):
+        return None
+    k = m['capacity_kwh']
+    ref = gross or net
+    if not ref:
+        return {'state': 'unknown'}
+    tol = 2 * 100.0 / m['dsoc'] + 2.0 if m.get('dsoc') else 10.0
+    if not m.get('kwh_counted'):
+        tol += 3.0                     # derived from Ah × a voltage
+    tol = round(tol, 1)
+    out = {'ref_kwh': ref, 'ref_is_gross': bool(gross), 'pct_of_ref': k / ref * 100.0,
+           'pct_of_net': (k / net * 100.0) if net else None, 'tol_pct': tol}
+    if obd_soh is not None:
+        s_ = min(obd_soh, 100.0)
+        out['soh_used'] = s_
+        exp = [x * s_ / 100.0 for x in (net, gross) if x]
+        out['expect_lo'], out['expect_hi'] = min(exp), max(exp)
+        devs = [(k / e - 1) * 100.0 for e in exp]
+        out['dev_pct'] = min(devs, key=abs)
+    if k > ref * (1 + tol / 100.0):
+        out['state'] = 'above_new'
+    elif out.get('dev_pct') is not None and round(abs(out['dev_pct']), 1) > tol:
+        out['state'] = 'conflict'
+    elif net and k < 0.7 * net:
+        out['state'] = 'low'
+    else:
+        out['state'] = 'ok'
+    return out
+
+
 def compute_battery_health(vehicle_id):
     """Assemble every battery-health metric for one vehicle.
 
@@ -342,6 +429,8 @@ def compute_battery_health(vehicle_id):
     # only for display on the certificate.
     nominal_kwh = _vehicle_field(vehicle_id, 'battery_kwh', 'battery_kwh', 0.0) or None
     gross_kwh = vehicle.battery_kwh_gross or None
+    if gross_kwh and nominal_kwh and gross_kwh <= nominal_kwh:
+        gross_kwh = None          # gross at or below net is a typo, not a pack
     stats = get_summary_stats(vehicle_id=vehicle_id) or {}
     history = get_vehicle_history(vehicle_id=vehicle_id)
     acdc = get_ac_dc_stats(vehicle_id=vehicle_id) or {}
@@ -350,19 +439,18 @@ def compute_battery_health(vehicle_id):
     bms = {'current': None, 'first': None, 'delta': None,
            'baseline': get_soh_baseline(vehicle_id), 'sample_count': 0}
     if history:
-        sm = history['summary']
-        bms['current'] = sm['last'].get('soh')
-        bms['first'] = None
-        # first non-null scaled soh
-        for v in history['series']['soh']:
-            if v is not None:
-                bms['first'] = v
-                break
-        bms['delta'] = sm.get('soh_delta')
-        bms['sample_count'] = sum(1 for v in history['series']['soh'] if v is not None)
+        # 🔴 The last PLAUSIBLE value, not the last sync: Kia/Hyundai cached
+        # syncs carry no SoH, and one of them at the end read "not reported"
+        # above a chart full of values.
+        vals = [v for v in history['series']['soh']
+                if v is not None and SOH_PLAUSIBLE[0] <= v <= SOH_PLAUSIBLE[1]]
+        if vals:
+            bms['current'], bms['first'] = vals[-1], vals[0]
+            bms['delta'] = round(vals[-1] - vals[0], 1) if len(vals) >= 2 else None
+            bms['sample_count'] = len(vals)
 
     # ── Measured SoH (Premium-Test equivalent) ───────────────────────
-    measured = _measured_capacity(vehicle_id, nominal_kwh)
+    measured = _measured_capacity(vehicle_id, nominal_kwh, gross_kwh)
     # A coulomb count that only reproduced the configured capacity is not a
     # measurement (see _measured_capacity) — keep the fact, drop the figure.
     measured_circular = bool(measured and measured.get('circular'))
@@ -374,10 +462,14 @@ def compute_battery_health(vehicle_id):
 
     # ── OBD/ELM327 cell snapshot (Flash-Test equivalent, direct BMS) ──
     obd = _latest_obd(vehicle_id)
-    obd_soh = obd.get('soh_pct') if obd else None
-    if obd_soh is not None and obd_soh > 110:
-        obd_soh = None                    # a broken decode, not a battery
     reads = _obd_reads(vehicle_id)
+    # The SoH register: the newest plausible read that has one (a quick read
+    # without the SoH page may be newer), rounded like every other source.
+    obd_soh, obd_soh_at = None, None
+    for rd in reversed(reads):
+        if rd.get('soh_pct') is not None:
+            obd_soh, obd_soh_at = round(rd['soh_pct'], 1), rd['timestamp']
+            break
     chem_key, chem_label, chem_nom_v, chem_max_v = BA.chemistry(
         getattr(vehicle, 'battery_chemistry', None))
     cells_series = getattr(vehicle, 'battery_cells_series', None)
@@ -390,6 +482,7 @@ def compute_battery_health(vehicle_id):
         nominal_kwh, gross_kwh,
         window.get('change_pct') if window else None, obd_soh)
     obd_cap = BA.obd_capacity(reads, chem_nom_v, cells_series)
+    cap_check = _capacity_check(obd_cap[-1] if obd_cap else None, nominal_kwh, gross_kwh, obd_soh)
     buffer_rows = BA.buffer_view(reads, chem_max_v)
 
     # ── Certified headline SoH. Priority:
@@ -407,31 +500,36 @@ def compute_battery_health(vehicle_id):
     #   3. a direct OBD SoH register read (real BMS value, fresh);
     #   4. the BMS SoH sampled via the cloud sync;
     #   5. a thin measured value as a last resort. ────────────────────
+    #   A headline is never above 100 % (not healthier than new) and never
+    #   from fewer than three measured charges.
     measured_soh = measured['soh_pct'] if measured else None
+    obd_head = min(obd_soh, 100.0) if obd_soh is not None else None
     certified_soh = None
     certified_source = None
-    if measured and measured['sample_count'] >= 3 and obd_soh is not None:
-        certified_soh = round((measured_soh + obd_soh) / 2, 1)
+    if measured and measured['sample_count'] >= 3 and obd_head is not None:
+        certified_soh = round((measured_soh + obd_head) / 2, 1)
         certified_source = 'reconciled'
     elif measured and measured['sample_count'] >= 3:
         certified_soh = measured_soh
         certified_source = 'measured'
-    elif obd_soh is not None:
-        certified_soh = obd_soh
+    elif obd_head is not None:
+        certified_soh = obd_head
         certified_source = 'obd'
     elif capacity and capacity.get('soh_high') is not None:
         # 🔑 Conservative on purpose: with the gross size known, the lower
         # bound assumes the hidden buffer is already spent — the displayed
         # window cannot tell, and a certificate handed to a buyer must not
-        # promise what the data cannot show.
-        certified_soh = capacity.get('soh_low', capacity['soh_high'])
-        certified_source = 'window'
-    elif bms['current'] is not None:
+        # promise what the data cannot show. Without a gross size only the
+        # upper bound exists, and the label says so.
+        if capacity.get('soh_low') is not None:
+            certified_soh, certified_source = capacity['soh_low'], 'window'
+        else:
+            certified_soh, certified_source = capacity['soh_high'], 'window_net'
+    elif bms['current'] is not None and bms['current'] <= 100.0:
+        # The car's own figure over the cloud — relative, not checked by
+        # anything else; the source label says exactly that.
         certified_soh = bms['current']
         certified_source = 'bms'
-    elif measured_soh is not None:
-        certified_soh = measured_soh
-        certified_source = 'measured'
 
     letter, label_key, color = grade_for_soh(certified_soh)
 
@@ -439,45 +537,68 @@ def compute_battery_health(vehicle_id):
     odometer = stats.get('total_km') or 0
     if history and history['summary']['last'].get('odometer_km'):
         odometer = max(odometer, history['summary']['last']['odometer_km'] or 0)
+    sync_odos = [o for o in (history['series']['odometer_km'] if history else []) if o and o > 0]
 
     acquired = vehicle.acquired_at
     first_reg = vehicle.first_registered_at
-    end_ref = vehicle.retired_at or date.today()
+    last_charge_d = stats.get('last_charge')
+    # An archived car without a retirement date: its data ends with the last
+    # charge — counting on to today would age it after it left.
+    end_ref = vehicle.retired_at or (
+        last_charge_d if (vehicle.is_archived and last_charge_d) else date.today())
+    if isinstance(end_ref, datetime):
+        end_ref = end_ref.date()
     # Ownership span — how long WE have had the car (and data for it).
     ownership_years = None
     if acquired:
         ownership_years = round((end_ref - acquired).days / 365.25, 1)
-    # Battery calendar age — from Erstzulassung, the real degradation clock.
-    # Falls back to the ownership start when no Erstzulassung is entered
-    # (bought-new case, where the two coincide anyway).
-    age_basis = first_reg or acquired
+    # Battery calendar age — from Erstzulassung only, the real degradation
+    # clock. 🔴 No fallback to the purchase date: a 5-year-old pack bought
+    # two years ago would be benchmarked as 2 years old.
     age_years = None
-    if age_basis:
-        age_years = round((end_ref - age_basis).days / 365.25, 1)
+    if first_reg:
+        age_years = round((end_ref - first_reg).days / 365.25, 1)
 
     # ── Charging behaviour / stress factors ──────────────────────────
-    ac_kwh = acdc.get('AC', {}).get('total_kwh', 0) or 0
-    dc_kwh = acdc.get('DC', {}).get('total_kwh', 0) or 0
-    pv_kwh = acdc.get('PV', {}).get('total_kwh', 0) or 0
-    throughput_kwh = ac_kwh + dc_kwh + pv_kwh
-    dc_share = round(dc_kwh / throughput_kwh * 100, 1) if throughput_kwh > 0 else None
-
-    # Equivalent full cycles = total energy throughput / nominal pack.
-    equiv_cycles = None
-    if nominal_kwh:
-        equiv_cycles = int(round(throughput_kwh / nominal_kwh)) if throughput_kwh else stats.get('charge_cycles')
-
-    # Deepest observed discharge / average SoC window from charge logs.
+    # Every figure of this block from ONE pass over the charges, so the
+    # table rows, the total and the share bar cannot disagree.
+    qc = Charge.query
+    if vehicle_id is not None:
+        qc = qc.filter(Charge.vehicle_id == vehicle_id)
+    all_charges = qc.all()
+    by_type = {}
+    battery_in = 0.0
+    loss_known = True
     soc_windows = []
     min_soc = None
-    q = Charge.query.filter(Charge.soc_from.isnot(None))
-    if vehicle_id is not None:
-        q = q.filter(Charge.vehicle_id == vehicle_id)
-    for c in q.all():
-        if c.soc_from is not None:
+    first_odo = None
+    for c in all_charges:
+        typ = (c.charge_type or '').upper()
+        if c.kwh_loaded and c.kwh_loaded > 0:
+            if typ in ('AC', 'DC', 'PV'):
+                n_, k_ = by_type.get(typ, (0, 0.0))
+                by_type[typ] = (n_ + 1, k_ + c.kwh_loaded)
+            battery_in += c.kwh_loaded - (c.loss_kwh or 0)
+            loss_known = loss_known and c.loss_kwh is not None
+        # 🔴 Only real windows: 80→20 (swapped) is not a −60 % charge.
+        if c.soc_from is not None and 0 <= c.soc_from <= 100:
             min_soc = c.soc_from if min_soc is None else min(min_soc, c.soc_from)
-        if c.soc_from is not None and c.soc_to is not None:
-            soc_windows.append(c.soc_to - c.soc_from)
+            if c.soc_to is not None and c.soc_from < c.soc_to <= 100:
+                soc_windows.append(c.soc_to - c.soc_from)
+        if c.odometer and c.odometer > 0:
+            first_odo = c.odometer if first_odo is None else min(first_odo, c.odometer)
+    ac_kwh = by_type.get('AC', (0, 0.0))[1]
+    dc_kwh = by_type.get('DC', (0, 0.0))[1]
+    pv_kwh = by_type.get('PV', (0, 0.0))[1]
+    throughput_kwh = ac_kwh + dc_kwh + pv_kwh
+    dc_share = dc_kwh / throughput_kwh * 100 if throughput_kwh > 0 else None
+
+    # Equivalent full cycles: energy that went INTO the battery (wall energy
+    # minus the logged charging loss) / net capacity. Wall energy alone
+    # counts the charger's heat as cycles (~10 % too many).
+    equiv_cycles = None
+    if nominal_kwh and battery_in > 0:
+        equiv_cycles = int(round(battery_in / nominal_kwh))
     avg_window = round(sum(soc_windows) / len(soc_windows), 1) if soc_windows else None
 
     # ── Degradation benchmark (informational) ────────────────────────
@@ -528,14 +649,19 @@ def compute_battery_health(vehicle_id):
         'measured': measured,
         'measured_circular': measured_circular,
         'obd': obd,
+        'obd_soh': obd_soh,
+        'obd_soh_at': obd_soh_at,
         'window': window,
         'capacity': capacity,
         'obd_capacity': obd_cap,
+        'capacity_check': cap_check,
         'buffer_view': buffer_rows,
         'obd_reads': reads,
         'cells': {
             'read': latest_cells,
-            'stats': BA.cell_stats(latest_cells['cell_voltages']) if latest_cells else None,
+            'stats': BA.cell_stats(latest_cells['cell_voltages'],
+                                   _profile_resolution_mv(latest_cells.get('profile')))
+                     if latest_cells else None,
             'series_configured': cells_series,
             'chemistry': {'key': chem_key, 'label': chem_label,
                           'nominal_v': chem_nom_v, 'max_v': chem_max_v},
@@ -544,18 +670,23 @@ def compute_battery_health(vehicle_id):
         'vs_benchmark': vs_benchmark,
         'behaviour': {
             'throughput_kwh': round(throughput_kwh, 1),
+            'battery_in_kwh': round(battery_in, 1),
+            'loss_all_logged': loss_known,
             'ac_kwh': round(ac_kwh, 1),
             'dc_kwh': round(dc_kwh, 1),
             'pv_kwh': round(pv_kwh, 1),
-            'ac_count': acdc.get('AC', {}).get('count', 0) or 0,
-            'dc_count': acdc.get('DC', {}).get('count', 0) or 0,
-            'pv_count': acdc.get('PV', {}).get('count', 0) or 0,
+            'ac_count': by_type.get('AC', (0, 0))[0],
+            'dc_count': by_type.get('DC', (0, 0))[0],
+            'pv_count': by_type.get('PV', (0, 0))[0],
             'dc_share_pct': dc_share,
             'equiv_full_cycles': equiv_cycles,
             'min_soc': min_soc,
             'avg_soc_window': avg_window,
             'total_charges': stats.get('total_charges'),
-            'total_km': stats.get('total_km'),
+            # km driven while the app logged: newest odometer minus the first
+            # one seen — not the odometer, which includes the previous owners
+            'driven_km': (int(odometer) - int(min([first_odo] + sync_odos if first_odo else sync_odos)))
+                         if (first_odo or sync_odos) and odometer else None,
         },
         'data_basis': {
             'charge_count': stats.get('total_charges'),
@@ -583,7 +714,7 @@ def _soh_trend_chart(history, nominal_kwh, tmp_dir):
     series = history['series']
     ts, vals = [], []
     for iso, soh in zip(series['timestamps'], series['soh']):
-        if soh is not None:
+        if soh is not None and SOH_PLAUSIBLE[0] <= soh <= SOH_PLAUSIBLE[1]:
             try:
                 ts.append(datetime.fromisoformat(iso))
                 vals.append(soh)
@@ -602,10 +733,10 @@ def _soh_trend_chart(history, nominal_kwh, tmp_dir):
         return None
     fig, ax = plt.subplots(figsize=(7.2, 2.4))
     ax.plot(ts, vals, color='#0f6b6b', linewidth=1.8)
-    ax.fill_between(ts, vals, min(vals) - 1, alpha=0.12, color='#0f6b6b')
+    ax.fill_between(ts, vals, min(min(vals), WARRANTY_FLOOR_SOH), alpha=0.12, color='#0f6b6b')
     ax.axhline(WARRANTY_FLOOR_SOH, color='#b3261e', linestyle='--', linewidth=1,
                label=t('cert.chart_warranty', default='Garantiegrenze 70%'))
-    ax.set_ylabel('SoH %')
+    ax.set_ylabel(t('cert.chart_soh_axis', default='BMS-Wert (relativ) %'))
     ax.grid(True, color='#e2e6ea')
     _chart_look(ax)
     ax.legend(fontsize=7, loc='lower left', frameon=False)
@@ -704,6 +835,10 @@ def _cell_heatmap(voltages, stats, tmp_dir, title, resolution_mv=None):
     return path
 
 
+# Reads shown in the cell history — the map and the sentence under it.
+_CELLHIST_N = 12
+
+
 def _cell_history_heatmap(reads, tmp_dir, resolution_mv=None):
     """Cells across reads — does the same cell sit low every time?
 
@@ -718,7 +853,7 @@ def _cell_history_heatmap(reads, tmp_dir, resolution_mv=None):
     if len(rows) < 2:
         return None
     n = len(rows[-1]['cell_voltages'])
-    rows = [r for r in rows if len(r['cell_voltages']) == n][-12:]
+    rows = [r for r in rows if len(r['cell_voltages']) == n][-_CELLHIST_N:]
     if len(rows) < 2:
         return None
     import numpy as np
@@ -745,6 +880,7 @@ def _cell_history_heatmap(reads, tmp_dir, resolution_mv=None):
     ax.set_xticklabels([str(i + 1) for i in range(0, n, step)], fontsize=6.5)
     ax.set_xlabel(t('cert.cellchart_xlabel', default='Zelle'), fontsize=7)
     cb = fig.colorbar(im, ax=ax, fraction=0.025, pad=0.02)
+    cb.set_label(t('cert.cellhist_unit', default='mV vom Mittel der Auslesung'), fontsize=6.5)
     cb.ax.tick_params(labelsize=6.5)
     path = os.path.join(tmp_dir, 'cert_cellhist.png')
     fig.savefig(path, dpi=160, bbox_inches='tight', facecolor='white')
@@ -862,6 +998,8 @@ _TONES = {
 # Printed in full on the report: a buyer holding the paper has to be able to
 # find the app that made it — "this app" names nothing on a printout.
 APP_URL = 'https://github.com/robeertm/ev-charge-tracker'
+import re as _re
+_UNIT_GLUE = _re.compile(r'(\d) (%|kWh|Ah|mV|V|km|mi|°C|Pkt|pts|ptn|pt|Jahren|Jahre|years|ans|años|anni|jaar)(?=\W|$)')
 
 
 def _tone_for_grade(letter):
@@ -912,6 +1050,8 @@ try:
 
         def _clean(self, text):
             s = '' if text is None else str(text)
+            # A number and its unit never break apart ("±5" / "%" on two lines).
+            s = _UNIT_GLUE.sub('\\1\u00a0\\2', s)
             return s if self.uni else latin1_safe(s)
 
         @property
@@ -1054,7 +1194,12 @@ try:
             w = (self.cw - gap * (cols - 1)) / cols
             for i in range(0, len(items), cols):
                 row = items[i:i + cols]
-                h = max(4 + 4.4 * self._lines(v, w, self.f_sans, 'B', 8.6) for _, v in row) + 2.5
+                # 🔴 A caption wider than its column wraps — on one line it ran
+                # into the next column ("CYCLES COMPLETS ÉQUIVALENTS (CÔTÉ
+                # BATTERIE)" in French). Values start below the tallest caption.
+                cap_lines = [self._lines(self._clean(k.upper()), w, self.f_mono, '', 6.3) for k, _ in row]
+                cap_h = 3.4 * max(cap_lines) + 0.6
+                h = max(cap_h + 4.4 * self._lines(v, w, self.f_sans, 'B', 8.6) for _, v in row) + 2.5
                 if self.get_y() + h > self.h - self.b_margin:
                     self.add_page()
                 y = self.get_y()
@@ -1063,10 +1208,15 @@ try:
                     self.set_xy(x, y)
                     self.set_font(self.f_mono, '', 6.3)
                     self.color(_MUTED)
-                    self.set_char_spacing(0.4)
-                    self.cell(w, 4, self._clean(k.upper()))
-                    self.set_char_spacing(0)
-                    self.set_xy(x, y + 4)
+                    if cap_lines[j] == 1:
+                        self.set_char_spacing(0.4)
+                        if self.get_string_width(self._clean(k.upper())) > w:
+                            self.set_char_spacing(0)
+                        self.cell(w, 3.4, self._clean(k.upper()))
+                        self.set_char_spacing(0)
+                    else:
+                        self.multi_cell(w, 3.4, self._clean(k.upper()))
+                    self.set_xy(x, y + cap_h)
                     self.set_font(self.f_sans, 'B', 8.6)
                     self.color(_INK)
                     self.multi_cell(w, 4.4, self._clean(v))
@@ -1327,6 +1477,8 @@ def _src_label(data):
         'bms': t('cert.src_bms', default='BMS-Wert des Fahrzeugs'),
         'window': t('cert.src_window',
                     default='aus dem angezeigten Fenster, Puffer als verbraucht angenommen'),
+        'window_net': t('cert.src_window_net',
+                        default='aus dem angezeigten Fenster (obere Grenze – ohne Bruttogröße)'),
     }.get(data.get('certified_source'), t('cert.na', default='keine Datengrundlage'))
 
 
@@ -1338,6 +1490,7 @@ def _spread_of(data):
 
 
 def _spread_rating(spread):
+    spread = round(spread)                # judged as printed ('%.0f mV')
     if spread <= 30:
         return t('cert.obd_spread_ok', default='sehr gut'), 'ok'
     if spread <= 60:
@@ -1348,6 +1501,33 @@ def _spread_rating(spread):
 def _last_cap(data):
     caps = data.get('obd_capacity') or []
     return caps[-1] if caps else None
+
+
+def _km(km):
+    """An odometer in the owner's unit, thousands split by a no-break space
+    — '87 512 km' reads the same in every language; '87.512' reads as 87 km
+    in English and '87,512' as 87 km in German."""
+    if km is None:
+        return '—'
+    return '{:,} {}'.format(int(round(_U.dist(km, 0))), _U.dist_label()).replace(',', '\u00a0')
+
+
+def _date(iso):
+    """dd.mm.yyyy — one date format for the whole report."""
+    if not iso:
+        return '—'
+    try:
+        return datetime.fromisoformat(str(iso)[:19]).strftime('%d.%m.%Y')
+    except ValueError:
+        return str(iso)[:10]
+
+
+def _cap_kwh(m):
+    """'69.3 kWh' from the energy counters, '~66.3 kWh' when it had to be
+    derived from Ah × a voltage."""
+    if not m or not m.get('capacity_kwh'):
+        return '—'
+    return ('%.1f kWh' if m.get('kwh_counted') else '~%.1f kWh') % m['capacity_kwh']
 
 
 # ── The topics. Each opens with its numbered heading and draws only through
@@ -1431,19 +1611,27 @@ def _t_cover(pdf, data, ctx):
     chem_txt = chem.get('label') if chem.get('key') not in (None, 'other') else None
     if n_cells:
         chem_txt = ((chem_txt + ' · ') if chem_txt else '') + t('cert.cells_n', default='{n} Zellen', n=n_cells)
-    period = veh['acquired_at'] or '—'
     if veh['acquired_at'] and veh['retired_at']:
-        period += ' → ' + veh['retired_at']
+        period = _date(veh['acquired_at']) + ' → ' + _date(veh['retired_at'])
+    elif veh['acquired_at'] and veh.get('is_archived'):
+        period = _date(veh['acquired_at']) + ' → ' + _date(data['data_basis'].get('last_charge'))
+    elif veh['acquired_at']:
+        period = t('cert.since', default='seit {d}', d=_date(veh['acquired_at']))
+        if data.get('ownership_years') is not None:
+            period += ' · ' + t('cert.years', default='{y} Jahre', y=data['ownership_years'])
+    else:
+        period = '—'
     items = [
         (t('cert.veh_brand', default='Marke / Modell'), brandmodel),
         ('VIN', veh['vin'] or t('cert.na', default='nicht hinterlegt')),
         (t('cert.veh_battery', default='Akku (Nennkapazität)'), batt),
-        (t('cert.veh_odometer', default='Tachostand'),
-         f"{_U.dist(data['odometer_km'], 0):,} {_U.dist_label()}".replace(',', '.')),
+        (t('cert.veh_odometer', default='Tachostand'), _km(data['odometer_km'])),
         (t('cert.veh_first_reg', default='Erstzulassung'),
-         veh.get('first_registered_at') or t('cert.na', default='nicht hinterlegt')),
+         _date(veh['first_registered_at']) if veh.get('first_registered_at')
+         else t('cert.na', default='nicht hinterlegt')),
         (t('cert.veh_age', default='Batteriealter'),
-         t('cert.years', default='{y} Jahre', y=data['age_years']) if data.get('age_years') is not None else '—'),
+         t('cert.years', default='{y} Jahre', y=data['age_years']) if data.get('age_years') is not None
+         else t('cert.age_needs_reg', default='Erstzulassung fehlt')),
         (t('cert.chemistry', default='Zellchemie'), chem_txt or '—'),
         (t('cert.veh_period', default='Besitzzeitraum'), period),
         (t('cert.obd_time', default='Letzte OBD-Auslesung'),
@@ -1472,13 +1660,22 @@ def _t_cover(pdf, data, ctx):
                                   ('Das sind {d:.1f} Prozentpunkte unter dem Flottenmittel für dieses '
                                    'Alter (~{e:.1f} %).'),
                           d=abs(vb), e=ex))
+        chk = data.get('capacity_check') or {}
         if m and m.get('capacity_kwh'):
-            bits.append(t('cert.sum_cap',
-                          default='Eigene Kapazitätsmessung über die BMS-Zähler: {k:.1f} kWh bzw. '
-                                  '{a:.1f} Ah je 100 % BMS-Ladestand (Fahrt {f} → {to}) – eine '
-                                  'Einzelmessung, Details in Abschnitt {n}.',
-                          k=m['capacity_kwh'], a=m['capacity_ah'], f=_d(m['from']), to=_d(m['to']),
-                          n=ctx['num'].get('capmeas', '')))
+            n_caps = len(data.get('obd_capacity') or [])
+            bits.append(t('cert.sum_cap2',
+                          default='Kapazität aus den BMS-Zählern: {k} bzw. {a:.1f} Ah je 100 % '
+                                  'BMS-Ladestand (Fahrt {f} → {to}; {how}).',
+                          k=_cap_kwh(m), a=m['capacity_ah'], f=_d(m['from']), to=_d(m['to']),
+                          how=t('cert.sum_cap_single', default='eine Einzelmessung') if n_caps == 1
+                          else t('cert.sum_cap_n', default='neueste von {n} Messfahrten', n=n_caps)))
+            if chk.get('state') in ('above_new', 'conflict'):
+                bits.append(t('cert.sum_cap_flag2',
+                              default='Dieser Wert ist nicht plausibel (Abschnitt {n}); die Note beruht allein auf '
+                                      'dem SoH.', n=ctx['num'].get('capmeas', '')))
+            else:
+                bits.append(t('cert.sum_cap_more', default='Details in Abschnitt {n}.',
+                              n=ctx['num'].get('capmeas', '')))
         p.set_x(x)
         p.set_font(p.f_sans, '', 8.3)
         p.color(_INK2)
@@ -1498,14 +1695,18 @@ def _cover_cards(data, ctx):
                     'tone': _tone_for_grade(data['grade']['letter'])})
     m = _last_cap(data)
     net = veh.get('nominal_kwh')
+    chk = data.get('capacity_check') or {}
     if m and m.get('capacity_kwh'):
-        pct = m['capacity_kwh'] / net if net else None
+        sub = t('cert.card_cap_sub', default='{a:.1f} Ah · BMS {f:g} → {to:g} % · {d1}–{d2}',
+                a=m['capacity_ah'], f=m['soc_from'], to=m['soc_to'], d1=_d(m['from']), d2=_d(m['to']))
+        flagged = chk.get('state') in ('above_new', 'conflict')
+        if flagged:
+            sub += ' · ' + t('cert.card_cap_flag2', default='nicht plausibel – s. Abschnitt {n}',
+                             n=ctx['num'].get('capmeas', ''))
         out.append({'key': t('cert.card_cap', default='Kapazität (BMS-Zähler)'),
-                    'value': '%.1f kWh' % m['capacity_kwh'],
-                    'sub': t('cert.card_cap_sub', default='{a:.1f} Ah · BMS {f:g} → {to:g} % · {d1}–{d2}',
-                             a=m['capacity_ah'], f=m['soc_from'], to=m['soc_to'],
-                             d1=_d(m['from']), d2=_d(m['to'])),
-                    'frac': pct, 'tone': 'ok' if (pct or 1) >= 0.7 else 'warn'})
+                    'value': _cap_kwh(m), 'sub': sub,
+                    'frac': None if flagged else (chk.get('pct_of_ref') or 0) / 100.0,
+                    'tone': 'warn' if flagged or chk.get('state') == 'low' else 'info'})
     else:
         out.append({'key': t('cert.card_cap', default='Kapazität (BMS-Zähler)'), 'value': '—',
                     'sub': t('cert.card_cap_none', default='noch keine Messfahrt von etwa 100 auf 20 %'),
@@ -1514,27 +1715,29 @@ def _cover_cards(data, ctx):
     if spread is not None:
         _, tone = _spread_rating(spread)
         n = ((data.get('cells') or {}).get('stats') or {}).get('n') or (data.get('obd') or {}).get('cell_count')
+        sub = t('cert.cells_n', default='{n} Zellen', n=n) if n else ''
+        if ctx.get('res_mv'):
+            sub += (' · ' if sub else '') + t('cert.bms_step', default='BMS-Schritt {r:.0f} mV', r=ctx['res_mv'])
         out.append({'key': t('cert.card_spread', default='Zell-Spreizung'), 'value': '%.0f mV' % spread,
-                    'sub': t('cert.card_spread_sub', default='{n} Zellen · BMS-Schritt {r:.0f} mV',
-                             n=n or '?', r=ctx.get('res_mv') or 20),
-                    'frac': 1 - spread / 100.0, 'tone': tone})
+                    'sub': sub, 'frac': 1 - spread / 100.0, 'tone': tone})
     win = data.get('window') or {}
     if win.get('change_pct') is not None:
         c = win['change_pct']
         out.append({'key': t('cert.card_window', default='Angezeigtes Fenster'), 'value': '%+.1f %%' % c,
                     'sub': t('cert.card_window_sub', default='seit {ref} · {n} gemessene Ladungen',
-                             ref=_halbjahr(win['ref_period']), n=win.get('sample_count', 0)),
-                    'frac': 1 + c / 20.0, 'tone': 'ok' if c >= -5 else 'warn'})
+                             ref=_halbjahr(win['ref_period']), n=win.get('compared_n', 0)),
+                    'frac': 1 + c / 20.0, 'tone': 'ok' if round(c, 1) >= -5 else 'warn'})
     vb, ex = data.get('vs_benchmark'), data.get('expected_soh')
     if vb is not None and ex is not None:
-        out.append({'key': t('cert.card_bench', default='Gegenüber der Flotte'), 'value': '%+.1f %%' % vb,
+        out.append({'key': t('cert.card_bench', default='Gegenüber der Flotte'),
+                    'value': t('cert.pts', default='{v:+.1f} Pkt', v=vb),
                     'sub': t('cert.card_bench_sub', default='Erwartung ~{e:.1f} % bei {y} Jahren',
                              e=ex, y=data.get('age_years')),
                     'frac': 0.5 + vb / 20.0, 'tone': 'ok' if vb >= 0 else 'warn'})
     if soh is not None:
         head = soh - WARRANTY_FLOOR_SOH
         out.append({'key': t('cert.card_warranty', default='Abstand zur Garantiegrenze'),
-                    'value': '%+.1f %%' % head,
+                    'value': t('cert.pts', default='{v:+.1f} Pkt', v=head),
                     'sub': t('cert.card_warranty_sub', default='Grenze {w:.0f} % SoH (übliche Herstellergarantie)',
                              w=WARRANTY_FLOOR_SOH),
                     'frac': head / 30.0, 'tone': 'ok' if head >= 5 else ('warn' if head >= 0 else 'crit')})
@@ -1555,39 +1758,54 @@ def _t_checks(pdf, data, ctx):
     vb, ex = data.get('vs_benchmark'), data.get('expected_soh')
     if vb is not None and ex is not None:
         rows.append([t('cert.chk_bench', default='Vergleich mit dem Flottenmittel'), '~%.1f %%' % ex,
-                     '%+.1f %%' % vb,
+                     '%.1f %% (%s)' % (soh, t('cert.pts', default='{v:+.1f} Pkt', v=vb)),
                      ('pill', t('cert.bench_above', default='über Durchschnitt') if vb >= 0
                       else t('cert.bench_below', default='unter Durchschnitt'), 'ok' if vb >= 0 else 'warn')])
     m = _last_cap(data)
     net = veh.get('nominal_kwh')
-    if m and m.get('capacity_kwh') and net:
-        pct = m['capacity_kwh'] / net * 100.0
-        ok = pct >= 70
+    chk = data.get('capacity_check') or {}
+    if m and m.get('capacity_kwh') and net and chk.get('state') not in (None, 'unknown'):
+        st = chk['state']
+        n_caps = len(data.get('obd_capacity') or [])
+        actual = (t('cert.chk_cap_actual_one', default='{k} · 1 Messfahrt', k=_cap_kwh(m)) if n_caps == 1
+                  else t('cert.chk_cap_actual_n', default='{k} · {n} Messfahrten', k=_cap_kwh(m), n=n_caps))
+        if st == 'above_new':
+            actual += ' · ' + t('cert.chk_cap_above', default='über dem Neuwert ({r:.1f} kWh {b})',
+                                r=chk['ref_kwh'], b=t('cert.gross_word', default='brutto') if chk['ref_is_gross']
+                                else t('cert.net_word', default='netto'))
+            pill = ('pill', t('cert.r_implausible', default='nicht plausibel'), 'warn')
+        elif st == 'conflict':
+            actual += ' · ' + t('cert.chk_cap_conflict2', default='BMS-SoH erwartet {lo:.1f}–{hi:.1f} kWh',
+                                lo=chk['expect_lo'], hi=chk['expect_hi'])
+            pill = ('pill', t('cert.r_implausible', default='nicht plausibel'), 'warn')
+        elif st == 'low':
+            pill = ('pill', t('cert.r_fail', default='unter Grenze'), 'crit')
+        else:
+            pill = ('pill', t('cert.r_pass', default='bestanden'), 'ok')
         rows.append([t('cert.chk_cap', default='Kapazität aus den BMS-Zählern'),
-                     '≥ 70 %% · %.1f kWh' % (0.7 * net),
-                     t('cert.chk_cap_actual', default='{k:.1f} kWh ({p:.0f} % von netto), Messungen: {n}',
-                       k=m['capacity_kwh'], p=pct, n=len(data.get('obd_capacity') or [])),
-                     ('pill', t('cert.r_pass', default='bestanden') if ok
-                      else t('cert.r_fail', default='unter Grenze'), 'ok' if ok else 'crit')])
+                     '≥ 70 %% · %.1f kWh' % (0.7 * net), actual, pill])
     spread = _spread_of(data)
     if spread is not None:
         lbl, tone = _spread_rating(spread)
         rows.append([t('cert.card_spread', default='Zell-Spreizung'), '≤ 30 mV', '%.0f mV' % spread,
                      ('pill', lbl, tone)])
+        # (the rating compares the value as printed: 30.4 mV prints 30 and passes)
     stats = (data.get('cells') or {}).get('stats')
     if stats:
         out = stats.get('outliers') or []
-        rows.append([t('cert.cells_outliers', default='Auffällige Zellen (> 2 σ)'),
+        rows.append([t('cert.cells_outliers', default='Auffällige Zellen (> 2 σ, > 1½ BMS-Schritte)'),
                      t('cert.none', default='keine'),
-                     ', '.join('#%d' % c for c in out[:8]) if out else t('cert.none', default='keine'),
+                     (', '.join('#%d' % c for c in out[:8]) + (' … (%d)' % len(out) if len(out) > 8 else ''))
+                     if out else t('cert.none', default='keine'),
                      ('pill', t('cert.r_pass', default='bestanden') if not out
                       else t('cert.r_check', default='prüfen'), 'ok' if not out else 'warn')])
     win = data.get('window') or {}
     if win.get('change_pct') is not None:
         c = win['change_pct']
+        ok = round(c, 1) >= -5            # judged as printed
         rows.append([t('cert.card_window', default='Angezeigtes Fenster'), '≥ −5 %', '%+.1f %%' % c,
-                     ('pill', t('cert.r_stable', default='stabil') if c >= -5
-                      else t('cert.r_shrunk', default='geschrumpft'), 'ok' if c >= -5 else 'warn')])
+                     ('pill', t('cert.r_stable', default='stabil') if ok
+                      else t('cert.r_shrunk', default='geschrumpft'), 'ok' if ok else 'warn')])
     cap = data.get('capacity') or {}
     if cap.get('buffer_used_pct') is not None:
         u = cap['buffer_used_pct']
@@ -1603,6 +1821,45 @@ def _t_checks(pdf, data, ctx):
                           'übliche Zell-Spreizung) – keine Normwerte.'))
 
 
+def _capmeas_calc(pdf, m):
+    """The calculation, step by step: what flowed out, what came back
+    (regeneration on the drive), the net amount, ÷ SoC points. Every figure
+    comes rounded from ``obd_capacity`` itself, so each line is exactly the
+    line above minus the next — and the cards below show the same numbers."""
+    counted = m.get('kwh') is not None
+    kw = (lambda v: '%.1f' % v) if counted else (lambda v: '—')
+    if m.get('capacity_kwh') is None:
+        cap_kwh = '—'
+    elif counted:
+        cap_kwh = '%.1f' % m['capacity_kwh']
+    else:
+        cap_kwh = '~%.1f' % m['capacity_kwh']
+    rows = [[t('cert.cm_calc_out', default='Aus dem Akku entnommen (Zähler „aus“)'),
+             '%.1f' % m['ah_out'], kw(m.get('kwh_out'))],
+            [t('cert.cm_calc_regen', default='Während der Fahrt zurückgeflossen – Rekuperation (Zähler „ein“)'),
+             '- %.1f' % m['ah_in'], ('- ' + kw(m.get('kwh_in'))) if counted else '—'],
+            [t('cert.cm_calc_net', default='Netto = Grundlage der Messung'), '%.1f' % m['ah'], kw(m.get('kwh'))],
+            [t('cert.cm_calc_cap', default='÷ {p} BMS-Punkte × 100 = Kapazität', p='%.1f' % m['dsoc']),
+             '%.1f' % m['capacity_ah'], cap_kwh]]
+    pdf.sub(t('cert.cm_calc', default='Rechenweg'), need=34)
+    pdf.table([t('cert.th_step', default='Schritt'), 'Ah', 'kWh'], rows, [70, 15, 15], ['L', 'R', 'R'])
+    notes = []
+    if m['ah_in'] > 0:
+        notes.append(t('cert.cm_calc_regen_note',
+                       default='Beim Bremsen und Rollen lädt der Motor als Generator den Akku wieder auf. Der '
+                               'Ladestand ist deshalb nur um die Netto-Menge gesunken – darum wird die '
+                               'Rekuperation abgezogen, bevor durch die Ladestandspunkte geteilt wird.'))
+    if not counted and m.get('kwh_basis'):
+        key = {'nominal': 'cert.cm_kwh_nominal', 'endpoints': 'cert.cm_kwh_endpoints'}[m['kwh_basis']]
+        notes.append(t(key,
+                       default={'nominal': '~ kWh: Ah × Nennspannung des Packs (Zellen × Nennspannung der '
+                                           'Chemie) – das BMS liefert keine Energiezähler.',
+                                'endpoints': '~ kWh: Ah × Mittel der Packspannung an beiden Messpunkten – '
+                                             'das BMS liefert keine Energiezähler.'}[m['kwh_basis']]))
+    if notes:
+        pdf.caption(' '.join(notes))
+
+
 def _t_capmeas(pdf, data, ctx):
     pdf.section(t('cert.sec_capmeas', default='Kapazitätsmessung über die BMS-Zähler'), ctx['num'].get('capmeas'))
     caps = data.get('obd_capacity') or []
@@ -1615,11 +1872,12 @@ def _t_capmeas(pdf, data, ctx):
                            'ergibt das die Kapazität, ohne jede Annahme über Ladeverluste.'))
         return
     m = caps[-1]
-    pdf.para(t('cert.capmeas_lead',
-               default='Das Batteriemanagement zählt jede Amperestunde und Kilowattstunde, die in den Akku '
-                       'hinein- und aus ihm herausfließt. Zwischen zwei Auslesungen ohne Laden ergibt die '
-                       'entnommene Menge geteilt durch die Ladestandspunkte die Kapazität – ohne Annahme '
-                       'über Ladeverluste.'))
+    chk = data.get('capacity_check') or {}
+    pdf.para(t('cert.capmeas_lead2',
+               default='Das Batteriemanagement (BMS) zählt jede Amperestunde und Kilowattstunde, die in den Akku '
+                       'hinein- und aus ihm herausfließt. Gemessen wird über eine Fahrt ohne Ladestopp: die netto '
+                       'entnommene Menge geteilt durch die Punkte, um die der BMS-Ladestand gesunken ist – ohne '
+                       'Annahme über Ladeverluste.'))
     a, b = m.get('start') or {}, m.get('end') or {}
 
     def num(v, f='%.1f'):
@@ -1630,11 +1888,6 @@ def _t_capmeas(pdf, data, ctx):
 
     def pair(x, y):
         return '%s / %s' % (num(x), num(y))
-
-    def diff(k):
-        if a.get(k) is None or b.get(k) is None:
-            return None
-        return b[k] - a[k]
     rows = [
         [t('cert.cm_start', default='Start'), _short_ts(m['from']), soc(a),
          pair(a.get('ah_in'), a.get('ah_out')), pair(a.get('kwh_in'), a.get('kwh_out')),
@@ -1643,105 +1896,162 @@ def _t_capmeas(pdf, data, ctx):
          pair(b.get('ah_in'), b.get('ah_out')), pair(b.get('kwh_in'), b.get('kwh_out')),
          num(b.get('pack_v')) + ' V' if b.get('pack_v') else '—'],
         [t('cert.cm_delta', default='Differenz'), '',
-         t('cert.pts', default='{v:+.1f} Pkt', v=(b.get('soc_bms') or 0) - (a.get('soc_bms') or 0))
-         if a.get('soc_bms') is not None and b.get('soc_bms') is not None else '—',
-         pair(diff('ah_in'), diff('ah_out')).replace('—', '—'),
-         pair(diff('kwh_in'), diff('kwh_out')), ''],
+         t('cert.pts', default='{v:+.1f} Pkt', v=-m['dsoc']),
+         pair(m['ah_in'], m['ah_out']), pair(m.get('kwh_in'), m.get('kwh_out')), ''],
     ]
     pdf.table([t('cert.th_point', default='Punkt'), t('cert.th_time', default='Zeitpunkt'),
                t('cert.th_soc', default='Anzeige / BMS'), t('cert.th_ah', default='Ah ein / aus'),
                t('cert.th_kwh', default='kWh ein / aus'), t('cert.th_pack', default='Pack')],
               rows, [16, 21, 21, 26, 25, 12], ['L', 'L', 'R', 'R', 'R', 'R'])
+    _capmeas_calc(pdf, m)
     net, gross = veh.get('nominal_kwh'), veh.get('gross_kwh')
+    flagged = chk.get('state') in ('above_new', 'conflict')
+    taken_sub = (t('cert.cm_taken_sub', default='{k} kWh · Rekuperation abgezogen', k='%.1f' % m['kwh'])
+                 if m.get('kwh') is not None and m['ah_in'] > 0
+                 else ('%.1f kWh' % m['kwh'] if m.get('kwh') is not None else ''))
     cards = [{'key': t('cert.cm_taken', default='Entnommen'), 'value': '%.1f Ah' % m['ah'],
-              'sub': t('cert.cm_taken_sub', default='{k} kWh · Rekuperation abgezogen',
-                       k=('%.1f' % m['kwh']) if m.get('kwh') is not None else '—'), 'tone': 'info'},
+              'sub': taken_sub, 'tone': 'info'},
              {'key': t('cert.cm_capacity', default='Kapazität je 100 % BMS'),
-              'value': ('%.1f kWh' % m['capacity_kwh']) if m.get('capacity_kwh') else '%.1f Ah' % m['capacity_ah'],
-              'sub': '%.1f Ah' % m['capacity_ah'], 'tone': 'info'}]
-    if net and m.get('capacity_kwh'):
-        sub = t('cert.cm_vs_sub_net', default='von {n:.1f} kWh netto', n=net)
-        if gross:
-            sub += ' · ' + t('cert.cm_vs_sub_gross', default='{p:.0f} % von {g:.1f} kWh brutto',
-                             p=m['capacity_kwh'] / gross * 100.0, g=gross)
-        pct = m['capacity_kwh'] / net
-        cards.append({'key': t('cert.cm_vs', default='Gegenüber Nennwert'), 'value': '%.0f %%' % (pct * 100),
-                      'sub': sub, 'frac': pct, 'tone': 'ok' if pct >= 0.7 else 'warn'})
+              'value': _cap_kwh(m) if m.get('capacity_kwh') else '%.1f Ah' % m['capacity_ah'],
+              'sub': '%.1f Ah' % m['capacity_ah'], 'tone': 'warn' if flagged else 'info'}]
+    if chk.get('ref_kwh') and m.get('capacity_kwh'):
+        if chk['ref_is_gross'] and chk.get('pct_of_net') is not None:
+            sub = t('cert.cm_vs_sub_gross2', default='von {g:.1f} kWh brutto (neu) · {p:.0f} % von {n:.1f} kWh netto',
+                    g=gross, p=chk['pct_of_net'], n=net)
+        elif chk['ref_is_gross']:
+            sub = t('cert.cm_vs_sub_gross_only', default='von {g:.1f} kWh brutto (neu)', g=gross)
+        else:
+            sub = t('cert.cm_vs_sub_net', default='von {n:.1f} kWh netto', n=net)
+        cards.append({'key': t('cert.cm_vs', default='Gegenüber Nennwert'),
+                      'value': '%.0f %%' % chk['pct_of_ref'], 'sub': sub,
+                      'frac': None if flagged else chk['pct_of_ref'] / 100.0,
+                      'tone': 'warn' if flagged or chk['state'] == 'low' else 'ok'})
     pdf.ln(1)
     pdf.cards(cards, cols=3)
-    pdf.para(t('cert.obdcap_note',
-               default='Das BMS zählt Amperestunden und Kilowattstunden genau, seinen Ladestand schätzt es. '
-                       'Ein Punkt Abweichung am Anfang oder Ende verschiebt das Ergebnis um rund 1,5 %. '
-                       'Belastbar wird es erst über mehrere solche Fahrten.'))
+    if flagged:
+        def warn(p, x, w):
+            p.set_x(x)
+            p.set_font(p.f_sans, 'B', 8.8)
+            p.color(_TONES['warn'][0])
+            p.cell(w, 5, p._clean(t('cert.cm_flag_title', default='Plausibilität: dieser Wert ist kein Kapazitätsnachweis')),
+                   new_x='LMARGIN', new_y='NEXT')
+            p.set_x(x)
+            p.set_font(p.f_sans, '', 7.9)
+            p.color(_INK2)
+            bits = []
+            if chk['state'] == 'above_new':
+                if chk['ref_is_gross']:
+                    bits.append(t('cert.cm_flag_above_gross',
+                                  default='{k} liegen über der Bruttokapazität eines neuen Akkus ({r:.1f} kWh). '
+                                          'Das kann keine echte Kapazität sein.', k=_cap_kwh(m), r=chk['ref_kwh']))
+                else:
+                    bits.append(t('cert.cm_flag_above_net',
+                                  default='{k} liegen deutlich über der Nettokapazität eines neuen Akkus '
+                                          '({r:.1f} kWh). Das kann keine echte Kapazität sein.',
+                                  k=_cap_kwh(m), r=chk['ref_kwh']))
+            if chk.get('dev_pct') is not None:
+                bits.append(t('cert.cm_flag_soh2',
+                              default='Der BMS-SoH von {s:.1f} % entspräche {lo:.1f} kWh (netto) bis {hi:.1f} kWh '
+                                      '(brutto); die Messung liegt {d:+.1f} % neben dem näheren Wert, die '
+                                      'Messtoleranz dieser Fahrt ist ±{tol:.1f} %.',
+                              s=chk['soh_used'], lo=chk['expect_lo'], hi=chk['expect_hi'],
+                              d=chk['dev_pct'], tol=chk['tol_pct']))
+            bits.append(t('cert.cm_flag_why2',
+                          default='Wahrscheinlichste Erklärung: das BMS bezieht seinen Ladestand auf eine feste '
+                                  'Bezugsgröße statt auf die heutige Kapazität – dann misst diese Rechnung die '
+                                  'Bezugsgröße, nicht die Alterung. Eine einzelne Fahrt kann das nicht beweisen. '
+                                  'Die Note beruht ohnehin allein auf dem SoH (Abschnitt {n}).',
+                          n=ctx['num'].get('soh', '')))
+            p.multi_cell(w, 4, p._clean(' '.join(bits)), new_x='LMARGIN', new_y='NEXT')
+        pdf.boxed(_TONES['warn'][0], _TONES['warn'][1], warn, bar=_TONES['warn'][0])
+    pdf.para(t('cert.obdcap_note2',
+               default='Das BMS zählt Amperestunden und Kilowattstunden genau, seinen Ladestand schätzt es. Ein '
+                       'Punkt Abweichung am Anfang oder Ende verschiebt dieses Ergebnis um {p:.1f} % (100 ÷ {d:.1f} '
+                       'Punkte). Belastbar wird es erst über mehrere solche Fahrten.',
+               p=100.0 / m['dsoc'], d=m['dsoc']))
     if len(caps) > 1:
-        pdf.sub(t('cert.cm_all', default='Alle Messungen'))
-        for c in caps[-6:]:
+        shown = caps[-10:]
+        pdf.sub(t('cert.cm_all', default='Alle Messungen') if len(shown) == len(caps)
+                else t('cert.cm_last_n', default='Die letzten {k} von {n} Messfahrten', k=len(shown), n=len(caps)))
+        for c in shown:
             val = '%.1f Ah' % c['capacity_ah']
             if c.get('capacity_kwh'):
-                val += (' / %.1f kWh' if c.get('kwh_counted') else ' / ~%.1f kWh') % c['capacity_kwh']
-            bis = _short_ts(c['to'])
-            if c['from'][:10] == c['to'][:10]:
-                bis = bis[-5:]           # same day: the time is enough
-            pdf.kv('%s -> %s' % (_short_ts(c['from']), bis),
+                val += ' / ' + _cap_kwh(c)
+            pdf.kv('%s → %s' % (_short_ts(c['from']), _short_ts(c['to'])),
                    t('cert.obdcap_val', default='{v}  (BMS {a:g} -> {b:g} %, {ah} Ah)',
                      v=val, a=c['soc_from'], b=c['soc_to'], ah=c['ah']), lw=56)
 
 
 def _t_soh(pdf, data, ctx):
     veh, bms, meas = data['vehicle'], data['bms'], data['measured']
-    pdf.section(t('cert.sec_soh', default='SoH-Bestimmung (zwei unabhängige Signale)'), ctx['num'].get('soh'))
-    obd_soh = (data.get('obd') or {}).get('soh_pct')
+    pdf.section(t('cert.sec_soh2', default='SoH-Bestimmung'), ctx['num'].get('soh'))
+    obd_soh = data.get('obd_soh')
     if obd_soh is not None:
-        pdf.kv(t('cert.soh_obd_here', default='SoH laut OBD (BMS-Register, verlässlich)'), '%.1f %%' % obd_soh)
+        pdf.kv(t('cert.soh_obd_here2', default='SoH laut OBD (BMS-Register)'),
+               '%.1f %%  (%s)' % (obd_soh, _short_ts(data.get('obd_soh_at'))))
     if meas:
         pdf.kv(t('cert.meas_soh', default='Gemessene SoH (Ladedaten)'), '%.1f %%' % meas['soh_pct'])
         pdf.kv(t('cert.meas_capacity', default='Gemessene nutzbare Kapazität'),
                f"{meas['capacity_kwh']:.1f} kWh "
                f"({t('cert.of', default='von')} {_fmt(veh['nominal_kwh'], '{:.1f}')} kWh)")
         pdf.kv(t('cert.meas_samples', default='Messgrundlage'),
-               t('cert.meas_samples_val',
-                 default='{n} Ladungen mit >= {w}% SoC-Fenster (Median; Streuung {lo}-{hi} kWh)',
-                 n=meas['sample_count'], w=meas['window_pct'],
+               t('cert.meas_samples_val2',
+                 default='{n} gemessene Ladungen mit ≥ {w} % SoC-Fenster, {a} bis {b} (Median; Streuung {lo} bis {hi} kWh)',
+                 n=meas['sample_count'], w=meas['window_pct'], a=_date(meas.get('basis_from')),
+                 b=_date(meas.get('basis_to')),
                  lo=f"{meas['min_capacity_kwh']:.1f}", hi=f"{meas['max_capacity_kwh']:.1f}"))
+        if meas.get('recent_only'):
+            pdf.kv('', t('cert.meas_recent2', default='die letzten 12 Monate der Messdaten von {n} Ladungen insgesamt – '
+                                                      'der neueste gemessene Stand, kein Mittel über die Jahre',
+                         n=meas['sample_total']))
         if meas.get('trend'):
             tr = meas['trend']
-            pdf.kv(t('cert.meas_trend', default='Trend (früh -> aktuell)'),
-                   f"{tr['early_soh']:.1f} % -> {tr['recent_soh']:.1f} %")
+            pdf.kv(t('cert.meas_trend2', default='Trend (frühes → spätes Drittel)'),
+                   f"{tr['early_capacity_kwh']:.1f} kWh → {tr['recent_capacity_kwh']:.1f} kWh")
     elif data.get('measured_circular'):
         pdf.kv(t('cert.meas_soh', default='Gemessene SoH (Ladedaten)'),
                t('cert.meas_circular',
-                 default='nicht unabhängig messbar - Ladeverlust aus der Kapazität abgeleitet'))
+                 default='nicht unabhängig messbar – die Ladedaten geben nur die eingestellte Kapazität wieder'))
     else:
         pdf.kv(t('cert.meas_soh', default='Gemessene SoH (Ladedaten)'),
-               t('cert.meas_none', default='zu wenige breite Ladefenster (>= 25% SoC) für eine Messung'))
+               t('cert.meas_none2', default='zu wenige gemessene Ladungen mit ≥ 25 % SoC-Fenster und erfasstem '
+                                            'Ladeverlust'))
     win = data.get('window') or {}
     if win.get('change_pct') is not None:
         pdf.kv(t('cert.window_kv', default='Angezeigtes Fenster'),
-               t('cert.window_kv_val', default='{c:+.1f} % seit {ref} - Details in der Anlage',
+               t('cert.window_kv_val', default='{c:+.1f} % seit {ref}',
                  c=win['change_pct'], ref=_halbjahr(win['ref_period'])))
     # The cloud-reported value is a RELATIVE raw figure that on some cars
-    # reads above 100 % — kept with a plain caveat, the OBD register above it.
+    # reads above 100 %.
     if bms['current'] is not None:
-        pdf.kv(t('cert.bms_soh', default='BMS-SoH (Fahrzeug, relativ)'),
-               f"{bms['current']:.1f} %"
-               + (f"  (Basiswert {bms['baseline']:.0f})" if bms['baseline'] != 100 else ''))
+        val = f"{bms['current']:.1f} %"
+        if bms['baseline'] != 100:
+            val += '  ' + t('cert.bms_baseline', default='(Basiswert {b:.0f})', b=bms['baseline'])
+        pdf.kv(t('cert.bms_soh', default='BMS-SoH (Fahrzeug, relativ)'), val)
         if bms['delta'] is not None:
             pdf.kv(t('cert.bms_delta', default='BMS-SoH Veränderung (Messzeitraum)'),
-                   f"{bms['delta']:+.1f} %  ({bms['sample_count']} Syncs)")
+                   t('cert.pts', default='{v:+.1f} Pkt', v=bms['delta'])
+                   + '  ' + t('cert.n_syncs', default='({n} Syncs)', n=bms['sample_count']))
         pdf.ln(1)
-        pdf.para(t('cert.bms_relative_note',
-                   default='Der vom Fahrzeug gemeldete BMS-Wert ist ein RELATIVER Rohwert und kann über 100 % '
-                           'liegen – er ist KEIN direkter State of Health. Verlässlich ist der direkt aus dem '
-                           'BMS-Register gelesene OBD-Wert.'))
+        note = t('cert.bms_relative_note2',
+                 default='Der vom Fahrzeug über die Cloud gemeldete BMS-Wert ist ein relativer Rohwert und kann '
+                         'über 100 % liegen – er ist kein direkter State of Health.')
+        if obd_soh is not None:
+            note += ' ' + t('cert.bms_relative_obd', default='Belastbarer ist der direkt aus dem BMS-Register '
+                                                             'gelesene OBD-Wert oben.')
+        elif data.get('certified_source') == 'bms':
+            note += ' ' + t('cert.bms_relative_only', default='Hier ist er die einzige SoH-Quelle und nicht durch '
+                                                              'eine zweite Messung geprüft.')
+        pdf.para(note)
     else:
         pdf.kv(t('cert.bms_soh', default='BMS-SoH (Fahrzeug, relativ)'),
                t('cert.bms_none', default='vom Fahrzeug nicht gemeldet'))
     if ctx.get('trend'):
         pdf.sub(t('cert.sec_trend', default='SoH-Verlauf'), need=70)
         pdf.image_full(ctx['trend'])
-        pdf.caption(t('cert.chart_soh_note',
-                      default='Gezeigt wird der relative BMS-Rohwert – er kann über 100 % liegen und ist kein '
-                              'absoluter SoH. Aussagekräftig ist der Verlauf (die Form), nicht die Höhe.'))
+        pdf.caption(t('cert.chart_soh_note2',
+                      default='Gezeigt wird der relative BMS-Wert aus der Cloud – aussagekräftig ist der Verlauf, '
+                              'nicht die Höhe.'))
 
 
 def _t_cells(pdf, data, ctx):
@@ -1762,25 +2072,30 @@ def _t_cells(pdf, data, ctx):
         soc_parts.append(t('cert.soc_bms', default='BMS {v:.1f} %', v=src['soc_bms_pct']))
     if soc_parts:
         items.append((t('cert.cells_soc', default='Ladestand'), ' / '.join(soc_parts)))
-    if obd.get('soh_pct') is not None:
-        items.append((t('cert.obd_soh', default='BMS-SoH (OBD-Register)'), '%.1f %%' % obd['soh_pct']))
-    if obd.get('pack_voltage_v') is not None:
-        pv = '%.1f V' % obd['pack_voltage_v']
-        if obd.get('pack_current_a') is not None:
-            pv += ' @ %+.1f A' % obd['pack_current_a']
+    # 🔴 Every value below from the SAME read as the time above — the SoH
+    # register only if that read has it, else with its own time.
+    if src.get('soh_pct') is not None:
+        items.append((t('cert.obd_soh', default='BMS-SoH (OBD-Register)'), '%.1f %%' % src['soh_pct']))
+    elif data.get('obd_soh') is not None:
+        items.append((t('cert.obd_soh', default='BMS-SoH (OBD-Register)'),
+                      '%.1f %%  (%s)' % (data['obd_soh'], _short_ts(data.get('obd_soh_at')))))
+    if src.get('pack_voltage_v') is not None:
+        pv = '%.1f V' % src['pack_voltage_v']
+        if src.get('pack_current_a') is not None:
+            pv += ' @ %+.1f A' % src['pack_current_a']
         items.append((t('cert.obd_pack', default='Packspannung / -strom'), pv))
-    if obd.get('temp_min_c') is not None and obd.get('temp_max_c') is not None:
-        temp = '%.0f / %.0f °C' % (obd['temp_min_c'], obd['temp_max_c'])
-        if obd.get('temp_avg_c') is not None:
-            temp += ' (Ø %.0f °C)' % obd['temp_avg_c']
+    if src.get('temp_min_c') is not None and src.get('temp_max_c') is not None:
+        temp = '%.0f / %.0f °C' % (src['temp_min_c'], src['temp_max_c'])
+        if src.get('temp_avg_c') is not None:
+            temp += ' (Ø %.0f °C)' % src['temp_avg_c']
         items.append((t('cert.obd_temp', default='Batterietemperatur min / max'), temp))
-    if obd.get('aux_battery_v') is not None:
-        items.append((t('cert.obd_aux', default='12V-Batterie'), '%.1f V' % obd['aux_battery_v']))
+    if src.get('aux_battery_v') is not None:
+        items.append((t('cert.obd_aux', default='12V-Batterie'), '%.1f V' % src['aux_battery_v']))
     if res_mv:
         items.append((t('cert.resolution', default='Auflösung des BMS'),
                       t('cert.resolution_val', default='{r:.0f} mV je Schritt', r=res_mv)))
     cfg = cells.get('series_configured')
-    n_cells = (stats or {}).get('n') or obd.get('cell_count')
+    n_cells = (stats or {}).get('n') or src.get('cell_count')
     if n_cells:
         n_txt = str(n_cells)
         if cfg and cfg != n_cells:
@@ -1788,13 +2103,17 @@ def _t_cells(pdf, data, ctx):
         items.append((t('cert.obd_cells', default='Zellen'), n_txt))
     pdf.meta_grid(items, cols=3)
     if not stats:
-        if obd.get('cell_min_v') is not None and obd.get('cell_max_v') is not None:
-            pdf.kv(t('cert.obd_cell_v', default='Zellspannung min / max'),
-                   '%.3f / %.3f V' % (obd['cell_min_v'], obd['cell_max_v']))
-        if obd.get('cell_delta_mv') is not None:
-            lbl, _ = _spread_rating(obd['cell_delta_mv'])
+        if src.get('cell_min_v') is not None and src.get('cell_max_v') is not None:
+            if src.get('cell_avg_v') is not None:
+                pdf.kv(t('cert.obd_cell_v', default='Zellspannung min / max / Ø'),
+                       '%.3f / %.3f / %.3f V' % (src['cell_min_v'], src['cell_max_v'], src['cell_avg_v']))
+            else:
+                pdf.kv(t('cert.obd_cell_v2', default='Zellspannung min / max'),
+                       '%.3f / %.3f V' % (src['cell_min_v'], src['cell_max_v']))
+        if src.get('cell_delta_mv') is not None:
+            lbl, _ = _spread_rating(src['cell_delta_mv'])
             pdf.kv(t('cert.obd_spread', default='Zell-Spreizung (max-min)'),
-                   '%.0f mV (%s)' % (obd['cell_delta_mv'], lbl))
+                   '%.0f mV (%s)' % (src['cell_delta_mv'], lbl))
         return
     if ctx.get('cellmap'):
         pdf.ln(1)
@@ -1816,7 +2135,7 @@ def _t_cells(pdf, data, ctx):
     pdf.kv(t('cert.obd_spread', default='Zell-Spreizung (max-min)'), '%.0f mV (%s)' % (stats['spread_mv'], lbl))
     pdf.kv(t('cert.cells_std', default='Standardabweichung'), '%.1f mV' % stats['std_mv'])
     out = stats.get('outliers') or []
-    pdf.kv(t('cert.cells_outliers', default='Auffällige Zellen (> 2 σ)'),
+    pdf.kv(t('cert.cells_outliers', default='Auffällige Zellen (> 2 σ, > 1½ BMS-Schritte)'),
            nummern(out) if out else t('cert.none', default='keine'))
     temps = read.get('cell_temps') or []
     if temps:
@@ -1827,10 +2146,20 @@ def _t_cells(pdf, data, ctx):
                    default='Alle Zellen liegen innerhalb eines Messschritts gleich auf. Das ist in der Mitte des '
                            'Ladestands typisch: dort ist die Spannungskurve flach und das BMS meldet in '
                            '{r:.0f}-mV-Schritten. Unterschiede zeigen sich bei hohem (über 95 %) oder niedrigem '
-                           '(unter 15 %) Ladestand – eine Auslesung dort ist aussagekräftiger.', r=res_mv or 20))
+                           '(unter 15 %) Ladestand – eine Auslesung dort ist aussagekräftiger.', r=res_mv or 20)
+               if res_mv else t('cert.cells_equal_note2',
+                                default='Alle Zellen liegen gleich auf. Das ist in der Mitte des Ladestands typisch: '
+                                        'dort ist die Spannungskurve flach. Unterschiede zeigen sich bei hohem (über '
+                                        '95 %) oder niedrigem (unter 15 %) Ladestand – eine Auslesung dort ist '
+                                        'aussagekräftiger.'))
     rows = ctx.get('cell_rows') or []
+    # The map and the sentence both cover the same reads: the last twelve.
+    last = rows[-_CELLHIST_N:]
+    title = (t('cert.cells_history', default='Verlauf über alle Auslesungen') if len(last) == len(rows)
+             else t('cert.cells_history_last', default='Verlauf über die letzten {k} von {n} Auslesungen',
+                    k=len(last), n=len(rows)))
     if ctx.get('cellhist'):
-        pdf.sub(t('cert.cells_history', default='Verlauf über alle Auslesungen'), need=55)
+        pdf.sub(title, need=55)
         pdf.image_full(ctx['cellhist'])
         pdf.caption(t('cert.cells_history_note',
                       default='Eine Zelle, die einmal tief liegt, ist Messrauschen. Eine Zelle, die in jeder Zeile '
@@ -1838,11 +2167,11 @@ def _t_cells(pdf, data, ctx):
     elif len(rows) >= 2:
         # Nothing to colour: every cell sat on the pack mean in every read.
         # An empty grey map says nothing — one sentence says it all.
-        pdf.sub(t('cert.cells_history', default='Verlauf über alle Auslesungen'))
+        pdf.sub(title)
         pdf.para(t('cert.cells_history_flat',
                    default='In allen {n} Auslesungen ({a} bis {b}) lagen alle Zellen innerhalb eines '
                            'Messschritts gleich auf – keine Zelle liegt wiederholt tief.',
-                   n=len(rows), a=_short_ts(rows[0]['timestamp'])[:8], b=_short_ts(rows[-1]['timestamp'])[:8]))
+                   n=len(last), a=_date(last[0]['timestamp']), b=_date(last[-1]['timestamp'])))
 
 
 def _t_buffer(pdf, data, ctx):
@@ -1855,7 +2184,8 @@ def _t_buffer(pdf, data, ctx):
             pdf.kv(t('cert.gross', default='Brutto (Zellen gesamt)'), '%.1f kWh' % cap['gross_kwh'])
         if cap.get('buffer_kwh'):
             pdf.kv(t('cert.buffer', default='Verborgener Puffer'),
-                   '%.1f kWh (%.1f %%)' % (cap['buffer_kwh'], cap['buffer_pct']))
+                   t('cert.buffer_val', default='{k:.1f} kWh ({p:.1f} % vom Brutto)',
+                     k=cap['buffer_kwh'], p=cap['buffer_pct']))
         if cap.get('usable_kwh') is not None:
             pdf.kv(t('cert.usable_now', default='Nutzbar heute (aus dem Fenster)'), '%.1f kWh' % cap['usable_kwh'])
         if cap.get('soh_low') is not None:
@@ -1868,7 +2198,7 @@ def _t_buffer(pdf, data, ctx):
         if cap.get('buffer_left_kwh') is not None:
             pdf.kv(t('cert.buffer_left', default='Davon noch Puffer'),
                    t('cert.buffer_left_val', default='{k:.1f} kWh  (etwa {u:.0f} % des Puffers verbraucht)',
-                     k=max(cap['buffer_left_kwh'], 0.0), u=cap['buffer_used_pct']))
+                     k=cap['buffer_left_kwh'], u=cap['buffer_used_pct']))
         pdf.ln(1.5)
         if cap.get('soh_low') is not None:
             pdf.para(t('cert.soh_range_note',
@@ -1879,7 +2209,14 @@ def _t_buffer(pdf, data, ctx):
             pdf.para(t('cert.gross_missing',
                        default='Brutto nicht eingetragen: ohne Bruttogröße lässt sich nicht sagen, wie viel '
                                'Alterung der Puffer schon verdeckt. Eintragen unter Einstellungen > Fahrzeuge.'))
-        if cap.get('buffer_used_pct') is not None and cap['buffer_used_pct'] >= 60:
+        win_c = (data.get('window') or {}).get('change_pct')
+        if cap.get('buffer_conflict'):
+            pdf.para(t('cert.buffer_conflict',
+                       default='Brutto × BMS-SoH ergibt weniger, als das angezeigte Fenster heute nutzbar zeigt. '
+                               'BMS-Wert, Fenster-Messung und eingetragene Größen können nicht alle stimmen – '
+                               'ein Pufferwert wird deshalb nicht angegeben.'))
+        elif (cap.get('buffer_used_pct') is not None and cap['buffer_used_pct'] >= 60
+                and win_c is not None and round(win_c, 1) >= -5):
             pdf.para(t('cert.buffer_spent_note',
                        default='Das angezeigte Fenster ist stabil, das BMS zählt aber bereits Alterung: sie wurde '
                                'mit dem Puffer ausgeglichen. Ist er aufgebraucht, sinkt die nutzbare Kapazität ab '
@@ -1902,7 +2239,7 @@ def _t_buffer(pdf, data, ctx):
             if b.get('cell_max_v'):
                 top = '%.2f V' % b['cell_max_v']
                 if b.get('headroom_mv') is not None:
-                    top += ' (−%d mV)' % b['headroom_mv']
+                    top += ' (%+d mV)' % -b['headroom_mv']   # below the maximum: negative
             rows.append([_short_ts(b['timestamp']), '%.1f %%' % b['display'], '%.1f %%' % b['bms'],
                          '%+.1f' % b['gap'], top])
         rows = rows[-8:]
@@ -1922,23 +2259,34 @@ def _t_window(pdf, data, ctx):
     pdf.section(t('cert.window_sec', default='Das angezeigte Fenster über die Jahre'), ctx['num'].get('window'))
     if ctx.get('window'):
         pdf.image_full(ctx['window'])
-        pdf.caption(t('cert.window_chart_title',
-                      default='Strom für eine volle Ladung (0 → 100 %) – an der Wallbox gemessen, je Halbjahr'))
+        pdf.caption(t('cert.window_chart_title2',
+                      default='Strom für eine volle Ladung (0 → 100 %) – gemessen (Wallbox-Zähler oder Ladebeleg), '
+                              'je Halbjahr'))
     pdf.para(t('cert.window_method',
                default='Gezählt werden nur Ladungen mit gemessener Energie (Wallbox-Zähler, Ladebeleg) und '
                        'mindestens {w} % SoC-Fenster – {n} Ladungen. Verglichen wird jedes Halbjahr mit demselben '
                        'Halbjahr eines früheren Jahres: im Winter kostet Laden mehr Energie, ein Vergleich Januar '
                        'gegen Juli würde das Wetter messen, nicht die Batterie.',
                w=BA.MIN_WINDOW, n=win.get('sample_count', 0)))
+    skipped = False
     for c in win.get('comparisons') or []:
-        pdf.kv('%s - %s' % (c['type'], t('cert.half_n', default='{h}. Halbjahr', h=c['half'][-1])),
-               t('cert.window_cmp', default='{a}: {ra:.1f} kWh (n={na}) -> {b}: {rb:.1f} kWh (n={nb}) = {c:+.1f} %',
-                 a=c['ref_period'][:4], ra=c['ref_median'], na=c['ref_n'],
-                 b=c['last_period'][:4], rb=c['last_median'], nb=c['last_n'], c=c['change_pct']), lw=42)
+        val = t('cert.window_cmp', default='{a}: {ra:.1f} kWh (n={na}) -> {b}: {rb:.1f} kWh (n={nb}) = {c:+.1f} %',
+                a=c['ref_period'][:4], ra=c['ref_median'], na=c['ref_n'],
+                b=c['last_period'][:4], rb=c['last_median'], nb=c['last_n'], c=c['change_pct'])
+        if not c.get('combined', True):
+            val += ' *'
+            skipped = True
+        pdf.kv('%s - %s' % (c['type'], t('cert.half_n', default='{h}. Halbjahr', h=c['half'][-1])), val, lw=42)
     if win.get('change_pct') is not None:
+        n_used = sum(1 for c in win.get('comparisons') or [] if c.get('combined', True))
         pdf.kv(t('cert.window_total', default='Veränderung zusammen'),
                t('cert.window_total_val', default='{c:+.1f} %  (die Vergleiche liegen {s:.1f} Punkte auseinander)',
-                 c=win['change_pct'], s=win['agreement_pct']), lw=42)
+                 c=win['change_pct'], s=win['agreement_pct']) if n_used > 1
+               else '%+.1f %%' % win['change_pct'], lw=42)
+        if skipped:
+            pdf.caption(t('cert.window_skipped', default='* über einen kürzeren Zeitraum – nicht mit den anderen '
+                                                         'gemittelt, sonst stünden verschieden lange Zeiträume in '
+                                                         'einer Zahl.'))
     else:
         pdf.para(t('cert.window_too_few',
                    default='Noch kein Vergleich möglich: je Halbjahr braucht es mindestens {n} gemessene Ladungen '
@@ -1949,18 +2297,28 @@ def _t_use(pdf, data, ctx):
     beh = data['behaviour']
     pdf.section(t('cert.sec_behaviour', default='Nutzung & Ladeverhalten'), ctx['num'].get('use'))
     items = [
-        (t('cert.beh_throughput', default='Energiedurchsatz gesamt'), _fmt(beh['throughput_kwh'], '{:.0f} kWh')),
-        (t('cert.beh_cycles', default='Äquivalente Vollzyklen'), _fmt(beh['equiv_full_cycles'], '{}')),
-        (t('cert.beh_dc', default='Schnellladeanteil (DC)'), _fmt(beh['dc_share_pct'], '{:.0f} %')),
-        (t('cert.beh_minsoc', default='Tiefste protokollierte Entladung'), _fmt(beh['min_soc'], 'SoC {}%')),
+        (t('cert.beh_throughput2', default='Geladen ab Netz (inkl. Verluste)'),
+         _fmt(beh['throughput_kwh'], '{:.1f} kWh')),
+        (t('cert.beh_cycles2', default='Äquivalente Vollzyklen (Akku-Seite)'),
+         ('≈ %d' % beh['equiv_full_cycles']) if beh.get('equiv_full_cycles') is not None else '—'),
+        (t('cert.beh_dc', default='Schnellladeanteil (DC)'),
+         ('%.1f %%' % _shares(_type_kinds(beh)).get('DC', 0.0)) if beh.get('dc_share_pct') is not None else '—'),
+        (t('cert.beh_minsoc', default='Tiefste protokollierte Entladung'), _fmt(beh['min_soc'], 'SoC {:g} %')),
         (t('cert.beh_window', default='Durchschn. Ladefenster'),
          t('cert.pp', default='{v:.0f} %-Punkte', v=beh['avg_soc_window'])
          if beh.get('avg_soc_window') is not None else '—'),
-        (t('cert.beh_charges', default='Ladevorgänge / Fahrleistung'),
-         f"{_fmt(beh['total_charges'], '{}')} / "
-         f"{_fmt(_U.dist(beh['total_km'], 0), '{:,} ' + _U.dist_label()).replace(',', '.')}"),
+        (t('cert.beh_charges2', default='Ladevorgänge'), _fmt(beh['total_charges'], '{}')),
+        (t('cert.beh_driven', default='Gefahren im Datenzeitraum'),
+         _km(beh['driven_km']) if beh.get('driven_km') is not None else '—'),
     ]
     pdf.meta_grid(items, cols=3)
+    if beh.get('equiv_full_cycles') is not None:
+        pdf.caption(t('cert.beh_cycles_note',
+                      default='Vollzyklen = in den Akku geladene Energie (ab Netz minus erfasster Ladeverlust) ÷ '
+                              'Nettokapazität, nur über die erfassten Ladungen.')
+                    + ('' if beh.get('loss_all_logged') else ' ' + t(
+                        'cert.beh_cycles_loss', default='Nicht bei jeder Ladung ist der Verlust erfasst – die Zahl '
+                                                        'ist dort etwas zu hoch.')))
     _charged_by_type(pdf, beh)
 
 
@@ -1968,26 +2326,46 @@ def _t_use(pdf, data, ctx):
 _TYPE_COLOURS = {'AC': (15, 107, 107), 'DC': (176, 122, 18), 'PV': (46, 125, 79)}
 
 
+def _type_kinds(beh):
+    kinds = [(k, beh.get(k.lower() + '_kwh') or 0, beh.get(k.lower() + '_count') or 0)
+             for k in ('AC', 'DC', 'PV')]
+    return [x for x in kinds if x[1] > 0 or x[2] > 0]
+
+
+def _shares(kinds):
+    """Shares in tenths of a percent that add up to exactly 100.0 as printed
+    (largest remainder: three thirds are 33.4 + 33.3 + 33.3). The grid, the
+    bar and the table all use these."""
+    total = sum(k for _, k, _ in kinds)
+    if total <= 0:
+        return {}
+    tenths = [kwh / total * 1000 for _, kwh, _ in kinds]
+    share = [int(x) for x in tenths]
+    for i in sorted(range(len(kinds)), key=lambda i: tenths[i] - share[i], reverse=True)[:1000 - sum(share)]:
+        share[i] += 1
+    return {typ: sh / 10.0 for (typ, _, _), sh in zip(kinds, share)}
+
+
 def _charged_by_type(pdf, beh):
     """How much went in by AC, by DC (fast charging) and from PV: a share
     bar and a table. DC is the figure a buyer asks about."""
-    kinds = [(k, beh.get(k.lower() + '_kwh') or 0, beh.get(k.lower() + '_count') or 0)
-             for k in ('AC', 'DC', 'PV')]
-    kinds = [x for x in kinds if x[1] > 0 or x[2] > 0]
+    kinds = _type_kinds(beh)
     total = sum(k for _, k, _ in kinds)
     if not kinds or total <= 0:
         return
     pdf.sub(t('cert.by_type', default='Geladen nach Art'), need=40)
+    sh_ = _shares(kinds)
+    share = [sh_[typ] * 10 for typ, _, _ in kinds]
     # share bar
     x, y, w, h = pdf.l_margin, pdf.get_y() + 1, pdf.cw, 6
     pdf.set_font(pdf.f_mono, 'B', 6.8)
-    for typ, kwh, _ in kinds:
+    for (typ, kwh, _), sh in zip(kinds, share):
         seg = w * kwh / total
         if seg <= 0:
             continue
         pdf.set_fill_color(*_TYPE_COLOURS[typ])
         pdf.rect(x, y, seg, h, style='F')
-        label = '%s %.0f %%' % (typ, kwh / total * 100)
+        label = '%s %.1f %%' % (typ, sh / 10.0)
         if pdf.get_string_width(label) + 3 < seg:
             pdf.set_xy(x, y)
             pdf.set_text_color(255, 255, 255)
@@ -1998,11 +2376,12 @@ def _charged_by_type(pdf, beh):
              'DC': t('cert.type_dc', default='DC – Schnelllader'),
              'PV': t('cert.type_pv', default='PV – Solarstrom')}
     rows = []
-    for typ, kwh, n in kinds:
-        rows.append([names[typ], str(n), '%.0f kWh' % kwh, '%.1f %%' % (kwh / total * 100),
+    for (typ, kwh, n), sh in zip(kinds, share):
+        rows.append([names[typ], str(n), '%.1f kWh' % kwh, '%.1f %%' % (sh / 10.0),
                      ('%.1f kWh' % (kwh / n)) if n else '—'])
     n_all = sum(n for _, _, n in kinds)
-    rows.append([t('cert.total', default='Gesamt'), str(n_all), '%.0f kWh' % total, '100.0 %',
+    total_shown = sum(round(kwh, 1) for _, kwh, _ in kinds)
+    rows.append([t('cert.total', default='Gesamt'), str(n_all), '%.1f kWh' % total_shown, '100.0 %',
                  ('%.1f kWh' % (total / n_all)) if n_all else '—'])
     pdf.table([t('cert.th_type', default='Art'), t('cert.th_charges', default='Ladungen'),
                t('cert.th_energy', default='Energie'), t('cert.th_share', default='Anteil'),
@@ -2013,16 +2392,38 @@ def _charged_by_type(pdf, beh):
 def _t_basis(pdf, data, ctx):
     basis = data['data_basis']
     pdf.section(t('cert.sec_basis', default='Datengrundlage & Methodik'), ctx['num'].get('basis'))
-    pdf.para(t('cert.basis_line',
-               default='Grundlage: {c} Ladevorgänge und {s} Fahrzeug-Syncs{period}. SoH = gemessene nutzbare '
-                       'Kapazität / Nennkapazität.',
-               c=basis['charge_count'] or 0, s=basis['sync_count'] or 0,
-               period=(f", {basis['first_charge']} bis {basis['last_charge']}" if basis['first_charge'] else '')))
-    if data.get('obd'):
+    line = t('cert.basis_line2',
+             default='Grundlage: {c} Ladevorgänge und {s} Fahrzeug-Syncs{period}. Der State of Health stammt aus '
+                     'der verlässlichsten verfügbaren Quelle (siehe Zusammenfassung).',
+             c=basis['charge_count'] or 0, s=basis['sync_count'] or 0,
+             period=(', ' + t('cert.period', default='{a} bis {b}', a=_date(basis['first_charge']),
+                              b=_date(basis['last_charge']))) if basis['first_charge'] else '')
+    # Name only the cross-checks this report actually has — and not the one
+    # that IS the headline.
+    checks = []
+    if data.get('obd_capacity'):
+        checks.append(t('cert.basis_chk_cap', default='die Kapazität aus den BMS-Zählern (Abschnitt {n})',
+                        n=ctx['num'].get('capmeas', '')))
+    if (data.get('window') or {}).get('change_pct') is not None \
+            and data.get('certified_source') not in ('window', 'window_net', 'measured', 'reconciled'):
+        # (the window comes from the same metered charges as a measured SoH —
+        # not independent of it)
+        checks.append(t('cert.basis_chk_window', default='das angezeigte Fenster (Abschnitt {n})',
+                        n=ctx['num'].get('window', '')))
+    if checks:
+        line += ' ' + t('cert.basis_checks', default='Unabhängige Gegenproben: {l}.', l='; '.join(checks))
+    pdf.para(line)
+    cells_read = bool((data.get('cells') or {}).get('read'))
+    if data.get('obd') and cells_read:
         limits = t('cert.limits_with_obd',
                    default='Zellspannungen, Zell-Spreizung und Batterietemperaturen wurden per OBD/ELM327 direkt '
                            'aus dem BMS ausgelesen. Das Zertifikat ist eine datenbasierte Eigenermittlung und '
                            'ersetzt keine akkreditierte Batterieprüfung (z. B. TÜV).')
+    elif data.get('obd'):
+        limits = t('cert.limits_obd_no_cells',
+                   default='Per OBD/ELM327 wurden Ladestand, Packspannung und die Zähler direkt aus dem BMS gelesen; '
+                           'Einzelzellspannungen enthielt keine Auslesung. Das Zertifikat ist eine datenbasierte '
+                           'Eigenermittlung und ersetzt keine akkreditierte Batterieprüfung (z. B. TÜV).')
     else:
         limits = t('cert.limits',
                    default='Nicht enthalten: Einzelzellspannungen, Zellbalancing und Zelltemperaturen – diese '

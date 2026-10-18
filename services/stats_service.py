@@ -26,12 +26,37 @@ def _vehicle_field(vehicle_id, attr, appconfig_key, default):
             v = Vehicle.query.get(vehicle_id)
             if v is not None and getattr(v, attr) is not None:
                 return type(default)(getattr(v, attr))
+            if v is not None and not _is_original_vehicle(vehicle_id):
+                # 🔴 Never borrow another car's value: a Kia without a
+                # capacity was computed against the Skoda's 77 kWh. Only the
+                # original car may fall back to the legacy single-car setting.
+                return default
+            if v is not None:
+                return _appconfig_value(appconfig_key, default)
         v = (Vehicle.query.filter_by(is_archived=False)
              .order_by(Vehicle.id.asc()).first())
         if v is not None and getattr(v, attr) is not None:
             return type(default)(getattr(v, attr))
     except Exception:
         pass
+    try:
+        raw = AppConfig.get(appconfig_key)
+        if raw not in (None, ''):
+            return type(default)(raw)
+    except (ValueError, TypeError):
+        pass
+    return default
+
+
+def _is_original_vehicle(vehicle_id):
+    """The car a legacy single-vehicle install was set up for: the lowest
+    id. Settings from before per-vehicle fields (AppConfig) belong to it."""
+    from models.database import Vehicle
+    first = Vehicle.query.order_by(Vehicle.id.asc()).first()
+    return first is not None and first.id == vehicle_id
+
+
+def _appconfig_value(appconfig_key, default):
     try:
         raw = AppConfig.get(appconfig_key)
         if raw not in (None, ''):
@@ -77,6 +102,17 @@ def get_soh_baseline(vehicle_id=None) -> float:
             v = Vehicle.query.get(vehicle_id)
             if v is not None and v.battery_soh_baseline:
                 return float(v.battery_soh_baseline) or 100.0
+            if v is not None and not _is_original_vehicle(vehicle_id):
+                # 🔴 Another car's baseline (an EV6 at 125) must not scale
+                # this car's raw SoH — unset means the raw value as reported.
+                # The legacy single-car setting belongs to the original car.
+                return 100.0
+            if v is not None:
+                try:
+                    raw = float(AppConfig.get('battery_soh_baseline', '100'))
+                    return raw if raw > 0 else 100.0
+                except (ValueError, TypeError):
+                    return 100.0
         # Single-vehicle install: take the only / first non-archived row.
         v = (Vehicle.query.filter_by(is_archived=False)
              .order_by(Vehicle.id.asc()).first())
@@ -89,6 +125,15 @@ def get_soh_baseline(vehicle_id=None) -> float:
         return raw if raw > 0 else 100.0
     except (ValueError, TypeError):
         return 100.0
+
+
+def _scaled(raw, baseline):
+    if raw is None:
+        return None
+    try:
+        return round(float(raw) / baseline * 100.0, 1)
+    except (ValueError, TypeError, ZeroDivisionError):
+        return None
 
 
 def scale_soh(raw, vehicle_id=None):
@@ -509,6 +554,8 @@ def get_vehicle_history(days=None, vehicle_id=None):
     rows = q.all()
     if not rows:
         return None
+    # this car's own baseline, looked up once (not once per sync row)
+    baseline = get_soh_baseline(vehicle_id)
 
     series = {
         'timestamps': [r.timestamp.isoformat() for r in rows],
@@ -516,7 +563,7 @@ def get_vehicle_history(days=None, vehicle_id=None):
         'range_km': [r.estimated_range_km for r in rows],
         'odometer_km': [r.odometer_km for r in rows],
         'battery_12v': [plausible_percent(r.battery_12v_percent) for r in rows],
-        'soh': [scale_soh(r.battery_soh_percent) for r in rows],
+        'soh': [_scaled(r.battery_soh_percent, baseline) for r in rows],
         # Cumulative (monotonic) — real measured recup since tracking started
         'regen_kwh': [r.regen_cumulative_kwh for r in rows],
         # Raw rolling 3-month window value (kept for reference / tooltips)
@@ -536,7 +583,7 @@ def get_vehicle_history(days=None, vehicle_id=None):
             'range_km': last.estimated_range_km,
             'odometer_km': last.odometer_km,
             'battery_12v': plausible_percent(last.battery_12v_percent),
-            'soh': scale_soh(last.battery_soh_percent),
+            'soh': _scaled(last.battery_soh_percent, baseline),
             'regen_kwh': last.regen_cumulative_kwh,
             'regen_3mo': last.total_regenerated_kwh,
             'consumption_30d': last.consumption_30d_kwh_per_100km,

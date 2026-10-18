@@ -138,7 +138,7 @@ def _quartiles(values):
 def window_trend(samples, min_n=MIN_PERIOD_N):
     """Energy per displayed 100 %, per type and half-year, and its change.
 
-    Returns ``None`` when no comparison is possible, else a dict with
+    Returns a dict with
     ``periods`` (every type/half-year with its quartiles), ``comparisons``
     (each season compared with the same season of the earliest year that has
     enough charges) and ``change_pct`` — the comparisons combined, weighted by
@@ -170,16 +170,26 @@ def window_trend(samples, min_n=MIN_PERIOD_N):
             })
     if not comparisons:
         return {'periods': periods, 'comparisons': [], 'change_pct': None,
-                'agreement_pct': None, 'sample_count': len(samples)}
-    weights = [min(c['ref_n'], c['last_n']) for c in comparisons]
-    change = sum(c['change_pct'] * w for c, w in zip(comparisons, weights)) / sum(weights)
-    spread = (max(c['change_pct'] for c in comparisons)
-              - min(c['change_pct'] for c in comparisons))
+                'agreement_pct': None, 'sample_count': len(samples), 'compared_n': 0}
+    # 🔴 Only comparisons over the SAME span are combined: −8 % over four
+    # years and −0.5 % over one year averaged to "−2 % since 2022" says
+    # neither. The longest span wins; the others are listed, not mixed in.
+    def span(c):
+        return int(c['last_period'][:4]) - int(c['ref_period'][:4])
+    longest = max(span(c) for c in comparisons)
+    for c in comparisons:
+        c['combined'] = span(c) == longest
+    used = [c for c in comparisons if c['combined']]
+    weights = [min(c['ref_n'], c['last_n']) for c in used]
+    change = sum(c['change_pct'] * w for c, w in zip(used, weights)) / sum(weights)
+    spread = (max(c['change_pct'] for c in used)
+              - min(c['change_pct'] for c in used))
     return {'periods': periods, 'comparisons': comparisons,
             'change_pct': round(change, 2), 'agreement_pct': round(spread, 2),
             'sample_count': len(samples),
-            'ref_period': min(c['ref_period'] for c in comparisons),
-            'last_period': max(c['last_period'] for c in comparisons)}
+            'compared_n': sum(c['ref_n'] + c['last_n'] for c in used),
+            'ref_period': min(c['ref_period'] for c in used),
+            'last_period': max(c['last_period'] for c in used)}
 
 
 # ── 2. Capacity and buffer ────────────────────────────────────────────
@@ -216,96 +226,168 @@ def capacity_picture(net_kwh, gross_kwh=None, window_change_pct=None, obd_soh=No
     if obd_soh is not None and gross_kwh:
         gross_now = gross_kwh * obd_soh / 100.0
         pic['gross_now_kwh'] = round(gross_now, 2)
-        reference = usable if usable is not None else net_kwh
-        if pic.get('buffer_kwh'):
-            left = gross_now - reference
-            pic['buffer_left_kwh'] = round(left, 2)
-            pic['buffer_used_pct'] = round(
-                max(0.0, min(100.0, (1 - left / pic['buffer_kwh']) * 100.0)), 0)
+        # The buffer left needs the usable window MEASURED — assuming it is
+        # still the full net would print a verdict nobody measured.
+        if pic.get('buffer_kwh') and usable is not None:
+            left = gross_now - usable
+            if left < 0:
+                # Less gross today than the window shows as usable: the BMS
+                # figure, the window and the configured sizes cannot all be
+                # right. Say so instead of printing a negative buffer.
+                pic['buffer_conflict'] = True
+            else:
+                pic['buffer_left_kwh'] = round(left, 2)
+                pic['buffer_used_pct'] = round(
+                    max(0.0, min(100.0, (1 - left / pic['buffer_kwh']) * 100.0)), 0)
     return pic
+
+
+def _ts(r):
+    t = r['timestamp']
+    if isinstance(t, str):
+        t = datetime.fromisoformat(t[:19])
+    return t.replace(tzinfo=None) if getattr(t, 'tzinfo', None) else t
+
+
+def counters_plausible(r):
+    """Can the four lifetime counters of one read be true?
+
+    🔴 A dropped CAN frame shifts every byte behind it: one missing line
+    turned 58 448 Ah into 424 million and printed a capacity of 107 million
+    Ah. Lifetime energy ÷ lifetime charge is the pack's mean voltage — it has
+    to lie near the voltage the same read shows."""
+    ah = (r.get('cumulative_charge_ah'), r.get('cumulative_discharge_ah'))
+    if any(v is None or v <= 0 for v in ah):
+        return False
+    kwh = (r.get('cumulative_charge_kwh'), r.get('cumulative_discharge_kwh'))
+    if any(v is None for v in kwh):
+        return True                      # no energy counters to cross-check
+    if any(v <= 0 for v in kwh):
+        return False
+    pack_v = r.get('pack_voltage_v')
+    for a_, k_ in zip(ah, kwh):
+        v = k_ * 1000.0 / a_
+        if pack_v:
+            if not 0.7 * pack_v <= v <= 1.3 * pack_v:
+                return False
+        elif not 150 <= v <= 1000:
+            return False
+    return True
 
 
 def obd_capacity(readings, nominal_cell_v=None, cells_series=None,
                  min_dsoc=MIN_OBD_DSOC, max_gap_days=MAX_OBD_GAP_DAYS):
-    """Capacity from the BMS's own Ah counters between two reads.
+    """Capacity from the BMS's own counters over a drive.
 
     ``readings`` are dicts (timestamp, soc_bms_pct, cumulative_charge_ah,
     cumulative_discharge_ah, pack_voltage_v, and where the BMS has them
     cumulative_charge_kwh / cumulative_discharge_kwh) — any order.
-    For every pair at least ``min_dsoc`` BMS-SoC points apart and at most
-    ``max_gap_days`` apart: net Ah out of the pack ÷ SoC points × 100.
-    No charging loss, no wall meter, no assumption — the BMS counted it.
-    kWh comes from the BMS's own energy counters when both reads carry
-    them (v3.0.167), else from the mean of the two pack voltages (or
-    nominal × cells).
 
-    Reads of the same moment (a snapshot saved right after a read, same
-    BMS SoC, within the hour) count once — otherwise one drive shows up as
-    four measurements.
-    Returns the list of measurements, newest pair last.
+    A measurement is a DRIVE between two reads: BMS SoC fell by at least
+    ``min_dsoc`` points within ``max_gap_days``, every counter moved forward,
+    and what flowed back in stayed below half of what flowed out — more than
+    that is a charge, not regeneration. Net Ah out (out − regeneration) ÷ SoC
+    points × 100.
+
+    🔴 Only INDEPENDENT drives count: reads at 95, 60 and 25 % are one drive,
+    not three measurements (95→60, 95→25, 60→25). Of overlapping pairs the
+    widest is kept. Sorted by end time — the last one is the newest.
+
+    kWh comes from the BMS's own energy counters when both reads carry them,
+    else from the nominal pack voltage (cell voltage × cells in series), else
+    from the mean of BOTH endpoint voltages — never from one endpoint alone.
+    ``kwh_basis`` says which.
     """
     rs = [r for r in readings
-          if r.get('soc_bms_pct') is not None
-          and r.get('cumulative_charge_ah') is not None
-          and r.get('cumulative_discharge_ah') is not None
-          and r.get('timestamp')]
-
-    def ts(r):
-        t = r['timestamp']
-        return datetime.fromisoformat(t[:26]) if isinstance(t, str) else t
-    rs.sort(key=ts)
+          if r.get('soc_bms_pct') is not None and r.get('timestamp')
+          and counters_plausible(r)]
+    rs.sort(key=_ts)
     einmal = []
     for r in rs:
         p = einmal[-1] if einmal else None
-        if (p and p['soc_bms_pct'] == r['soc_bms_pct']
-                and (ts(r) - ts(p)).total_seconds() <= 3600):
+        # The same moment saved twice (a snapshot after a read): within the
+        # hour, the SoC within a point, the charge counters unmoved.
+        if (p and (_ts(r) - _ts(p)).total_seconds() <= 3600
+                and abs(p['soc_bms_pct'] - r['soc_bms_pct']) <= 1.0
+                and abs(r['cumulative_discharge_ah'] - p['cumulative_discharge_ah']) < 1.0):
             continue
         einmal.append(r)
     rs = einmal
-    raus = []
+
+    def r1(v):
+        return round(v + 0.0, 1)
+
+    def d(a, b, k):
+        # from the counters AS PRINTED (0.1), so the difference row of the
+        # table is exactly end − start of the rows above it
+        return r1(round(b[k], 1) - round(a[k], 1))
+
+    kandidaten = []
     for i in range(len(rs)):
         for j in range(i + 1, len(rs)):
             a, b = rs[i], rs[j]
-            if (ts(b) - ts(a)).total_seconds() > max_gap_days * 86400:
+            if (_ts(b) - _ts(a)).total_seconds() > max_gap_days * 86400:
                 break
             dsoc = a['soc_bms_pct'] - b['soc_bms_pct']        # + = discharged
-            if abs(dsoc) < min_dsoc:
+            if dsoc < min_dsoc:
                 continue
-            ah_out = ((b['cumulative_discharge_ah'] - a['cumulative_discharge_ah'])
-                      - (b['cumulative_charge_ah'] - a['cumulative_charge_ah']))
-            if ah_out == 0 or (ah_out > 0) != (dsoc > 0):
-                continue                  # counters and SoC disagree on direction
-            cap_ah = ah_out / dsoc * 100.0
-            kwh_out = None
+            # 🔴 A read in between that shows the SoC RISING is a charge stop:
+            # 95 → 40, charged to 60, → 25 is two drives, not one with
+            # 52 Ah of "regeneration".
+            if any(rs[q + 1]['soc_bms_pct'] > rs[q]['soc_bms_pct'] + 1.0 for q in range(i, j)):
+                continue
+            d_out = d(a, b, 'cumulative_discharge_ah')
+            d_in = d(a, b, 'cumulative_charge_ah')
+            if d_out <= 0 or d_in < 0 or d_in > 0.5 * d_out:
+                continue                  # counters ran back, or a charge in between
+            net_ah = r1(d_out - d_in)
+            if net_ah <= 0:
+                continue
+            k_out = k_in = None
             if all(x.get(k) is not None for x in (a, b)
                    for k in ('cumulative_charge_kwh', 'cumulative_discharge_kwh')):
-                kwh_out = ((b['cumulative_discharge_kwh'] - a['cumulative_discharge_kwh'])
-                           - (b['cumulative_charge_kwh'] - a['cumulative_charge_kwh']))
-                if kwh_out == 0 or (kwh_out > 0) != (dsoc > 0):
-                    kwh_out = None
-            volts = [v for v in (a.get('pack_voltage_v'), b.get('pack_voltage_v')) if v]
-            if volts:
-                pack_v = sum(volts) / len(volts)
-            elif nominal_cell_v and cells_series:
-                pack_v = nominal_cell_v * cells_series
-            else:
-                pack_v = None
-            if kwh_out is not None:
-                cap_kwh = round(kwh_out / dsoc * 100.0, 1)
-            else:
-                cap_kwh = round(cap_ah * pack_v / 1000.0, 1) if pack_v else None
-            raus.append({
-                'from': ts(a).isoformat(timespec='minutes'),
-                'to': ts(b).isoformat(timespec='minutes'),
-                'soc_from': a['soc_bms_pct'], 'soc_to': b['soc_bms_pct'],
-                'ah': round(abs(ah_out), 1),
-                'kwh': round(abs(kwh_out), 1) if kwh_out is not None else None,
-                'capacity_ah': round(cap_ah, 1),
-                'capacity_kwh': cap_kwh,
-                'kwh_counted': kwh_out is not None,
-                # The two reads themselves, for the measurement table.
-                'start': _ends(a), 'end': _ends(b),
-            })
+                k_out = d(a, b, 'cumulative_discharge_kwh')
+                k_in = d(a, b, 'cumulative_charge_kwh')
+                if k_out <= 0 or k_in < 0 or k_in >= k_out:
+                    k_out = k_in = None
+            kandidaten.append((dsoc, a, b, d_out, d_in, net_ah, k_out, k_in))
+    # Widest first; a pair joins only if its time span overlaps no kept one.
+    kandidaten.sort(key=lambda k: -k[0])
+    gewaehlt = []
+    for k in kandidaten:
+        a0, b0 = _ts(k[1]), _ts(k[2])
+        if any(a0 < _ts(g[2]) and _ts(g[1]) < b0 for g in gewaehlt):
+            continue
+        gewaehlt.append(k)
+    gewaehlt.sort(key=lambda k: _ts(k[2]))
+
+    raus = []
+    for dsoc, a, b, d_out, d_in, net_ah, k_out, k_in in gewaehlt:
+        dsoc = round(dsoc, 1)
+        cap_ah = net_ah / dsoc * 100.0
+        net_kwh = r1(k_out - k_in) if k_out is not None else None
+        if net_kwh is not None:
+            cap_kwh, basis = round(net_kwh / dsoc * 100.0, 1), 'counters'
+        elif nominal_cell_v and cells_series:
+            cap_kwh, basis = round(cap_ah * nominal_cell_v * cells_series / 1000.0, 1), 'nominal'
+        elif a.get('pack_voltage_v') and b.get('pack_voltage_v'):
+            pack_v = (a['pack_voltage_v'] + b['pack_voltage_v']) / 2.0
+            cap_kwh, basis = round(cap_ah * pack_v / 1000.0, 1), 'endpoints'
+        else:
+            cap_kwh, basis = None, None
+        raus.append({
+            'from': _ts(a).isoformat(timespec='minutes'),
+            'to': _ts(b).isoformat(timespec='minutes'),
+            'soc_from': a['soc_bms_pct'], 'soc_to': b['soc_bms_pct'], 'dsoc': dsoc,
+            'ah_out': d_out, 'ah_in': d_in, 'ah': net_ah,
+            'kwh_out': k_out, 'kwh_in': k_in, 'kwh': net_kwh,
+            'capacity_ah': round(cap_ah, 1),
+            'capacity_kwh': cap_kwh,
+            'kwh_counted': basis == 'counters',
+            'kwh_basis': basis,
+            # The two reads themselves, for the measurement table.
+            'start': _ends(a), 'end': _ends(b),
+        })
     return raus
 
 
@@ -337,7 +419,7 @@ def buffer_view(readings, max_cell_v=None):
 
 
 # ── 3. The cells ──────────────────────────────────────────────────────
-def cell_stats(voltages):
+def cell_stats(voltages, resolution_mv=None):
     """Everything worth saying about one set of cell voltages.
 
     🔴 ``resolution_mv`` matters for reading the result: many BMS report a
@@ -362,7 +444,12 @@ def cell_stats(voltages):
     # passes it on where it matters.
     resolution = min(steps) if len(distinct) >= 3 else None
     sd = pstdev(cells) * 1000.0
-    out_lim = max(2 * sd, resolution or 0.0)
+    # 🔴 A cell one BMS step off is the step, not a weak cell: on 98 cells at
+    # 3.80 V with eight at 3.82 V, 2 σ is 11 mV and all eight were "outliers".
+    # The limit is never below one and a half steps, and deviations are
+    # compared rounded — 20.000000000000018 mV is one step, not more.
+    step = resolution_mv or resolution or 0.0
+    out_lim = max(2 * sd, 1.5 * step)
     return {
         'n': n,
         'mean_v': round(mean, 4),
@@ -374,7 +461,7 @@ def cell_stats(voltages):
         'spread_mv': round((hi - lo) * 1000.0, 1),
         'resolution_mv': resolution,
         'deviation_mv': [round(d, 1) for d in dev],
-        'outliers': [i + 1 for i, d in enumerate(dev) if out_lim and abs(d) > out_lim],
+        'outliers': [i + 1 for i, d in enumerate(dev) if out_lim and round(abs(d), 1) > out_lim],
         'all_equal': len(distinct) == 1,
     }
 

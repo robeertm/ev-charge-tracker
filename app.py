@@ -5549,9 +5549,9 @@ def register_routes(app):
             'charge_power_kw': sync.charge_power_kw,
             'estimated_range_km': sync.estimated_range_km,
             'battery_12v_percent': sync.battery_12v_percent,
-            'battery_soh_percent': scale_soh(sync.battery_soh_percent),
+            'battery_soh_percent': scale_soh(sync.battery_soh_percent, sync.vehicle_id),
             'battery_soh_raw': sync.battery_soh_percent,
-            'battery_soh_baseline': get_soh_baseline(),
+            'battery_soh_baseline': get_soh_baseline(sync.vehicle_id),
             'total_regenerated_kwh': sync.total_regenerated_kwh,
             'regen_cumulative_kwh': sync.regen_cumulative_kwh,
             'consumption_30d_kwh_per_100km': sync.consumption_30d_kwh_per_100km,
@@ -6138,10 +6138,11 @@ def register_routes(app):
             soh_raw = s.battery_soh_percent
             if soh_raw is None:
                 from models.database import VehicleSync as _VS
-                _prev = (_VS.query
-                         .filter(_VS.battery_soh_percent.isnot(None))
-                         .order_by(_VS.timestamp.desc())
-                         .first())
+                _q_prev = _VS.query.filter(_VS.battery_soh_percent.isnot(None))
+                if _stamp_vid_d is not None:
+                    # this car's last SoH — not whichever car synced last
+                    _q_prev = _q_prev.filter(_VS.vehicle_id == _stamp_vid_d)
+                _prev = _q_prev.order_by(_VS.timestamp.desc()).first()
                 if _prev is not None:
                     soh_raw = _prev.battery_soh_percent
 
@@ -6153,7 +6154,7 @@ def register_routes(app):
                 'is_locked': s.is_locked,
                 'range_km': s.estimated_range_km,
                 'battery_12v': s.battery_12v_percent,
-                'battery_soh': scale_soh(soh_raw),
+                'battery_soh': scale_soh(soh_raw, _stamp_vid_d),
                 'charge_limit_ac': s.charge_limit_ac,
                 'charge_limit_dc': s.charge_limit_dc,
                 'est_charge_min': s.est_charge_duration_min,

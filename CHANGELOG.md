@@ -1,5 +1,54 @@
 # Changelog
 
+## v3.0.174 (2026-10-18)
+
+### Battery certificate: every calculation audited
+
+A full review of the certificate (three independent audits plus a review of
+the fixes) found figures that were computed right but claimed too much, and
+some that were wrong. All fixed; each one is pinned by a test.
+
+**Capacity from the BMS counters (OBD)**
+- A value that contradicts the BMS's own SoH, or lies above the new pack,
+  is no longer rated "passed". It is marked *not plausible* with the
+  reason, the drive's own tolerance (100 ÷ ΔSoC points, not a fixed 1.5 %)
+  and the expected range (net × SoH to gross × SoH). On a real Kia Niro the
+  counters gave the Ah of the NEW gross pack to 1 % — the BMS seems to refer
+  its SoC to a fixed capacity, so this figure cannot show ageing.
+- Only independent drives count: three reads on one drive are one
+  measurement (the widest), not three; a charge stop splits a drive.
+- A worked calculation shows out − regeneration = net ÷ SoC points, from the
+  same rounded numbers as the table and the cards.
+- kWh without energy counters comes from the nominal pack voltage (or both
+  endpoint voltages) and is marked "~".
+- A dropped CAN frame no longer shifts every byte behind it (it once turned
+  58 448 Ah into 424 million); counters that cannot be true are refused.
+
+**SoH**
+- The cloud SoH series used the first vehicle's baseline for every car;
+  settings (capacity, baseline) were borrowed from another vehicle when a
+  car had none. Neither happens any more.
+- The "measured" SoH ignores estimated charges and charges without a logged
+  loss, recognises circular data on the samples it actually uses, and is
+  the newest 12 months, not a lifetime median.
+- Headline SoH never above 100 %; implausible OBD reads are never printed;
+  the last sync without a SoH no longer hides the BMS value; the cells
+  section shows one read, not values from two.
+- Battery age and fleet comparison need the first registration (no silent
+  fallback to the purchase date).
+
+**Figures and wording**
+- Differences of percentages are printed as points (Pkt), not %.
+- Shares add up to 100.0 % as printed; energies to 0.1 kWh; the DC share is
+  the same in the grid, the bar and the table.
+- Equivalent cycles count energy into the battery (grid minus logged loss).
+- "Driven in the data period" instead of the odometer labelled as mileage.
+- One date format; odometer with a no-break thousands space; numbers never
+  separated from their unit at a line break; captions wrap instead of
+  running into the next column.
+- Sentences that were not always true (window "stable", "read by OBD",
+  "independent cross-check", outlier rule) now depend on the data.
+
 ## v3.0.173 (2026-10-18)
 
 ### Battery certificate: footer text no longer overlaps

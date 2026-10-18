@@ -42,8 +42,8 @@ def test_the_average_and_degree_glyphs_survive_latin1():
 def test_every_cert_string_the_new_code_uses_exists_in_all_six_languages():
     src = open(os.path.join(ROOT, 'services', 'battery_cert_service.py'), encoding='utf-8').read()
     used = set(re.findall(r"""t\(\s*['"]((?:cert)\.[a-z0-9_]+)['"]""", src))
-    assert {'cert.bms_relative_note', 'cert.soh_obd_here',
-            'cert.chart_soh_note', 'cert.window_chart_title'} <= used
+    assert {'cert.bms_relative_note2', 'cert.soh_obd_here2',
+            'cert.chart_soh_note2', 'cert.window_chart_title2'} <= used
     for lang in LANGS:
         d = json.loads(open(os.path.join(ROOT, 'translations', f'{lang}.json'),
                             encoding='utf-8').read())
@@ -55,7 +55,7 @@ def test_the_cryptic_window_title_is_gone_in_every_language():
     for lang in LANGS:
         d = json.loads(open(os.path.join(ROOT, 'translations', f'{lang}.json'),
                             encoding='utf-8').read())
-        title = d['cert.window_chart_title']
+        title = d['cert.window_chart_title2']
         assert 'Vollladen' not in title and 'displayed full charge' not in title
         # it now speaks of a full charge in plain words
         assert any(w in title.lower() for w in

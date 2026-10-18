@@ -173,7 +173,8 @@ def test_the_certificate_prints_the_corrected_capacity(app):
         for lang, note in (('de', 'schätzt es'), ('en', 'is an estimate')):
             set_language(lang); units.set_unit('km'); units.set_currency('EUR')
             pdf = bytes(bc.generate_certificate(v.id))
-            text = '\n'.join(p.get_text() for p in pymupdf.open(stream=pdf, filetype='pdf'))
+            # numbers and units are glued with a no-break space (v3.0.174)
+            text = '\n'.join(p.get_text() for p in pymupdf.open(stream=pdf, filetype='pdf')).replace('\xa0', ' ')
             # v3.0.168: a key-figure card on the first page and its own section
             assert '69.3 kWh' in text and '190.6 Ah' in text, lang
             assert 'BMS 94.5 → 25.5 %' in text, lang       # no rounding to 94 -> 26

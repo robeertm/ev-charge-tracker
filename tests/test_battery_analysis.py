@@ -183,10 +183,12 @@ def _seed(db, circular=True, gross=67.5):
                 first_registered_at=date(2021, 7, 2))
     db.session.add(v)
     db.session.commit()
-    for c in _season_fleet():
+    for i, c in enumerate(_season_fleet()):
         # The app derives the loss from the configured capacity — exactly the
         # trap: (kwh - loss) / window is 64.0 again, every time.
-        loss = c.kwh_loaded - 0.6 * 64.0 if circular else 0.0
+        # Real (metered) losses vary from charge to charge: 14–15.2 % here.
+        loss = (c.kwh_loaded - 0.6 * 64.0 if circular
+                else round(c.kwh_loaded * (0.14 + 0.003 * (i % 5)), 2))
         db.session.add(Charge(vehicle_id=v.id, date=c.date, charge_type='AC', soc_from=20,
                               soc_to=80, kwh_loaded=c.kwh_loaded, loss_kwh=loss))
     cells = [4.16] * 98
@@ -324,5 +326,5 @@ def test_the_certificate_says_how_much_went_in_by_ac_and_by_dc(app_ctx):
     text = '\n'.join(p.get_text() for p in
                      pymupdf.open(stream=bytes(bc.generate_certificate(v.id)), filetype='pdf'))
     assert 'Geladen nach Art' in text
-    assert 'DC – Schnelllader' in text and '200 kWh' in text
+    assert 'DC – Schnelllader' in text and '200.0 kWh' in text
     assert 'AC – Wallbox und Ladesäule' in text and 'Gesamt' in text
