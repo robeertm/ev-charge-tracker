@@ -1932,5 +1932,7 @@
   "cert.th_charges": "Recharges",
   "cert.th_energy": "Énergie",
   "cert.th_share": "Part",
-  "cert.th_avg": "Ø par recharge"
+  "cert.th_avg": "Ø par recharge",
+  "renault.err_data_denied_all_cars": "Connexion réussie, mais Renault ne transmet les données d’aucun des {n} véhicules de votre compte (accès refusé) : {cars}. Saisissez le VIN de votre voiture dans le formulaire du véhicule et relancez le test ; si l’application My Renault / My Dacia affiche le niveau de batterie, envoyez-nous les lignes de journal « Renault … refused ».",
+  "renault.picked_car": "Connecté à {car}. D’autres véhicules sont rattachés au compte ({others}) – saisissez le VIN s’il s’agit d’un autre."
 }

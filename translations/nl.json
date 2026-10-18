@@ -1932,5 +1932,7 @@
   "cert.th_charges": "Laadbeurten",
   "cert.th_energy": "Energie",
   "cert.th_share": "Aandeel",
-  "cert.th_avg": "Ø per laadbeurt"
+  "cert.th_avg": "Ø per laadbeurt",
+  "renault.err_data_denied_all_cars": "Aangemeld, maar Renault geeft voor geen van de {n} voertuigen in je account gegevens vrij (toegang geweigerd): {cars}. Vul het VIN van je auto in het voertuigformulier in en test opnieuw; toont de app My Renault / My Dacia het batterijniveau, stuur ons dan de logregels „Renault … refused”.",
+  "renault.picked_car": "Verbonden met {car}. In het account staan meer voertuigen ({others}) – vul het VIN in als je een ander bedoelt."
 }

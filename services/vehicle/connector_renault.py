@@ -36,6 +36,10 @@ CREDENTIAL_FIELDS = [
      "label_key": "cred.email", "context": "MyRenault / MyDacia"},
     {"key": "password", "label": "Passwort", "type": "password",
      "label_key": "cred.password", "context": "MyRenault / MyDacia"},
+    # v3.0.171: without a VIN the tracker looks for the car that answers;
+    # with one, it asks only for that car.
+    {"key": "vin", "label": "FIN / VIN (optional, bei mehreren Fahrzeugen)", "type": "text",
+     "label_key": "cred.vin", "optional": True, "help_key": "cred.help_vin_multi"},
     {"key": "locale", "label": "Region", "type": "select", "label_key": "cred.region",
      "optional": True,
      "options": [
@@ -119,6 +123,24 @@ def _mask_vin(vin) -> str:
     return vin[:3] + '…' + vin[-4:] if len(vin) > 7 else '…'
 
 
+def _label(link) -> str:
+    d = getattr(link, 'vehicleDetails', None)
+    m = getattr(d, 'model', None) if d else None
+    return (getattr(m, 'label', None) or '').strip()
+
+
+def _car(vin, label) -> str:
+    return ('%s (%s)' % (label, _mask_vin(vin))) if label else _mask_vin(vin)
+
+
+def _log_denied(what, exc, account_type, asked, account_country, vin):
+    """Every refusal, not only the battery one: the owner's log is the only
+    place that says WHICH request Renault refused, for which car."""
+    logger.info(f"Renault {what} refused on {account_type}: "
+                f"{getattr(exc, 'error_code', type(exc).__name__)}: {getattr(exc, 'error_details', exc)}; "
+                f"asked as {asked}, account country {account_country}, car {_mask_vin(vin)}")
+
+
 def _country(locale) -> str:
     return (locale or '').split('_')[-1].upper()
 
@@ -126,9 +148,9 @@ def _country(locale) -> str:
 class _Refused(Exception):
     """Renault gave nothing at all for the car; carries what a retry needs."""
 
-    def __init__(self, key, cause, asked, account_country):
+    def __init__(self, key, cause, asked, account_country, **kw):
         super().__init__(key)
-        self.key, self.cause = key, cause
+        self.key, self.cause, self.kw = key, cause, kw
         self.asked, self.account_country = asked, account_country
 
 
@@ -299,13 +321,13 @@ class _RenaultBase(VehicleConnector):
                             f"{r.account_country} — retrying with {r.account_country}")
                 try:
                     st = await self._fetch_once(request_code, r.account_country)
-                except _Refused:
-                    raise RuntimeError(_t(r.key)) from r.cause
+                except _Refused as r2:
+                    raise RuntimeError(_t(r2.key, **r2.kw)) from r2.cause
                 state = _load_state(user)
                 state['country'] = r.account_country
                 _save_state(user, state)
                 return st
-            raise RuntimeError(_t(r.key)) from r.cause
+            raise RuntimeError(_t(r.key, **r.kw)) from r.cause
 
     async def _fetch_once(self, request_code, country):
         async with ClientSession() as websession:
@@ -321,69 +343,131 @@ class _RenaultBase(VehicleConnector):
             if not accounts:
                 raise RuntimeError(_t('renault.err_no_account'))
 
-            # An owner can have the car on another account than the first
-            # one (MyRenault next to SFDC, say), so look in each. An account
-            # that lists the car may still be refused its battery data: then
-            # the SAME car is tried on the next account — never another car,
-            # whose values would land in this history.
+            # Which car? (v3.0.171, issue #4.) A VIN entered by the owner, or
+            # the car that delivered data before, IS the car — never another
+            # one, whose values would land in this history. Only without
+            # either the tracker looks for it, the way Home Assistant does:
+            # every car on every account, cars Renault sends no details for
+            # skipped (sold or half-linked ones). Until now it took the FIRST
+            # car Renault listed — an owner whose list starts with such a car
+            # got "access denied" for everything, while Home Assistant, which
+            # goes through all cars, showed his Mégane.
+            user = self.credentials['username']
             want_vin = (self.credentials.get('vin') or '').strip().upper()
-            vin = link = vehicle = battery = None
-            refused = None              # (error, vehicle, link) of the first refusal
-            privacy_sure = False
+            memo = {} if want_vin else _load_state(user)
+            pin = want_vin or (memo.get('vin') or '').upper()
+            cars = {}                   # vin -> [(account type, account, vehicle list, link)], in order
+            offered = {}                # vin -> label, every car seen
             acc_country = None
             for a in accounts:
                 acc = await client.get_api_account(a.accountId)
                 try:
                     vs = await acc.get_vehicles()
-                    links = vs.vehicleLinks or []
+                    links = [x for x in (vs.vehicleLinks or []) if x.vin]
                 except Exception as e:
                     logger.info(f"Renault account {a.accountType}: no vehicles ({e})")
                     continue
-                want = vin or want_vin
-                l = next((l for l in links if l.vin
-                          and (not want or l.vin.upper() == want)), None)
-                if not l:
-                    continue
-                vin = l.vin.upper()
+                logger.info(f"Renault account {a.accountType}: {len(links)} car(s)"
+                            + (': ' + ', '.join(_car(x.vin, _label(x)) for x in links) if links else ''))
                 acc_country = acc_country or (getattr(vs, 'country', None) or '').upper() or None
-                v = self._vehicle_for(acc, l) or await acc.get_api_vehicle(l.vin)
-                try:
-                    battery = await v.get_battery_status()
-                except Exception as e:
-                    if not _data_denied(e):
-                        raise
-                    privacy_sure = privacy_sure or _privacy_on(e)
-                    logger.info(
-                        f"Renault account {a.accountType}: battery-status refused "
-                        f"({getattr(e, 'error_code', '?')}: {getattr(e, 'error_details', e)}); "
-                        f"asked as {asked}, account country {getattr(vs, 'country', None)}, "
-                        f"car {_mask_vin(l.vin)}")
-                    refused = refused or (e, v, l)
-                    continue
-                link, vehicle = l, v
-                break
-            if not vin:
+                for l in links:
+                    v_up = l.vin.upper()
+                    offered.setdefault(v_up, _label(l))
+                    if pin and v_up != pin:
+                        continue
+                    if not pin and not getattr(l, 'vehicleDetails', None):
+                        # Like Home Assistant: ask for the details once; a car
+                        # without any is not one we can read.
+                        try:
+                            l.vehicleDetails = await (await acc.get_api_vehicle(l.vin)).get_details()
+                        except Exception:
+                            pass
+                        if not getattr(l, 'vehicleDetails', None):
+                            logger.info(f"Renault account {a.accountType}: skipping {_mask_vin(l.vin)}"
+                                        f" — Renault sends no details for it")
+                            continue
+                    cars.setdefault(v_up, []).append((a.accountType, acc, vs, l))
+                    offered[v_up] = offered[v_up] or _label(l)
+            if not cars:
+                if pin and not want_vin:
+                    # The remembered car is gone from the account: forget it
+                    # and look again.
+                    memo.pop('vin', None)
+                    _save_state(user, memo)
+                    return await self._fetch_once(request_code, country)
                 raise RuntimeError(_t('renault.err_no_vehicle'))
-            if not link:
-                # No account handed out the battery data. Like Home Assistant,
-                # keep what Renault does give (odometer, position) — from the
-                # same car on the account that listed it first.
-                _, vehicle, link = refused
-            vin = link.vin
+            if not pin:
+                logger.info("Renault: no VIN entered — trying the cars in the order Renault lists them")
 
-            cockpit = None
-            location = None
-            try:
-                cockpit = await vehicle.get_cockpit()
-            except Exception:
-                pass
-            try:
-                location = await vehicle.get_location()
-            except Exception:
-                pass
-            if battery is None and cockpit is None and location is None:
-                raise _Refused('renault.err_privacy' if privacy_sure else 'renault.err_data_denied',
-                               refused[0], asked, acc_country)
+            vin = link = vehicle = battery = cockpit = location = None
+            partial = False
+            refused = None              # first refusal: (error, account country)
+            privacy_sure = False
+            for v_up, entries in cars.items():
+                first_refused = None    # (vehicle, link, account type, vehicle list)
+                for typ, acc, vs, l in entries:
+                    v = self._vehicle_for(acc, l) or await acc.get_api_vehicle(l.vin)
+                    try:
+                        battery = await v.get_battery_status()
+                    except Exception as e:
+                        if not _data_denied(e):
+                            raise
+                        privacy_sure = privacy_sure or _privacy_on(e)
+                        _log_denied('battery-status', e, typ, asked, getattr(vs, 'country', None), l.vin)
+                        refused = refused or (e, getattr(vs, 'country', None))
+                        first_refused = first_refused or (v, l, typ, vs)
+                        continue
+                    vehicle, link = v, l
+                    break
+                if not link and first_refused:
+                    # No account handed out this car's battery. Like Home
+                    # Assistant, keep what Renault does give (odometer,
+                    # position) — from the account that listed it first.
+                    v, l, typ, vs = first_refused
+                    for what, call in (('cockpit', v.get_cockpit), ('location', v.get_location)):
+                        try:
+                            got = await call()
+                        except Exception as e:
+                            _log_denied(what, e, typ, asked, getattr(vs, 'country', None), l.vin)
+                            continue
+                        if what == 'cockpit':
+                            cockpit = got
+                        else:
+                            location = got
+                    if cockpit is not None or location is not None:
+                        vehicle, link, partial = v, l, True
+                if link:
+                    vin = link.vin
+                    break
+                # Nothing at all for this car: with a VIN that is the answer;
+                # without one, the next car may be the owner's.
+                logger.info(f"Renault: nothing at all for {_car(v_up, offered.get(v_up))}"
+                            + ("" if pin else " — trying the next car"))
+            if not link:
+                if privacy_sure:
+                    raise _Refused('renault.err_privacy', refused[0], asked, acc_country)
+                if not pin and len(cars) > 1:
+                    # every car on the account tried, none answered
+                    raise _Refused('renault.err_data_denied_all_cars', refused[0], asked, acc_country,
+                                   n=len(cars), cars=', '.join(_car(v_, offered.get(v_)) for v_ in cars))
+                raise _Refused('renault.err_data_denied', refused[0], asked, acc_country)
+
+            if not partial:
+                # Battery came; odometer and position are extras.
+                try:
+                    cockpit = await vehicle.get_cockpit()
+                except Exception as e:
+                    _log_denied('cockpit', e, '-', asked, acc_country, vin)
+                try:
+                    location = await vehicle.get_location()
+                except Exception as e:
+                    _log_denied('location', e, '-', asked, acc_country, vin)
+            if not want_vin and (memo.get('vin') or '').upper() != vin.upper():
+                # Found it: from now on this is THE car.
+                memo = _load_state(user)
+                memo['vin'] = vin.upper()
+                _save_state(user, memo)
+                logger.info(f"Renault: using {_car(vin, offered.get(vin.upper()))} from now on")
 
             soc = plausible_percent(battery.batteryLevel) if battery else None
             # chargingStatus is a state code, not a flag: 0.1 waiting for a
@@ -409,7 +493,9 @@ class _RenaultBase(VehicleConnector):
                 last_updated=str(battery.timestamp) if battery and battery.timestamp else None,
                 vehicle_name=model,
                 vehicle_model=model,
-                raw_data={'vin': vin},
+                raw_data={'vin': vin, 'picked': not want_vin and len(offered) > 1,
+                          'car': _car(vin, offered.get(vin.upper())),
+                          'others': [_car(v_, offered[v_]) for v_ in offered if v_ != vin.upper()]},
             )
 
     def authenticate(self) -> bool:
@@ -432,9 +518,14 @@ class _RenaultBase(VehicleConnector):
         st = _run_async(self._fetch(request_code=True))
         # Connected, but Renault kept the battery data back: say so next to
         # "connected" instead of letting it look complete.
+        notes = []
         if st is not None and st.soc_percent is None:
-            return _t('renault.partial_no_soc')
-        return None
+            notes.append(_t('renault.partial_no_soc'))
+        raw = (st.raw_data or {}) if st is not None else {}
+        if raw.get('picked'):
+            # Several cars, no VIN: say which one answered.
+            notes.append(_t('renault.picked_car', car=raw.get('car'), others=', '.join(raw.get('others') or [])))
+        return ' '.join(notes) or None
 
     def get_status(self, force=False) -> VehicleStatus:
         return _run_async(self._fetch(force))

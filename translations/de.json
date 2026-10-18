@@ -1932,5 +1932,7 @@
   "cert.th_charges": "Ladungen",
   "cert.th_energy": "Energie",
   "cert.th_share": "Anteil",
-  "cert.th_avg": "Ø je Ladung"
+  "cert.th_avg": "Ø je Ladung",
+  "renault.err_data_denied_all_cars": "Anmeldung erfolgreich, aber Renault gibt für keines der {n} Fahrzeuge in deinem Konto Daten heraus (Zugriff verweigert): {cars}. Trag die FIN deines Autos im Fahrzeug-Formular ein und teste erneut; zeigt die App My Renault / My Dacia den Batteriestand, schick uns bitte die Logzeilen „Renault … refused“.",
+  "renault.picked_car": "Verbunden mit {car}. Im Konto sind weitere Fahrzeuge ({others}) – trag die FIN ein, wenn ein anderes gemeint ist."
 }

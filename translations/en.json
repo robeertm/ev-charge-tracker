@@ -1932,5 +1932,7 @@
   "cert.th_charges": "Charges",
   "cert.th_energy": "Energy",
   "cert.th_share": "Share",
-  "cert.th_avg": "Ø per charge"
+  "cert.th_avg": "Ø per charge",
+  "renault.err_data_denied_all_cars": "Signed in, but Renault hands out data for none of the {n} vehicles on your account (access denied): {cars}. Enter your car’s VIN in the vehicle form and test again; if the My Renault / My Dacia app shows the battery level, please send us the “Renault … refused” log lines.",
+  "renault.picked_car": "Connected to {car}. Your account holds more vehicles ({others}) – enter the VIN if you meant another one."
 }

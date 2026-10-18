@@ -1932,5 +1932,7 @@
   "cert.th_charges": "Ricariche",
   "cert.th_energy": "Energia",
   "cert.th_share": "Quota",
-  "cert.th_avg": "Ø per ricarica"
+  "cert.th_avg": "Ø per ricarica",
+  "renault.err_data_denied_all_cars": "Accesso riuscito, ma Renault non fornisce dati per nessuno dei {n} veicoli del tuo account (accesso negato): {cars}. Inserisci il VIN della tua auto nel modulo del veicolo e riprova; se l’app My Renault / My Dacia mostra il livello della batteria, inviaci le righe di log «Renault … refused».",
+  "renault.picked_car": "Collegato a {car}. Nell’account ci sono altri veicoli ({others}) – inserisci il VIN se intendi un altro."
 }

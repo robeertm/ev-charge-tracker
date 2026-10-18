@@ -1,5 +1,24 @@
 # Changelog
 
+## v3.0.171 (2026-10-18)
+
+### Renault / Dacia: find the right car, the way Home Assistant does
+
+- **Without a VIN the tracker took the first car Renault lists.** On an
+  account that also lists another car — a sold one, or one only half linked —
+  every request then went to that car and Renault refused everything, while
+  Home Assistant (which goes through all cars) showed the owner's car. Now,
+  without a VIN, every car on every account is tried; cars Renault sends no
+  details for are skipped, like Home Assistant does; the first car that
+  delivers data is used **and remembered**, so it never changes by itself.
+- *Test connection* says which car it connected to when the account holds
+  several, and names the others.
+- If Renault refuses every car, the message lists them all.
+- **VIN field for Renault / Dacia** (optional): with a VIN, only that car is
+  ever asked — no searching, no switching.
+- The log now records **every** refusal (battery, odometer, position) with
+  the account type and a masked VIN, and which cars each account lists.
+
 ## v3.0.170 (2026-10-18)
 
 ### Battery certificate: how much was charged by AC and by DC

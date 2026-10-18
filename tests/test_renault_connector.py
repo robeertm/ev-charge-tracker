@@ -64,7 +64,10 @@ def fake_net(monkeypatch, tmp_path):
              # which endpoints the error in battery_error applies to
              'denied_endpoints': ('battery-status',),
              # refuse only when asked with this country (None: always)
-             'refuse_country': None}
+             'refuse_country': None,
+             # v3.0.171: cars Renault refuses everything for, and cars it
+             # sends no details for (a sold or half-linked car)
+             'denied_vins': set(), 'no_details': set()}
 
     async def login(self, login_id, password):
         calls['login'].append((login_id, password, self._locale if hasattr(self, '_locale') else None))
@@ -82,6 +85,8 @@ def fake_net(monkeypatch, tmp_path):
 
     async def get_vehicle_details(self, account_id, vin):
         calls['details'].append(vin)
+        if vin in state['no_details']:
+            schemas.KamereonResponseSchema.loads(PRIVACY_403).raise_for_error_code()
         return schemas.KamereonVehicleDetailsResponseSchema.load(
             VEHICLES['vehicleLinks'][-1]['vehicleDetails'])
 
@@ -90,6 +95,8 @@ def fake_net(monkeypatch, tmp_path):
         # (``…/accounts/{id}/…/cars/{vin}/battery-status`` …); answer by its last part.
         calls.setdefault('data', []).append(endpoint)
         last = endpoint.split('?')[0].rstrip('/').rsplit('/', 1)[-1]
+        if any('/%s/' % v in endpoint for v in state['denied_vins']):
+            schemas.KamereonResponseSchema.loads(PRIVACY_403).raise_for_error_code()
         err = state['battery_error']
         if isinstance(err, dict):           # refused on some accounts only
             err = next((b for acc, b in err.items() if f'/accounts/{acc}/' in endpoint), None)
@@ -328,6 +335,7 @@ def test_the_client_gets_the_aiohttp_session_as_websession():
 def test_new_messages_exist_in_every_language():
     keys = ('renault.err_login', 'renault.err_2fa', 'renault.err_no_account',
             'renault.err_no_vehicle', 'renault.err_privacy', 'renault.err_data_denied',
+            'renault.err_data_denied_all_cars', 'renault.picked_car',
             'renault.partial_no_soc', 'vehicle.err_credentials_rejected')
     for lang in LANGS:
         d = json.loads((ROOT / 'translations' / f'{lang}.json').read_text(encoding='utf-8'))
@@ -361,3 +369,98 @@ def test_region_choices_speak_the_ui_language(lang, renault_fr, kia_eu):
     for brand in ('renault', 'dacia', 'kia', 'hyundai', 'mg'):
         for label in options(brand).values():
             assert label and not label.startswith('set.'), (brand, label)
+
+
+# ── v3.0.171: which car, without a VIN (issue #4) ──────────────────────
+# The connector took the FIRST car Renault listed. An owner whose list
+# starts with a car Renault refuses (sold, half-linked) got "access denied"
+# for everything — Home Assistant, which goes through all cars, showed his
+# Mégane. Now: every car is tried, cars without details are skipped, the one
+# that answers is remembered.
+OLD = 'VF1AG000000000777'
+
+
+def _two_cars(first_details=True):
+    details = {'vin': OLD, 'model': {'code': 'X10', 'label': 'ZOE', 'group': '971'}} if first_details else None
+    return {'accountId': 'acc-myr', 'country': 'FR', 'vehicleLinks': [
+        {'vin': OLD, 'vehicleDetails': details}, VEHICLES['vehicleLinks'][0]]}
+
+
+def test_without_a_vin_the_car_that_answers_is_found_and_kept(fake_net):
+    calls, state = fake_net
+    state['vehicles'] = _two_cars()
+    state['denied_vins'] = {OLD}
+    st = _conn().get_status()
+    assert st.raw_data['vin'] == VIN and st.soc_percent == 63
+    # remembered: the next sync asks only for the Mégane
+    calls['data'].clear()
+    st = _conn().get_status()
+    assert st.raw_data['vin'] == VIN
+    assert calls['data'] and not any(OLD in e for e in calls['data'])
+
+
+def test_a_car_without_details_is_skipped_like_home_assistant(fake_net):
+    calls, state = fake_net
+    state['vehicles'] = _two_cars(first_details=False)
+    state['no_details'] = {OLD}
+    st = _conn().get_status()
+    assert st.raw_data['vin'] == VIN
+    assert OLD in calls['details']                       # asked once, like HA
+    assert not any(OLD in e for e in calls['data'])      # but never for its data
+
+
+def test_the_test_button_names_the_car_it_found(fake_net):
+    _, state = fake_net
+    state['vehicles'] = _two_cars()
+    state['denied_vins'] = {OLD}
+    note = _conn().verify_credentials()
+    assert note and 'MEGANE E-TECH (VF1…0001)' in note and 'ZOE (VF1…0777)' in note
+
+
+def test_all_cars_refused_says_so_and_lists_them(fake_net):
+    _, state = fake_net
+    state['vehicles'] = _two_cars()
+    state['denied_vins'] = {OLD, VIN}
+    with pytest.raises(RuntimeError) as ei:
+        _conn().get_status()
+    msg = str(ei.value)
+    assert 'renault.err_data_denied_all_cars' not in msg     # translated
+    assert 'VF1…0777' in msg and 'VF1…0001' in msg
+
+
+def test_an_entered_vin_is_never_left_for_another_car(fake_net):
+    calls, state = fake_net
+    state['vehicles'] = _two_cars()
+    state['denied_vins'] = {OLD}
+    with pytest.raises(RuntimeError):
+        _conn(vin=OLD).get_status()
+    assert not any(VIN in e for e in calls['data'])
+
+
+def test_a_remembered_car_that_left_the_account_is_forgotten(fake_net):
+    calls, state = fake_net
+    state['vehicles'] = _two_cars()
+    state['denied_vins'] = {OLD}
+    _conn().get_status()                                  # remembers the Mégane
+    state['vehicles'] = {'accountId': 'acc-myr', 'country': 'FR', 'vehicleLinks': [
+        {'vin': OLD, 'vehicleDetails': _two_cars()['vehicleLinks'][0]['vehicleDetails']}]}
+    state['denied_vins'] = set()
+    assert _conn().get_status().raw_data['vin'] == OLD     # gone → looked again
+
+
+def test_the_vin_field_is_offered_for_renault_and_dacia():
+    for c in (cr.RenaultConnector, cr.DaciaConnector):
+        f = {x['key']: x for x in c.credential_fields()}
+        assert 'vin' in f and f['vin'].get('optional')
+
+
+def test_every_refusal_is_logged_not_only_the_battery(fake_net, caplog):
+    import logging
+    _, state = fake_net
+    state['battery_error'], state['denied_endpoints'] = PRIVACY_403, ALL_DATA
+    with caplog.at_level(logging.INFO, logger=cr.logger.name):
+        with pytest.raises(RuntimeError):
+            _conn().get_status()
+    text = caplog.text
+    assert 'battery-status refused' in text and 'cockpit refused' in text and 'location refused' in text
+    assert VIN not in text                                # masked
