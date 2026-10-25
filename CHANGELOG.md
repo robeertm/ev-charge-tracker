@@ -1,6 +1,6 @@
 # Changelog
 
-## v3.0.178 (2026-10-25)
+## v3.0.179 (2026-10-25)
 
 ### Kia/Hyundai EU sign-in: current SDK
 
@@ -9,6 +9,9 @@
   and keeps the full login working when the legacy device registration fails
   (4.36.1). Sign-ins that the maker's server rejected since the last rollout
   need this version; the image is rebuilt with it.
+- **Image build fixed for the new SDK.** The SDK needs `pycryptodome` 4.x while
+  the MG connector caps it below 4; the MG connector is now installed last
+  without that cap (both only use the unchanged `Crypto` namespace).
 - No code changes were needed: the app only uses the manager calls whose
   behaviour is unchanged between 4.35 and 4.41.
 

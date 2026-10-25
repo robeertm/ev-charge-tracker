@@ -42,7 +42,16 @@ WORKDIR /app
 # separately, pip would satisfy requirements.txt first and then let the
 # connectors quietly move a shared dependency (requests) underneath it.
 COPY requirements.txt requirements-vehicles.txt ./
-RUN pip install --no-cache-dir -r requirements.txt -r requirements-vehicles.txt
+#
+# One exception: the MG connector (saic-ismart-client-ng) caps pycryptodome
+# below 4.0 while the Kia/Hyundai SDK (>=4.41) needs 4.x. Both only use the
+# unchanged `Crypto` namespace, so the MG connector is installed last without
+# its own pin on that one package; its other dependencies join the first
+# resolution so nothing else moves afterwards.
+RUN grep -v '^saic-ismart-client-ng' requirements-vehicles.txt > /tmp/rv.txt \
+ && pip install --no-cache-dir -r requirements.txt -r /tmp/rv.txt dacite httpx tenacity \
+ && pip install --no-cache-dir --no-deps "saic-ismart-client-ng>=0.5.0" \
+ && rm /tmp/rv.txt
 
 # App source.
 COPY . .
