@@ -1,5 +1,22 @@
 # Changelog
 
+## v3.0.177 (2026-10-25)
+
+### Read-only API: every value says how old it is
+
+- **`data_ts` is no longer `null` when the values come from storage.** If the
+  app has had no successful poll since it started — for example because the
+  manufacturer refuses the sign-in — the answer uses the newest stored status
+  row, and `data_ts` is now the time that row was stored. A reader can say
+  "39 % as of Tuesday" instead of presenting old values as current.
+- **New field `data_source`:** `"poll"` (values from a successful poll since
+  the app started) or `"stored"` (the newest stored status row); `null` when
+  the app has no values at all.
+- When the connector gives no timestamp of its own, values from a poll are
+  dated by when that successful poll arrived. A later **failed** attempt only
+  moves `last_sync_ts` and sets `last_sync_ok` to `false` — it never re-dates
+  the values.
+
 ## v3.0.176 (2026-10-25)
 
 ### Read-only API token for assistants and dashboards

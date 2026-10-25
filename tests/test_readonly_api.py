@@ -178,6 +178,7 @@ def test_the_right_token_reads_with_the_web_login_switched_on():
     assert car['target_soc_pct'] == 80
     assert car['odometer_km'] == 40123
     assert car['data_ts'] == '2026-10-25T17:58:00+02:00'
+    assert car['data_source'] == 'poll'
     assert car['last_sync_ok'] is True and car['last_sync_ts']
     lc = car['last_charge']
     assert lc['kwh'] == 21.5 and lc['soc_from'] == 40 and lc['soc_to'] == 75
@@ -189,6 +190,7 @@ def test_the_right_token_reads_with_the_web_login_switched_on():
     # A car the app never polled has nothing to report — null, not a guess.
     assert old['soc_pct'] is None and old['last_sync_ok'] is None
     assert old['last_sync_ts'] is None and old['plugged_in'] is None
+    assert old['data_ts'] is None and old['data_source'] is None
 
 
 def test_the_answer_carries_no_position_identity_or_secret():
@@ -333,3 +335,61 @@ print(json.dumps({'n0': n0, 'n1': n1, 'rec': rec}))""" % (LAT, LON))
     assert not out['rec']['at'].startswith('2000')
     assert out['rec']['charging'] is False and out['rec']['plugged_in'] is False
     assert 'location_lat' not in out['rec'] and 'lat' not in json.dumps(out['rec'])
+
+
+# ── how old the values are (v3.0.177) ─────────────────────────────────
+def test_stored_values_carry_the_time_of_their_row():
+    """No successful poll since start: the values come from the newest
+    stored row, and data_ts is that row's time — never null, so the
+    reader can say how old they are."""
+    d = _fresh()
+    token = _new_token(d)
+    out = _run(d, """
+from datetime import datetime
+with app.app_context():
+    vid = Vehicle.query.order_by(Vehicle.id).first().id
+    row = VehicleSync.query.filter_by(vehicle_id=vid).order_by(VehicleSync.timestamp.desc()).first()
+    row.timestamp = datetime(2026, 10, 14, 7, 30, 0)
+    db.session.commit()
+    # what a restart followed by a refused sign-in leaves behind
+    AppConfig.set(ro.LAST_POLL_KEY.format(vid=vid),
+                  json.dumps({'at': datetime.now().isoformat(timespec='seconds'), 'ok': False}))
+r = get('/api/readonly/vehicle', %r)
+print(json.dumps({'r': r}))""" % token)
+    car = json.loads(out['r']['body'])['vehicles'][0]
+    assert car['data_source'] == 'stored'
+    assert car['data_ts'] is not None
+    assert car['data_ts'].startswith('2026-10-14T07:30:00')
+    assert car['soc_pct'] == 67
+    assert car['last_sync_ok'] is False
+    assert car['last_sync_ts'] != car['data_ts']
+
+
+def test_a_failed_poll_does_not_move_data_ts():
+    """A poll without the car's own timestamp dates its values by when they
+    arrived. A later failed attempt moves last_sync_ts — not data_ts."""
+    d = _fresh()
+    token = _new_token(d)
+    out = _run(d, """
+from services.vehicle.base import VehicleStatus
+from app import _save_vehicle_sync
+with app.app_context():
+    vid = Vehicle.query.order_by(Vehicle.id).first().id
+    _save_vehicle_sync(VehicleStatus(soc_percent=55, odometer_km=40200,
+                                     estimated_range_km=200), 64.0,
+                       raw_json='{}', vehicle_id=vid)
+    key = ro.LAST_POLL_KEY.format(vid=vid)
+    rec = json.loads(AppConfig.get(key))
+    rec['at'] = rec['ok_at'] = '2026-10-25T08:00:00'      # the good poll, earlier
+    AppConfig.set(key, json.dumps(rec))
+before = json.loads(get('/api/readonly/vehicle', %r)['body'])['vehicles'][0]
+with app.app_context():
+    ro.note_poll_failed(vid)
+after = json.loads(get('/api/readonly/vehicle', %r)['body'])['vehicles'][0]
+print(json.dumps({'before': before, 'after': after}))""" % (token, token))
+    b, a = out['before'], out['after']
+    assert b['data_source'] == a['data_source'] == 'poll'
+    assert b['data_ts'].startswith('2026-10-25T08:00:00')
+    assert a['data_ts'] == b['data_ts'], 'a failed attempt re-dated the values'
+    assert a['last_sync_ok'] is False and a['last_sync_ts'] != b['last_sync_ts']
+    assert a['soc_pct'] == 55

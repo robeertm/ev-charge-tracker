@@ -164,9 +164,13 @@ def note_poll(vehicle_id, status) -> None:
         return
     try:
         from models.database import AppConfig
+        now = datetime.now().isoformat(timespec='seconds')
         rec = {
-            'at': datetime.now().isoformat(timespec='seconds'),
+            'at': now,
             'ok': True,
+            # when these values arrived — kept by a later failed attempt,
+            # which only moves 'at'
+            'ok_at': now,
             'soc_pct': getattr(status, 'soc_percent', None),
             'range_km': getattr(status, 'estimated_range_km', None),
             'charging': _opt_bool(getattr(status, 'is_charging', None)),
@@ -329,6 +333,10 @@ def _vehicle_entry(v, active_id, home_names, public_names):
     poll = _load_poll(v.id)
     has_values = any(k in poll for k in ('soc_pct', 'odometer_km'))
     if has_values:
+        # The car's own timestamp where the connector gives one; otherwise
+        # the moment this successful poll arrived. Never the time of a later
+        # FAILED attempt — that one only moves last_sync_ts.
+        values_at = poll.get('ok_at') or (poll.get('at') if poll.get('ok') else None)
         vals = {
             'soc_pct': poll.get('soc_pct'),
             'range_km': poll.get('range_km'),
@@ -337,11 +345,14 @@ def _vehicle_entry(v, active_id, home_names, public_names):
             'charge_power_kw': poll.get('charge_power_kw'),
             'target_soc_pct': poll.get('target_soc_pct'),
             'odometer_km': poll.get('odometer_km'),
-            'data_ts': poll.get('data_ts'),
+            'data_ts': poll.get('data_ts') or _local_iso_str(values_at),
+            'data_source': 'poll',
         }
     elif row is not None:
-        # Before the first poll after an update there is no record yet:
-        # the newest stored status row is all there is.
+        # No successful poll since the update (or since the vendor started
+        # refusing): the newest stored status row is all there is. Its time
+        # is when the app stored those values — so an assistant can say how
+        # old they are instead of presenting them as current.
         vals = {
             'soc_pct': row.soc_percent,
             'range_km': row.estimated_range_km,
@@ -350,12 +361,13 @@ def _vehicle_entry(v, active_id, home_names, public_names):
             'charge_power_kw': row.charge_power_kw,
             'target_soc_pct': None,
             'odometer_km': row.odometer_km,
-            'data_ts': None,
+            'data_ts': _local_iso(row.timestamp),
+            'data_source': 'stored',
         }
     else:
         vals = dict.fromkeys(('soc_pct', 'range_km', 'charging', 'plugged_in',
                               'charge_power_kw', 'target_soc_pct',
-                              'odometer_km', 'data_ts'))
+                              'odometer_km', 'data_ts', 'data_source'))
     if vals['charge_power_kw'] is not None:
         try:
             vals['charge_power_kw'] = float(vals['charge_power_kw'])
