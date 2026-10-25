@@ -36,7 +36,7 @@ def test_the_kia_sdk_pin_is_raised_to_the_release_that_gets_past_9035():
     from services.vehicle.catalog import PACKAGES
     kia = [p for p in PACKAGES['hyundai-kia'] if 'hyundai-kia-connect-api' in p]
     assert kia, 'the Kia SDK vanished from the package group'
-    assert _min_version(kia[0]) >= (4, 35, 3), kia[0]
+    assert _min_version(kia[0]) >= (4, 41, 1), kia[0]
 
 
 def test_the_pin_in_the_catalog_and_in_the_image_requirements_agree():

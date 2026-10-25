@@ -418,7 +418,7 @@ needed.
 After installing, configure credentials in Settings > Vehicle API. Optional background sync polls your vehicle at a configurable interval (1-12h).
 
 **¹ Kia/Hyundai:** signing in with username and password works — but only on
-**Python 3.12 or newer**. The sign-in needs `hyundai-kia-connect-api` ≥ 4.35.3,
+**Python 3.12 or newer**. The sign-in needs `hyundai-kia-connect-api` ≥ 4.41.1,
 and every release of that SDK from 4.23.1 onward declares `Requires-Python
 >=3.12`. The Docker image ships 3.12, so a container install signs in like
 every other brand here. This direct route is **unofficial and fragile**: on

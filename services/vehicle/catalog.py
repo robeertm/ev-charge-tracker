@@ -127,14 +127,14 @@ BRANDS: List[Brand] = [
 # (tests/test_vehicle_catalog.py checks that too).
 PACKAGES: Dict[str, List[str]] = {
     # Track the upstream community SDK. 4.26.5 brought the headless CCI
-    # password sign-in; 4.35.3 is the current maintained release, which
+    # password sign-in; 4.41.1 is the current maintained release, which
     # restores EU sign-in after the maker's 14 Oct 2026 server change that
     # had answered HTTP 400 code 9035 (upstream kia_uvo#1939). This is an
     # UNOFFICIAL community route the maker works against and may break
     # again — the warning shown to users lives in the credential help and
     # in hk.err_vendor_block. selenium/webdriver-manager stay for the
     # browser-login *fallback*.
-    'hyundai-kia': ['hyundai-kia-connect-api>=4.35.3', 'selenium', 'webdriver-manager'],
+    'hyundai-kia': ['hyundai-kia-connect-api>=4.41.1', 'selenium', 'webdriver-manager'],
     'vw':          ['carconnectivity', 'carconnectivity-connector-volkswagen'],
     'skoda':       ['carconnectivity', 'carconnectivity-connector-skoda'],
     'seatcupra':   ['carconnectivity', 'carconnectivity-connector-seatcupra'],

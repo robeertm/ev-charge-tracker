@@ -1,5 +1,17 @@
 # Changelog
 
+## v3.0.178 (2026-10-25)
+
+### Kia/Hyundai EU sign-in: current SDK
+
+- **Raised the community SDK floor to `hyundai-kia-connect-api` 4.41.1.** It
+  sends a current Android Chrome User-Agent to the EU sign-in (upstream #1416)
+  and keeps the full login working when the legacy device registration fails
+  (4.36.1). Sign-ins that the maker's server rejected since the last rollout
+  need this version; the image is rebuilt with it.
+- No code changes were needed: the app only uses the manager calls whose
+  behaviour is unchanged between 4.35 and 4.41.
+
 ## v3.0.177 (2026-10-25)
 
 ### Read-only API: every value says how old it is
