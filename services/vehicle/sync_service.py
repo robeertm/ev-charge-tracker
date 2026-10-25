@@ -494,6 +494,10 @@ def _do_sync(app):
                     pass
                 if getattr(e, 'kind', '') == 'vendor_block':
                     _note_vendor_block(v.id, e)
+                # v3.0.176: the read-only API reports the failed attempt
+                # and keeps the last good values. Never raises.
+                from services.readonly_api import note_poll_failed
+                note_poll_failed(v.id)
         return results
 
 

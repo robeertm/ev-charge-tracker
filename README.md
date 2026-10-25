@@ -241,6 +241,15 @@ never mix with a real history.
 - **Flask signed session cookie** with a per-install random 32-byte secret that's generated on first boot and persisted — sessions survive restarts and updates
 - **Use case**: when the Tailscale share link is known to other devices but you still want a password in front of your charge data
 
+### Read-only API token (for assistants and dashboards)
+- **`GET /api/readonly/vehicle`** with `Authorization: Bearer <token>` returns, per vehicle, the state of charge, range, charging / plugged in, charge power, target, odometer, when the car reported it, when the app last polled it (and whether that worked) and the last logged charge (`start`, `end`, `kwh`, `soc_from`, `soc_to`, `location_kind` = `home` / `public` / `null`). Values the app does not have are `null`
+- **Read-only and narrow**: no GPS coordinates, no VIN, no plates, no place names or addresses, no credentials, no account or tariff data. It cannot change anything
+- **Its own token**, separate from the web login: the endpoint is exempt from the login for this one exact path and checks the token itself. Without a token it does not exist (`404`); a missing or wrong token gets `401`; more than 10 failed attempts within a minute switch it to `429` for everyone until the minute has passed
+- **No web UI** — the token is managed in a shell (in a container: `docker exec <container> python3 -m services.readonly_token …`):
+  - `new` prints a new token on stdout and nothing else, so it can be piped straight into a file; the previous token stops working
+  - `off` switches the endpoint off, `status` says `on` / `off` and never shows the token
+- Only a SHA-256 hash of the token is stored. Protection is the token alone: behind a container bridge every request comes from the same address, so the source address is not used as a safeguard
+
 ### First-run Setup Wizard (VM deployments)
 - **Browser-based wizard** that appears on first access to a freshly provisioned VM (triggered by a `/srv/ev-data/.setup_pending` marker)
 - **Web login + at least one vehicle** — the two mandatory steps; the web credentials replace the old SSH-password step and gate every subsequent request

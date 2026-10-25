@@ -1728,6 +1728,11 @@ def _save_vehicle_sync(status, battery_kwh, raw_json='', vehicle_id=None):
     else:
         result = last
 
+    # v3.0.176: remember this poll as answered — also when nothing changed
+    # and no row was written — for the read-only API. Never raises.
+    from services.readonly_api import note_poll
+    note_poll(vehicle_id, status)
+
     # Retroactive GPS backfill: when the sync we just saved carries a
     # GPS fix whose own timestamp (``location_last_updated_at``) is in
     # the past — common on Hyundai Bluelink after a sleep window where
@@ -2576,6 +2581,37 @@ def register_routes(app):
     def api_health():
         return jsonify({'ok': True, 'version': Config.APP_VERSION})
 
+    @app.route('/api/readonly/vehicle', methods=['GET'])
+    def api_readonly_vehicle():
+        """v3.0.176: read-only vehicle status behind its own bearer token.
+
+        Exempt from the web login (exact path only) because it checks its
+        own token — see services/readonly_api.py. No token configured →
+        404, the endpoint does not exist. Wrong or missing token → 401.
+        Too many failures in a minute → 429 for everyone until it cools
+        down. Nothing here writes to the database.
+        """
+        from services import readonly_api as ro
+        expected = ro.stored_hash()
+        if not expected:
+            return jsonify({'error': 'not_found'}), 404
+        wait = ro.brake_retry_after()
+        if wait:
+            resp = jsonify({'error': 'too_many_attempts'})
+            resp.status_code = 429
+            resp.headers['Retry-After'] = str(wait)
+            return resp
+        presented = ro.bearer_from_header(request.headers.get('Authorization'))
+        if not ro.token_matches(presented, expected):
+            ro.note_failure()
+            resp = jsonify({'error': 'unauthorized'})
+            resp.status_code = 401
+            resp.headers['WWW-Authenticate'] = 'Bearer'
+            return resp
+        resp = jsonify(ro.build_payload(Config.APP_VERSION))
+        resp.headers['Cache-Control'] = 'no-store'
+        return resp
+
     @app.route('/api/sync/health', methods=['GET'])
     def api_sync_health():
         """Watchdog snapshot for the dashboard badge.
@@ -2795,6 +2831,10 @@ def register_routes(app):
     # Settings → Zugangsschutz; credentials live in AppConfig (hashed).
     _AUTH_ALLOWED_PREFIXES = ('/login', '/logout', '/static/', '/api/health',
                               '/setup', '/api/setup/')
+    # v3.0.176: paths that check their OWN credential and therefore skip the
+    # web login. Compared for equality, never as a prefix — a prefix entry
+    # would also open every future route that happens to start the same way.
+    _AUTH_ALLOWED_EXACT = frozenset({'/api/readonly/vehicle'})
 
     @app.before_request
     def _auth_guard():
@@ -2804,6 +2844,8 @@ def register_routes(app):
         if is_logged_in():
             return None
         path = request.path or '/'
+        if path in _AUTH_ALLOWED_EXACT:
+            return None
         if any(path.startswith(p) for p in _AUTH_ALLOWED_PREFIXES):
             return None
         if request.method == 'GET':

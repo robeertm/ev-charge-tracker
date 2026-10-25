@@ -1,5 +1,45 @@
 # Changelog
 
+## v3.0.176 (2026-10-25)
+
+### Read-only API token for assistants and dashboards
+
+A program that only needs to know the battery level no longer needs the web
+login, which can also change settings and delete history.
+
+- **`GET /api/readonly/vehicle`** with `Authorization: Bearer <token>`
+  answers `{"ok": true, "version": …, "vehicles": [ … ]}`. Per vehicle: name,
+  brand, model, `active` (the car the picker shows by default), `archived`,
+  `soc_pct`, `range_km`, `charging`, `plugged_in`, `charge_power_kw`,
+  `target_soc_pct`, `odometer_km`, `data_ts` (when the car reported the
+  values), `last_sync_ts` / `last_sync_ok` (the app's last poll) and
+  `last_charge` (`start`, `end`, `kwh`, `soc_from`, `soc_to`,
+  `location_kind` = `home` / `public` / `null`). Anything the app does not
+  have is `null`, never estimated.
+- **Nothing that identifies or locates:** no GPS coordinates, no VIN, no
+  plates, no place names or addresses, no credentials, no account or tariff
+  data. `location_kind` is only `home` or `public` where the app itself
+  recorded it (home-meter reading, the "home" operator entry, a built-in
+  public network); work, custom names and unknown are `null`.
+- **Its own token:** exempt from the web login for this one exact path —
+  `/api/readonly/vehicleX` or `/api/readonly/other` stay behind the login,
+  and the token opens nothing else. No token configured → `404`; missing or
+  wrong → `401`; more than 10 failures within a minute → `429` for every
+  caller until it cools down (the source address is no safeguard behind a
+  container bridge). Stored only as a SHA-256 hash, compared in constant
+  time.
+- **Managed from a shell, no web UI:** `python3 -m services.readonly_token
+  new | off | status`. `new` prints the token on stdout and nothing else, so
+  it can be piped straight into a file on another machine; `status` never
+  shows it. The command writes to the database the running app has open and
+  never creates one.
+- **The last poll is now remembered per vehicle.** A status row is only
+  stored when a value changes, so its time said when the values last
+  changed, not when the app last asked — and the plug state, the charge
+  target and the car's own timestamp were never stored at all. Each poll now
+  keeps what the connector answered in one small record; a failed background
+  poll is marked there and keeps the last good values.
+
 ## v3.0.175 (2026-10-18)
 
 ### OBD: 29-bit cars (VW MEB, Renault Zoe ZE50) read with a real ELM327
