@@ -1,5 +1,19 @@
 # Changelog
 
+## v3.0.180 (2026-10-29)
+
+### Background sync starts when the first vehicle is added
+
+- **Fixed: a vehicle added after the container started never got synced
+  until the next restart.** The background sync service was only started at
+  boot, so on a freshly set-up instance the dashboard showed a sync warning
+  (`bg_loop_not_yet_ticked`) until the container was restarted. Saving a
+  vehicle with credentials and auto-sync now starts the service if it is not
+  already running.
+- **Start is idempotent and thread-safe.** The check-and-set of the running
+  flag is serialised, so boot and a concurrent vehicle save can never spawn
+  two sets of sync threads.
+
 ## v3.0.179 (2026-10-25)
 
 ### Kia/Hyundai EU sign-in: current SDK

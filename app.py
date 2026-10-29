@@ -3344,6 +3344,15 @@ def register_routes(app):
         if not vid:
             db.session.add(v)
         db.session.commit()
+        # A vehicle with credentials saved after container start must not
+        # wait for a restart: start the background sync service if it is
+        # not running yet (start_sync is idempotent and thread-safe).
+        if v.auto_sync and v.api_brand and v.api_username and not v.is_archived:
+            try:
+                from services.vehicle.sync_service import start_sync as _start_sync
+                _start_sync(app)
+            except Exception as _e:
+                logger.warning(f"Could not start sync service after vehicle save: {_e}")
         # v2.29 legacy mirror: stats services + sync_service still read
         # AppConfig.battery_kwh / battery_soh_baseline / etc. directly.
         # Mirror the primary vehicle (lowest id, non-archived) onto

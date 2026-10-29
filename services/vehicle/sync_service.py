@@ -9,6 +9,7 @@ logger = logging.getLogger(__name__)
 
 _sync_thread = None
 _sync_running = False
+_start_lock = threading.Lock()
 _nightly_thread = None
 # v2.29: per-vehicle force-refresh queue. Keyed by vehicle_id (int);
 # value is the reason string. ``request_force_refresh(reason, vid)``
@@ -899,7 +900,17 @@ def _sync_watchdog_loop(app):
 
 
 def start_sync(app):
-    """Start periodic vehicle sync in a background thread."""
+    """Start periodic vehicle sync in a background thread.
+
+    Idempotent and thread-safe: the check-and-set of the running flag is
+    serialised, so concurrent callers (container boot, vehicle save) can
+    never spawn two sets of threads.
+    """
+    with _start_lock:
+        return _start_sync_locked(app)
+
+
+def _start_sync_locked(app):
     global _sync_thread, _nightly_thread, _watchdog_thread, _sync_running
 
     if _sync_running:
