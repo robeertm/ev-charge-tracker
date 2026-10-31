@@ -1,5 +1,14 @@
 # Changelog
 
+## v3.0.181 (2026-10-31)
+
+### Neutral wording in tests, commit identity check
+
+Replace verbatim quotes and personal names in test text with neutral
+wording; add a commit identity check (script, pre-push hook, CI workflow,
+tests) so private or placeholder addresses are not published.
+Co-Authored-By: Claude Sonnet 5.5 <noreply@anthropic.com>
+
 ## v3.0.180 (2026-10-29)
 
 ### Background sync starts when the first vehicle is added
