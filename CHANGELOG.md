@@ -2,12 +2,13 @@
 
 ## v3.0.181 (2026-10-31)
 
-### Neutral wording in tests, commit identity check
+### Neutral test wording and commit identity check
 
-Replace verbatim quotes and personal names in test text with neutral
-wording; add a commit identity check (script, pre-push hook, CI workflow,
-tests) so private or placeholder addresses are not published.
-Co-Authored-By: Claude Sonnet 5.5 <noreply@anthropic.com>
+- **Neutralised comments and test texts.** Verbatim quotes and personal names
+  are gone from comments and test fixtures.
+- **Added a commit identity check.** A script, a pre-push hook, the CI
+  workflow "Commit identity" and tests keep private or placeholder addresses
+  from being published.
 
 ## v3.0.180 (2026-10-29)
 
