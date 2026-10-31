@@ -240,7 +240,7 @@ def main():
     app3 = _make_app()
     with app3.app_context():
         db.create_all()
-        v = Vehicle(name='Mike no-API-SoH', brand='Tesla', battery_kwh=60.0,
+        v = Vehicle(name='Example no-API-SoH', brand='Tesla', battery_kwh=60.0,
                     is_archived=False, acquired_at=date(2022, 1, 1))
         db.session.add(v)
         db.session.commit()

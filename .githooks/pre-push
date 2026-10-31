@@ -1,0 +1,4 @@
+#!/bin/sh
+# Refuse to push commits that would publish a private or placeholder identity.
+# Enable once per clone:  git config core.hooksPath .githooks
+exec python3 "$(git rev-parse --show-toplevel)/scripts/check_commit_identity.py" --pre-push "$@"

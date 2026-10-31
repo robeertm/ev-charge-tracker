@@ -566,6 +566,8 @@ Pull requests welcome! Areas where help is appreciated:
 - Charts and analytics ideas
 - Mobile UX improvements
 
+Your commits show your name and e-mail to everyone. Use the address you want public (GitHub's no-reply address works). Pushes are checked by `scripts/check_commit_identity.py` (in CI, and locally after `git config core.hooksPath .githooks`); it only refuses the maintainer's own identities and machine placeholders such as `agent@host`.
+
 ---
 
 ## License

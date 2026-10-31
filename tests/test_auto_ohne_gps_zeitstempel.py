@@ -165,7 +165,7 @@ def test_02_wer_sonst_zeitstempel_schickt_bleibt_streng():
     try:
         from services.trips_service import update_parking_from_sync
         v = _auto(marke='hyundai')
-        # Die Historie, die dieses Auto von Mikes unterscheidet:
+        # Die Historie, die dieses Auto von einem anderen Auto unterscheidet:
         _sync(v.id, odo=34600, wann=AN_WORK - timedelta(hours=4),
               ort=ORT_A, gps_alter_min=2)
         pe = _halt(v.id, ORT_A, odo=34606, wann=AN_WORK)

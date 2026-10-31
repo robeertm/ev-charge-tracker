@@ -301,7 +301,7 @@ def test_the_history_page_shows_the_badge(live):
 
 
 def test_the_history_row_carries_the_source_colours(live):
-    """Robert: „die einträge bekommen die anteilsfarben oder so".
+    """Request: history entries carry the source colours.
 
     The stub's charge is 17.0 sun / 2.4 battery / 2.0 grid of 21.4 kWh, so all
     three segments must be there — and in the same colours the curve uses,
@@ -319,7 +319,7 @@ def test_the_history_row_carries_the_source_colours(live):
 
 
 def test_the_settings_page_points_at_the_companion(live):
-    """Robert: „der ev-tracker andersrum zu shelly analyzer". One sentence and
+    """Request: the settings page points the other way, to the energy analyzer. One sentence and
     a link — and it has to survive translation, so the German text is checked,
     not the English fallback."""
     base, _ = live

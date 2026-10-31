@@ -1,0 +1,32 @@
+# Every commit in this public repository shows its author and committer to
+# anyone. This check fails a push whose new commits would publish the
+# maintainer's private address or a machine placeholder (see
+# scripts/check_commit_identity.py). Outside contributors are not affected.
+name: Commit identity
+
+on:
+  push:
+    branches: ['**']
+
+permissions:
+  contents: read
+
+jobs:
+  identity:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Check the pushed commits
+        env:
+          BEFORE: ${{ github.event.before }}
+          AFTER: ${{ github.sha }}
+        run: |
+          if [ "$BEFORE" = "0000000000000000000000000000000000000000" ] || ! git cat-file -e "$BEFORE^{commit}" 2>/dev/null; then
+            RANGE="$AFTER --not origin/main"
+            [ "${GITHUB_REF}" = "refs/heads/main" ] && RANGE="$AFTER -n 1"
+          else
+            RANGE="$BEFORE..$AFTER"
+          fi
+          python3 scripts/check_commit_identity.py $RANGE

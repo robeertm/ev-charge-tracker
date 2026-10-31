@@ -268,8 +268,8 @@ def test_11_what_may_be_overwritten_and_what_may_not():
 
     "auto" used to leave a typed-in price alone, which sounds careful and
     leaves the worse number standing exactly where a better one exists: at the
-    owner's own wallbox the meter sat in the wire. Robert: „zu hause/wallbox >
-    alles automatisch". Every adoption stays reversible, so nothing is lost —
+    owner's own wallbox the meter sat in the wire. Request: at home/wallbox,
+    everything automatic. Every adoption stays reversible, so nothing is lost —
     and "never" still means never.
     """
     print("== What may be overwritten, and what may not ==")
@@ -371,7 +371,7 @@ def test_15_the_settings_are_coerced_not_trusted():
 # ══════════════════════════════════════════════════════════════════════════
 
 def test_20_a_measured_home_charge_stops_asking_to_be_checked():
-    """Robert: „soll er nicht prüfen hinschreiben sondern es richtig eintragen".
+    """Request: do not mark it "to be checked", enter it correctly.
 
     The flag asks "is this entry right?". For a charge at the owner's own
     wallbox the answer arrives from the wire, with a curve behind it — so the
@@ -591,8 +591,7 @@ def test_25_a_match_the_old_rule_declined_is_settled_later():
 # ══════════════════════════════════════════════════════════════════════════
 
 def test_26_the_co2_of_a_mixed_charge_is_mixed_too():
-    """Robert: „wird eigentlich dann der co2 anteil auch richtig berechnet bei
-    mischladungen?"
+    """Question: is the CO2 share computed correctly for mixed charges?
 
     It was not. The app books ONE intensity per charge, and a charge of 5.63
     kWh sunshine plus 0.011 kWh grid was booked at the grid mix — roughly ten
