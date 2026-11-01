@@ -6,9 +6,10 @@
 
 - **Sign-in state is stored per vehicle.** Every background sync records
   whether the vehicle's sign-in works (state, since when, last successful
-  sign-in, consecutive failures). The sync health endpoint shows it with a
-  short, scrubbed note; the read-only vehicle endpoint carries the state
-  word only. Credentials, tokens, e-mail addresses and VINs never appear.
+  sign-in, consecutive failures). The sync health endpoint shows the state,
+  when it began, the last successful sign-in and the pause; the read-only
+  vehicle endpoint carries the state word only. Credentials, tokens, e-mail
+  addresses and VINs never appear.
 - **Automatic sign-ins pause after a rejected credential.** After an expired
   token or a refused credential the background loop no longer signs that
   vehicle in on every tick; it waits 1, 3, 6, 12, then 24 hours before the
