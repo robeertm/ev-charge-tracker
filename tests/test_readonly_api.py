@@ -191,6 +191,8 @@ def test_the_right_token_reads_with_the_web_login_switched_on():
     assert old['soc_pct'] is None and old['last_sync_ok'] is None
     assert old['last_sync_ts'] is None and old['plugged_in'] is None
     assert old['data_ts'] is None and old['data_source'] is None
+    # Never signed in through the background loop yet: no state, not a guess.
+    assert car['login_state'] is None and old['login_state'] is None
 
 
 def test_the_answer_carries_no_position_identity_or_secret():
@@ -393,3 +395,44 @@ print(json.dumps({'before': before, 'after': after}))""" % (token, token))
     assert a['data_ts'] == b['data_ts'], 'a failed attempt re-dated the values'
     assert a['last_sync_ok'] is False and a['last_sync_ts'] != b['last_sync_ts']
     assert a['soc_pct'] == 55
+
+
+# ── the sign-in state ─────────────────────────────────────────────────
+def test_the_sign_in_state_is_one_word_and_carries_no_detail():
+    """login_state is the bare state; the scrubbed error text behind it,
+    and anything the error happened to contain, stays out of the answer."""
+    d = _fresh()
+    token = _new_token(d)
+    leaky = ('401 Unauthorized for someone@example.com at '
+             'https://idp.example.invalid/auth?user=someone token '
+             + 'z9' * 24 + ' vin ' + VIN)
+    out = _run(d, """
+from services.vehicle import login_state
+with app.app_context():
+    vid = Vehicle.query.order_by(Vehicle.id).first().id
+    login_state.note_failure(vid, 'renault', RuntimeError(%r))
+r = get('/api/readonly/vehicle', %r)
+print(json.dumps({'r': r}))""" % (leaky, token))
+    text = out['r']['body']
+    car, old = json.loads(text)['vehicles']
+    assert car['login_state'] == 'credentials_rejected'
+    assert old['login_state'] is None
+    for value in ('someone@example.com', 'idp.example.invalid', 'z9' * 24,
+                  VIN, 'Unauthorized', 'detail', 'paused_until'):
+        assert value not in text, f'{value!r} leaked into the answer'
+    keys = set()
+
+    def walk(o):
+        if isinstance(o, dict):
+            for k, v in o.items():
+                keys.add(k.lower())
+                walk(v)
+        elif isinstance(o, list):
+            for v in o:
+                walk(v)
+    walk(json.loads(text))
+    for bad in ('gps', 'lat', 'lon', 'vin', 'password', 'token', 'pin',
+                'username', 'address', 'location_name', 'operator', 'eur',
+                'cost', 'plate'):
+        hit = [k for k in keys if bad in k]
+        assert not hit, f'forbidden field {bad!r} in answer: {hit}'

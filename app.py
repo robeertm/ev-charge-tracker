@@ -2730,7 +2730,35 @@ def register_routes(app):
             # sieht der Benutzer nach dem Ende der Sperre einen leeren
             # Hinweisbereich und alte Daten, ohne Zusammenhang.
             'fresh_gps_age_hours': fresh_gps_age_hours,
+            # Sign-in state per car, for an outside watcher. No error
+            # detail and no credentials — only the machine-readable state.
+            'vehicles': _login_health_vehicles(),
         })
+
+    def _login_health_vehicles():
+        try:
+            from models.database import Vehicle as _Vl
+            from services.vehicle import login_state as _ls
+            from services.vehicle.catalog import credentials_present as _cp
+            out = []
+            for _v in (_Vl.query.filter_by(is_archived=False)
+                       .order_by(_Vl.id.asc()).all()):
+                if not (_v.api_brand and _cp(_v.api_brand, _v.api_username,
+                                             _v.api_password, _v.api_vin)):
+                    continue
+                rec = _ls.read(_v.id) or {}
+                out.append({
+                    'id': _v.id,
+                    'name': _v.name,
+                    'api_brand': _v.api_brand,
+                    'login': {k: rec.get(k) for k in
+                              ('state', 'since', 'last_ok_at',
+                               'paused_until', 'attempts')},
+                })
+            return out
+        except Exception as e:
+            logger.debug(f"sync health: login states unavailable: {e}")
+            return []
 
     # ── LUKS auto-unlock (v3.0.3) ─────────────────────────────
     # Lets the user opt out of typing the LUKS passphrase on every
@@ -3258,6 +3286,9 @@ def register_routes(app):
             v = Vehicle.query.get_or_404(vid)
         else:
             v = Vehicle()
+        # What the sign-in pause (login_state) depends on: new credentials
+        # deserve an immediate attempt.
+        _creds_before = (v.api_username, v.api_password, v.api_brand)
         v.name = (request.form.get('name', '') or '').strip()[:64]
         _ajax = request.form.get('ajax') == '1'
         if not v.name:
@@ -3344,6 +3375,12 @@ def register_routes(app):
         if not vid:
             db.session.add(v)
         db.session.commit()
+        if vid and (v.api_username, v.api_password, v.api_brand) != _creds_before:
+            try:
+                from services.vehicle import login_state as _ls
+                _ls.lift_pause(v.id)
+            except Exception as _e:
+                logger.debug(f"sign-in pause not lifted after save: {_e}")
         # A vehicle with credentials saved after container start must not
         # wait for a restart: start the background sync service if it is
         # not running yet (start_sync is idempotent and thread-safe).
@@ -3652,6 +3689,12 @@ def register_routes(app):
                 return jsonify({'ok': False, 'error': t('flash.vehicle_test_no_creds')}), 400
             flash(t('flash.vehicle_test_no_creds'), 'warning')
             return redirect('/settings#sec-fleet')
+        # A person asking always gets through: lift the sign-in pause.
+        try:
+            from services.vehicle import login_state as _ls
+            _ls.lift_pause(v.id)
+        except Exception as _e:
+            logger.debug(f"sign-in pause not lifted on test: {_e}")
         try:
             from services.vehicle import get_connector
             creds = credentials_of(v)

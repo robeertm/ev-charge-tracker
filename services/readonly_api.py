@@ -16,7 +16,9 @@ hash — a copy of the database does not reveal it.
 What is deliberately NOT in the answer: GPS coordinates, the VIN, number
 plates, any credential, account or tariff data, addresses or place names.
 The last charge says only whether it was at home or at a public charger,
-and only when the app itself recorded that — otherwise ``null``.
+and only when the app itself recorded that — otherwise ``null``. The
+sign-in state is the bare state word (``ok``, ``token_expired``, …), never
+the error text behind it.
 
 Protection is the token. The address a request comes from is not a usable
 signal here: inside a container every request arrives from the bridge
@@ -384,7 +386,20 @@ def _vehicle_entry(v, active_id, home_names, public_names):
     entry['last_sync_ts'] = _local_iso_str(poll.get('at'))
     entry['last_sync_ok'] = (bool(poll['ok']) if 'ok' in poll else None)
     entry['last_charge'] = _last_charge(v.id, home_names, public_names)
+    entry['login_state'] = _login_state(v.id)
     return entry
+
+
+def _login_state(vid):
+    """Only the sign-in state word ('ok', 'token_expired', …) or ``None`` —
+    never its detail text."""
+    try:
+        from services.vehicle import login_state
+        rec = login_state.read(vid) or {}
+        state = rec.get('state')
+        return state if state in login_state.STATES else None
+    except Exception:
+        return None
 
 
 def build_payload(version: str) -> dict:

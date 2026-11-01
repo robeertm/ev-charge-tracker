@@ -476,13 +476,20 @@ def _do_sync(app):
                    .all())
         if not targets:
             return []
+        from . import login_state
         results = []
         for v in targets:
+            # After a rejected credential no automatic sign-in until the
+            # pause ends: no SDK call, no daily-counter tick (login_state).
+            if login_state.skip_paused(v.id, v.name):
+                continue
+            brand = v.api_brand        # read before a rollback expires the row
             try:
                 r = _sync_one_vehicle(app, v)
                 if r is not None:
                     results.append(r)
                     _note_vendor_block(v.id, None)
+                    login_state.note_ok(v.id, brand)
             except Exception as e:
                 logger.error(f"Vehicle sync [{v.name}] error: {e}")
                 # v3.0.112: shared session across the fleet loop — clear any
@@ -495,6 +502,7 @@ def _do_sync(app):
                     pass
                 if getattr(e, 'kind', '') == 'vendor_block':
                     _note_vendor_block(v.id, e)
+                login_state.note_failure(v.id, brand, e)
                 # v3.0.176: the read-only API reports the failed attempt
                 # and keeps the last good values. Never raises.
                 from services.readonly_api import note_poll_failed
@@ -597,7 +605,10 @@ def _maybe_post_move_reconcile(app) -> None:
                 total = sum(d.get('added', 0) + d.get('updated', 0) for d in r.get('results', []))
                 logger.info(f"Post-move trip reconcile (legacy): {total} SDK trip(s) touched")
                 return
+            from . import login_state
             for v in targets:
+                if login_state.paused_until(v.id) is not None:
+                    continue          # sign-in paused after a rejected credential
                 try:
                     r = _run_trip_backfill_for_vehicle(v, days=1)
                     total = sum(d.get('added', 0) + d.get('updated', 0) for d in r.get('results', []))
@@ -647,7 +658,10 @@ def _maybe_daily_trip_reconcile(app) -> None:
                     f"conflicts={r.get('total_conflicts', 0)}"
                 )
                 return
+            from . import login_state
             for v in targets:
+                if login_state.paused_until(v.id) is not None:
+                    continue          # sign-in paused after a rejected credential
                 try:
                     brand = (v.api_brand or '').lower()
                     if brand in ('kia', 'hyundai'):

@@ -258,6 +258,20 @@ def _is_auth_rejection(err: Exception) -> bool:
     return any(marker in msg for marker in _AUTH_REJECT_MARKERS)
 
 
+class SignInRefused(RuntimeError):
+    """A sign-in the provider refused, with the reason as ``kind``.
+
+    Still a RuntimeError, so every caller that catches one keeps working;
+    the message is the same friendly text as before. ``kind`` lets the
+    sign-in state (services/vehicle/login_state.py) tell an expired token
+    from a rate limit without reading the German wording.
+    """
+
+    def __init__(self, message: str, kind: str = 'credentials_rejected'):
+        super().__init__(message)
+        self.kind = kind
+
+
 def _friendly_auth_message(err: Exception, credential: str = '') -> str:
     """Translate an opaque SDK sign-in failure into an actionable German hint,
     or return '' when the error is *not* a credential-level rejection (so the
@@ -279,11 +293,18 @@ def _friendly_auth_message(err: Exception, credential: str = '') -> str:
     chasing a password that may well be 'correct' in the app yet unusable here
     (e.g. the account signs in via Apple/Google and has no real password, or an
     invisible autofill space slipped into the field). We spell those out."""
+    return _classify_auth_failure(err, credential)[1]
+
+
+def _classify_auth_failure(err: Exception, credential: str = '') -> tuple:
+    """``(kind, friendly text)`` for a sign-in failure; ``('', '')`` when it
+    is not a credential-level refusal. The texts are those of
+    :func:`_friendly_auth_message`, which is a thin view onto this."""
     msg = str(err).lower()
     name = _sdk_error_name(err)
     if name == 'RateLimitingError' or 'exceeds number of requests' in msg:
         # Retrying a rate limit is the one reaction that makes it worse.
-        return (
+        return 'rate_limit', (
             "Kia/Hyundai hat das Tageskontingent an Abfragen erreicht "
             "(rund 200 je Tag). Das ist kein Konto- oder Passwortproblem und "
             "heilt von selbst — die Abfragen laufen nach dem Zurücksetzen des "
@@ -292,14 +313,14 @@ def _friendly_auth_message(err: Exception, credential: str = '') -> str:
         )
     if (name == 'ConsentRequiredError' or 'consent' in msg
             or '/web/v1/user/authorization' in msg):
-        return (
+        return 'consent_required', (
             "Kia/Hyundai verlangt eine einmalige Zustimmung (AGB/Consent), "
             "bevor die App sich anmelden darf. Bitte melde dich EINMAL über den "
             "Browser-Login (Server) unten im Assistenten an und bestätige die "
             "Zustimmung — danach klappt die direkte Anmeldung."
         )
     if 'otp' in msg:
-        return (
+        return 'otp_required', (
             "Dein Kia/Hyundai-Konto verlangt einen Einmalcode (OTP/2-Faktor). "
             "Die direkte Anmeldung kann keinen OTP abfragen. Bitte 2-Faktor im "
             "Hersteller-Konto vorübergehend deaktivieren oder den Browser-Login "
@@ -310,7 +331,7 @@ def _friendly_auth_message(err: Exception, credential: str = '') -> str:
         # browser token flow: the stored 48-char refresh token stopped being
         # exchangeable, the SDK fell back to a full login and sent that very
         # token as the password — which cannot work. No retry revives it.
-        return (
+        return 'token_expired', (
             "Dein gespeicherter Kia/Hyundai-Token ist abgelaufen — deshalb "
             "lehnt der Hersteller die Anmeldung ab. Ein erneuter Versuch kann "
             "das nicht beheben.\n"
@@ -322,7 +343,7 @@ def _friendly_auth_message(err: Exception, credential: str = '') -> str:
             "Speichern und zeigt den Browser-Token-Weg an."
         )
     if _is_auth_rejection(err):
-        return (
+        return 'credentials_rejected', (
             "Kia/Hyundai hat die Anmeldung abgelehnt — das ist KEIN Bann und "
             "kein Server-Fehler: der Login-Server gibt bei jeder Ablehnung "
             "dieselbe Antwort. Bitte der Reihe nach prüfen:\n"
@@ -338,7 +359,8 @@ def _friendly_auth_message(err: Exception, credential: str = '') -> str:
             "Kia-Connect-/Bluelink-App migriert? Wenn du dich dort nicht "
             "einloggen kannst, geht es hier auch nicht."
         )
-    return ''
+    return '', ''
+
 
 from .base import VehicleConnector, VehicleStatus, to_km, unit_name
 from .registry import describe, register
@@ -559,14 +581,14 @@ class _HyundaiKiaBase(VehicleConnector):
             # A credential rejection won't fix itself on retry — and every extra
             # login attempt nudges the account toward a provider captcha/lockout.
             # Fail fast on those; only retry once for transient token/network blips.
-            friendly = _friendly_auth_message(e, self._password())
+            kind, friendly = _classify_auth_failure(e, self._password())
             if friendly:
                 logger.warning(
                     "Kia/Hyundai sign-in not retried [%s]: %s"
                     % (_sdk_error_name(e) or 'text match', e)
                 )
                 _managers.pop(self._cache_key, None)
-                raise RuntimeError(friendly) from e
+                raise SignInRefused(friendly, kind) from e
             logger.warning(f"Token refresh failed, retrying once: {e}")
             _managers.pop(self._cache_key, None)
             mgr = self._get_manager()
