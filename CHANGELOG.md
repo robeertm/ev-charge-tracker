@@ -1,5 +1,24 @@
 # Changelog
 
+## v3.0.182 (2026-11-01)
+
+### Sign-in state per vehicle, and a pause after a rejected credential
+
+- **Sign-in state is stored per vehicle.** Every background sync records
+  whether the vehicle's sign-in works (state, since when, last successful
+  sign-in, consecutive failures). The sync health endpoint shows it with a
+  short, scrubbed note; the read-only vehicle endpoint carries the state
+  word only. Credentials, tokens, e-mail addresses and VINs never appear.
+- **Automatic sign-ins pause after a rejected credential.** After an expired
+  token or a refused credential the background loop no longer signs that
+  vehicle in on every tick; it waits 1, 3, 6, 12, then 24 hours before the
+  next attempt. A paused vehicle costs no request and no daily budget, and
+  the follow-up syncs after parking and at night skip it as well.
+- **Retry at once when it makes sense.** Saving changed credentials, the
+  Test button or a restart lift the pause immediately. The manual sync
+  button is never paused.
+- The existing pause after a manufacturer-side block is unchanged.
+
 ## v3.0.181 (2026-10-31)
 
 ### Neutral test wording and commit identity check
