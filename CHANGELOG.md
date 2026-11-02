@@ -1,5 +1,18 @@
 # Changelog
 
+## v3.0.186 (2026-11-02)
+
+### Battery certificate for packs without a BMS SoH: capacity estimate from wallbox energy, honest labels
+
+LFP packs such as the 2026 XPENG G6 answer no SoH register and have no Ah/kWh
+counters. Until now such a car got no certificate at all, and the message sent
+the owner to an OBD dongle that cannot read a SoH from this pack either.
+- New capacity estimate for cars without any BMS SoH: wallbox-metered energy
+  x (1 - charging loss) / SoC lift. Only home charges with the meter's own
+  reading (matched, not undone, >= 95 % covered, >= 3 kW where known), a lift
+  of at least 30 points and not DC count; at least 5 of them, otherwise
+  "too little data" and no figure. The loss is a stated assumption (12 %,
+
 ## v3.0.185 (2026-11-02)
 
 ### Home Assistant: detect charging and charge power from pack current, and stop trusting impossible odometer readings
