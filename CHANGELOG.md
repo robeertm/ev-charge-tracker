@@ -1,5 +1,14 @@
 # Changelog
 
+## v3.0.188 (2026-11-02)
+
+### Readable charge rows in dark mode, correct singular for the key hint, phone-friendly vehicle list
+
+Charge-type row tints in dark mode now use muted dark tones, with readable secondary text and checkboxes.
+The light theme is unchanged.
+The key expiry hint says 1 day instead of 1 days in all six languages.
+The vehicle list in settings turns into cards below the medium breakpoint, so no sideways scrolling is needed.
+
 ## v3.0.187 (2026-11-02)
 
 ### Pleos key expiry warning, car maker on the certificate, dark-mode buttons, quieter logs, all tests green
