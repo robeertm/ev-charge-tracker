@@ -1,5 +1,17 @@
 # Changelog
 
+## v3.0.187 (2026-11-02)
+
+### Pleos key expiry warning, car maker on the certificate, dark-mode buttons, quieter logs, all tests green
+
+Pleos: the app now knows when a Pleos key runs out and warns on the vehicle list from 14 days before.
+The date is read from Pleos, taken from the new "Key valid until" field, or estimated (marked approx.).
+An expired key is reported as such in sync health and the stored sign-in state, not as wrong credentials.
+The certificate and vehicle lists show the car maker instead of the integration name "homeassistant".
+Dark mode: the certificate button on the OBD page and other outlined buttons and light boxes are readable.
+The logs no longer fill up with database "Query.get() is legacy" warnings.
+Tests: the 17 long-standing failures are fixed (outdated expectations, modules leaking between test files).
+
 ## v3.0.186 (2026-11-02)
 
 ### Battery certificate for packs without a BMS SoH: capacity estimate from wallbox energy, honest labels
