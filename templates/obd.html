@@ -15,7 +15,7 @@
       <select class="form-select form-select-sm" name="vehicle" onchange="this.form.submit()" style="max-width:16rem">
         {% for v in vehicles %}
         <option value="{{ v.id }}" {% if active and v.id == active.id %}selected{% endif %}>
-          {{ v.name }}{% if v.brand %} · {{ v.brand }}{% endif %}{% if v.is_archived %} ({{ t('nav.archived') }}){% endif %}
+          {% set _mk = display_maker(v) %}{{ v.name }}{% if _mk %} · {{ _mk }}{% endif %}{% if v.is_archived %} ({{ t('nav.archived') }}){% endif %}
         </option>
         {% endfor %}
       </select>

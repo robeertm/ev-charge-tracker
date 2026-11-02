@@ -375,9 +375,15 @@ def _vehicle_entry(v, active_id, home_names, public_names):
             vals['charge_power_kw'] = float(vals['charge_power_kw'])
         except (TypeError, ValueError):
             vals['charge_power_kw'] = None
+    from services.vehicle.maker import display_maker
     entry = {
         'name': v.name,
+        # ``brand`` is the stored free-text field, unchanged for existing
+        # consumers. ``maker`` is the make as the app shows it: never an
+        # integration such as Home Assistant, never a raw brand key, and
+        # null when the make cannot be told.
         'brand': v.brand,
+        'maker': display_maker(v),
         'model': v.model,
         'active': v.id == active_id,
         'archived': bool(v.is_archived),

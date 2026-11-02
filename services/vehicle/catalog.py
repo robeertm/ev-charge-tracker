@@ -52,12 +52,21 @@ class Brand:
     ``sunset`` — free text naming when the old access stops, shown next
                  to the label. A date is what makes a deprecation
                  actionable; "deprecated" on its own is not.
+    ``maker``  — the car maker this key stands for, as printed wherever a
+                 car's make is shown (certificate, fleet table, read-only
+                 API). Defaults to ``label``; set where the label names an
+                 access route rather than the make ("Kia (Pleos)" → Kia).
+                 ``None`` for an *integration* — a key that can carry a car
+                 of any make (Home Assistant) and therefore says nothing
+                 about who built it. See ``services/vehicle/maker.py``.
     """
 
-    __slots__ = ('key', 'label', 'pkg', 'token', 'legacy', 'sunset', 'replaced_by')
+    __slots__ = ('key', 'label', 'pkg', 'token', 'legacy', 'sunset', 'replaced_by',
+                 'maker', 'integration')
 
     def __init__(self, key: str, label: str, pkg: Optional[str], token: bool = False,
-                 legacy: bool = False, sunset: str = '', replaced_by: str = ''):
+                 legacy: bool = False, sunset: str = '', replaced_by: str = '',
+                 maker: str = '', integration: bool = False):
         self.key = key
         self.label = label
         self.pkg = pkg
@@ -65,6 +74,8 @@ class Brand:
         self.legacy = legacy
         self.sunset = sunset
         self.replaced_by = replaced_by
+        self.integration = integration
+        self.maker: Optional[str] = None if integration else (maker or label)
 
     def as_dict(self) -> dict:
         return {'key': self.key, 'label': self.label,
@@ -83,9 +94,9 @@ BRANDS: List[Brand] = [
     # 9035; this is the sanctioned door — no package, plain HTTPS with a
     # Client ID/Secret the owner creates on pleos.ai. The old entries stay
     # offered: outside Europe they still work, and Pleos is EU-only.
-    Brand('kia_pleos',     'Kia (Pleos)',     None),
-    Brand('hyundai_pleos', 'Hyundai (Pleos)', None),
-    Brand('genesis_pleos', 'Genesis (Pleos)', None),
+    Brand('kia_pleos',     'Kia (Pleos)',     None, maker='Kia'),
+    Brand('hyundai_pleos', 'Hyundai (Pleos)', None, maker='Hyundai'),
+    Brand('genesis_pleos', 'Genesis (Pleos)', None, maker='Genesis'),
     # The official Škoda API — no package, plain HTTPS with an API key
     # the owner creates in the MyŠkoda app.
     Brand('skoda_api', 'Škoda',        None),
@@ -103,13 +114,14 @@ BRANDS: List[Brand] = [
     Brand('dacia',    'Dacia',        'renault'),
     Brand('polestar', 'Polestar',     'polestar'),
     Brand('mg',       'MG',           'mg'),
-    Brand('smart',    'Smart #1/#3',  'smart'),
+    Brand('smart',    'Smart #1/#3',  'smart', maker='Smart'),
     Brand('porsche',  'Porsche',      'porsche'),
-    Brand('xpeng',    'XPENG (Enode)', None),
+    Brand('xpeng',    'XPENG (Enode)', None, maker='XPENG'),
     # v3.0.158: any car whose data already reaches Home Assistant (core
     # Tibber integration, an OBD dongle over MQTT, …) — for cars without a
     # vendor API a private owner can use, the XPENG G6 among them.
-    Brand('homeassistant', 'Home Assistant', None),
+    # An integration, not a maker: it must never be printed as the make.
+    Brand('homeassistant', 'Home Assistant', None, integration=True),
 ]
 
 # XPENG used to be deliberately absent from the list above: it

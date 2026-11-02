@@ -126,3 +126,22 @@ def init_app(app):
             return key or ''
 
     app.jinja_env.globals['brand_label'] = _brand_label
+
+    # The car's make for display — never the integration (Home Assistant)
+    # that reports it, never a raw brand key. See services/vehicle/maker.py.
+    def _display_maker(vehicle):
+        try:
+            from services.vehicle.maker import display_maker
+            return display_maker(vehicle) or ''
+        except Exception:
+            return ''
+
+    def _maker_model_label(vehicle, sep=' · '):
+        try:
+            from services.vehicle.maker import maker_model_label
+            return maker_model_label(vehicle, sep)
+        except Exception:
+            return (getattr(vehicle, 'model', None) or '') if vehicle is not None else ''
+
+    app.jinja_env.globals['display_maker'] = _display_maker
+    app.jinja_env.globals['maker_model_label'] = _maker_model_label

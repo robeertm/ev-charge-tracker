@@ -67,6 +67,7 @@ from services.stats_service import (
     get_ac_dc_stats, _vehicle_field,
 )
 from services.i18n import t
+from services.vehicle.maker import display_maker, maker_model_label
 
 # ── Tunables ──────────────────────────────────────────────────────────
 # Minimum SoC window a charge must fill to count as a usable-capacity
@@ -797,6 +798,10 @@ def compute_battery_health(vehicle_id):
             'id': vehicle.id,
             'name': vehicle.name,
             'brand': vehicle.brand,
+            'api_brand': vehicle.api_brand,
+            # The make as printed: never the integration that reports the
+            # car (Home Assistant), never a raw key (kia_pleos).
+            'maker': display_maker(vehicle),
             'model': vehicle.model,
             'vin': vehicle.api_vin,
             'color': vehicle.color,
@@ -1805,7 +1810,7 @@ def _t_cover(pdf, data, ctx):
     pdf.boxed(_ACCENT, (255, 255, 255), app, bar=_ACCENT, border=_RULE)
 
     # Master data
-    brandmodel = ' · '.join([p for p in (veh['brand'], veh['model']) if p]) or '—'
+    brandmodel = maker_model_label(veh) or '—'
     if veh.get('gross_kwh'):
         batt = t('cert.net_gross', default='{n:.1f} kWh netto · {g:.1f} kWh brutto',
                  n=veh['nominal_kwh'] or 0, g=veh['gross_kwh'])

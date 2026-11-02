@@ -68,7 +68,7 @@
                                 data-max-ac-kw="{{ v.max_ac_kw or '' }}"
                                 {% if _input_default_vid == v.id %}selected{% endif %}
                                 {% if v.is_archived %}class="text-muted"{% endif %}>
-                            {{ v.name }}{% if v.brand or v.model %} — {{ v.brand or '' }}{% if v.brand and v.model %} {% endif %}{{ v.model or '' }}{% endif %}{% if v.is_archived %} ({{ t('nav.archived') }}){% endif %}
+                            {% set _mm = maker_model_label(v, ' ') %}{{ v.name }}{% if _mm %} — {{ _mm }}{% endif %}{% if v.is_archived %} ({{ t('nav.archived') }}){% endif %}
                         </option>
                         {% endfor %}
                     </select>

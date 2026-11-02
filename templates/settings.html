@@ -337,7 +337,7 @@
                                     </div>
                                     {% endif %}
                                 </td>
-                                <td class="small">{{ v.brand or '—' }}{% if v.model %} · {{ v.model }}{% endif %}</td>
+                                <td class="small">{{ maker_model_label(v) or '—' }}</td>
                                 <td class="text-end small">{% if v.battery_kwh %}{{ "%.1f"|format(v.battery_kwh) }} kWh{% else %}—{% endif %}</td>
                                 <td class="small">{% if v.api_brand %}<i class="bi bi-broadcast text-success"></i> {{ brand_label(v.api_brand) }}{% if not v.auto_sync %} <span class="text-muted">({{ t('set.fleet_sync_off') }})</span>{% endif %}{% else %}<span class="text-muted">—</span>{% endif %}</td>
                                 <td>

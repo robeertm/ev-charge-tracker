@@ -803,9 +803,13 @@ def create_app(config_class=Config):
                     return float(str(v).replace(',', '.'))
                 except (ValueError, TypeError):
                     return None
+            # The make, not the connector key: 'homeassistant' is an
+            # integration and 'kia_pleos' a route, neither is a make.
+            from services.vehicle.maker import display_maker as _seed_maker
             _seed = _VehicleModel(
                 name=(AppConfig.get('car_model', '') or 'Mein Auto').strip()[:64] or 'Mein Auto',
-                brand=(AppConfig.get('vehicle_api_brand', '') or '').strip().capitalize() or None,
+                brand=_seed_maker({'api_brand': (AppConfig.get('vehicle_api_brand', '') or '').strip(),
+                                   'model': (AppConfig.get('car_model', '') or '').strip()}) or None,
                 model=(AppConfig.get('car_model', '') or '').strip() or None,
                 color='#0d6efd',  # Bootstrap primary; user can edit later
                 battery_kwh=_f('battery_kwh', '64'),
