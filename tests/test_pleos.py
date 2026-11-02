@@ -474,3 +474,420 @@ def test_a_proved_key_switches_the_car_and_both_config_places():
     assert prev['brand'] == 'kia' and prev['username'] == 'a@b.c'
     assert 'pw' not in json.dumps(prev).replace('"', ' ').split(), 'old password copied'
     assert out['block'] == ''
+
+
+# ── the key's end date (read / entered / estimated) ───────────────────
+# A personal Pleos key runs out; after that every token issued with it is
+# refused and the car silently stops syncing. The documentation names no
+# validity period and no endpoint for the end date (the portal shows it
+# under "API key status"), so the date comes from, best first: a field in
+# the token answer that clearly belongs to the KEY ("read"), the date the
+# owner typed from the portal ("entered"), or first token + 90 days
+# ("estimated"). The token's own ``exp`` is its lifetime and never counts.
+import base64                                                         # noqa: E402
+import logging                                                        # noqa: E402
+import tempfile                                                       # noqa: E402
+from datetime import date, datetime, timedelta                        # noqa: E402
+
+SECRET = 'client-secret-do-not-leak'
+CID = 'client-id-do-not-leak'
+
+
+def _jwt(payload):
+    seg = lambda d: base64.urlsafe_b64encode(json.dumps(d).encode()).rstrip(b'=').decode()  # noqa: E731
+    return f"{seg({'alg': 'none'})}.{seg(payload)}.c2ln"
+
+
+def _mem_app():
+    from flask import Flask
+    from models.database import db
+    app = Flask(__name__)
+    app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:///:memory:'
+    app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
+    db.init_app(app)
+    with app.app_context():
+        db.create_all()
+    return app
+
+
+def _pleos_car(app, secret=SECRET, entered=None, brand='kia_pleos'):
+    from models.database import db, Vehicle
+    with app.app_context():
+        v = Vehicle(name='Niro', api_brand=brand, api_username=CID, api_password=secret,
+                    api_vin=VIN, api_key_valid_until=entered, auto_sync=True,
+                    is_archived=False)
+        db.session.add(v)
+        db.session.commit()
+        return v.id
+
+
+def _veh(vid):
+    from models.database import db, Vehicle
+    return db.session.get(Vehicle, vid)
+
+
+class _TokenServer(_Server):
+    """Like _Server, but the token answer can carry extra fields."""
+
+    def __init__(self, token_data=None, token=None, **kw):
+        super().__init__(**kw)
+        self.token_data = token_data or {}
+        self.token = token
+
+    def __call__(self, req, timeout=None):
+        if req.full_url.endswith('/v1/auth/personal-token') and not self.token_error:
+            self.calls.append((req.get_method(), '/v1/auth/personal-token',
+                               dict(req.header_items())))
+            self.tokens += 1
+            data = dict(self.token_data, accessToken=self.token or f'tok{self.tokens}')
+            return _Resp({'data': data, 'meta': {'code': 200}})
+        if self.token and req.get_header('Authorization') == 'Bearer ' + self.token:
+            req.add_header('Authorization', 'Bearer tok-jwt')   # what _Server checks
+        return super().__call__(req, timeout)
+
+
+@pytest.fixture
+def pk(monkeypatch):
+    """Clean client state, a fake Pleos, the key module and login state."""
+    api = _api()
+    from services.vehicle import login_state, pleos_key
+    api.reset_state()
+    login_state.reset()
+    holder = {'server': _TokenServer()}
+    monkeypatch.setattr(api.urllib.request, 'urlopen',
+                        lambda req, timeout=None: holder['server'](req, timeout))
+    yield types_ns(api=api, key=pleos_key, ls=login_state, holder=holder)
+    api.reset_state()
+    login_state.reset()
+
+
+class types_ns:                                    # tiny namespace, no import needed
+    def __init__(self, **kw):
+        self.__dict__.update(kw)
+
+
+def _connect(app, vid, pk, secret=SECRET):
+    """One successful token call with this car's key, then note it."""
+    from services.vehicle.connector_pleos import KiaPleosConnector
+    with app.app_context():
+        KiaPleosConnector({'username': CID, 'password': secret, 'vin': VIN}).get_status()
+        pk.key.note_success(_veh(vid))
+
+
+def test_estimated_is_first_token_plus_90_days(pk):
+    app = _mem_app()
+    vid = _pleos_car(app)
+    with app.app_context():
+        assert pk.key.expiry(_veh(vid)) is None, 'no token yet, nothing to estimate from'
+    _connect(app, vid, pk)
+    with app.app_context():
+        info = pk.key.expiry(_veh(vid))
+    assert info == {'date': (date.today() + timedelta(days=90)).isoformat(),
+                    'source': 'estimated', 'days_left': 90}
+
+
+def test_the_estimate_does_not_move_with_every_sync(pk):
+    app = _mem_app()
+    vid = _pleos_car(app)
+    _connect(app, vid, pk)
+    with app.app_context():
+        pk.key.note_success(_veh(vid), today=date.today() + timedelta(days=30))
+        info = pk.key.expiry(_veh(vid), today=date.today() + timedelta(days=30))
+    assert info['source'] == 'estimated' and info['days_left'] == 60
+
+
+def test_a_new_secret_starts_the_estimate_afresh(pk):
+    from models.database import db
+    app = _mem_app()
+    vid = _pleos_car(app)
+    _connect(app, vid, pk)
+    later = date.today() + timedelta(days=80)
+    with app.app_context():
+        v = _veh(vid)
+        v.api_password = 'a-brand-new-secret'
+        db.session.commit()
+        assert pk.key.expiry(_veh(vid), today=later) is None, \
+            'the old key\'s estimate must not be shown for the new key'
+    _connect(app, vid, pk, secret='a-brand-new-secret')
+    with app.app_context():
+        pk.key.note_success(_veh(vid), today=later)
+        info = pk.key.expiry(_veh(vid), today=later)
+    # first token of the NEW key was today (the process saw it), not day 80
+    assert info['source'] == 'estimated'
+    assert info['date'] == (date.today() + timedelta(days=90)).isoformat()
+
+
+def test_an_entered_date_beats_the_estimate(pk):
+    app = _mem_app()
+    vid = _pleos_car(app, entered='2027-01-31')
+    _connect(app, vid, pk)
+    with app.app_context():
+        info = pk.key.expiry(_veh(vid), today=date(2027, 1, 1))
+    assert info == {'date': '2027-01-31', 'source': 'entered', 'days_left': 30}
+
+
+def test_an_entered_date_works_without_any_token(pk):
+    app = _mem_app()
+    vid = _pleos_car(app, entered='2027-01-31')
+    with app.app_context():
+        assert pk.key.expiry(_veh(vid), today=date(2027, 1, 31))['days_left'] == 0
+
+
+@pytest.mark.parametrize('field,value', [
+    ('apiKeyExpiresAt', '2027-02-14T00:00:00Z'),
+    ('keyExpiryDate', '20270214'),
+    ('client_secret_expires_at', int(datetime(2027, 2, 14, 12).timestamp())),
+])
+def test_a_key_date_in_the_token_answer_is_read_and_beats_everything(pk, field, value):
+    pk.holder['server'] = _TokenServer(token_data={field: value, 'expiresIn': 3600})
+    app = _mem_app()
+    vid = _pleos_car(app, entered='2027-01-31')
+    _connect(app, vid, pk)
+    with app.app_context():
+        info = pk.key.expiry(_veh(vid), today=date(2027, 2, 4))
+    assert info == {'date': '2027-02-14', 'source': 'read', 'days_left': 10}
+
+
+def test_a_key_date_in_the_token_payload_is_read(pk):
+    pk.holder['server'] = _TokenServer(token=_jwt({'exp': 1, 'apiKeyExpiredAt': '2027-03-01'}))
+    app = _mem_app()
+    vid = _pleos_car(app)
+    _connect(app, vid, pk)
+    with app.app_context():
+        assert pk.key.expiry(_veh(vid), today=date(2027, 2, 1))['source'] == 'read'
+
+
+def test_the_tokens_own_lifetime_is_not_the_keys(pk):
+    """``exp`` / ``expiresIn`` / ``expires_at`` are the TOKEN's lifetime."""
+    soon = int((datetime.now() + timedelta(hours=1)).timestamp())
+    pk.holder['server'] = _TokenServer(
+        token=_jwt({'exp': soon, 'iat': soon - 3600}),
+        token_data={'expiresIn': 3600, 'expires_at': soon, 'refreshTokenExpiresIn': 7776000})
+    app = _mem_app()
+    vid = _pleos_car(app)
+    _connect(app, vid, pk)
+    with app.app_context():
+        assert pk.key.expiry(_veh(vid))['source'] == 'estimated'
+
+
+def test_never_expires_marker_is_not_a_date():
+    from services.vehicle.pleos_api import key_expiry_from
+    assert key_expiry_from({'client_secret_expires_at': 0}, 'x') is None
+    assert key_expiry_from({'apiKeyExpiresAt': 'soon'}, 'x') is None
+
+
+@pytest.mark.parametrize('days,level', [
+    (15, None), (14, 'soon'), (4, 'soon'), (3, 'urgent'), (1, 'urgent'),
+    (0, 'urgent'), (-1, 'expired'), (-30, 'expired'),
+])
+def test_the_hint_steps_at_14_3_and_0_days(days, level):
+    from services.vehicle.pleos_key import level as lvl
+    assert lvl(days) == level
+
+
+@pytest.fixture
+def english():
+    from services.i18n import get_language, set_language
+    before = get_language()
+    set_language('en')
+    yield
+    set_language(before or 'de')
+
+
+def test_the_hint_text_says_approx_and_where_the_date_is(pk, english):
+    app = _mem_app()
+    vid = _pleos_car(app)
+    _connect(app, vid, pk)
+    with app.app_context():
+        assert pk.key.hint(_veh(vid)) is None, '90 days left: nothing to say yet'
+        h = pk.key.hint(_veh(vid), today=date.today() + timedelta(days=80))
+        assert h['level'] == 'soon' and 'approx.' in h['text'] and '10 days' in h['text']
+        assert 'API key status' in h['estimated_note']
+        h = pk.key.hint(_veh(vid), today=date.today() + timedelta(days=95))
+        assert h['level'] == 'expired' and '5 days ago' in h['text']
+    vid2 = _pleos_car(app, entered=(date.today() + timedelta(days=2)).isoformat())
+    with app.app_context():
+        h = pk.key.hint(_veh(vid2))
+        assert h['level'] == 'urgent' and 'approx' not in h['text'] and not h['estimated_note']
+
+
+def test_the_entered_date_is_parsed_leniently_and_garbage_is_dropped():
+    from services.vehicle.pleos_key import parse_date
+    assert parse_date('2027-01-31') == '2027-01-31'
+    assert parse_date('31.01.2027') == '2027-01-31'
+    assert parse_date('1234') is None and parse_date('') is None and parse_date('2027-02-30') is None
+
+
+# ── key_invalid near the end date is "key_expired" ────────────────────
+def _refused(app, vid, pk, today=None):
+    from services.vehicle.pleos_api import PleosError
+    e = PleosError('key_invalid', 'refused', status=400, code='4002')
+    with app.app_context():
+        e2 = pk.key.refine_failure(_veh(vid), e, today=today)
+        pk.ls.note_failure(vid, 'kia_pleos', e2)
+        return e2, pk.ls.read(vid)
+
+
+def test_a_refusal_at_the_estimated_end_is_key_expired_and_brakes(pk):
+    app = _mem_app()
+    vid = _pleos_car(app)
+    _connect(app, vid, pk)
+    e, rec = _refused(app, vid, pk, today=date.today() + timedelta(days=80))
+    assert e.kind == 'key_expired'
+    assert rec['state'] == 'key_expired' and rec['kind'] == 'key_expired'
+    assert pk.ls.paused_until(vid) is not None, 'brake like for refused credentials'
+
+
+def test_a_refusal_far_from_the_end_stays_a_refused_key(pk):
+    app = _mem_app()
+    vid = _pleos_car(app)
+    _connect(app, vid, pk)
+    e, rec = _refused(app, vid, pk, today=date.today() + timedelta(days=30))
+    assert e.kind == 'key_invalid'
+    assert rec['state'] == 'credentials_rejected' and rec['kind'] == 'key_invalid'
+    assert pk.ls.paused_until(vid) is not None
+
+
+@pytest.mark.parametrize('days_left,expired', [(4, False), (3, True), (0, True), (-10, True)])
+def test_an_exact_date_counts_from_three_days(pk, days_left, expired):
+    app = _mem_app()
+    vid = _pleos_car(app, entered=(date.today() + timedelta(days=days_left)).isoformat())
+    e, rec = _refused(app, vid, pk)
+    assert (e.kind == 'key_expired') is expired
+    assert (rec['state'] == 'key_expired') is expired
+
+
+def test_no_date_at_all_never_says_expired(pk):
+    app = _mem_app()
+    vid = _pleos_car(app)
+    e, rec = _refused(app, vid, pk)
+    assert e.kind == 'key_invalid' and rec['state'] == 'credentials_rejected'
+
+
+def test_the_sync_loop_records_key_expired_and_the_date(pk, monkeypatch):
+    """End to end through _do_sync: success stores the estimate, a later
+    refusal near it is recorded as key_expired with key_expires attached."""
+    from services.vehicle import sync_service as S
+    from services.vehicle import pleos_key
+    app = _mem_app()
+    vid = _pleos_car(app)
+    calls = {'n': 0}
+
+    def fake_one(app_, v):
+        from services.vehicle.connector_pleos import KiaPleosConnector
+        calls['n'] += 1
+        if calls['n'] == 1:
+            KiaPleosConnector({'username': CID, 'password': SECRET, 'vin': VIN}).get_status()
+            return None
+        from services.vehicle.pleos_api import PleosError
+        raise PleosError('key_invalid', 'refused', status=401, code='401')
+    monkeypatch.setattr(S, '_sync_one_vehicle', fake_one)
+    monkeypatch.setattr('services.readonly_api.note_poll_failed', lambda vid: None)
+    S._do_sync(app)
+    with app.app_context():
+        rec = pk.ls.read(vid)
+        assert rec['key_expires']['source'] == 'estimated'
+        assert rec['key_expires']['days_left'] == 90
+    real = pleos_key.expiry
+    monkeypatch.setattr(pleos_key, 'expiry',
+                        lambda v, today=None: real(v, today=date.today() + timedelta(days=88)))
+    S._do_sync(app)
+    with app.app_context():
+        rec = pk.ls.read(vid)
+    assert rec['state'] == 'key_expired' and rec['kind'] == 'key_expired'
+    assert rec['key_expires'] == {'date': (date.today() + timedelta(days=90)).isoformat(),
+                                  'source': 'estimated', 'days_left': 2}
+    assert rec['paused_until']
+
+
+def test_no_secret_reaches_the_log_or_the_stored_records(pk, caplog):
+    from models.database import AppConfig
+    pk.holder['server'] = _TokenServer(token=_jwt({'apiKeyExpiresAt': '2027-03-01',
+                                                    'sub': 'someone'}))
+    app = _mem_app()
+    vid = _pleos_car(app)
+    caplog.set_level(logging.DEBUG)
+    _connect(app, vid, pk)
+    _refused(app, vid, pk, today=date(2027, 2, 28))
+    with app.app_context():
+        stored = json.dumps({r.key: r.value for r in AppConfig.query.all()})
+    text = caplog.text + stored
+    for bad in (SECRET, CID, 'tok1', _jwt({'apiKeyExpiresAt': '2027-03-01', 'sub': 'someone'})):
+        assert bad not in text
+
+
+# ── health, read-only door, settings page (real app, subprocess) ──────
+_ROUTES = r'''
+import json, os, sys, subprocess
+sys.path.insert(0, %(root)r)
+from datetime import date, timedelta
+from app import create_app
+from models.database import db, AppConfig, Vehicle
+from services.vehicle import login_state as L
+from services.vehicle.pleos_api import PleosError
+from services.i18n import set_language
+app = create_app()
+client = app.test_client()
+with app.app_context():
+    AppConfig.set('vehicle_sync_enabled', 'false')
+    v = Vehicle.query.order_by(Vehicle.id).first()
+    v.name = 'Niro'; v.api_brand = 'kia_pleos'; v.api_username = %(cid)r
+    v.api_password = %(secret)r; v.api_vin = 'KNATESTVIN0000001'; v.auto_sync = False
+    v.api_key_valid_until = (date.today() + timedelta(days=%(days)d)).isoformat()
+    db.session.commit()
+    vid = v.id
+    L.note_failure(vid, 'kia_pleos', PleosError('key_invalid', 'x', status=401))
+tok = subprocess.run([sys.executable, '-m', 'services.readonly_token', 'new'],
+                     capture_output=True, text=True, env=os.environ).stdout.strip()
+health = client.get('/api/sync/health').get_json()
+ro = client.get('/api/readonly/vehicle', headers={'Authorization': 'Bearer ' + tok})
+set_language('en')
+with app.app_context():
+    AppConfig.set('language', 'en')
+page = client.get('/settings').get_data(as_text=True)
+r = client.post('/vehicles/save', data={'vehicle_id': str(vid), 'name': 'Niro',
+                'api_brand': 'kia_pleos', 'api_username': %(cid)r, 'api_password': '',
+                'api_vin': 'KNATESTVIN0000001', 'api_key_valid_until': '2031-05-06', 'ajax': '1'})
+with app.app_context():
+    saved = db.session.get(Vehicle, vid).api_key_valid_until
+print(json.dumps({'health': health, 'ro_code': ro.status_code, 'ro': ro.get_data(as_text=True),
+                  'hint': 'pleos-key-hint' in page, 'page_has_box': 'vf_api_key_valid_until' in page,
+                  'level': page.split('data-level="')[1].split('"')[0] if 'data-level="' in page else None,
+                  'saved': saved, 'save_code': r.status_code}))
+'''
+
+
+def _routes(days):
+    d = tempfile.mkdtemp(prefix='evct-pleos-key-')
+    env = dict(os.environ, EV_DATA_DIR=d, SECRET_KEY='pleos-key-test')
+    code = _ROUTES % {'root': ROOT, 'cid': CID, 'secret': SECRET, 'days': days}
+    r = subprocess.run([sys.executable, '-c', code], capture_output=True, text=True,
+                       timeout=240, cwd=ROOT, env=env)
+    assert r.returncode == 0, r.stderr[-3000:]
+    out = json.loads(r.stdout.strip().splitlines()[-1])
+    out['stderr'] = r.stderr
+    return out
+
+
+def test_health_readonly_and_settings_show_the_key_end():
+    out = _routes(days=2)
+    car = out['health']['vehicles'][0]
+    ke = car['login']['key_expires']
+    assert ke == {'date': (date.today() + timedelta(days=2)).isoformat(),
+                  'source': 'entered', 'days_left': 2}
+    assert car['login']['kind'] == 'key_invalid'
+    assert out['ro_code'] == 200
+    ro_car = json.loads(out['ro'])['vehicles'][0]
+    assert ro_car['key_expires'] == {'key_expires_days': 2, 'source': 'entered'}
+    assert (date.today() + timedelta(days=2)).isoformat() not in out['ro'], 'no date in the door'
+    assert out['hint'] is True and out['level'] == 'urgent'
+    assert out['page_has_box'] is True
+    assert out['save_code'] == 200 and out['saved'] == '2031-05-06'
+    everything = json.dumps(out['health']) + out['ro'] + out['stderr']
+    assert SECRET not in everything and CID not in everything
+
+
+def test_far_from_the_end_the_page_stays_quiet():
+    out = _routes(days=40)
+    assert out['health']['vehicles'][0]['login']['key_expires']['days_left'] == 40
+    assert out['hint'] is False

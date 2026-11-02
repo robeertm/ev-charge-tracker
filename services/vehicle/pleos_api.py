@@ -93,7 +93,8 @@ class PleosError(RuntimeError):
 
     ``kind``: ``no_key``, ``key_invalid``, ``not_authorized``, ``no_data``,
     ``rate_limited``, ``no_vehicle``, ``pick_vin``, ``vin_not_in_key``,
-    ``network``, ``http``.
+    ``network``, ``http``; ``key_expired`` is set by ``pleos_key.refine_failure``
+    when a ``key_invalid`` arrives at or after the key's end date.
     """
 
     def __init__(self, kind: str, message: str, status: int = 0, code: str = '',
@@ -113,6 +114,9 @@ _lock = threading.Lock()
 _tokens: dict = {}
 _retry_at: dict = {}
 _vehicle_cache: dict = {}
+# fp -> {'first_ok': epoch, 'read': 'YYYY-MM-DD' | None}: what a successful
+# token call told us about the KEY (not the token). See ``key_seen``.
+_key_seen: dict = {}
 
 
 def _fp(brand: str, client_id: str, client_secret: str) -> str:
@@ -126,6 +130,7 @@ def reset_state() -> None:
         _tokens.clear()
         _retry_at.clear()
         _vehicle_cache.clear()
+        _key_seen.clear()
 
 
 def _retry_after_seconds(headers) -> int:
@@ -230,9 +235,113 @@ def _token(brand: str, client_id: str, client_secret: str, fp: str) -> str:
     if not isinstance(tok, str) or not tok:
         raise PleosError('http', _t('pleos.err_http', status=200), status=200,
                          code='missing_token')
+    read = key_expiry_from(data, tok)
     with _lock:
         _tokens[fp] = tok
+        seen = _key_seen.setdefault(fp, {'first_ok': time.time(), 'read': None})
+        if read:
+            seen['read'] = read
     return tok
+
+
+# ── the key's own end date, if the API ever states it ─────────────────
+# The documentation (document.pleos.ai, "Manage My Vehicle API Key") knows
+# the states Generated / Revoked / Expired and says that the access tokens
+# of an expired key stop working — but names no validity period for the
+# personal key and no endpoint that returns its end date; the date is only
+# shown in the portal under "API key status". If the token answer (or the
+# token's own payload) ever carries a field that unmistakably belongs to
+# the KEY, it is used. ``exp`` / ``expiresIn`` of the access token are the
+# TOKEN's lifetime (minutes to hours) and deliberately do not count.
+_KEY_EXPIRY_FIELDS = frozenset({
+    'apikeyexpiresat', 'apikeyexpiredat', 'apikeyexpiry', 'apikeyexpiration',
+    'apikeyexpirationdate', 'apikeyexpiredate', 'apikeyexpirydate', 'apikeyvaliduntil',
+    'apikeyenddate', 'keyexpiresat', 'keyexpiredat', 'keyexpiry', 'keyexpiration',
+    'keyexpiredate', 'keyexpirydate', 'keyvaliduntil',
+    'clientsecretexpiresat', 'clientsecretexpiry', 'clientsecretexpiredat',
+    'clientsecretvaliduntil', 'credentialexpiresat',
+})
+
+
+def _norm_field(name) -> str:
+    return ''.join(ch for ch in str(name).lower() if ch.isalnum())
+
+
+def _as_date(value) -> Optional[str]:
+    """'YYYY-MM-DD' from an ISO date/datetime, 'YYYYMMDD' or epoch s/ms."""
+    from datetime import datetime, timezone
+    if isinstance(value, bool) or value is None:
+        return None
+    if isinstance(value, (int, float)):
+        v = float(value)
+        if v <= 0:                  # RFC 7591: 0 means "never expires"
+            return None
+        if v > 1e11:                # milliseconds
+            v /= 1000.0
+        try:
+            return datetime.fromtimestamp(v, tz=timezone.utc).date().isoformat()
+        except (OverflowError, OSError, ValueError):
+            return None
+    s = str(value).strip()
+    if s.isdigit():
+        if len(s) == 8:
+            try:
+                return datetime.strptime(s, '%Y%m%d').date().isoformat()
+            except ValueError:
+                return None
+        return _as_date(int(s))
+    try:
+        return datetime.fromisoformat(s.replace('Z', '+00:00')).date().isoformat()
+    except ValueError:
+        pass
+    try:
+        return datetime.strptime(s[:10], '%Y-%m-%d').date().isoformat()
+    except ValueError:
+        return None
+
+
+def _jwt_payload(token: str) -> dict:
+    """The payload of a JWT, decoded locally. Never logged."""
+    import base64
+    try:
+        parts = token.split('.')
+        if len(parts) != 3:
+            return {}
+        seg = parts[1] + '=' * (-len(parts[1]) % 4)
+        data = json.loads(base64.urlsafe_b64decode(seg.encode('ascii')).decode('utf-8'))
+        return data if isinstance(data, dict) else {}
+    except Exception:
+        return {}
+
+
+def key_expiry_from(data, token) -> Optional[str]:
+    """The key's end date from the token answer or the token payload."""
+    for src in (data if isinstance(data, dict) else {},
+                _jwt_payload(token) if isinstance(token, str) else {}):
+        for k, v in src.items():
+            if _norm_field(k) in _KEY_EXPIRY_FIELDS:
+                d = _as_date(v)
+                if d:
+                    return d
+    return None
+
+
+def key_seen(brand: str, client_id: str, client_secret: str) -> Optional[dict]:
+    """What this process learnt about the key on a successful token call:
+    ``{'first_ok': epoch, 'read': 'YYYY-MM-DD' | None}``, or None when no
+    token was obtained with it since the start."""
+    fp = fingerprint(brand, client_id, client_secret)
+    with _lock:
+        seen = _key_seen.get(fp)
+        return dict(seen) if seen else None
+
+
+def fingerprint(brand: str, client_id: str, client_secret: str) -> str:
+    """Stable, non-reversible id of a key (for "is this still the same key").
+
+    Same inputs as the connector sends (it strips the boxes), same hash as
+    the token cache."""
+    return _fp((brand or '').lower(), client_id or '', client_secret or '')
 
 
 def _get(brand: str, client_id: str, client_secret: str, path: str):

@@ -185,6 +185,7 @@ FIELD_COLUMN = {
     'region': 'api_region',
     'locale': 'api_region',
     'vin': 'api_vin',
+    'key_valid_until': 'api_key_valid_until',
 }
 
 
@@ -240,6 +241,7 @@ def credentials_of(vehicle) -> Dict[str, str]:
         'region': get('api_region') or 'EU',
         'locale': get('api_region') or 'de_DE',
         'vin': get('api_vin'),
+        'key_valid_until': get('api_key_valid_until'),
     }
 
 

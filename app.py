@@ -447,6 +447,10 @@ def create_app(config_class=Config):
                 db.session.execute(text(
                     'ALTER TABLE vehicles ADD COLUMN remote_control_enabled '
                     'BOOLEAN NOT NULL DEFAULT 0'))
+            # Pleos: the key's end date as shown in the portal (optional).
+            if 'api_key_valid_until' not in veh_columns:
+                db.session.execute(text(
+                    'ALTER TABLE vehicles ADD COLUMN api_key_valid_until VARCHAR(10)'))
         except Exception:
             pass  # fresh install — create_all() handles it
 
@@ -2811,6 +2815,7 @@ def register_routes(app):
         try:
             from models.database import Vehicle as _Vl
             from services.vehicle import login_state as _ls
+            from services.vehicle import pleos_key as _pk
             from services.vehicle.catalog import credentials_present as _cp
             out = []
             for _v in (_Vl.query.filter_by(is_archived=False)
@@ -2819,13 +2824,17 @@ def register_routes(app):
                                              _v.api_password, _v.api_vin)):
                     continue
                 rec = _ls.read(_v.id) or {}
+                login = {k: rec.get(k) for k in
+                         ('state', 'kind', 'since', 'last_ok_at',
+                          'paused_until', 'attempts')}
+                # Pleos: when the key runs out, and how sure that date is.
+                # Computed now (days_left moves daily); null when unknown.
+                login['key_expires'] = _pk.expiry(_v) if _pk.is_pleos(_v.api_brand) else None
                 out.append({
                     'id': _v.id,
                     'name': _v.name,
                     'api_brand': _v.api_brand,
-                    'login': {k: rec.get(k) for k in
-                              ('state', 'since', 'last_ok_at',
-                               'paused_until', 'attempts')},
+                    'login': login,
                 })
             return out
         except Exception as e:
@@ -3427,6 +3436,9 @@ def register_routes(app):
             v.api_region = (request.form.get('api_region', '') or '').strip() or None
         if 'api_vin' in request.form:
             v.api_vin = (request.form.get('api_vin', '') or '').strip().upper() or None
+        if 'api_key_valid_until' in request.form:
+            from services.vehicle.pleos_key import parse_date as _pk_date
+            v.api_key_valid_until = _pk_date(request.form.get('api_key_valid_until'))
         v.auto_sync = request.form.get('auto_sync') == '1'
         try:
             fr = request.form.get('first_registered_at', '').strip()
@@ -3982,6 +3994,13 @@ def register_routes(app):
         mirror_primary_vehicle_to_legacy_config(v)
         db.session.commit()
         AppConfig.set(f'vendor_block_at_{v.id}', '')
+        # The key just got its first token: that starts the 90-day estimate
+        # of its end date (read before reset_state forgets it).
+        try:
+            from services.vehicle import pleos_key as _pk
+            _pk.note_success(v)
+        except Exception as _e:
+            logger.debug(f"Pleos key start not noted: {_e}")
         reset_state()
         logger.info(f"Vehicle {v.id} switched to the official Pleos API ({pleos_brand})")
         return jsonify({'ok': True,
@@ -5161,6 +5180,7 @@ def register_routes(app):
         _skoda_legacy = []
         _skoda_keys = []
         _pleos_switch = []
+        _pleos_key_hints = {}
         try:
             # app.py does NOT import Vehicle at module level — every route
             # pulls it in locally. Relying on a bare `Vehicle` here raised
@@ -5176,6 +5196,13 @@ def register_routes(app):
                        .order_by(_RcVehicle.id).all()):
                 _brand = (_v.api_brand or '').lower()
                 _cat = by_key(_brand)
+                # Pleos key end date: quiet from 14 days, clear from 3 days
+                # and after the end (services/vehicle/pleos_key.py).
+                if _brand.endswith('_pleos'):
+                    from services.vehicle.pleos_key import hint as _pk_hint
+                    _h = _pk_hint(_v)
+                    if _h:
+                        _pleos_key_hints[_v.id] = _h
                 # v3.0.157: the manufacturer refused this car's sign-in
                 # (9035) — offer the official Pleos API right here.
                 if _brand in ('kia', 'hyundai'):
@@ -5361,6 +5388,7 @@ def register_routes(app):
                                remote_vehicles=_remote_vehicles,
                                skoda_legacy_vehicles=_skoda_legacy,
                                pleos_switch_vehicles=_pleos_switch,
+                               pleos_key_hints=_pleos_key_hints,
                                skoda_key_status=_skoda_keys,
                                hyundai_kia_sdk_outdated=hyundai_kia_sdk_outdated,
                                hyundai_kia_sdk_version=hyundai_kia_sdk_version,

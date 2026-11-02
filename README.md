@@ -242,7 +242,7 @@ never mix with a real history.
 - **Use case**: when the Tailscale share link is known to other devices but you still want a password in front of your charge data
 
 ### Read-only API token (for assistants and dashboards)
-- **`GET /api/readonly/vehicle`** with `Authorization: Bearer <token>` returns, per vehicle, the state of charge, range, charging / plugged in, charge power, target, odometer, when the car reported it (`data_ts` — with `data_source` = `poll` for a fresh poll or `stored` for the newest stored status row, so old values come with their age), when the app last polled it (and whether that worked) and the last logged charge (`start`, `end`, `kwh`, `soc_from`, `soc_to`, `location_kind` = `home` / `public` / `null`). Values the app does not have are `null`
+- **`GET /api/readonly/vehicle`** with `Authorization: Bearer <token>` returns, per vehicle, the state of charge, range, charging / plugged in, charge power, target, odometer, when the car reported it (`data_ts` — with `data_source` = `poll` for a fresh poll or `stored` for the newest stored status row, so old values come with their age), when the app last polled it (and whether that worked) and the last logged charge (`start`, `end`, `kwh`, `soc_from`, `soc_to`, `location_kind` = `home` / `public` / `null`), and for a car on the Pleos API the days its key has left (`key_expires`: `key_expires_days`, `source`). Values the app does not have are `null`
 - **Read-only and narrow**: no GPS coordinates, no VIN, no plates, no place names or addresses, no credentials, no account or tariff data. It cannot change anything
 - **Its own token**, separate from the web login: the endpoint is exempt from the login for this one exact path and checks the token itself. Without a token it does not exist (`404`); a missing or wrong token gets `401`; more than 10 failed attempts within a minute switch it to `429` for everyone until the minute has passed
 - **No web UI** — the token is managed in a shell (in a container: `docker exec <container> python3 -m services.readonly_token …`):
@@ -452,6 +452,13 @@ targets, time to full, range, odometer, position, doors and lock, climate and ou
 temperature. Not available: 12 V battery, state of health, charging power, remote control
 and waking the car; trips are derived from parking events. Pleos says data flows fully
 24 hours after consent.
+A Pleos key runs out at the end of its validity period, which the portal shows under
+*API key status*. Enter that date as *Key valid until* in the vehicle's settings; without it
+the app estimates the date (first use + 90 days) and marks it "approx.". The vehicle list
+mentions the date from 14 days before and clearly from 3 days before; `/api/sync/health`
+reports `login.key_expires` (`date`, `source` = `read` / `entered` / `estimated`,
+`days_left`), and a key refused close to that date is reported as `key_expired` rather than
+as wrong credentials.
 
 **⁵ Home Assistant:** for a car without a vendor API you can use — for example an
 XPENG G6 (no public XPENG API yet) — the tracker can read the car from Home Assistant.

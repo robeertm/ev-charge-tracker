@@ -2099,5 +2099,13 @@
   "cert.unavail_lead": "Diese Angaben fehlen im Bericht nicht aus Versehen. Sie kommen aus dem Batteriemanagement (BMS), und das liefert sie für dieses Fahrzeug nicht oder noch nicht:",
   "cert.unavail_soh_instead": "Statt des SoH vom BMS steht in diesem Bericht eine Schätzung aus der Wallbox-Energie (Abschnitt {n}).",
   "obd.cert_est_note": "Schätzung aus {n} Heimladungen (Wallbox-Energie gegen Ladestand), Spanne {lo}–{hi} % – kein Messwert des Batteriemanagements. Die Note richtet sich nach der unteren Grenze.",
-  "obd.cert_none_est_head": "Noch kein Zertifikat."
+  "obd.cert_none_est_head": "Noch kein Zertifikat.",
+  "cred.pleos_key_valid_until": "Schlüssel gültig bis",
+  "cred.help_pleos_key_valid_until": "Steht auf pleos.ai unter „My Vehicle Data API“ → „API key status“. Ohne Angabe schätzt die App das Datum (erster Abruf + 90 Tage).",
+  "pleos.err_key_expired": "Der Pleos-Schlüssel ist abgelaufen. Bitte auf pleos.ai unter „My Vehicle Data API“ einen neuen Schlüssel erzeugen und Client ID und Client Secret hier eintragen.",
+  "pleos.key_approx": "ca. {date}",
+  "pleos.key_expires_in": "Pleos-Schlüssel läuft am {date} ab (noch {days} Tage).",
+  "pleos.key_expires_today": "Pleos-Schlüssel läuft heute ab ({date}).",
+  "pleos.key_expired_since": "Pleos-Schlüssel abgelaufen am {date} (vor {days} Tagen) — auf pleos.ai einen neuen erzeugen.",
+  "pleos.key_estimated_note": "Das Datum ist geschätzt (erster Abruf + 90 Tage). Das genaue Datum steht im Pleos-Portal unter „API key status“ und kann beim Fahrzeug als „Schlüssel gültig bis“ eingetragen werden."
 }

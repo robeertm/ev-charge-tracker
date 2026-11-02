@@ -387,7 +387,19 @@ def _vehicle_entry(v, active_id, home_names, public_names):
     entry['last_sync_ok'] = (bool(poll['ok']) if 'ok' in poll else None)
     entry['last_charge'] = _last_charge(v.id, home_names, public_names)
     entry['login_state'] = _login_state(v.id)
+    entry['key_expires'] = _key_expires(v)
     return entry
+
+
+def _key_expires(v):
+    """Pleos only: ``{"key_expires_days", "source"}`` — no date, no key."""
+    try:
+        from services.vehicle import pleos_key
+        if not pleos_key.is_pleos(v.api_brand):
+            return None
+        return pleos_key.for_readonly(pleos_key.expiry(v))
+    except Exception:
+        return None
 
 
 def _login_state(vid):

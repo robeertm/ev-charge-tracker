@@ -2099,5 +2099,13 @@
   "cert.unavail_lead": "Deze gegevens ontbreken niet per ongeluk in het rapport. Ze komen uit het batterijbeheersysteem (BMS), en dat levert ze voor dit voertuig niet, of nog niet:",
   "cert.unavail_soh_instead": "In plaats van de SoH van het BMS staat in dit rapport een schatting uit wallbox-energie (sectie {n}).",
   "obd.cert_est_note": "Schatting uit {n} thuisladingen (wallbox-energie tegenover laadtoestand), bereik {lo}–{hi} % – geen meetwaarde van het batterijbeheersysteem. Het cijfer volgt de ondergrens.",
-  "obd.cert_none_est_head": "Nog geen certificaat."
+  "obd.cert_none_est_head": "Nog geen certificaat.",
+  "cred.pleos_key_valid_until": "Sleutel geldig tot",
+  "cred.help_pleos_key_valid_until": "Staat op pleos.ai onder ‘My Vehicle Data API’ → ‘API key status’. Leeg gelaten schat de app de datum (eerste gebruik + 90 dagen).",
+  "pleos.err_key_expired": "De Pleos-sleutel is verlopen. Maak op pleos.ai onder ‘My Vehicle Data API’ een nieuwe sleutel aan en vul hier Client ID en Client Secret in.",
+  "pleos.key_approx": "ca. {date}",
+  "pleos.key_expires_in": "Pleos-sleutel verloopt op {date} (nog {days} dagen).",
+  "pleos.key_expires_today": "Pleos-sleutel verloopt vandaag ({date}).",
+  "pleos.key_expired_since": "Pleos-sleutel verlopen op {date} ({days} dagen geleden) — maak op pleos.ai een nieuwe aan.",
+  "pleos.key_estimated_note": "Deze datum is geschat (eerste gebruik + 90 dagen). De exacte datum staat in het Pleos-portaal onder ‘API key status’ en kan bij het voertuig worden ingevuld als ‘Sleutel geldig tot’."
 }

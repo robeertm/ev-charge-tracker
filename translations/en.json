@@ -2099,5 +2099,13 @@
   "cert.unavail_lead": "These figures are not missing from the report by accident. They come from the battery management system (BMS), and for this vehicle it does not supply them, or not yet:",
   "cert.unavail_soh_instead": "Instead of the SoH from the BMS, this report carries an estimate from wallbox energy (section {n}).",
   "obd.cert_est_note": "Estimate from {n} home charges (wallbox energy against state of charge), range {lo}–{hi} % – not a reading of the battery management system. The grade follows the lower end.",
-  "obd.cert_none_est_head": "No certificate yet."
+  "obd.cert_none_est_head": "No certificate yet.",
+  "cred.pleos_key_valid_until": "Key valid until",
+  "cred.help_pleos_key_valid_until": "Shown on pleos.ai under “My Vehicle Data API” → “API key status”. Left empty, the app estimates the date (first use + 90 days).",
+  "pleos.err_key_expired": "The Pleos key has expired. Please create a new key on pleos.ai under “My Vehicle Data API” and enter its Client ID and Client Secret here.",
+  "pleos.key_approx": "approx. {date}",
+  "pleos.key_expires_in": "Pleos key expires on {date} ({days} days left).",
+  "pleos.key_expires_today": "Pleos key expires today ({date}).",
+  "pleos.key_expired_since": "Pleos key expired on {date} ({days} days ago) — create a new one on pleos.ai.",
+  "pleos.key_estimated_note": "This date is an estimate (first use + 90 days). The exact date is shown in the Pleos portal under “API key status” and can be entered for the vehicle as “Key valid until”."
 }

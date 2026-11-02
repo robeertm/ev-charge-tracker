@@ -8,14 +8,18 @@ Two problems this answers:
   sync writes one small JSON record per vehicle into AppConfig
   (``vehicle_{vid}_login_state``)::
 
-      {"state", "since", "last_attempt_at", "last_ok_at", "attempts",
-       "paused_until", "brand", "detail"}
+      {"state", "kind", "since", "last_attempt_at", "last_ok_at", "attempts",
+       "paused_until", "brand", "detail", "key_expires"}
 
   ``state`` is one of :data:`STATES`. ``since`` is when the current state
   began and does not move while the state stays the same. ``attempts``
   counts consecutive failures (0 when ok). ``last_ok_at`` survives
   failures. ``detail`` is a short error text with every e-mail address,
   URL path, UUID, VIN, token and long number removed — never credentials.
+  ``kind`` is the connector's own word for the failure when it names one
+  (e.g. Pleos ``key_invalid`` / ``key_expired``), else the state.
+  ``key_expires`` (Pleos only) is ``{"date", "source", "days_left"}`` — see
+  ``pleos_key``; it is kept across records until replaced.
 
 * **A rejected credential was asked again every tick.** "Not retried"
   only held within one tick, so an install whose stored token had run out
@@ -51,14 +55,21 @@ KEY = 'vehicle_{vid}_login_state'
 STATES = (
     'ok', 'vendor_block', 'token_expired', 'credentials_rejected',
     'rate_limit', 'consent_required', 'otp_required', 'vendor_error', 'error',
+    'key_expired',
 )
 
+#: Connector kinds that mean one of the states above under another name.
+#: Pleos says ``key_invalid`` for a refused Client ID/Secret.
+KIND_ALIASES = {'key_invalid': 'credentials_rejected'}
+
 #: Only these states engage the brake: no retry can revive them.
-BRAKE_STATES = frozenset({'token_expired', 'credentials_rejected'})
+#: ``key_expired``: a Pleos key refused at (or after) its end date.
+BRAKE_STATES = frozenset({'token_expired', 'credentials_rejected', 'key_expired'})
 #: Only the connector whose rejections were measured to pile up.
 BRAKE_BRANDS = frozenset({'kia', 'hyundai'})
 #: Braked only on a refusal the connector states as ``kind`` itself.
-KIND_BRAKE_BRANDS = frozenset({'renault', 'dacia'})
+KIND_BRAKE_BRANDS = frozenset({'renault', 'dacia',
+                               'kia_pleos', 'hyundai_pleos', 'genesis_pleos'})
 #: Pause per consecutive rejection; the last step repeats (cap).
 PAUSE_STEPS_H = (1, 3, 6, 12, 24)
 
@@ -119,8 +130,8 @@ def classify(exc) -> str:
     "authentication", "invalid_grant" are a refused credential.
     """
     try:
-        kind = getattr(exc, 'kind', None)
-        if isinstance(kind, str) and kind in STATES and kind != 'ok':
+        kind = _kind_state(exc)
+        if kind:
             return kind
         try:
             names = {c.__name__ for c in type(exc).__mro__}
@@ -136,6 +147,15 @@ def classify(exc) -> str:
     except Exception:
         pass
     return 'error'
+
+
+def _kind_state(exc):
+    """The state the exception's own ``kind`` names, or None."""
+    kind = getattr(exc, 'kind', None)
+    if not isinstance(kind, str):
+        return None
+    kind = KIND_ALIASES.get(kind, kind)
+    return kind if kind in STATES and kind != 'ok' else None
 
 
 # ── scrubbing ─────────────────────────────────────────────────────────
@@ -292,11 +312,12 @@ def _rollback() -> None:
         pass
 
 
-def _record(vid, brand, state, now, detail, paused, attempts, ok) -> None:
+def _record(vid, brand, state, now, detail, paused, attempts, ok, kind=None) -> None:
     prev = _load(vid)
     since = prev.get('since') if prev.get('state') == state and prev.get('since') else _now_iso(now)
     rec = {
         'state': state,
+        'kind': kind or state,
         'since': since,
         'last_attempt_at': _now_iso(now),
         'last_ok_at': _now_iso(now) if ok else prev.get('last_ok_at'),
@@ -305,7 +326,28 @@ def _record(vid, brand, state, now, detail, paused, attempts, ok) -> None:
         'brand': (brand or '').strip().lower() or None,
         'detail': detail,
     }
+    if prev.get('key_expires'):
+        rec['key_expires'] = prev['key_expires']
     _store(vid, rec)
+
+
+def set_key_expires(vid, info) -> None:
+    """Put a Pleos key's end date (``{"date", "source", "days_left"}``, or
+    None) into the stored record, for a watcher that reads only the DB."""
+    if vid is None:
+        return
+    try:
+        new = {k: info.get(k) for k in ('date', 'source', 'days_left')} if info else None
+        rec = _load(vid)
+        if rec.get('key_expires') == new:
+            return
+        if new:
+            rec['key_expires'] = new
+        else:
+            rec.pop('key_expires', None)
+        _store(vid, rec)
+    except Exception as e:
+        logger.debug(f"key expiry for vehicle {vid} not recorded: {e}")
 
 
 def note_ok(vid, brand) -> None:
@@ -333,7 +375,7 @@ def note_failure(vid, brand, exc) -> None:
         b = (brand or '').strip().lower()
         if state in BRAKE_STATES and (
                 b in BRAKE_BRANDS
-                or (b in KIND_BRAKE_BRANDS and getattr(exc, 'kind', None) == state)):
+                or (b in KIND_BRAKE_BRANDS and _kind_state(exc) == state)):
             paused = _engage(vid, now)
         else:
             paused = paused_until(vid, now)
@@ -342,7 +384,10 @@ def note_failure(vid, brand, exc) -> None:
             attempts = int(prev.get('attempts') or 0) if prev.get('state') != 'ok' else 0
         except (TypeError, ValueError):
             attempts = 0
-        _record(vid, brand, state, now, scrub(exc), paused, attempts + 1, False)
+        raw_kind = getattr(exc, 'kind', None)
+        kind = raw_kind if isinstance(raw_kind, str) and raw_kind.isidentifier() else state
+        _record(vid, brand, state, now, scrub(exc), paused, attempts + 1, False,
+                kind=kind[:40])
     except Exception as e:
         logger.debug(f"login state failure for vehicle {vid} not recorded: {e}")
 

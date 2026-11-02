@@ -260,8 +260,9 @@ def test_ok_resets_attempts_and_moves_last_ok():
     assert ok['state'] == 'ok' and ok['attempts'] == 0
     assert ok['last_ok_at'] != '2026-01-01T00:00:00'
     assert ok['paused_until'] is None and ok['detail'] == ''
-    assert set(ok) == {'state', 'since', 'last_attempt_at', 'last_ok_at',
+    assert set(ok) == {'state', 'kind', 'since', 'last_attempt_at', 'last_ok_at',
                        'attempts', 'paused_until', 'brand', 'detail'}
+    assert ok['kind'] == 'ok'
 
 
 def test_since_stays_while_the_state_stays():
@@ -565,8 +566,11 @@ print(json.dumps({'code': r.status_code, 'body': r.get_json()}))""")
     car = cars[0]
     assert set(car) == {'id', 'name', 'api_brand', 'login'}
     assert car['api_brand'] == 'kia' and car['name'] == 'Testauto'
-    assert set(car['login']) == {'state', 'since', 'last_ok_at', 'paused_until', 'attempts'}
+    assert set(car['login']) == {'state', 'kind', 'since', 'last_ok_at', 'paused_until',
+                                 'attempts', 'key_expires'}
     assert car['login']['state'] == 'token_expired'
+    assert car['login']['kind'] == 'token_expired'
+    assert car['login']['key_expires'] is None, 'not a Pleos car: no key end date'
     assert car['login']['paused_until'] and car['login']['attempts'] == 1
     text = json.dumps(out['body'])
     assert 'detail' not in text and TOKEN not in text

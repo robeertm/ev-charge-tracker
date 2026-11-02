@@ -163,6 +163,11 @@
                   <input type="text" class="form-control form-control-sm" name="api_vin" id="cw_vin_creds" maxlength="40">
                   <div class="form-text small cw-cred-help"></div>
                 </div>
+                <div class="col-12 col-sm-4 cw-cred" data-col="api_key_valid_until" hidden>
+                  <label class="form-label small" for="cw_key_valid_until_creds">{{ t('cred.pleos_key_valid_until') }}</label>
+                  <input type="date" class="form-control form-control-sm" name="api_key_valid_until" id="cw_key_valid_until_creds" disabled>
+                  <div class="form-text small cw-cred-help"></div>
+                </div>
               </div>
               {# Renault/Dacia: "Weiter" meldet sich hier sofort an. Will Renault
                  einen E-Mail-Code, wird er gleich hier eingegeben — vorher
@@ -436,7 +441,7 @@
     // Both connect panes share field names (api_username/pin/region…). Collapse
     // them to a single clean value from the brand's active pane, read directly
     // from the inputs so hidden-pane values (step 4+) are preserved, not wiped.
-    ['api_username','api_password','api_pin','api_region','api_vin'].forEach(k=>fd.delete(k));
+    ['api_username','api_password','api_pin','api_region','api_vin','api_key_valid_until'].forEach(k=>fd.delete(k));
     const g = id => (q(id) ? (q(id).value||'') : '');
     if(sel && sel.token){
       fd.set('api_username', g('cw_username_token'));
@@ -453,7 +458,7 @@
       const spalten = (CRED_FELDER[sel.key] || []).map(f => f.column);
       const quelle = {api_username:'cw_username_creds', api_password:'cw_password_creds',
                       api_pin:'cw_pin_creds', api_region:'cw_region_creds',
-                      api_vin:'cw_vin_creds'};
+                      api_vin:'cw_vin_creds', api_key_valid_until:'cw_key_valid_until_creds'};
       spalten.forEach(spalte => {
         const wert = g(quelle[spalte]);
         if(spalte === 'api_password'){ if(wert) fd.set(spalte, wert); }

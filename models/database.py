@@ -143,6 +143,10 @@ class Vehicle(db.Model):
     api_pin = db.Column(db.String(40))
     api_region = db.Column(db.String(8))
     api_vin = db.Column(db.String(40))
+    # Pleos only: the key's end date as typed from the portal ('YYYY-MM-DD').
+    # Its own column, not the unused PIN box: a car switched from Kia keeps
+    # its old PIN there for the way back.
+    api_key_valid_until = db.Column(db.String(10))
     auto_sync = db.Column(db.Boolean, default=True)
     # v3.0.121: remote control (Škoda official API) is OFF unless the owner
     # turns it on for THIS car. Reading a vehicle's state and moving its
@@ -210,6 +214,7 @@ class Vehicle(db.Model):
             'api_pin': self.api_pin,
             'api_region': self.api_region,
             'api_vin': self.api_vin,
+            'api_key_valid_until': self.api_key_valid_until,
             'remote_control_enabled': bool(self.remote_control_enabled),
             'wallbox_link_enabled': bool(self.wallbox_link_enabled),
             'wallbox_device_key': self.wallbox_device_key or '',

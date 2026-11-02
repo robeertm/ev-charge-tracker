@@ -325,6 +325,17 @@
                                 <td>
                                     <span class="d-inline-block rounded-circle me-1" style="width:.75rem; height:.75rem; background:{{ v.color or '#0d6efd' }};"></span>
                                     {{ v.name }}
+                                    {# Pleos-Schlüssel läuft ab: leise ab 14 Tagen, deutlich ab 3 Tagen
+                                       und danach. Kein Pop-up, kein Knopf — nur der Hinweis. #}
+                                    {% set _pkh = (pleos_key_hints or {}).get(v.id) %}
+                                    {% if _pkh %}
+                                    <div class="small pleos-key-hint {{ 'text-muted' if _pkh.level == 'soon' else ('text-danger fw-semibold' if _pkh.level == 'expired' else 'text-warning-emphasis fw-semibold') }}"
+                                         data-level="{{ _pkh.level }}" data-source="{{ _pkh.source }}">
+                                        <i class="bi {{ 'bi-key' if _pkh.level == 'soon' else 'bi-exclamation-triangle' }}"></i>
+                                        {{ _pkh.text }}
+                                        {% if _pkh.estimated_note %}<div class="text-muted fw-normal">{{ _pkh.estimated_note }}</div>{% endif %}
+                                    </div>
+                                    {% endif %}
                                 </td>
                                 <td class="small">{{ v.brand or '—' }}{% if v.model %} · {{ v.model }}{% endif %}</td>
                                 <td class="text-end small">{% if v.battery_kwh %}{{ "%.1f"|format(v.battery_kwh) }} kWh{% else %}—{% endif %}</td>
@@ -575,6 +586,12 @@
                             <div class="col-12 col-md-6 vf-cred" data-col="api_vin">
                                 <label class="form-label small" for="vf_api_vin">{{ t('set.fleet_field_api_vin') }}</label>
                                 <input type="text" class="form-control form-control-sm" name="api_vin" id="vf_api_vin" maxlength="40">
+                                <div class="form-text small vf-cred-help"></div>
+                            </div>
+                            {# Pleos: Ablaufdatum des Schlüssels aus dem Portal (optional). #}
+                            <div class="col-12 col-md-4 vf-cred" data-col="api_key_valid_until" hidden>
+                                <label class="form-label small" for="vf_api_key_valid_until">{{ t('cred.pleos_key_valid_until') }}</label>
+                                <input type="date" class="form-control form-control-sm" name="api_key_valid_until" id="vf_api_key_valid_until" disabled>
                                 <div class="form-text small vf-cred-help"></div>
                             </div>
                             <div class="col-12">
@@ -2900,6 +2917,7 @@
         api_pin: 'vf_api_pin',
         api_region: 'vf_api_region',
         api_vin: 'vf_api_vin',
+        api_key_valid_until: 'vf_api_key_valid_until',
         auto_sync: 'vf_auto_sync',
         wallbox_link_enabled: 'vf_wallbox_link',
         wallbox_device_key: 'vf_wallbox_key',

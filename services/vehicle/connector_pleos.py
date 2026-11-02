@@ -45,6 +45,12 @@ def _fields(context: str) -> list:
          "label_key": "cred.client_secret", "context": "Pleos"},
         {"key": "vin", "label": "VIN (optional, bei mehreren Fahrzeugen)", "type": "text",
          "label_key": "cred.vin", "optional": True, "help_key": "cred.help_vin_multi"},
+        # The portal shows the key's end date under "API key status"; the
+        # API does not hand it out. Optional — without it the app estimates
+        # (first token + 90 days) and says so (see pleos_key).
+        {"key": "key_valid_until", "label": "Schlüssel gültig bis", "type": "date",
+         "label_key": "cred.pleos_key_valid_until", "optional": True,
+         "help_key": "cred.help_pleos_key_valid_until"},
     ]
 
 

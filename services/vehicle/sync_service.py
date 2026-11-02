@@ -477,7 +477,7 @@ def _do_sync(app):
                    .all())
         if not targets:
             return []
-        from . import login_state
+        from . import login_state, pleos_key
         results = []
         for v in targets:
             # After a rejected credential no automatic sign-in until the
@@ -492,6 +492,11 @@ def _do_sync(app):
                     results.append(r)
                     _note_vendor_block(v.id, None)
                     login_state.note_ok(v.id, brand)
+                if pleos_key.is_pleos(brand):
+                    # Starts the 90-day estimate on the first token this
+                    # key ever got; only acts after a real token call.
+                    pleos_key.note_success(v)
+                    login_state.set_key_expires(v.id, pleos_key.expiry(v))
             except Exception as e:
                 logger.error(f"Vehicle sync [{v.name}] error: {e}")
                 # v3.0.112: shared session across the fleet loop — clear any
@@ -504,7 +509,13 @@ def _do_sync(app):
                     pass
                 if getattr(e, 'kind', '') == 'vendor_block':
                     _note_vendor_block(v.id, e)
+                if pleos_key.is_pleos(brand):
+                    # A refused Pleos key at (or past) its end date is
+                    # "expired", not "wrong" — a watcher must tell them apart.
+                    e = pleos_key.refine_failure(v, e)
                 login_state.note_failure(v.id, brand, e)
+                if pleos_key.is_pleos(brand):
+                    login_state.set_key_expires(v.id, pleos_key.expiry(v))
                 # v3.0.176: the read-only API reports the failed attempt
                 # and keeps the last good values. Never raises.
                 from services.readonly_api import note_poll_failed
