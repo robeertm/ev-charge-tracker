@@ -202,9 +202,13 @@
           <i class="bi bi-patch-check"></i>
           {{ t('obd.cert_title', default='Batteriezertifikat') }}
           {% if cert_available and cert and cert.certified_soh is not none %}
-          <span class="badge rounded-pill"
+          <span class="badge rounded-pill" id="obdCertBadge"
                 style="background-color: {{ cert.grade.color }}; color:#fff;">
+            {% if cert.is_estimate %}
+            {{ cert.grade.letter }} · ≈ {{ '%.0f'|format(cert.certified_soh) }} % · {{ t('cert.est_word', default='Schätzung') }}
+            {% else %}
             {{ cert.grade.letter }} · {{ '%.1f'|format(cert.certified_soh) }} %
+            {% endif %}
           </span>
           {% endif %}
         </h6>
@@ -229,6 +233,22 @@
       <p class="small text-muted mb-2">
         {{ t('obd.cert_subtitle', default='Vorschau des Zertifikats – so wie es als PDF aussieht. Die zuletzt ausgelesene Messung fließt automatisch ein.') }}
       </p>
+      {% if cert and cert.is_estimate and cert.estimate %}
+      <div class="alert alert-warning small py-2 mb-2" id="obdCertEstimate">
+        <i class="bi bi-exclamation-triangle"></i>
+        {{ t('obd.cert_est_note', n=cert.estimate.n_used, lo='%.0f'|format(cert.estimate.soh_lo_pct), hi='%.0f'|format(cert.estimate.soh_hi_pct), default='Schätzung aus {n} Heimladungen (Wallbox-Energie gegen Ladestand), Spanne {lo}–{hi} % – kein Messwert des Batteriemanagements. Die Note richtet sich nach der unteren Grenze.') }}
+      </div>
+      {% endif %}
+      {% if cert_unavailable %}
+      <details class="small mb-2" id="obdCertUnavailable" {% if not cert_available %}open{% endif %}>
+        <summary class="text-muted">{{ t('cert.sec_unavail', default='Nicht verfügbar bei diesem Fahrzeug') }}</summary>
+        <ul class="mb-0 mt-1">
+          {% for label, reason in cert_unavailable %}
+          <li><span class="fw-semibold">{{ label }}</span> – {{ reason }}</li>
+          {% endfor %}
+        </ul>
+      </details>
+      {% endif %}
       <!-- Preview area. JS swaps in a fresh (cache-busted) PDF object right
            after a read so the just-read cell data & charts appear without a
            full page reload. -->
@@ -248,7 +268,11 @@
       </div>
       {% else %}
       <div class="alert alert-secondary small mb-0">
+        {% if cert_none_text %}
+        {{ t('obd.cert_none_est_head', default='Noch kein Zertifikat.') }} {{ cert_none_text }}
+        {% else %}
         {{ t('obd.cert_none', default='Kein Batteriezustand (SoH) ermittelbar – daher noch kein Zertifikat. Dieses Fahrzeug meldet keinen SoH über die API und die Ladehistorie reicht nicht zur Messung. Lies die Batterie oben mit dem OBD-Dongle aus oder erfasse mehr (möglichst volle) Ladevorgänge – dann erscheint das Zertifikat hier.') }}
+        {% endif %}
       </div>
       {% endif %}
       </div>

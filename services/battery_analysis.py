@@ -466,6 +466,176 @@ def cell_stats(voltages, resolution_mv=None):
     }
 
 
+# ── 4. A capacity ESTIMATE from wallbox energy, for a BMS that says nothing ──
+# Some packs answer neither a SoH register nor Ah/kWh counters (the 2026 LFP
+# XPENG G6 is one). What is left is the energy the home wallbox measured and
+# the displayed SoC before and after:
+#
+#     capacity ≈ E_wallbox × (1 − charging loss) ÷ ΔSoC
+#
+# 🔴 THE LOSS MUST NOT COME FROM THE APP. ``Charge.calculate_fields`` writes
+# ``loss = kwh_loaded − ΔSoC × battery_kwh`` — the configured capacity — and
+# the self-learning efficiency (``_get_charge_efficiency``) is the median of
+# exactly those losses. Fed back in, it returns the configured capacity for
+# every charge (the v3.0.154 lesson, see the module docstring). So the loss
+# is a stated ASSUMPTION with a band, the same 12 % the app falls back to
+# before it has learned anything (efficiency 0.88), ±4 points: typical AC
+# home charging at wallbox power. The band is carried into the result.
+#
+# Thresholds:
+#   * ΔSoC ≥ 30 points: the displayed SoC is a whole number, so ΔSoC is good
+#     to about ±1 point — ±3.3 % of a 30-point window, ±10 % of a 10-point one.
+#   * at least 5 such charges, else nothing is stated ("too few").
+#   * the wallbox reading must cover the charge (≥ 95 % of the window) and,
+#     where its mean power is known, run at ≥ 3 kW — slow charging loses
+#     clearly more than the assumed band.
+EST_MIN_DSOC = 30
+EST_MIN_N = 5
+EST_MIN_COVERAGE = 0.95
+EST_MIN_POWER_W = 3000.0
+EST_LOSS = 0.12
+EST_LOSS_BAND = (0.08, 0.16)
+EST_RECENT_DAYS = 365
+# A per-charge figure outside this share of the pack is a data error (a
+# reading of the wrong car, a SoC that did not update), not a battery.
+EST_SAMPLE_BAND = (0.40, 1.30)
+# A median above the pack as new (gross, else net) by more than this is not
+# ageing that can be graded — the assumption or the SoC does not hold.
+EST_ABOVE_NEW = 1.05
+
+
+def _as_date(d):
+    if isinstance(d, str):
+        return datetime.fromisoformat(d[:19])
+    if d is not None and not isinstance(d, datetime):
+        return datetime(d.year, d.month, d.day)
+    return d
+
+
+def wallbox_capacity_estimate(rows, net_kwh, gross_kwh=None, floor_pct=70.0,
+                              loss=EST_LOSS, loss_band=EST_LOSS_BAND,
+                              min_n=EST_MIN_N, min_dsoc=EST_MIN_DSOC):
+    """Usable capacity ESTIMATED from wallbox energy against the SoC lift.
+
+    ``rows`` are dicts, one per logged charge: ``date``, ``soc_from``,
+    ``soc_to``, ``energy_kwh`` (what the wallbox meter measured, None when
+    nobody measured), ``coverage`` (0..1 of the charge the meter saw, None =
+    unknown), ``avg_power_w`` (None = unknown), ``charge_type``.
+
+    Returns None without a net capacity, else a dict whose ``state`` is
+    ``'too_few'`` (fewer than ``min_n`` usable charges — no figure at all),
+    ``'implausible'`` (the median lies above the pack as new or below 40 %
+    — no SoH) or ``'ok'``. With ``'ok'``:
+
+    * ``capacity_kwh`` — median of the per-charge capacities at the assumed
+      loss; ``capacity_lo_kwh``/``capacity_hi_kwh`` — lower quartile at the
+      HIGH end of the loss band, upper quartile at the LOW end: scatter of
+      the charges and the loss assumption in one range.
+    * ``soh_pct`` (≤ 100), ``soh_lo_pct``, ``soh_hi_pct`` — whole percent of
+      NET; a decimal would claim a precision this method does not have.
+    * ``verdict`` against ``floor_pct``: ``'pass'`` only when the whole range
+      is at or above it, ``'fail'`` when the whole range is below it, else
+      ``'undecided'`` — an estimate whose range crosses the line passes
+      nothing. Judged on the whole percent as printed.
+
+    Never a measured SoH: ``is_estimate`` is always True.
+    """
+    if not net_kwh or net_kwh <= 0:
+        return None
+    skipped = {'not_measured': 0, 'small_window': 0, 'partial': 0,
+               'low_power': 0, 'dc': 0, 'outlier': 0}
+    lo_ok = EST_SAMPLE_BAND[0] * net_kwh
+    hi_ok = EST_SAMPLE_BAND[1] * (gross_kwh or net_kwh)
+    samples = []
+    for r in rows:
+        e = r.get('energy_kwh')
+        if e is None or e <= 0:
+            skipped['not_measured'] += 1
+            continue
+        if (r.get('charge_type') or '').upper() == 'DC':
+            skipped['dc'] += 1
+            continue
+        sf, st = r.get('soc_from'), r.get('soc_to')
+        if sf is None or st is None or not (0 <= sf < st <= 100) or st - sf < min_dsoc:
+            skipped['small_window'] += 1
+            continue
+        cov = r.get('coverage')
+        if cov is not None and cov < EST_MIN_COVERAGE:
+            skipped['partial'] += 1
+            continue
+        pw = r.get('avg_power_w')
+        if pw is not None and pw < EST_MIN_POWER_W:
+            skipped['low_power'] += 1
+            continue
+        dsoc = st - sf
+        wall100 = e / dsoc * 100.0
+        cap = wall100 * (1 - loss)
+        if not lo_ok <= cap <= hi_ok:
+            skipped['outlier'] += 1
+            continue
+        samples.append({'date': _as_date(r.get('date')), 'soc_from': sf, 'soc_to': st,
+                        'dsoc': dsoc, 'energy_kwh': round(e, 2),
+                        'wall100_kwh': round(wall100, 2), 'capacity_kwh': round(cap, 1)})
+    samples.sort(key=lambda s: s['date'] or datetime.min)
+    out = {
+        'is_estimate': True,
+        'state': 'too_few',
+        'n_used': 0,
+        'n_qualifying': len(samples),
+        'n_rows': len(rows),
+        'skipped': skipped,
+        'min_n': min_n,
+        'min_dsoc': min_dsoc,
+        'loss_pct': round(loss * 100.0, 1),
+        'loss_lo_pct': round(loss_band[0] * 100.0, 1),
+        'loss_hi_pct': round(loss_band[1] * 100.0, 1),
+        'floor_pct': floor_pct,
+        'net_kwh': net_kwh,
+        'samples': [],
+    }
+    # The recent state, like the measured SoH: the last year before the
+    # newest usable charge, when that alone holds enough.
+    basis = samples
+    if samples and samples[-1]['date']:
+        newest = samples[-1]['date']
+        recent = [s for s in samples if s['date'] and (newest - s['date']).days <= EST_RECENT_DAYS]
+        if len(recent) >= min_n:
+            basis = recent
+    out['samples'] = [dict(s, date=s['date'].date().isoformat() if s['date'] else None)
+                      for s in basis]
+    if len(basis) < min_n:
+        return out
+    q1, med, q3 = _quartiles([s['wall100_kwh'] for s in basis])
+    cap = med * (1 - loss)
+    cap_lo = q1 * (1 - loss_band[1])
+    cap_hi = q3 * (1 - loss_band[0])
+    out.update({
+        'n_used': len(basis),
+        'recent_only': len(basis) < len(samples),
+        'basis_from': out['samples'][0]['date'],
+        'basis_to': out['samples'][-1]['date'],
+        'capacity_kwh': round(cap, 1),
+        'capacity_lo_kwh': round(cap_lo, 1),
+        'capacity_hi_kwh': round(cap_hi, 1),
+        'uncertainty_pct': round((cap_hi - cap_lo) / 2.0 / cap * 100.0, 1),
+    })
+    if cap > EST_ABOVE_NEW * (gross_kwh or net_kwh) or cap < lo_ok:
+        out['state'] = 'implausible'
+        return out
+    soh = int(round(cap / net_kwh * 100.0))
+    soh_lo = int(round(cap_lo / net_kwh * 100.0))
+    soh_hi = int(round(cap_hi / net_kwh * 100.0))
+    out.update({
+        'state': 'ok',
+        'soh_pct': float(min(soh, 100)),
+        'soh_lo_pct': float(min(soh_lo, 100)),
+        'soh_hi_pct': float(soh_hi),
+        'verdict': ('pass' if soh_lo >= floor_pct
+                    else 'fail' if soh_hi < floor_pct else 'undecided'),
+    })
+    return out
+
+
 def grid_columns(n):
     """Columns for drawing ``n`` cells as a block: a divisor between 10 and
     16 when there is one (98 → 14, 96 → 12, 108 → 12), else 14."""

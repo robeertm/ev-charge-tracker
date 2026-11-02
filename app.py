@@ -3523,6 +3523,18 @@ def register_routes(app):
             if _switch:
                 set_language(_prev_lang)
         if not pdf_bytes:
+            # A car whose BMS gives no SoH at all: say what the wallbox
+            # estimate still needs, instead of sending the owner to an OBD
+            # dongle that cannot read a SoH from this pack either.
+            try:
+                from services.battery_cert_service import compute_battery_health, estimate_none_text
+                _msg = estimate_none_text(compute_battery_health(vid))
+            except Exception:
+                app.logger.debug('battery estimate state unreadable', exc_info=True)
+                _msg = None
+            if _msg:
+                flash(v.name + ': ' + _msg, 'warning')
+                return redirect('/settings#sec-fleet')
             flash(t('flash.cert_no_data', name=v.name,
                     default='Für {name} konnte kein Batteriezustand (SoH) ermittelt '
                             'werden: Das Fahrzeug meldet keinen SoH über die API und '
@@ -3543,6 +3555,45 @@ def register_routes(app):
             as_attachment=not inline,
             download_name=filename,
         )
+
+    @app.route('/api/vehicles/<int:vid>/battery-health', methods=['GET'])
+    def api_vehicle_battery_health(vid):
+        """The battery-health figures behind the certificate, as JSON.
+
+        ``is_estimate`` and ``kind`` say whether the headline SoH is a
+        measured / BMS value or the wallbox ESTIMATE; ``estimate`` carries the
+        estimate with its range and basis, ``unavailable`` what the BMS of
+        this car does not give and why. Unmeasured values are null, never 0."""
+        from models.database import Vehicle
+        Vehicle.query.get_or_404(vid)
+        from services.battery_cert_service import (
+            compute_battery_health, describe_unavailable, estimate_none_text)
+        d = compute_battery_health(vid)
+        if d is None:
+            return jsonify({'ok': False, 'error': 'not found'}), 404
+        est = d.get('estimate')
+        return jsonify({
+            'ok': True,
+            'vehicle_id': vid,
+            'can_certify': d['can_certify'],
+            'certified_soh': d['certified_soh'],
+            'certified_source': d['certified_source'],
+            'is_estimate': d['is_estimate'],
+            'kind': ('estimate' if d['is_estimate']
+                     else ('measured' if d['certified_soh'] is not None else None)),
+            'label': t('cert.est_word') if d['is_estimate'] else None,
+            'grade': {'letter': d['grade']['letter'],
+                      'label': t(d['grade']['label_key']),
+                      'basis': 'estimate_range_low' if d['is_estimate'] else 'soh'},
+            'bms_soh': d['bms']['current'],
+            'obd_soh': d['obd_soh'],
+            'chemistry': d['cells']['chemistry'],
+            'estimate': est,
+            'estimate_note': estimate_none_text(d),
+            'unavailable': [dict(u, label=lbl, reason_text=why) for u, (lbl, why) in
+                            zip(d.get('unavailable') or [],
+                                describe_unavailable(d.get('unavailable')))],
+        })
 
     # ── OBD / ELM327 in-browser battery read (v3.0.74) ───────────────
     @app.route('/obd')
@@ -3567,6 +3618,7 @@ def register_routes(app):
         last = None
         cert = None
         cert_available = False
+        cert_unavailable, cert_none_text = [], None
         if active is not None:
             last = (ObdReading.query.filter_by(vehicle_id=active.id)
                     .order_by(ObdReading.timestamp.desc()).first())
@@ -3584,10 +3636,19 @@ def register_routes(app):
                 # determinable (measured / OBD / API). No SoH → no health
                 # figure → no certificate, matching generate_certificate().
                 cert_available = bool(cert.get('can_certify'))
+                try:
+                    from services.battery_cert_service import (
+                        describe_unavailable, estimate_none_text)
+                    cert_unavailable = describe_unavailable(cert.get('unavailable'))
+                    cert_none_text = estimate_none_text(cert)
+                except Exception:
+                    app.logger.debug('battery unavailable list failed', exc_info=True)
         return render_template('obd.html', vehicles=vehicles,
                                active=active,
                                last=last.to_dict() if last else None,
                                cert=cert, cert_available=cert_available,
+                               cert_unavailable=cert_unavailable,
+                               cert_none_text=cert_none_text,
                                dongles=dongle_catalog(),
                                preferred_dongle=AppConfig.get('obd_preferred_dongle', ''),
                                app_version=Config.APP_VERSION)

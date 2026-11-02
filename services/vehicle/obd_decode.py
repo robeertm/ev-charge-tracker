@@ -572,6 +572,11 @@ PROFILES = {
         # DIDs (only in CarScanner's closed profile) — we don't guess them.
         'module_temps': None,
         'cells': [],
+        # Fields the profile asks for but a pack of this chemistry is known
+        # not to answer — the battery certificate says "the BMS does not
+        # supply this" instead of "not read yet" (two independent reports
+        # on the 2026 LFP G6: no answer to 22110A).
+        'not_answered': {'lfp': ('soh_pct',)},
     },
     # ── Jaguar I-Pace (EV400) — BECM on 7E4/7EC, UDS service 22 ─────────
     # Source: OpenVehicles/OVMS Jaguar I-Pace driver (ipace_poll_becm.cpp),

@@ -164,6 +164,22 @@ def _measured_capacity(vehicle_id, nominal_kwh, gross_kwh=None):
         if not BA.is_metered(c, (nominal_kwh,), _EST_EFFICIENCIES):
             estimated += 1
             continue
+        # 🔴 Wall energy at or below ΔSoC × the configured capacity: here
+        # ``calculate_fields`` cannot take the loss from the wall, it fills
+        # ``ΔSoC × capacity × (1/efficiency − 1)`` — the setting and the
+        # learned efficiency again, not a measurement. On a pack that has lost
+        # more than the charging loss this is EVERY charge, and it used to
+        # print "measured 68.7 %" without any range (see
+        # BA.wallbox_capacity_estimate for the honest version). Only that
+        # branch's signature is caught — AC/PV (the fallback never fills DC)
+        # and a loss of exactly 1/η − 1 of the theoretical energy for an
+        # efficiency in the app's clamp band 0.70–0.97 — so a loss somebody
+        # logged by hand still counts.
+        kib = window / 100.0 * nominal_kwh
+        if ((c.charge_type or 'AC') in ('AC', 'PV') and gross <= kib + 0.05
+                and 1 / 0.97 - 1 - 0.002 <= c.loss_kwh / kib <= 1 / 0.70 - 1 + 0.002):
+            estimated += 1
+            continue
         net = gross - c.loss_kwh
         if net <= 0:
             continue
@@ -367,6 +383,140 @@ def _window_analysis(vehicle_id, nominal_kwh):
     return BA.window_trend(samples)
 
 
+def _wallbox_rows(vehicle_id):
+    """One row per logged charge for ``BA.wallbox_capacity_estimate``: the
+    energy the home wallbox MEASURED for it, or None.
+
+    🔴 The meter's own reading, not ``Charge.kwh_loaded``: a charge can be
+    matched to a reading without the reading being taken over (apply mode
+    "never", or an owner's undo), and then ``kwh_loaded`` is still the car-side
+    estimate. A reading counts only while it is matched to exactly this charge
+    and nobody has undone it."""
+    from models.database import WallboxCharge
+    q = Charge.query.order_by(Charge.date.asc())
+    if vehicle_id is not None:
+        q = q.filter(Charge.vehicle_id == vehicle_id)
+    charges = q.all()
+    ids = [c.wallbox_charge_id for c in charges if c.wallbox_charge_id]
+    wcs = ({w.id: w for w in WallboxCharge.query.filter(WallboxCharge.id.in_(ids)).all()}
+           if ids else {})
+    rows = []
+    for c in charges:
+        w = wcs.get(c.wallbox_charge_id) if c.wallbox_charge_id else None
+        ok = (w is not None and w.match_state == 'matched' and w.undone_at is None
+              and w.charge_id in (None, c.id)
+              and w.energy_kwh is not None and w.energy_kwh > 0)
+        rows.append({'date': c.date, 'soc_from': c.soc_from, 'soc_to': c.soc_to,
+                     'charge_type': c.charge_type,
+                     'energy_kwh': float(w.energy_kwh) if ok else None,
+                     'coverage': w.coverage if ok else None,
+                     'avg_power_w': w.avg_power_w if ok else None})
+    return rows
+
+
+def _unavailable(vehicle, chem_key, reads):
+    """What the BMS of this car does not give us — and why, in one word.
+
+    Only asked for a car without any BMS SoH. Reasons, most certain first:
+    ``known_silent`` (the decoder profile records that a pack of this
+    chemistry does not answer), ``not_supplied`` (no known query for it on
+    this car), ``bms_silent`` (asked in every stored OBD read, never
+    answered), ``not_read`` (it could be asked, but no OBD read is stored),
+    ``only_minmax`` (cells: only the highest and lowest cell come back)."""
+    try:
+        from services.vehicle.obd_decode import profile_for_brand, get_profile
+        prof = get_profile(profile_for_brand(vehicle.brand or vehicle.api_brand)) or {}
+    except Exception:
+        prof = {}
+    fields = prof.get('fields') or {}
+    silent = set((prof.get('not_answered') or {}).get(chem_key or '', ()))
+    n = len(reads)
+
+    def why(asked, key):
+        if key in silent:
+            return 'known_silent'
+        if not asked:
+            return 'not_supplied'
+        return 'bms_silent' if n else 'not_read'
+
+    items = [{'key': 'soh', 'reason': why('soh_pct' in fields, 'soh_pct'), 'reads': n}]
+    has_cells = any(r.get('cell_voltages') for r in reads)
+    has_minmax = any(r.get('cell_min_v') is not None and r.get('cell_max_v') is not None
+                     for r in reads)
+    if not has_cells:
+        items.append({'key': 'cells', 'reads': n,
+                      'reason': 'only_minmax' if has_minmax
+                      else why(bool(prof.get('cells')), 'cells')})
+        if not has_minmax:
+            items.append({'key': 'spread', 'reads': n,
+                          'reason': why('cell_min_v' in fields and 'cell_max_v' in fields,
+                                        'cell_min_v')})
+    if not any(BA.counters_plausible(r) for r in reads):
+        items.append({'key': 'counters', 'reads': n,
+                      'reason': why('cumulative_discharge_ah' in fields, 'cumulative_discharge_ah')})
+    return items
+
+
+def describe_unavailable(items):
+    """[(label, reason)] in the current language — one wording for the PDF,
+    the API and the web page."""
+    labels = {
+        'soh': t('cert.na_soh', default='State of Health (SoH) vom Batteriemanagement'),
+        'cells': t('cert.na_cells', default='Einzelzellspannungen'),
+        'spread': t('cert.na_spread', default='Zell-Spreizung (höchste − tiefste Zelle)'),
+        'counters': t('cert.na_counters',
+                      default='Ah-/kWh-Zähler des BMS (Kapazitätsmessung über eine Fahrt)'),
+    }
+    out = []
+    for it in items or []:
+        r = it.get('reason')
+        if r == 'known_silent':
+            txt = t('cert.na_r_known_silent',
+                    default='Das BMS liefert diesen Wert bei diesem Akku nicht – auf die Anfrage kommt keine Antwort.')
+        elif r == 'not_supplied':
+            txt = t('cert.na_r_not_supplied',
+                    default='Das BMS liefert diesen Wert über die verfügbaren Wege nicht – für dieses Fahrzeug ist '
+                            'keine Abfrage bekannt.')
+        elif r == 'bms_silent':
+            txt = t('cert.na_r_bms_silent',
+                    default='Das BMS hat in keiner der {n} OBD-Auslesungen darauf geantwortet.', n=it.get('reads', 0))
+        elif r == 'only_minmax':
+            txt = t('cert.na_r_only_minmax',
+                    default='Das BMS meldet nur die höchste und die tiefste Zelle, keine Einzelwerte.')
+        else:
+            txt = t('cert.na_r_not_read',
+                    default='Über die Fahrzeugverbindung nicht gemeldet; noch keine OBD-Auslesung mit diesem Wert.')
+        out.append((labels.get(it.get('key'), it.get('key')), txt))
+    return out
+
+
+def estimate_none_text(data):
+    """Why a car without a BMS SoH has no figure yet — or None when it has
+    one (or has a BMS SoH, or no estimate was asked for). One wording for the
+    web page, the API and the message after a refused certificate."""
+    est = (data or {}).get('estimate')
+    if not est or est.get('state') == 'ok':
+        return None
+    soh_item = next((u for u in data.get('unavailable') or [] if u['key'] == 'soh'), None)
+    if soh_item and soh_item['reason'] == 'not_read':
+        first = t('cert.est_none_not_read',
+                  default='Vom Batteriemanagement liegt noch kein SoH vor – weder über die Fahrzeugverbindung '
+                          'noch aus einer OBD-Auslesung.')
+    else:
+        first = t('cert.est_none_silent', default='Das Batteriemanagement dieses Fahrzeugs liefert keinen SoH.')
+    if est['state'] == 'implausible':
+        ref = (data.get('vehicle') or {}).get('nominal_kwh') or est.get('net_kwh')
+        second = t('cert.est_none_implausible',
+                   default='Die Schätzung aus der Wallbox-Energie ist nicht plausibel (≈ {k:.1f} kWh bei {r:.1f} kWh '
+                           'Nennkapazität) – es wird kein Wert angegeben.', k=est['capacity_kwh'], r=ref)
+    else:
+        second = t('cert.est_none_few',
+                   default='Die Schätzung aus der Wallbox-Energie braucht mindestens {m} Heimladungen mit '
+                           'Wallbox-Messung und mindestens {w} %-Punkten Hub – bisher {n}.',
+                   m=est['min_n'], w=est['min_dsoc'], n=est['n_qualifying'])
+    return first + ' ' + second
+
+
 def _capacity_check(m, net, gross, obd_soh):
     """Can the capacity from the BMS counters be true — and does it agree
     with the BMS's own SoH?
@@ -485,6 +635,16 @@ def compute_battery_health(vehicle_id):
     cap_check = _capacity_check(obd_cap[-1] if obd_cap else None, nominal_kwh, gross_kwh, obd_soh)
     buffer_rows = BA.buffer_view(reads, chem_max_v)
 
+    # ── No SoH from the BMS at all (an LFP pack that does not answer, a
+    # brand that does not report it): estimate from wallbox energy, and say
+    # what is missing and why. A car WITH a BMS SoH takes neither path — its
+    # certificate stays exactly as it was.
+    estimate, unavailable = None, []
+    if bms['current'] is None and obd_soh is None:
+        estimate = BA.wallbox_capacity_estimate(_wallbox_rows(vehicle_id), nominal_kwh,
+                                                gross_kwh, WARRANTY_FLOOR_SOH)
+        unavailable = _unavailable(vehicle, chem_key, reads)
+
     # ── Certified headline SoH. Priority:
     #   1. BOTH a solid coulomb-count AND a direct OBD BMS-register read →
     #      reconcile them (mean of the two independent estimates). The
@@ -530,8 +690,19 @@ def compute_battery_health(vehicle_id):
         # anything else; the source label says exactly that.
         certified_soh = bms['current']
         certified_source = 'bms'
+    elif estimate and estimate['state'] == 'ok':
+        # Last resort, and it says so everywhere it appears: no BMS figure
+        # at all, only wallbox energy against the SoC lift at an ASSUMED
+        # charging loss (BA.wallbox_capacity_estimate).
+        certified_soh = estimate['soh_pct']
+        certified_source = 'estimate'
+    is_estimate = certified_source == 'estimate'
 
-    letter, label_key, color = grade_for_soh(certified_soh)
+    # 🔑 An estimate is graded by the LOWER end of its range — the same
+    # conservatism as the window source: a report handed to a buyer must not
+    # promise what the data cannot show.
+    letter, label_key, color = grade_for_soh(
+        estimate['soh_lo_pct'] if is_estimate else certified_soh)
 
     # ── Odometer / age ───────────────────────────────────────────────
     odometer = stats.get('total_km') or 0
@@ -604,7 +775,8 @@ def compute_battery_health(vehicle_id):
     # ── Degradation benchmark (informational) ────────────────────────
     expected_soh = None
     vs_benchmark = None
-    if age_years is not None and certified_soh is not None:
+    # (not for an estimate: its range is wider than the gap it would show)
+    if age_years is not None and certified_soh is not None and not is_estimate:
         expected_soh = round(100 - age_years * AVG_DEGRADATION_PCT_PER_YEAR, 1)
         vs_benchmark = round(certified_soh - expected_soh, 1)
 
@@ -645,6 +817,11 @@ def compute_battery_health(vehicle_id):
         # No source → no health figure → no certificate (see module docstring).
         'can_certify': certified_soh is not None,
         'grade': {'letter': letter, 'label_key': label_key, 'color': color},
+        # True when the headline is the wallbox ESTIMATE, not a measured or
+        # BMS-reported value — every place that prints it marks it (≈).
+        'is_estimate': is_estimate,
+        'estimate': estimate,
+        'unavailable': unavailable,
         'bms': bms,
         'measured': measured,
         'measured_circular': measured_circular,
@@ -1479,6 +1656,8 @@ def _src_label(data):
                     default='aus dem angezeigten Fenster, Puffer als verbraucht angenommen'),
         'window_net': t('cert.src_window_net',
                         default='aus dem angezeigten Fenster (obere Grenze – ohne Bruttogröße)'),
+        'estimate': t('cert.src_estimate',
+                      default='geschätzt aus Wallbox-Energie und Ladestand – kein Messwert des BMS'),
     }.get(data.get('certified_source'), t('cert.na', default='keine Datengrundlage'))
 
 
@@ -1530,6 +1709,31 @@ def _cap_kwh(m):
     return ('%.1f kWh' if m.get('kwh_counted') else '~%.1f kWh') % m['capacity_kwh']
 
 
+def _est_soh(e):
+    """'≈ 96 %' — an estimate in whole percent, marked."""
+    return '≈ %.0f %%' % e['soh_pct']
+
+
+def _est_range(e):
+    return '%.0f–%.0f %%' % (e['soh_lo_pct'], e['soh_hi_pct'])
+
+
+def _est_verdict_pill(e):
+    v = e.get('verdict')
+    if v == 'pass':
+        return ('pill', t('cert.r_pass_est', default='bestanden (Schätzung)'), 'ok')
+    if v == 'fail':
+        return ('pill', t('cert.r_fail_est', default='unter Grenze (Schätzung)'), 'crit')
+    return ('pill', t('cert.r_undecided', default='nicht entscheidbar'), 'warn')
+
+
+def _counters_impossible(data):
+    """The car cannot give the BMS counters — the "how to measure" text of
+    the counter section would describe something this car cannot do."""
+    return any(u['key'] == 'counters' and u['reason'] in ('known_silent', 'not_supplied', 'bms_silent')
+               for u in data.get('unavailable') or [])
+
+
 # ── The topics. Each opens with its numbered heading and draws only through
 # the pdf methods, so it can be measured in a probe PDF before it is placed.
 
@@ -1548,10 +1752,11 @@ def _t_cover(pdf, data, ctx):
                default='Vom EV Charge Tracker selbst ermittelt aus den Lade-, Fahrzeug- und '
                        'OBD-Daten des Halters. Bericht-Nr. {id}.', id=data['cert_id']), w=left_w)
     bottom = pdf.get_y()
+    est = data.get('estimate') if data.get('is_estimate') else None
     pdf.stamp(pdf.w - pdf.r_margin - 44, top + 1, 44, 21, tone,
               t('cert.stamp_grade', default='NOTE {g}', g=grade['letter']),
-              'SoH ' + _fmt(soh, '{:.1f} %', dash='n/a'),
-              t(grade['label_key'], default=''))
+              'SoH ' + (_est_soh(est) if est else _fmt(soh, '{:.1f} %', dash='n/a')),
+              t('cert.est_word', default='Schätzung') if est else t(grade['label_key'], default=''))
     pdf.set_y(max(bottom, top + 26) + 3)
     pdf.set_draw_color(*_INK)
     pdf.set_line_width(0.6)
@@ -1648,10 +1853,19 @@ def _t_cover(pdf, data, ctx):
         p.set_xy(x, y + 6.5)
         p.set_font(p.f_serif, 'B', 12.5)
         p.color(_INK)
-        p.multi_cell(w, 6, p._clean(t('cert.sum_big', default='State of Health {s} – Note {g}',
-                                      s=_fmt(soh, '{:.1f} %', dash='n/a'), g=grade['letter'])),
-                     new_x='LMARGIN', new_y='NEXT')
+        if est:
+            big = t('cert.sum_big_est', default='State of Health {s} (Schätzung) – Note {g}',
+                    s=_est_soh(est), g=grade['letter'])
+        else:
+            big = t('cert.sum_big', default='State of Health {s} – Note {g}',
+                    s=_fmt(soh, '{:.1f} %', dash='n/a'), g=grade['letter'])
+        p.multi_cell(w, 6, p._clean(big), new_x='LMARGIN', new_y='NEXT')
         bits = [t('cert.sum_src', default='Bestimmt: {src}.', src=_src_label(data))]
+        if est:
+            bits.append(t('cert.sum_est',
+                          default='Spanne {r} aus {n} Heimladungen; die Note richtet sich nach der unteren Grenze. '
+                                  'Details in Abschnitt {k}.',
+                          r=_est_range(est), n=est['n_used'], k=ctx['num'].get('estimate', '')))
         vb, ex = data.get('vs_benchmark'), data.get('expected_soh')
         if vb is not None and ex is not None:
             bits.append(t('cert.sum_bench_above' if vb >= 0 else 'cert.sum_bench_below',
@@ -1689,14 +1903,37 @@ def _cover_cards(data, ctx):
     veh = data['vehicle']
     soh = data['certified_soh']
     out = []
-    if soh is not None:
+    est = data.get('estimate')
+    if soh is not None and data.get('is_estimate'):
+        out.append({'key': t('cert.card_soh', default='State of Health'),
+                    'value': _est_soh(est),
+                    'sub': t('cert.card_soh_est_sub', default='Schätzung · Spanne {r}', r=_est_range(est)),
+                    'frac': soh / 100.0, 'tone': _tone_for_grade(data['grade']['letter'])})
+    elif soh is not None:
         out.append({'key': t('cert.card_soh', default='State of Health'),
                     'value': '%.1f %%' % soh, 'sub': _src_label(data), 'frac': soh / 100.0,
                     'tone': _tone_for_grade(data['grade']['letter'])})
     m = _last_cap(data)
     net = veh.get('nominal_kwh')
     chk = data.get('capacity_check') or {}
-    if m and m.get('capacity_kwh'):
+    if est is not None and not (m and m.get('capacity_kwh')) and _counters_impossible(data):
+        # No counters on this car: the card shows the wallbox estimate instead
+        # of asking for a measuring drive the car cannot deliver.
+        key = t('cert.card_est_cap', default='Kapazität (Schätzung)')
+        if est['state'] == 'ok':
+            out.append({'key': key, 'value': '≈ %.1f kWh' % est['capacity_kwh'],
+                        'sub': t('cert.card_est_cap_sub', default='{n} Heimladungen · {lo:.1f}–{hi:.1f} kWh',
+                                 n=est['n_used'], lo=est['capacity_lo_kwh'], hi=est['capacity_hi_kwh']),
+                        'frac': est['capacity_kwh'] / net if net else None, 'tone': 'info'})
+        elif est['state'] == 'implausible':
+            out.append({'key': key, 'value': '—',
+                        'sub': t('cert.card_est_implausible', default='nicht plausibel – s. Abschnitt {n}',
+                                 n=ctx['num'].get('estimate', '')), 'tone': 'warn'})
+        else:
+            out.append({'key': key, 'value': '—',
+                        'sub': t('cert.card_est_few', default='zu wenig Daten: {n} von {m} Ladungen',
+                                 n=est['n_qualifying'], m=est['min_n']), 'tone': 'muted'})
+    elif m and m.get('capacity_kwh'):
         sub = t('cert.card_cap_sub', default='{a:.1f} Ah · BMS {f:g} → {to:g} % · {d1}–{d2}',
                 a=m['capacity_ah'], f=m['soc_from'], to=m['soc_to'], d1=_d(m['from']), d2=_d(m['to']))
         flagged = chk.get('state') in ('above_new', 'conflict')
@@ -1734,7 +1971,7 @@ def _cover_cards(data, ctx):
                     'sub': t('cert.card_bench_sub', default='Erwartung ~{e:.1f} % bei {y} Jahren',
                              e=ex, y=data.get('age_years')),
                     'frac': 0.5 + vb / 20.0, 'tone': 'ok' if vb >= 0 else 'warn'})
-    if soh is not None:
+    if soh is not None and not data.get('is_estimate'):
         head = soh - WARRANTY_FLOOR_SOH
         out.append({'key': t('cert.card_warranty', default='Abstand zur Garantiegrenze'),
                     'value': t('cert.pts', default='{v:+.1f} Pkt', v=head),
@@ -1749,7 +1986,11 @@ def _t_checks(pdf, data, ctx):
     veh = data['vehicle']
     soh = data['certified_soh']
     rows = []
-    if soh is not None:
+    est = data.get('estimate') if data.get('is_estimate') else None
+    if est:
+        rows.append([t('cert.chk_soh_est', default='State of Health (Schätzung)'), '≥ %.0f %%' % WARRANTY_FLOOR_SOH,
+                     '%s (%s)' % (_est_soh(est), _est_range(est)), _est_verdict_pill(est)])
+    elif soh is not None:
         ok = soh >= WARRANTY_FLOOR_SOH
         rows.append([t('cert.card_soh', default='State of Health'), '≥ %.0f %%' % WARRANTY_FLOOR_SOH,
                      '%.1f %%' % soh,
@@ -1816,9 +2057,13 @@ def _t_checks(pdf, data, ctx):
     pdf.table([t('cert.th_check', default='Prüfpunkt'), t('cert.th_target', default='Soll'),
                t('cert.th_actual', default='Ist'), t('cert.th_rating', default='Bewertung')],
               rows, [33, 15, 28, 24], ['L', 'L', 'L', 'L'])
-    pdf.caption(t('cert.checks_note',
-                  default='Die Soll-Werte sind Richtwerte des EV Charge Tracker (übliche Garantiegrenze der Hersteller, '
-                          'übliche Zell-Spreizung) – keine Normwerte.'))
+    note = t('cert.checks_note',
+             default='Die Soll-Werte sind Richtwerte des EV Charge Tracker (übliche Garantiegrenze der Hersteller, '
+                     'übliche Zell-Spreizung) – keine Normwerte.')
+    if est:
+        note += ' ' + t('cert.checks_est_note',
+                        default='Bei einer Schätzung gilt „bestanden“ nur, wenn die ganze Spanne über der Grenze liegt.')
+    pdf.caption(note)
 
 
 def _capmeas_calc(pdf, m):
@@ -2016,6 +2261,18 @@ def _t_soh(pdf, data, ctx):
         pdf.kv(t('cert.meas_soh', default='Gemessene SoH (Ladedaten)'),
                t('cert.meas_none2', default='zu wenige gemessene Ladungen mit ≥ 25 % SoC-Fenster und erfasstem '
                                             'Ladeverlust'))
+    est = data.get('estimate')
+    if est is not None:
+        lbl = t('cert.est_soh_kv', default='Geschätzte SoH (Wallbox-Energie)')
+        if est['state'] == 'ok':
+            pdf.kv(lbl, t('cert.est_soh_kv_val', default='{s} (Spanne {r}) – Schätzung, Abschnitt {n}',
+                          s=_est_soh(est), r=_est_range(est), n=ctx['num'].get('estimate', '')))
+        elif est['state'] == 'implausible':
+            pdf.kv(lbl, t('cert.est_soh_kv_implausible', default='nicht plausibel – Abschnitt {n}',
+                          n=ctx['num'].get('estimate', '')))
+        else:
+            pdf.kv(lbl, t('cert.est_soh_kv_few', default='zu wenig Daten ({n} von {m} Ladungen) – Abschnitt {k}',
+                          n=est['n_qualifying'], m=est['min_n'], k=ctx['num'].get('estimate', '')))
     win = data.get('window') or {}
     if win.get('change_pct') is not None:
         pdf.kv(t('cert.window_kv', default='Angezeigtes Fenster'),
@@ -2052,6 +2309,150 @@ def _t_soh(pdf, data, ctx):
         pdf.caption(t('cert.chart_soh_note2',
                       default='Gezeigt wird der relative BMS-Wert aus der Cloud – aussagekräftig ist der Verlauf, '
                               'nicht die Höhe.'))
+
+
+def _t_estimate(pdf, data, ctx):
+    """The wallbox estimate: formula, assumption, basis, result — and what
+    it may NOT be read as."""
+    est = data['estimate']
+    veh = data['vehicle']
+    pdf.section(t('cert.sec_est', default='Kapazitätsschätzung aus Wallbox-Energie'), ctx['num'].get('estimate'))
+    pdf.para(t('cert.est_lead',
+               default='Für dieses Fahrzeug liegt kein SoH-Wert des Batteriemanagements vor. Geschätzt wird deshalb '
+                       'aus den Heimladungen: die Energie, die die Wallbox gemessen hat, abzüglich eines angenommenen '
+                       'Ladeverlusts, geteilt durch den Hub des Ladestands. Das Ergebnis ist eine Schätzung, kein '
+                       'gemessener State of Health.'))
+    pdf.kv(t('cert.est_formula_lbl', default='Rechnung'),
+           t('cert.est_formula', default='Kapazität ≈ Wallbox-Energie × (1 − Ladeverlust) ÷ Ladestandshub'))
+    pdf.kv(t('cert.est_loss_lbl', default='Ladeverlust (Annahme)'),
+           t('cert.est_loss_val', default='{l:.0f} % (Spanne {lo:.0f}–{hi:.0f} %) – angenommen, nicht gemessen',
+             l=est['loss_pct'], lo=est['loss_lo_pct'], hi=est['loss_hi_pct']))
+    pdf.kv(t('cert.est_basis_lbl', default='Messgrundlage'),
+           t('cert.est_basis_val',
+             default='{n} von {m} Ladungen tauglich: Energie an der Wallbox gemessen, Hub mindestens {w} %-Punkte',
+             n=est['n_qualifying'], m=est['n_rows'], w=est['min_dsoc']))
+    sk = est.get('skipped') or {}
+    parts = []
+    for key, txt in (
+            ('not_measured', t('cert.est_skip_not_measured', default='{n} ohne Wallbox-Messung', n=sk.get('not_measured', 0))),
+            ('small_window', t('cert.est_skip_small', default='{n} mit weniger als {w} %-Punkten Hub',
+                                             n=sk.get('small_window', 0), w=est['min_dsoc'])),
+            ('partial', t('cert.est_skip_partial', default='{n} nur teilweise gemessen', n=sk.get('partial', 0))),
+            ('low_power', t('cert.est_skip_low_power', default='{n} mit unter 3 kW', n=sk.get('low_power', 0))),
+            ('dc', t('cert.est_skip_dc', default='{n} DC-Ladungen', n=sk.get('dc', 0))),
+            ('outlier', t('cert.est_skip_outlier', default='{n} unplausibel', n=sk.get('outlier', 0)))):
+        if sk.get(key):
+            parts.append(txt)
+    if parts:
+        pdf.caption(t('cert.est_skip', default='Nicht gezählt: {l}.', l=', '.join(parts)))
+    if est['state'] == 'ok':
+        pdf.kv(t('cert.est_cap_lbl', default='Geschätzte Kapazität'),
+               t('cert.est_cap_val', default='≈ {k:.1f} kWh (Spanne {lo:.1f}–{hi:.1f} kWh)',
+                 k=est['capacity_kwh'], lo=est['capacity_lo_kwh'], hi=est['capacity_hi_kwh']))
+        pdf.kv(t('cert.est_soh_lbl', default='Geschätzte SoH'),
+               t('cert.est_soh_val', default='{s} von {n:.1f} kWh netto (Spanne {r})',
+                 s=_est_soh(est), n=veh['nominal_kwh'], r=_est_range(est)))
+        if est.get('recent_only'):
+            pdf.kv('', t('cert.est_recent', default='nur die letzten 12 Monate der tauglichen Ladungen'))
+        pdf.ln(1.5)
+        v = est.get('verdict')
+        if v == 'pass':
+            msg = t('cert.est_v_pass', default='Die ganze Spanne liegt über der Garantiegrenze von {f:.0f} %.',
+                    f=est['floor_pct'])
+        elif v == 'fail':
+            msg = t('cert.est_v_fail', default='Die ganze Spanne liegt unter der Garantiegrenze von {f:.0f} %.',
+                    f=est['floor_pct'])
+        else:
+            msg = t('cert.est_v_undecided',
+                    default='Die Spanne schneidet die Garantiegrenze von {f:.0f} % – die Schätzung kann weder '
+                            '„bestanden“ noch „unter Grenze“ belegen.', f=est['floor_pct'])
+        pdf.para(msg + ' ' + t('cert.est_grade_note',
+                               default='Die Note richtet sich nach der unteren Grenze der Spanne.'))
+    elif est['state'] == 'implausible':
+        ref = veh.get('gross_kwh') or veh['nominal_kwh']
+        if est['capacity_kwh'] > ref:
+            msg = t('cert.est_implausible_high',
+                    default='Der Median von ≈ {k:.1f} kWh liegt über der Kapazität eines neuen Akkus ({r:.1f} kWh). '
+                            'Dann stimmen die Verlustannahme oder der Ladestand nicht – ein SoH wird nicht angegeben.',
+                    k=est['capacity_kwh'], r=ref)
+        else:
+            msg = t('cert.est_implausible_low',
+                    default='Der Median von ≈ {k:.1f} kWh liegt unter 40 % der Nennkapazität. Das ist ein '
+                            'Datenfehler, keine Alterung – ein SoH wird nicht angegeben.', k=est['capacity_kwh'])
+        pdf.para(msg)
+    else:
+        pdf.para(t('cert.est_too_few',
+                   default='Zu wenig Daten: Für eine Schätzung braucht es mindestens {m} taugliche Ladungen, bisher '
+                           'sind es {n}. Es wird kein Wert angegeben.', m=est['min_n'], n=est['n_qualifying']))
+    shown = (est.get('samples') or [])[-10:]
+    if shown:
+        pdf.sub(t('cert.est_table', default='Taugliche Ladungen') if len(shown) == len(est['samples'])
+                else t('cert.est_table_last', default='Die letzten {k} von {n} tauglichen Ladungen',
+                       k=len(shown), n=len(est['samples'])), need=30)
+        rows = [[_date(s_['date']), '%d → %d %%' % (s_['soc_from'], s_['soc_to']),
+                 '%d' % s_['dsoc'],
+                 '%.1f kWh' % s_['energy_kwh'], '≈ %.1f kWh' % s_['capacity_kwh']] for s_ in shown]
+        pdf.table([t('cert.th_date', default='Datum'), t('cert.th_soc_lift', default='Ladestand'),
+                   t('cert.th_lift', default='Hub (%-Punkte)'), t('cert.th_wallbox', default='Wallbox'),
+                   t('cert.th_cap_est', default='≈ Kapazität')],
+                  rows, [18, 18, 18, 18, 20], ['L', 'R', 'R', 'R', 'R'])
+    loss_shift = (est['loss_hi_pct'] - est['loss_pct']) / (100.0 - est['loss_pct']) * 100.0
+    unc = t('cert.est_uncert',
+            default='Unsicherheit: Der Ladeverlust ist nicht gemessen – {b:.0f} Punkte mehr oder weniger Verlust '
+                    'verschieben das Ergebnis um rund {p:.1f} %. Ein Punkt Ladestand am Anfang oder Ende macht bei '
+                    '{w} Punkten Hub {q:.1f} % aus. Strom fürs Vorklimatisieren am Kabel misst die Wallbox mit. '
+                    'Zusammen liegt die Unsicherheit bei mehreren Prozent.',
+            b=est['loss_hi_pct'] - est['loss_pct'], p=loss_shift, w=est['min_dsoc'], q=100.0 / est['min_dsoc'])
+    if est['state'] == 'ok':
+        unc += ' ' + t('cert.est_uncert_here', default='Die Spanne hier: ±{u:.0f} %.', u=est['uncertainty_pct'])
+    pdf.caption(unc)
+    pdf.caption(t('cert.est_why_assumed',
+                  default='Warum nicht der vom Tracker gelernte Ladeverlust: Er wird aus der eingestellten Akkugröße '
+                          'berechnet (Verlust = Wallbox-Energie − Hub × Akkugröße). Mit ihm käme genau die eingestellte '
+                          'Kapazität heraus – die Rechnung würde die Einstellung messen, nicht den Akku.'))
+
+
+def _t_unavail(pdf, data, ctx):
+    """What the BMS does not give for this car, with the reason — instead of
+    empty fields or a dash nobody can read."""
+    pdf.section(t('cert.sec_unavail', default='Nicht verfügbar bei diesem Fahrzeug'), ctx['num'].get('unavail'))
+    pdf.para(t('cert.unavail_lead',
+               default='Diese Angaben fehlen im Bericht nicht aus Versehen. Sie kommen aus dem Batteriemanagement '
+                       '(BMS), und das liefert sie für dieses Fahrzeug nicht oder noch nicht:'))
+    rows = [[lbl, why] for lbl, why in describe_unavailable(data.get('unavailable'))]
+    pdf.table([t('cert.th_value', default='Angabe'), t('cert.th_reason', default='Grund')],
+              rows, [38, 62], ['L', 'L'])
+    keys = {u['key'] for u in data.get('unavailable') or []}
+    if 'soh' in keys and data.get('estimate') is not None:
+        pdf.caption(t('cert.unavail_soh_instead',
+                      default='Statt des SoH vom BMS steht in diesem Bericht eine Schätzung aus der Wallbox-Energie '
+                              '(Abschnitt {n}).', n=ctx['num'].get('estimate', '')))
+
+
+def _t_chem_lfp(pdf, data, ctx):
+    """What is different about LFP — only statements that hold for the
+    chemistry in general, no manufacturer promises."""
+    chem = (data.get('cells') or {}).get('chemistry') or {}
+    pdf.section(t('cert.sec_chem_lfp', default='Hinweise zur Zellchemie LFP'), ctx['num'].get('chem'))
+    if chem.get('nominal_v') and chem.get('max_v'):
+        pdf.kv(t('cert.lfp_volt_lbl', default='Nennspannung / Ladeschluss je Zelle'),
+               '%.2f V / %.2f V' % (chem['nominal_v'], chem['max_v']))
+        pdf.ln(1.5)
+    pdf.para(t('cert.lfp_flat',
+               default='Flache Spannungskurve: Eine LFP-Zelle hält über den größten Teil des Ladestands fast dieselbe '
+                       'Spannung. Die Spannung sagt deshalb wenig über den Ladestand, und Unterschiede zwischen den '
+                       'Zellen zeigen sich erst nahe voll oder nahe leer – eine Zell-Spreizung aus der Mitte des '
+                       'Ladestands ist kaum aussagekräftig.'))
+    pdf.para(t('cert.lfp_full',
+               default='Vollladen: LFP-Zellen vertragen regelmäßiges Laden auf 100 % deutlich besser als NMC-Zellen. '
+                       'Weil die Spannung kaum hilft, schätzt das BMS den Ladestand über den Stromfluss und gleicht '
+                       'ihn bei voller Ladung neu ab; gelegentliches Laden auf 100 % zur Kalibrierung ist deshalb '
+                       'üblich. Maßgeblich ist die Empfehlung im Handbuch des Fahrzeugs.'))
+    if data.get('estimate') is not None:
+        pdf.para(t('cert.lfp_report',
+                   default='Für diesen Bericht: Kurz nach einer Vollladung ist der angezeigte Ladestand am genauesten. '
+                           'Ladungen, die bei 100 % enden, sind darum die verlässlichsten Punkte der '
+                           'Kapazitätsschätzung; ein ungenauer Ladestand am Start bleibt Teil der Unsicherheit.'))
 
 
 def _t_cells(pdf, data, ctx):
@@ -2507,13 +2908,22 @@ def generate_certificate(vehicle_id):
         ctx['window'] = _window_chart(win, tmp_dir)
 
     # Most important first. Each name gets its section number.
-    order = [('cover', _t_cover), ('checks', _t_checks), ('capmeas', _t_capmeas), ('soh', _t_soh)]
+    order = [('cover', _t_cover), ('checks', _t_checks)]
+    if data.get('estimate') is not None:
+        order.append(('estimate', _t_estimate))
+    if data.get('obd_capacity') or not _counters_impossible(data):
+        order.append(('capmeas', _t_capmeas))
+    order.append(('soh', _t_soh))
+    if data.get('unavailable'):
+        order.append(('unavail', _t_unavail))
     if data.get('obd') or stats:
         order.append(('cells', _t_cells))
     if data.get('capacity') or data.get('buffer_view'):
         order.append(('buffer', _t_buffer))
     if win and win.get('periods'):
         order.append(('window', _t_window))
+    if ((data.get('cells') or {}).get('chemistry') or {}).get('key') == 'lfp':
+        order.append(('chem', _t_chem_lfp))
     order += [('use', _t_use), ('basis', _t_basis)]
     ctx['num'] = {name: i + 1 for i, (name, _) in enumerate(order)}
 
