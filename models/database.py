@@ -544,6 +544,10 @@ class VehicleSync(db.Model):
     # the last-known GPS long after the car last pinged; this field is
     # how the parking-event state machine detects stale echoes.
     location_last_updated_at = db.Column(db.DateTime)
+    # When the car itself captured this data (naive local time), for the
+    # connectors that state it. Not in TRACKED_FIELDS: it must never decide
+    # whether a poll counts as unchanged.
+    captured_at = db.Column(db.DateTime)
     raw_json = db.Column(db.Text)
 
     # Fields used for change detection (any difference triggers a new row).

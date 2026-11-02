@@ -1,5 +1,6 @@
 """Background service for periodic vehicle status sync."""
 import json
+import math
 import logging
 import threading
 import time
@@ -843,12 +844,19 @@ def _nightly_maintenance_loop(app):
     except Exception as e:
         logger.warning(f"Nightly maintenance startup catch-up failed: {e}")
 
+    # The next target is always computed from just AFTER the previous one:
+    # waking at 02:59:59.x used to give ``int(0.4) == 0`` seconds of sleep,
+    # so the loop did not sleep and fired hundreds of times until 03:00:00.
+    _earliest = None
     while _sync_running:
         now = datetime.now()
+        if _earliest is not None and now < _earliest:
+            now = _earliest
         target = now.replace(hour=NIGHTLY_HOUR, minute=0, second=0, microsecond=0)
         if target <= now:
             target += timedelta(days=1)
-        sleep_secs = int((target - now).total_seconds())
+        # Round UP and sleep at least one second.
+        sleep_secs = max(1, math.ceil((target - now).total_seconds()))
         slept = 0
         # Sleep in small increments so stop_sync() is responsive.
         while slept < sleep_secs and _sync_running:
@@ -856,7 +864,9 @@ def _nightly_maintenance_loop(app):
             slept += 30
         if not _sync_running:
             break
-        logger.info(f"Nightly maintenance fired at {datetime.now().isoformat(timespec='seconds')}")
+        _fired = datetime.now()
+        _earliest = target + timedelta(seconds=1)
+        logger.info(f"Nightly maintenance fired at {_fired.isoformat(timespec='seconds')}")
         try:
             _maybe_daily_trip_reconcile(app)
         except Exception as e:

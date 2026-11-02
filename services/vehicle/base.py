@@ -126,6 +126,10 @@ class VehicleStatus:
     # The values above are already km; this only tells the sync that a
     # car's earlier history may have been stored in miles.
     distance_unit: Optional[str] = None
+    # The moment the CAR itself captured this data (aware or naive datetime,
+    # or an ISO string). Only a connector whose cloud states it explicitly
+    # sets it; None everywhere else. Not a change-detection field.
+    captured_at: Optional[object] = None
     timestamp: datetime = field(default_factory=datetime.utcnow)
     raw_data: dict = field(default_factory=dict)
 

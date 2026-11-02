@@ -148,8 +148,51 @@ def _abfahrt_anker(open_evt, sync):
     return letzt or open_evt.arrived_at
 
 
-def update_parking_from_sync(sync) -> Optional[ParkingEvent]:
+def _ankunft_anker(geschlossen, sync):
+    """Die Ankunftszeit eines neuen Halts — die EINE Stelle dafuer.
+
+    Ein Auto, das nur selten abgefragt wird, meldet seine Daten oft Stunden
+    nach dem Eintreffen. Nennt der Connector die Erfassungszeit des Autos
+    (``sync.captured_at``, naive Ortszeit), ist sie der bessere Anker als die
+    Abfragezeit. Sie gilt aber nur, wenn sie glaubhaft ist: strikt NACH der
+    Abfahrt des gerade geschlossenen Halts (sonst ein Altwert, der den neuen
+    Halt vor die Fahrt zurueckdatiert) und nicht nach der Abfrage selbst
+    (sonst eine Zukunftszeit). Ohne geschlossenen Halt gibt es nichts, woran
+    man sie pruefen koennte — dann gilt die Abfragezeit wie bisher.
+    """
+    erfasst = getattr(sync, 'captured_at', None)
+    abfrage = sync.timestamp
+    if not isinstance(erfasst, datetime) or abfrage is None:
+        return abfrage
+    ab = getattr(geschlossen, 'departed_at', None)
+    if ab is None:
+        return abfrage
+    if ab < erfasst <= abfrage:
+        return erfasst
+    return abfrage
+
+
+def _gesehen_um(open_evt, sync, seen_at):
+    """Der Zeitpunkt, bis zu dem ein offener Halt als belegt gilt.
+
+    Standard ist die Zeit der Zeile. Eine unveraenderte Abfrage schreibt keine
+    neue Zeile; ihre Abfragezeit (``seen_at``) belegt den Halt trotzdem —
+    aber nur, wenn der Kilometerstand der Abfrage dem des Halts gleicht.
+    """
+    if seen_at is None or sync.odometer_km is None or open_evt is None:
+        return sync.timestamp
+    halt_km = open_evt.odometer_departed or open_evt.odometer_arrived
+    if halt_km is None or sync.odometer_km != halt_km:
+        return sync.timestamp
+    return seen_at if seen_at > sync.timestamp else sync.timestamp
+
+
+def update_parking_from_sync(sync, seen_at=None) -> Optional[ParkingEvent]:
     """Hook called from _save_vehicle_sync after a new sync row is created.
+
+    ``seen_at`` (optional): the poll time of an UNCHANGED poll (no new row).
+    It only extends ``last_seen_at`` of the open stop — see ``_gesehen_um``.
+    ``None`` keeps the behaviour exactly as before.
 
     Decides whether to:
     - Open a new ParkingEvent (car arrived somewhere new)
@@ -314,8 +357,8 @@ def update_parking_from_sync(sync) -> Optional[ParkingEvent]:
                     d = _haversine_m(ref_pe.lat, ref_pe.lon, new_lat, new_lon)
                     is_echo = d <= SAME_PLACE_M
                 if not is_echo:
-                    return _open_event(sync, new_lat, new_lon)
-            return _open_unknown(sync)
+                    return _open_event(sync, new_lat, new_lon, vorher=open_evt)
+            return _open_unknown(sync, vorher=open_evt)
 
     # Upgrade path: if the currently open PE is an Unknown placeholder
     # (opened from an odo-advance with stale-or-missing GPS) and this
@@ -408,7 +451,7 @@ def update_parking_from_sync(sync) -> Optional[ParkingEvent]:
                     request_post_move_reconcile()
                 except Exception:
                     pass
-                return _open_unknown(sync)
+                return _open_unknown(sync, vorher=open_evt)
             return open_evt
         # 🔴 v3.0.153: ein Platzhalter darf nur dann nachtraeglich beschriftet
         # werden, wenn das Auto in der Zwischenzeit STAND.
@@ -447,7 +490,7 @@ def update_parking_from_sync(sync) -> Optional[ParkingEvent]:
                 request_post_move_reconcile()
             except Exception:
                 pass
-            return _open_event(sync, new_lat, new_lon)
+            return _open_event(sync, new_lat, new_lon, vorher=open_evt)
         _upgrade_unknown(open_evt, sync)
         return open_evt
 
@@ -461,8 +504,9 @@ def update_parking_from_sync(sync) -> Optional[ParkingEvent]:
             and sync.odometer_km is not None):
         last_odo = open_evt.odometer_departed or open_evt.odometer_arrived
         if last_odo is not None and sync.odometer_km == last_odo:
-            if open_evt.last_seen_at is None or sync.timestamp > open_evt.last_seen_at:
-                open_evt.last_seen_at = sync.timestamp
+            _gesehen = _gesehen_um(open_evt, sync, seen_at)
+            if open_evt.last_seen_at is None or _gesehen > open_evt.last_seen_at:
+                open_evt.last_seen_at = _gesehen
             if sync.soc_percent is not None:
                 open_evt.soc_departed = sync.soc_percent
             db.session.commit()
@@ -509,7 +553,7 @@ def update_parking_from_sync(sync) -> Optional[ParkingEvent]:
 
     if open_evt is None:
         # No open event → open one at the current location
-        return _open_event(sync, lat, lon)
+        return _open_event(sync, lat, lon, vorher=None)
 
     distance = _haversine_m(open_evt.lat, open_evt.lon, lat, lon)
 
@@ -576,7 +620,7 @@ def update_parking_from_sync(sync) -> Optional[ParkingEvent]:
                 request_post_move_reconcile()
             except Exception:
                 pass
-            return _open_event(sync, lat, lon)
+            return _open_event(sync, lat, lon, vorher=open_evt)
 
         # Car still at the same spot. Top up arrival fields that were
         # missing on open, continuously track the latest at-spot state
@@ -592,8 +636,9 @@ def update_parking_from_sync(sync) -> Optional[ParkingEvent]:
         if sync.soc_percent is not None:
             open_evt.soc_departed = sync.soc_percent
         # Only advance last_seen_at forward, never backward (matters during backfill)
-        if open_evt.last_seen_at is None or sync.timestamp > open_evt.last_seen_at:
-            open_evt.last_seen_at = sync.timestamp
+        _gesehen = _gesehen_um(open_evt, sync, seen_at)
+        if open_evt.last_seen_at is None or _gesehen > open_evt.last_seen_at:
+            open_evt.last_seen_at = _gesehen
         db.session.commit()
         return open_evt
 
@@ -642,7 +687,7 @@ def update_parking_from_sync(sync) -> Optional[ParkingEvent]:
             request_post_move_reconcile()
         except Exception:
             pass
-        return _open_event(sync, lat, lon)
+        return _open_event(sync, lat, lon, vorher=open_evt)
 
     return open_evt
 
@@ -699,7 +744,8 @@ def release_stuck_parking_events(vehicle_id=None) -> int:
     return befreit
 
 
-def _open_event(sync, lat: float, lon: float) -> ParkingEvent:
+def _open_event(sync, lat: float, lon: float, *, vorher) -> ParkingEvent:
+    """``vorher`` is the stop just closed (or None); it dates the arrival."""
     label, fav_name = _classify_location(lat, lon)
     # Initialize odometer_departed / soc_departed to the arrival values
     # so even a one-sync parking event has meaningful "when-leaving" data.
@@ -707,7 +753,7 @@ def _open_event(sync, lat: float, lon: float) -> ParkingEvent:
     # car moves.
     evt = ParkingEvent(
         vehicle_id=getattr(sync, 'vehicle_id', None),
-        arrived_at=sync.timestamp,
+        arrived_at=_ankunft_anker(vorher, sync),
         last_seen_at=sync.timestamp,
         lat=lat,
         lon=lon,
@@ -874,14 +920,14 @@ def repariere_zurueckdatierte_ankunft(vehicle_id=None) -> int:
     return gerichtet
 
 
-def _open_unknown(sync) -> ParkingEvent:
+def _open_unknown(sync, *, vorher) -> ParkingEvent:
     """Open a placeholder PE when an odo-advance closed the previous one
     but no fresh GPS is available to anchor the new location. Coords are
     sentinel (0,0) and label is 'unknown'. A later fresh-GPS sync
     upgrades it via ``_upgrade_unknown``."""
     evt = ParkingEvent(
         vehicle_id=getattr(sync, 'vehicle_id', None),
-        arrived_at=sync.timestamp,
+        arrived_at=_ankunft_anker(vorher, sync),
         last_seen_at=sync.timestamp,
         lat=0.0,
         lon=0.0,

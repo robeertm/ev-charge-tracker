@@ -214,6 +214,9 @@ def create_app(config_class=Config):
             # Without this, Hyundai's cached "echo" of last-known GPS
             # pollutes the ParkingEvent state machine with phantom moves.
             ('location_last_updated_at', 'DATETIME'),
+            # Car-side capture time (naive local), only where the connector
+            # states it; dates a stop's arrival.
+            ('captured_at', 'DATETIME'),
         ]
         for col_name, col_type in _new_sync_cols:
             if col_name not in sync_columns:
@@ -1631,6 +1634,27 @@ def _extract_location_last_updated(status, raw_json):
     return None
 
 
+def _extract_captured_at(status):
+    """The car's own capture time as a naive LOCAL datetime, or None.
+
+    Aware values are converted with ``astimezone()`` and never merely
+    stripped of their label (see the v3.0.151 note in
+    ``_extract_location_last_updated``). Anything unparsable is None.
+    """
+    ts = getattr(status, 'captured_at', None)
+    if isinstance(ts, str) and ts:
+        try:
+            ts = datetime.fromisoformat(ts.strip().replace('Z', '+00:00'))
+        except ValueError:
+            return None
+    if isinstance(ts, datetime):
+        try:
+            return ts.astimezone().replace(tzinfo=None) if ts.tzinfo else ts
+        except (OverflowError, OSError, ValueError):
+            return None
+    return None
+
+
 def _build_vehicle_sync(status, battery_kwh, raw_json='', vehicle_id=None):
     """Build a VehicleSync row from a connector VehicleStatus.
 
@@ -1667,8 +1691,14 @@ def _build_vehicle_sync(status, battery_kwh, raw_json='', vehicle_id=None):
         location_lat=status.location_lat,
         location_lon=status.location_lon,
         location_last_updated_at=_extract_location_last_updated(status, raw_json),
+        captured_at=_extract_captured_at(status),
         raw_json=raw_json,
     )
+
+
+def _poll_clock():
+    """Wall-clock time of a poll (naive local). A seam so tests can steer it."""
+    return datetime.now()
 
 
 def _save_vehicle_sync(status, battery_kwh, raw_json='', vehicle_id=None):
@@ -1696,6 +1726,7 @@ def _save_vehicle_sync(status, battery_kwh, raw_json='', vehicle_id=None):
         except Exception as _ue:
             db.session.rollback()
             logger.error(f"unit check for vehicle {vehicle_id} failed: {_ue}")
+    _poll_time = _poll_clock()
     new_sync = _build_vehicle_sync(status, battery_kwh, raw_json=raw_json,
                                    vehicle_id=vehicle_id)
     # v2.29: scope the "previous sync" lookup per-vehicle so the
@@ -1773,7 +1804,24 @@ def _save_vehicle_sync(status, battery_kwh, raw_json='', vehicle_id=None):
     # Always run parking detection on the latest snapshot.
     try:
         from services.trips_service import update_parking_from_sync
-        update_parking_from_sync(result)
+        # An unchanged poll writes no row, but it still PROVES the car stood
+        # at its open stop at poll time. Hand that time to the hook — only
+        # for a car with no trip source of its own (decided per vehicle, not
+        # per brand): a car whose manufacturer reports trips keeps its
+        # behaviour exactly.
+        _seen_at = None
+        if result is not None and result is last:
+            try:
+                from models.database import VehicleTrip
+                _tq = VehicleTrip.query
+                if vehicle_id is not None:
+                    _tq = _tq.filter(VehicleTrip.vehicle_id == vehicle_id)
+                if _tq.first() is None:
+                    _seen_at = _poll_time
+            except Exception as _se:
+                db.session.rollback()
+                logger.warning(f"trip-source check failed: {_se}")
+        update_parking_from_sync(result, seen_at=_seen_at)
     except Exception as e:
         logger.warning(f"Failed to update parking event: {e}")
 

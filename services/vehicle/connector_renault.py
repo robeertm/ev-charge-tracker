@@ -491,6 +491,10 @@ class _RenaultBase(VehicleConnector):
                 location_lat=location.gpsLatitude if location else None,
                 location_lon=location.gpsLongitude if location else None,
                 last_updated=str(battery.timestamp) if battery and battery.timestamp else None,
+                # The car's own capture time: the position's stamp first, the
+                # battery's as the fallback. Neither is the time of this poll.
+                captured_at=((location.lastUpdateTime if location else None)
+                             or (battery.timestamp if battery else None) or None),
                 vehicle_name=model,
                 vehicle_model=model,
                 raw_data={'vin': vin, 'picked': not want_vin and len(offered) > 1,
