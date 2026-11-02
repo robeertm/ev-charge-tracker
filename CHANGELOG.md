@@ -1,5 +1,10 @@
 # Changelog
 
+## v3.0.183 (2026-11-02)
+
+### Date trips by the car's own capture time and let unchanged polls confirm a stop
+
+
 ## v3.0.182 (2026-11-01)
 
 ### Sign-in state per vehicle, and a pause after a rejected credential
