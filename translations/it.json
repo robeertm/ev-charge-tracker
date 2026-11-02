@@ -2105,6 +2105,8 @@
   "pleos.err_key_expired": "La chiave Pleos è scaduta. Creare una nuova chiave su pleos.ai in «My Vehicle Data API» e inserire qui Client ID e Client Secret.",
   "pleos.key_approx": "circa {date}",
   "pleos.key_expires_in": "La chiave Pleos scade il {date} (ancora {days} giorni).",
+  "pleos.key_expires_in_one": "La chiave Pleos scade il {date} (ancora 1 giorno).",
+  "pleos.key_expired_since_one": "La chiave Pleos è scaduta il {date} (1 giorno fa) — crearne una nuova su pleos.ai.",
   "pleos.key_expires_today": "La chiave Pleos scade oggi ({date}).",
   "pleos.key_expired_since": "La chiave Pleos è scaduta il {date} ({days} giorni fa) — crearne una nuova su pleos.ai.",
   "pleos.key_estimated_note": "La data è stimata (primo utilizzo + 90 giorni). La data esatta è indicata nel portale Pleos in «API key status» e può essere inserita nel veicolo come «Chiave valida fino al»."

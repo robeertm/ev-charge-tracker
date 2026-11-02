@@ -308,7 +308,7 @@
 
                 {% if fleet_vehicles %}
                 <div class="table-responsive mb-3">
-                    <table class="table table-sm align-middle mb-0">
+                    <table class="table table-sm align-middle mb-0 fleet-table">
                         <thead>
                             <tr>
                                 <th>{{ t('set.fleet_col_name') }}</th>
@@ -347,7 +347,7 @@
                                     <span class="badge bg-success">{{ t('set.fleet_active') }}</span>
                                     {% endif %}
                                 </td>
-                                <td class="text-end">
+                                <td class="text-end fleet-actions">
                                     {% if v.api_brand and (v.api_username or (v.api_password and v.api_vin)) %}
                                     <form method="POST" action="/vehicles/{{ v.id }}/test" class="d-inline">
                                         <button type="submit" class="btn btn-sm btn-outline-info"

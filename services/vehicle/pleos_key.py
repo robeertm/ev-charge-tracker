@@ -244,11 +244,13 @@ def hint(vehicle, today=None) -> Optional[dict]:
         shown = t('pleos.key_approx', date=shown)
     days = info['days_left']
     if lvl == 'expired':
-        text = t('pleos.key_expired_since', date=shown, days=-days)
+        text = t('pleos.key_expired_since_one' if days == -1 else 'pleos.key_expired_since',
+                   date=shown, days=-days)
     elif days == 0:
         text = t('pleos.key_expires_today', date=shown)
     else:
-        text = t('pleos.key_expires_in', date=shown, days=days)
+        text = t('pleos.key_expires_in_one' if days == 1 else 'pleos.key_expires_in',
+                   date=shown, days=days)
     return {'level': lvl, 'text': text,
             'estimated_note': t('pleos.key_estimated_note') if est else '',
             'source': info['source'], 'days_left': days}

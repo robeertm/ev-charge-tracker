@@ -2105,6 +2105,8 @@
   "pleos.err_key_expired": "Der Pleos-Schlüssel ist abgelaufen. Bitte auf pleos.ai unter „My Vehicle Data API“ einen neuen Schlüssel erzeugen und Client ID und Client Secret hier eintragen.",
   "pleos.key_approx": "ca. {date}",
   "pleos.key_expires_in": "Pleos-Schlüssel läuft am {date} ab (noch {days} Tage).",
+  "pleos.key_expires_in_one": "Pleos-Schlüssel läuft am {date} ab (noch 1 Tag).",
+  "pleos.key_expired_since_one": "Pleos-Schlüssel abgelaufen am {date} (vor 1 Tag) — auf pleos.ai einen neuen erzeugen.",
   "pleos.key_expires_today": "Pleos-Schlüssel läuft heute ab ({date}).",
   "pleos.key_expired_since": "Pleos-Schlüssel abgelaufen am {date} (vor {days} Tagen) — auf pleos.ai einen neuen erzeugen.",
   "pleos.key_estimated_note": "Das Datum ist geschätzt (erster Abruf + 90 Tage). Das genaue Datum steht im Pleos-Portal unter „API key status“ und kann beim Fahrzeug als „Schlüssel gültig bis“ eingetragen werden."

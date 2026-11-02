@@ -2105,6 +2105,8 @@
   "pleos.err_key_expired": "De Pleos-sleutel is verlopen. Maak op pleos.ai onder ‘My Vehicle Data API’ een nieuwe sleutel aan en vul hier Client ID en Client Secret in.",
   "pleos.key_approx": "ca. {date}",
   "pleos.key_expires_in": "Pleos-sleutel verloopt op {date} (nog {days} dagen).",
+  "pleos.key_expires_in_one": "Pleos-sleutel verloopt op {date} (nog 1 dag).",
+  "pleos.key_expired_since_one": "Pleos-sleutel verlopen op {date} (1 dag geleden) — maak op pleos.ai een nieuwe aan.",
   "pleos.key_expires_today": "Pleos-sleutel verloopt vandaag ({date}).",
   "pleos.key_expired_since": "Pleos-sleutel verlopen op {date} ({days} dagen geleden) — maak op pleos.ai een nieuwe aan.",
   "pleos.key_estimated_note": "Deze datum is geschat (eerste gebruik + 90 dagen). De exacte datum staat in het Pleos-portaal onder ‘API key status’ en kan bij het voertuig worden ingevuld als ‘Sleutel geldig tot’."

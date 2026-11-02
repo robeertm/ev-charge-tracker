@@ -2105,6 +2105,8 @@
   "pleos.err_key_expired": "The Pleos key has expired. Please create a new key on pleos.ai under “My Vehicle Data API” and enter its Client ID and Client Secret here.",
   "pleos.key_approx": "approx. {date}",
   "pleos.key_expires_in": "Pleos key expires on {date} ({days} days left).",
+  "pleos.key_expires_in_one": "Pleos key expires on {date} (1 day left).",
+  "pleos.key_expired_since_one": "Pleos key expired on {date} (1 day ago) — create a new one on pleos.ai.",
   "pleos.key_expires_today": "Pleos key expires today ({date}).",
   "pleos.key_expired_since": "Pleos key expired on {date} ({days} days ago) — create a new one on pleos.ai.",
   "pleos.key_estimated_note": "This date is an estimate (first use + 90 days). The exact date is shown in the Pleos portal under “API key status” and can be entered for the vehicle as “Key valid until”."
