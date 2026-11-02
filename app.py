@@ -1655,6 +1655,30 @@ def _extract_captured_at(status):
     return None
 
 
+def _obd_context(vehicle_id, profile):
+    """What a profile needs to judge a doubtful reading: the car's last
+    known mileage (latest OBD reading, else latest sync). None for profiles
+    that do not use it — the live view must stay cheap."""
+    from services.vehicle.obd_decode import wants_context
+    if not wants_context(profile):
+        return None
+    try:
+        from models.database import ObdReading
+        row = (ObdReading.query.filter(ObdReading.vehicle_id == vehicle_id,
+                                       ObdReading.odometer_km.isnot(None))
+               .order_by(ObdReading.id.desc()).first())
+        km = row.odometer_km if row else None
+        if km is None:
+            row = (VehicleSync.query.filter(VehicleSync.vehicle_id == vehicle_id,
+                                            VehicleSync.odometer_km.isnot(None))
+                   .order_by(VehicleSync.id.desc()).first())
+            km = row.odometer_km if row else None
+        return {'odometer_km': km} if km is not None else None
+    except Exception:
+        logger.warning('OBD: could not read the last known mileage', exc_info=True)
+        return None
+
+
 def _build_vehicle_sync(status, battery_kwh, raw_json='', vehicle_id=None):
     """Build a VehicleSync row from a connector VehicleStatus.
 
@@ -3646,7 +3670,7 @@ def register_routes(app):
             return jsonify({'ok': False, 'error': 'no frames'}), 400
         profile = data.get('profile') or profile_for_brand(v.brand or v.api_brand)
         try:
-            decoded = decode(profile, frames)
+            decoded = decode(profile, frames, _obd_context(v.id, profile))
         except Exception as e:
             app.logger.exception('OBD decode failed')
             return jsonify({'ok': False, 'error': str(e)}), 500
@@ -3713,7 +3737,7 @@ def register_routes(app):
             return jsonify({'ok': False, 'error': 'no frames'}), 400
         profile = data.get('profile') or profile_for_brand(v.brand or v.api_brand)
         try:
-            decoded = decode(profile, frames)
+            decoded = decode(profile, frames, _obd_context(v.id, profile))
         except Exception as e:
             app.logger.exception('OBD live decode failed')
             return jsonify({'ok': False, 'error': str(e)}), 500

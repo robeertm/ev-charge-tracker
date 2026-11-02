@@ -750,7 +750,7 @@ class ObdReading(db.Model):
     soc_display_pct = db.Column(db.Float)    # dashboard SoC, if reported
     soh_pct = db.Column(db.Float)            # BMS State-of-Health register
     pack_voltage_v = db.Column(db.Float)
-    pack_current_a = db.Column(db.Float)     # + = discharge, - = charge (sign per profile)
+    pack_current_a = db.Column(db.Float)     # raw, sign per profile: Kia/Hyundai - = charge; XPENG disputed (majority - = charge), the consumer decides
     aux_battery_v = db.Column(db.Float)      # 12 V auxiliary battery
 
     # Cell voltages (V) — summary + full array in cell_voltages_json

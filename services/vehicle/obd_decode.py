@@ -281,13 +281,62 @@ def _field(resp, spec):
     ``scale`` (multiplier, default 1), ``offset`` (added after scaling,
     default 0 — encodes ``raw * scale + offset``, which also covers the
     ``(raw - k) * scale`` convention CanZE/OVMS use via ``offset = -k*scale``).
+
+    Two optional guards for a field that has been seen to read garbage:
+    ``echo`` (the reply must begin with exactly these bytes — service + DID —
+    else there is no value) and ``reject`` (values that are known false
+    readings, e.g. the echo bytes read as a number — no value either).
     """
+    echo = spec.get('echo')
+    if echo and list(resp[:len(echo)]) != list(echo):
+        return None
     length = spec.get('len', 1)
     le = spec.get('le', False)
     raw = _s(resp, spec['byte'], length, le) if spec.get('signed') else _u(resp, spec['byte'], length, le)
     if raw is None:
         return None
-    return raw * spec.get('scale', 1.0) + spec.get('offset', 0.0)
+    val = raw * spec.get('scale', 1.0) + spec.get('offset', 0.0)
+    if val in (spec.get('reject') or ()):
+        return None
+    return val
+
+
+#: A byte above the 16-bit part is believed (when nothing else is known) up to
+#: this value: 3 << 16 = 196 608 km. A byte beyond that is no car's mileage.
+ODO_TOP_BYTE_MAX = 3
+#: With the last known mileage at hand, a reading may be this far above it.
+ODO_STEP_MAX_KM = 20000
+
+
+def _field_alt(resp, spec, last=None):
+    """A field that exists in a wide and a narrow reading (``spec['alt']``).
+
+    The XPENG odometer: sources count 3 bytes (``[B4:B6]``) or 2
+    (``[B5:B6]``). Below 65 536 km they are identical as long as the top
+    byte is 0 — and a top byte that is NOT 0 on a younger car was seen to
+    produce garbage ("wacky numbers in the middle of the night", wican-fw
+    #371). So: a top byte of 0 → both agree. Otherwise the wide value is
+    taken only when it is believable — consistent with the last known
+    mileage when there is one, else not beyond ``ODO_TOP_BYTE_MAX`` — and
+    the narrow one when that is the believable one. Neither → no value.
+    A frame too short for the wide reading yields the narrow one.
+    """
+    wide = _field(resp, spec)
+    narrow = _field(resp, dict(spec['alt'], echo=spec.get('echo'), reject=spec.get('reject')))
+    if wide is None or narrow is None or wide == narrow:
+        return narrow if wide is None else wide if narrow is not None else None
+    if last is not None:
+        def fits(x):
+            return last - 1 <= x <= last + ODO_STEP_MAX_KM
+        return wide if fits(wide) else narrow if fits(narrow) else None
+    top = _u(resp, spec['byte'], spec.get('len', 1) - spec['alt'].get('len', 1))
+    return wide if top is not None and top <= ODO_TOP_BYTE_MAX else narrow
+
+
+def wants_context(profile_key: str) -> bool:
+    """True when a profile decodes better knowing the car's last mileage."""
+    prof = PROFILES.get(profile_key) or {}
+    return any('alt' in spec for spec in prof.get('fields', {}).values())
 
 
 # ── Profiles ─────────────────────────────────────────────────────────
@@ -476,8 +525,19 @@ PROFILES = {
         'fields': {
             # Pack voltage 221101 [B4:B5] / 10.
             'pack_voltage_v': {'pid': '221101', 'byte': 3, 'len': 2, 'scale': 0.1},
-            # Pack current 221103 (B4*256+B5) * 0.5 - 1600 (positive = charging
-            # on the G6 per the field profile).
+            # Pack current 221103 (B4*256+B5) * 0.5 - 1600; raw 3200 = 0 A.
+            # 🔴 The SIGN is disputed and not settled by any measurement we
+            # have: negative = charging per stevelea/xpcardata (docs/
+            # XPENG_G6_PIDs.md "matches dashboard display", WICAN_SETUP.md,
+            # its Dart profile) and vondraussen/xpeng-wican-evcc (live -9 A
+            # while trickle-charging, but marked unverified there); positive
+            # = charging per FranckH250/xpeng-home-assistant-wican (README,
+            # no measurement). Majority: negative = charging, same as the Kia
+            # map above. The value stays RAW here — reading it as "charging"
+            # is the consumer's job, and regeneration has the same sign as
+            # charging (xpcardata tells them apart with speed = 0 on two
+            # consecutive samples). Until 3.0.184 this said "positive =
+            # charging", which rested on the minority source only.
             'pack_current_a': {'pid': '221103', 'byte': 3, 'len': 2, 'scale': 0.5, 'offset': -1600.0},
             # Cell voltage max/min 221105/221106 [B4:B5] / 1000 (mV -> V).
             'cell_max_v': {'pid': '221105', 'byte': 3, 'len': 2, 'scale': 0.001},
@@ -490,8 +550,23 @@ PROFILES = {
             # SoH 22110A — same layout as its neighbours; unconfirmed (the
             # 2026 LFP pack does not answer it at all).
             'soh_pct': {'pid': '22110A', 'byte': 3, 'len': 2, 'scale': 0.1},
-            # Odometer 220101 [B5:B6] km — second data byte onward.
-            'odometer_km': {'pid': '220101', 'byte': 4, 'len': 2},
+            # Odometer 220101 km. Sources count [B4:B6] (3 bytes: wican-fw
+            # #371 / PR #483, PR #568) or [B5:B6] (2 bytes: FranckH250, the
+            # official wican-fw profile vehicle_profiles/xpeng/xpeng_g6.json,
+            # xpcardata). Our byte 3 = WiCAN B4 on a single frame. Wrong
+            # readings seen: 100 000 km for 10 000, 0, and 25 089 for 1 146 —
+            # 25 089 = 0x6201 is the service echo "62 01" read as a number,
+            # i.e. an answer that was shifted or cut short, not a formula
+            # problem (#371). Hence: the reply must start with the echo
+            # 62 01 01, 0 and 0x6201 are no reading, and the 3-byte value is
+            # used only when its top byte is believable (else the 2-byte
+            # one) — see _field_alt. If the real car answers 220101 in
+            # several frames, WiCAN's B-numbers count the follow-up frame
+            # headers too (wican-fw #514) and the bytes sit one place
+            # earlier than here; check ObdReading.raw_json once data exists.
+            'odometer_km': {'pid': '220101', 'byte': 3, 'len': 3,
+                            'echo': [0x62, 0x01, 0x01], 'reject': [0, 0x6201],
+                            'alt': {'byte': 4, 'len': 2}},
         },
         # Per-cell arrays and per-module temps use undocumented multi-frame
         # DIDs (only in CarScanner's closed profile) — we don't guess them.
@@ -930,8 +1005,11 @@ def _summ(values):
     return (min(values), max(values), sum(values) / len(values))
 
 
-def decode(profile_key: str, frames: dict):
+def decode(profile_key: str, frames: dict, context: dict = None):
     """Decode a dict of ``{pid: raw_elm_text}`` into battery metrics.
+
+    ``context`` may carry ``odometer_km`` (the car's last known mileage); only
+    profiles whose fields have an ``alt`` reading use it (see ``_field_alt``).
 
     Returns a dict with the scalar fields, cell/temperature summaries and
     the full per-cell / per-temperature arrays. Missing PIDs or fields
@@ -952,7 +1030,11 @@ def decode(profile_key: str, frames: dict):
 
     for name, spec in prof['fields'].items():
         r = resp.get(spec['pid'].upper())
-        out[name] = round(_field(r, spec), 3) if (r and _field(r, spec) is not None) else None
+        val = None
+        if r:
+            val = (_field_alt(r, spec, (context or {}).get('odometer_km')) if 'alt' in spec
+                   else _field(r, spec))
+        out[name] = round(val, 3) if val is not None else None
 
     # Cell voltages. Each cell spec says which PID carries the array, the
     # start byte, the cell count, the bytes-per-cell (``len``, default 1 —

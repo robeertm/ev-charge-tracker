@@ -28,12 +28,49 @@ button lists what it found, so a wrong guess is visible before it is
 recorded. Values HA reports as ``unavailable``/``unknown`` are no reading.
 Nothing is written to Home Assistant; the token is only used to read
 ``/api/states``.
+
+Cars without a charging entity (the XPENG G6 over a WiCAN dongle)
+----------------------------------------------------------------
+WiCAN publishes the profile parameters in capitals — ``SOC``,
+``ODOMETER``, ``HV_A`` (pack current), ``HV_V`` (pack voltage), optionally
+``SPEED`` and ``SOH`` — and Home Assistant turns them into entities such as
+``sensor.<device>_wican_<id>_local_hv_a``. Nobody publishes "is charging",
+so it is worked out here from the pack current:
+
+* **Sense.** The sources disagree on the sign of the XPENG pack current
+  (221103, ``(B4*256+B5)*0.5-1600`` A). Negative = charging: stevelea/
+  xpcardata (docs/XPENG_G6_PIDs.md, WICAN_SETUP.md, its Dart profile) and
+  vondraussen/xpeng-wican-evcc (live value -9 while trickle-charging — but
+  marked "unverified" there). Positive = charging: FranckH250/
+  xpeng-home-assistant-wican (README, no measurement given). The majority
+  is the default; the car itself settles it: when the state of charge keeps
+  rising while the car stands and the current has the *other* sense, the
+  sense is turned round for this car and remembered (``_learn``).
+* **Charging is not "current flows into the pack".** Regeneration has the
+  same sign as charging. xpcardata separates the two by speed ("speed=0 for
+  2 consecutive samples"). With a speed entity: |A| >= 1 in the charging
+  sense AND speed 0. Without one: the plug state confirms, or two
+  consecutive polls both show the current and the odometer has not moved.
+  A real ``charging``/``plug`` entity always wins.
+* **Power** is |V x A| only when both are there and plausible. The 2026 LFP
+  G6 reportedly does not answer HV_V at all (FranckH250); no voltage is
+  invented, the power stays empty (see ``_to_status``).
+* **Odometer.** An odometer only goes up: 0 after a positive value, a value
+  below the last one, a jump no car can drive in the time that has passed
+  (> 250 km/h on average) and the known false value 0x6201 = 25 089 (an
+  answer shifted by its own service echo, wican-fw #371) are no reading.
+
+The poll-to-poll memory lives in a small file per car (``STATE_DIR``),
+because the connector object is rebuilt for every poll.
 """
 from __future__ import annotations
 
+import hashlib
 import json
 import logging
+import os
 import re
+import time
 import urllib.error
 import urllib.request
 from typing import Optional
@@ -42,6 +79,28 @@ from .base import VehicleConnector, VehicleStatus, plausible_percent, to_km
 from .registry import register
 
 logger = logging.getLogger(__name__)
+
+try:
+    from config import DATA_DIR
+except Exception:                          # pragma: no cover
+    DATA_DIR = os.path.join(os.path.dirname(__file__), '..', '..', 'data')
+
+STATE_DIR = os.path.join(DATA_DIR, 'homeassistant')
+
+# ── inferring a charge from pack current ──────────────────────────────
+CHARGE_MIN_A = 1.0              # |A| below this is idle consumption, not a charge
+PACK_V_RANGE = (200.0, 900.0)   # a plausible traction pack (power = V x A)
+PACK_A_MAX = 1000.0             # more than this is no reading
+STILL_KMH = 0.5                 # "standing"
+MIN_POLL_GAP_S = 60             # two polls closer than this are one observation
+MAX_PREV_AGE_S = 6 * 3600       # an older previous poll says nothing
+LEARN_VOTES = 2                 # observed SoC rises that turn the sense round
+SOC_RISE_PCT = 1.0
+# ── odometer plausibility ─────────────────────────────────────────────
+ODO_MAX_KMH = 250.0
+ODO_SLACK_KM = 1.0              # whole-km rounding
+ODO_KNOWN_BAD = frozenset({0x6201})     # 25 089: echo "62 01" read as a value
+ODO_REANCHOR = 3                # distinct, mutually consistent lower readings
 
 CREDENTIAL_FIELDS = [
     {"key": "username", "label": "Home-Assistant-Adresse", "type": "text",
@@ -72,6 +131,19 @@ _WORDS = {
     'lon': ('longitude', 'lon', 'lng'),
     'outside': ('outside_temp', 'aussentemp', 'ambient', 'exterior_temp'),
 }
+# Whole token sequences ("hv_a" must not match "hv_ac" or "hv_ambient").
+# WiCAN names its parameters HV_A / HV_V; the rest are what other setups
+# call the traction pack's current and voltage.
+_PACK_CURRENT_WORDS = ('hv_a', 'hv_current', 'hvcurrent', 'pack_current', 'battery_current',
+                       'bms_current', 'batt_current', 'hv_battery_current', 'packstrom',
+                       'batteriestrom', 'akkustrom')
+_PACK_VOLTAGE_WORDS = ('hv_v', 'hv_voltage', 'hvvoltage', 'pack_voltage', 'battery_voltage',
+                       'bms_voltage', 'batt_voltage', 'hv_battery_voltage', 'packspannung',
+                       'batteriespannung', 'akkuspannung')
+_SPEED_WORDS = ('speed', 'geschwindigkeit', 'velocity', 'vehicle_speed')
+_NOT_SPEED = ('max', 'limit', 'avg', 'average', 'fan', 'wind', 'target', 'set')
+_SPEED_UNITS = {'km/h': 1.0, 'kph': 1.0, 'kmh': 1.0, 'km/hr': 1.0,
+                'mph': 1.609344, 'mi/h': 1.609344, 'm/s': 3.6}
 _NOT_SOC = _WORDS['target'] + _WORDS['aux'] + ('health', 'soh', 'temp', 'voltage', 'current')
 
 
@@ -106,6 +178,50 @@ def _has(text: str, words) -> bool:
     return any((w in parts) if '_' not in w else (w in text) for w in words)
 
 
+def _seq(text: str, words) -> bool:
+    """True when any of ``words`` occurs in ``text`` as whole tokens in a row."""
+    toks = [t for t in re.split(r'[^a-z0-9]+', text) if t]
+    for w in words:
+        wt = w.split('_')
+        n = len(wt)
+        if any(toks[i:i + n] == wt for i in range(len(toks) - n + 1)):
+            return True
+    return False
+
+
+def _is_pack_current(rest: str, dc: str, unit: str) -> bool:
+    return ((unit.lower() == 'a' or dc == 'current')
+            and unit.lower() in ('a', '')
+            and _seq(rest, _PACK_CURRENT_WORDS)
+            and not _has(rest, _WORDS['aux']))
+
+
+def _is_pack_voltage(rest: str, dc: str, unit: str, state) -> bool:
+    if not ((unit.lower() == 'v' or dc == 'voltage') and unit.lower() in ('v', '')):
+        return False
+    if not _seq(rest, _PACK_VOLTAGE_WORDS) or _has(rest, _WORDS['aux']):
+        return False
+    v = _num((state or {}).get('state'))
+    return v is None or 60.0 <= v <= 1000.0       # a 12 V value is not the pack
+
+
+def _is_speed(rest: str, dc: str, unit: str) -> bool:
+    return (unit.lower() in _SPEED_UNITS
+            and (dc == 'speed' or _has(rest, _SPEED_WORDS))
+            and not _has(rest, _NOT_SPEED))
+
+
+def _kmh(value, unit) -> Optional[float]:
+    v = _num(value)
+    f = _SPEED_UNITS.get(str(unit or 'km/h').strip().lower())
+    return None if v is None or f is None or v < 0 else v * f
+
+
+def _now() -> float:
+    """Wall-clock seconds of a poll — a seam so tests can steer it."""
+    return time.time()
+
+
 def _is_on(state) -> Optional[bool]:
     s = str(state or '').strip().lower()
     if s in _NO_VALUE:
@@ -129,6 +245,162 @@ def _km(value, unit) -> Optional[float]:
     if u in ('km', 'mi', 'mile', 'miles', ''):
         return to_km(v, u or 'km')
     return None
+
+
+# ── what the car did at the previous poll ─────────────────────────────
+# The connector object is rebuilt for every poll, so the previous poll is
+# kept in a small file per car (like the Renault connector keeps its
+# sign-in): keyed by a hash of address + entity prefix — nothing to put
+# in a file name that is private — written atomically, mode 0600.
+
+def _mem_path(base: str, prefix: str) -> str:
+    key = hashlib.sha256(f'{base}|{prefix}'.encode()).hexdigest()[:32]
+    return os.path.join(STATE_DIR, key + '.json')
+
+
+def _mem_load(path: str) -> dict:
+    try:
+        with open(path, encoding='utf-8') as f:
+            d = json.load(f)
+        return d if isinstance(d, dict) else {}
+    except (OSError, ValueError):
+        return {}
+
+
+def _mem_save(path: str, data: dict) -> None:
+    try:
+        os.makedirs(STATE_DIR, mode=0o700, exist_ok=True)
+        tmp = path + '.tmp'
+        fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+        try:
+            os.fchmod(fd, 0o600)
+        except OSError:                    # pragma: no cover - e.g. Windows
+            pass
+        with os.fdopen(fd, 'w', encoding='utf-8') as f:
+            json.dump(data, f)
+        os.replace(tmp, path)
+    except OSError as e:                   # a read-only data folder must not break a poll
+        logger.warning(f"Home Assistant: could not remember the last poll ({e})")
+
+
+def _check_odometer(mem: dict, km, stamp, now: float):
+    """``(km or None, reason or None)`` — only plausible readings pass.
+
+    An odometer only goes up, so the car's own last accepted reading is the
+    judge: no 0 after a positive value, nothing below it, no step a car
+    cannot drive in the time since (``ODO_MAX_KMH`` on average, plus one
+    rounding km), and never the known false value 0x6201. A reading that
+    is lower than the last one but agrees with its own predecessors for
+    ``ODO_REANCHOR`` distinct Home Assistant updates is taken as the new
+    truth — otherwise one wrongly accepted high value would lock every
+    later, correct reading out for good.
+    """
+    if km is None:
+        return None, None
+    last = mem.get('odo')
+    reason = None
+    if round(km) in ODO_KNOWN_BAD:
+        reason = 'known_bad'
+    elif last and km <= 0 and last['km'] > 0:
+        reason = 'zero'
+    elif last and km < last['km'] - ODO_SLACK_KM:
+        reason = 'backwards'
+    elif last and km - last['km'] > ODO_MAX_KMH * max(0.0, now - last['t']) / 3600.0 + ODO_SLACK_KM:
+        reason = 'jump'
+    if reason is None:
+        if km > 0:                          # a lone 0 is no baseline to judge by
+            mem['odo'] = {'km': km, 't': now}
+        mem.pop('odo_rej', None)
+        return km, None
+    if reason == 'backwards':
+        rej = mem.get('odo_rej')
+        if (rej and stamp and stamp != rej.get('stamp')
+                and rej['km'] - ODO_SLACK_KM <= km
+                <= rej['km'] + ODO_MAX_KMH * max(0.0, now - rej['t']) / 3600.0 + ODO_SLACK_KM):
+            rej = {'km': km, 't': now, 'stamp': stamp, 'n': rej.get('n', 1) + 1}
+        else:
+            rej = {'km': km, 't': now, 'stamp': stamp, 'n': 1}
+        mem['odo_rej'] = rej
+        if rej['n'] >= ODO_REANCHOR:
+            logger.warning(f"Home Assistant: odometer now reads {km:.0f} km, below the earlier "
+                           f"{last['km']:.0f} km, on {rej['n']} separate updates — taking it as the real one")
+            mem['odo'] = {'km': km, 't': now}
+            mem.pop('odo_rej', None)
+            return km, None
+    logger.warning(f"Home Assistant: odometer reading {km:.0f} km ignored ({reason}"
+                   f"{'' if not last else ', last accepted %.0f km' % last['km']})")
+    return None, reason
+
+
+def _mem_dirty(mem: dict, before: str) -> bool:
+    return json.dumps(mem, sort_keys=True) != before
+
+
+def _sense(current, sign) -> int:
+    """+1 = current flows in the charging sense, -1 = the other way, 0 = idle."""
+    if current is None:
+        return 0
+    c = current * sign
+    return 1 if c >= CHARGE_MIN_A else -1 if c <= -CHARGE_MIN_A else 0
+
+
+def _observe(mem: dict, now: float, *, soc, odo, cur, speed, plug, real_charging) -> dict:
+    """Charging from pack current, with the previous poll as witness.
+
+    Updates ``mem`` (previous poll, learned sense) and returns what was
+    decided: ``{'charging': True/False/None, 'mode': ..., 'sign': ...}``
+    (``None`` = leave it to the real entity).
+    """
+    sign = 1 if mem.get('sign', -1) > 0 else -1          # sign of the current WHILE charging
+    prev = mem.get('prev')
+    if not isinstance(prev, dict) or not 0 <= now - prev.get('t', -1e12) <= MAX_PREV_AGE_S:
+        prev = None
+    spaced = prev is not None and now - prev['t'] >= MIN_POLL_GAP_S
+    still = None if speed is None else speed <= STILL_KMH
+
+    # Learn the sense from the car: it stands, the state of charge climbs,
+    # and the current says "not charging" — twice. Then the assumed sense
+    # is wrong for this car.
+    if spaced and not real_charging and cur is not None:
+        pcur, psoc = prev.get('cur'), prev.get('soc')
+        both_still = ((still is True and prev.get('still') is True)
+                      or (speed is None and odo is not None and odo == prev.get('odo')))
+        if both_still and pcur is not None and soc is not None and psoc is not None:
+            if _sense(cur, sign) == -1 and _sense(pcur, sign) == -1 and soc - psoc >= SOC_RISE_PCT:
+                mem['votes'] = mem.get('votes', 0) + 1
+                if mem['votes'] >= LEARN_VOTES:
+                    sign = -sign
+                    mem.update(sign=sign, sign_learned=True, votes=0)
+                    logger.warning("Home Assistant: the state of charge rose twice while the car "
+                                   "stood, with the pack current in the other sense — a current "
+                                   f"{'above' if sign > 0 else 'below'} zero now means charging "
+                                   "for this car (remembered)")
+            elif _sense(cur, sign) == 1:
+                mem['votes'] = 0
+
+    out = {'charging': None, 'mode': 'entity' if real_charging else None, 'sign': sign,
+           'learned': bool(mem.get('sign_learned'))}
+    if not real_charging:
+        s_now = _sense(cur, sign)
+        if plug is False:
+            out.update(charging=False, mode='unplugged')
+        elif s_now != 1:
+            out.update(charging=False, mode='no_charge_current' if cur is not None else 'no_current')
+        elif still is True:
+            out.update(charging=True, mode='current+standstill')
+        elif still is False:
+            out.update(charging=False, mode='driving')           # regeneration
+        elif plug is True:
+            out.update(charging=True, mode='current+plug')
+        elif (spaced and odo is not None and odo == prev.get('odo')
+              and _sense(prev.get('cur'), sign) == 1):
+            out.update(charging=True, mode='current+two_polls')
+        else:
+            out.update(charging=False, mode='waiting_for_second_poll')
+
+    if prev is None or spaced:
+        mem['prev'] = {'t': now, 'odo': odo, 'soc': soc, 'cur': cur, 'still': still}
+    return out
 
 
 class HomeAssistantConnector(VehicleConnector):
@@ -223,6 +495,12 @@ class HomeAssistantConnector(VehicleConnector):
                 take('range', st)
             elif dc == 'power' and _has(rest, ('charging', 'charge', 'lade', 'ladeleistung')):
                 take('power', st)
+            elif _is_pack_current(rest, dc, unit):
+                take('pack_current', st)
+            elif _is_pack_voltage(rest, dc, unit, st):
+                take('pack_voltage', st)
+            elif _is_speed(rest, dc, unit):
+                take('speed', st)
 
         # Pass 2: words, for entities without (useful) metadata — MQTT
         # sensors from an OBD dongle typically carry only a unit.
@@ -246,6 +524,12 @@ class HomeAssistantConnector(VehicleConnector):
                 take('power', st)
             elif unit == 'v' and _has(rest, _WORDS['aux']):
                 take('aux_v', st)
+            elif _is_pack_current(rest, '', unit):
+                take('pack_current', st)
+            elif _is_pack_voltage(rest, '', unit, st):
+                take('pack_voltage', st)
+            elif _is_speed(rest, '', unit):
+                take('speed', st)
             elif unit in ('°c', '°f') and _has(rest, _WORDS['outside']):
                 take('outside', st)
             elif _has(rest, _WORDS['plug']):
@@ -261,7 +545,9 @@ class HomeAssistantConnector(VehicleConnector):
     def describe(self, roles: dict) -> str:
         names = [('soc', 'ha.role_soc'), ('odometer', 'ha.role_odometer'),
                  ('range', 'ha.role_range'), ('charging', 'ha.role_charging'),
-                 ('plug', 'ha.role_plug'), ('location', 'ha.role_location')]
+                 ('plug', 'ha.role_plug'), ('location', 'ha.role_location'),
+                 ('pack_current', 'ha.role_pack_current'),
+                 ('pack_voltage', 'ha.role_pack_voltage'), ('speed', 'ha.role_speed')]
         parts = []
         for role, key in names:
             st = roles.get(role)
@@ -313,10 +599,25 @@ class HomeAssistantConnector(VehicleConnector):
 
     def _to_status(self, roles: dict) -> VehicleStatus:
         v, u = self._val, self._unit
+        now = _now()
+        path = _mem_path(self._base(), self._prefix())
+        mem = _mem_load(path)
+        before = json.dumps(mem, sort_keys=True)
+
         soc = plausible_percent(_num(v(roles.get('soc'))))
         target = plausible_percent(_num(v(roles.get('target'))))
-        odo = _km(v(roles.get('odometer')), u(roles.get('odometer')))
+        odo_read = _km(v(roles.get('odometer')), u(roles.get('odometer')))
+        odo, odo_rejected = _check_odometer(
+            mem, odo_read, (roles.get('odometer') or {}).get('last_updated'), now)
         rng = _km(v(roles.get('range')), u(roles.get('range')))
+
+        cur = _num(v(roles.get('pack_current')))
+        if cur is not None and abs(cur) > PACK_A_MAX:
+            cur = None
+        volt = _num(v(roles.get('pack_voltage')))
+        if volt is not None and not PACK_V_RANGE[0] <= volt <= PACK_V_RANGE[1]:
+            volt = None
+        speed = _kmh(v(roles.get('speed')), u(roles.get('speed')))
 
         charging = _is_on(v(roles.get('charging')))
         plugged = _is_on(v(roles.get('plug')))
@@ -325,8 +626,26 @@ class HomeAssistantConnector(VehicleConnector):
             power = power / 1000.0
         if charging is None and power is not None:
             charging = power > 0.2
+        # No charging entity and no power entity: work it out from the pack
+        # current (see the module note). A real entity always wins.
+        inferred = _observe(mem, now, soc=soc, odo=odo, cur=cur, speed=speed, plug=plugged,
+                            real_charging=charging is not None)
+        if charging is None and inferred['charging'] is not None:
+            charging = inferred['charging']
         if charging and plugged is None:
             plugged = True
+
+        # Charge power: a real power entity first; else |V x A| when both
+        # are there. Without the pack voltage (the 2026 LFP G6 reportedly
+        # does not answer it) it stays EMPTY: a nominal voltage would be a
+        # guess presented as a reading, and AC power is not pack V x A
+        # anyway. Never shown for a car that is not charging — a -1.5 A
+        # idle draw is not a charge power.
+        if power is None and charging and cur is not None and volt is not None:
+            power = abs(volt * cur) / 1000.0
+
+        if _mem_dirty(mem, before):
+            _mem_save(path, mem)
 
         lat = lon = None
         loc = roles.get('location')
@@ -366,6 +685,18 @@ class HomeAssistantConnector(VehicleConnector):
                 'entities': {role: st['entity_id'] for role, st in roles.items() if st},
                 'states': {role: v(st) for role, st in roles.items() if st},
                 'aux_battery_v': _num(v(roles.get('aux_v'))),
+                'pack_current_a': cur,
+                'pack_voltage_v': volt,
+                'speed_kmh': speed,
+                'odometer_rejected': odo_rejected,
+                # What decided "charging" and which sense of the pack
+                # current counts as charging for this car (learned or
+                # the default): visible, so a wrong call can be traced.
+                'charge_inference': {
+                    'mode': inferred['mode'],
+                    'charging_current_sign': 'positive' if inferred['sign'] > 0 else 'negative',
+                    'sign_learned': inferred['learned'],
+                },
                 'outside_temperature_c': outside,
                 'lock_status_known': False,
             },
