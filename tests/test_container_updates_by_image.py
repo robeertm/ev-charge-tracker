@@ -114,7 +114,10 @@ def test_the_check_still_reports_what_is_available():
     have to watch the repository by hand."""
     quelle = (ROOT / 'app.py').read_text(encoding='utf-8')
     stelle = quelle.index("def api_update_check")
-    block = quelle[stelle:stelle + 1500]
+    # The whole function, up to the next route — a fixed window of 1500
+    # characters went red as soon as the function grew a few comments.
+    block = quelle[stelle:]
+    block = block[:block.index('    @app.route', 10)]
     assert "'update_available'" in block
     assert "'by_image'" in block
     assert "'release_url'" in block

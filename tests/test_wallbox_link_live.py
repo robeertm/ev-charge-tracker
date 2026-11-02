@@ -234,11 +234,15 @@ def _car_and_charge(base, data_dir):
         'vehicle_id': str(vid), 'name': 'Probe-Auto', 'battery_kwh': '64',
         'wallbox_present': '1', 'wallbox_link_enabled': 'on',
     })
+    # 40 → 70 % of 64 kWh = 19.2 kWh in the battery, matching the 21.4 kWh
+    # the meter reports. The old 20 → 70 % (32 kWh) made the meter reading
+    # look incomplete, and since v3.0.135 such a reading is held back as a
+    # conflict instead of being filed (shelly_link.contradicts_the_battery).
     con = _sqlite(data_dir)
     con.execute(
         'INSERT INTO charges (vehicle_id, date, charge_hour, charge_end_hour, '
         'kwh_loaded, charge_type, needs_review, soc_from, soc_to) '
-        'VALUES (?,?,?,?,?,?,1,20,70)',
+        'VALUES (?,?,?,?,?,?,1,40,70)',
         (vid, START.date().isoformat(), START.hour, ENDE.hour, 19.0, 'AC'))
     con.commit()
     cid = con.execute('SELECT id FROM charges ORDER BY id DESC LIMIT 1').fetchone()[0]

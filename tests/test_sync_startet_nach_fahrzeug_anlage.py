@@ -19,12 +19,13 @@ sys.path.insert(0, ROOT)
 
 
 @pytest.fixture
-def env(monkeypatch):
+def env(monkeypatch, fresh_app_modules):
     d = tempfile.mkdtemp(prefix='evct-syncstart-')
-    os.environ['EV_DATA_DIR'] = d
-    os.environ.setdefault('SECRET_KEY', 'syncstart-test')
-    for mod in [m for m in list(sys.modules) if m.startswith(('app', 'config', 'models', 'services'))]:
-        sys.modules.pop(mod, None)
+    # Fresh modules for this data dir — put back afterwards
+    # (conftest.fresh_app_modules); leaving ``services`` popped split
+    # services.units in two for every later file.
+    fresh_app_modules(('app', 'config', 'models', 'services'), EV_DATA_DIR=d,
+                      SECRET_KEY=os.environ.get('SECRET_KEY') or 'syncstart-test')
     from services.vehicle import sync_service as ss
     started = []
     stop = threading.Event()

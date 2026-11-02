@@ -21,12 +21,12 @@ sys.path.insert(0, ROOT)
 
 
 @pytest.fixture
-def app_ctx():
+def app_ctx(fresh_app_modules):
     d = tempfile.mkdtemp(prefix='evct-audit-')
-    os.environ['EV_DATA_DIR'] = d
-    os.environ.setdefault('SECRET_KEY', 'audit-test')
-    for mod in [m for m in list(sys.modules) if m.startswith(('app', 'config', 'models'))]:
-        sys.modules.pop(mod, None)
+    # Fresh app/config/models for this data dir — put back afterwards
+    # (conftest.fresh_app_modules); leaving them popped broke later files.
+    fresh_app_modules(('app', 'config', 'models'), EV_DATA_DIR=d,
+                      SECRET_KEY=os.environ.get('SECRET_KEY') or 'audit-test')
     from app import create_app
     a = create_app()
     with a.app_context():

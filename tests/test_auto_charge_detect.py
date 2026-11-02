@@ -36,18 +36,14 @@ AKKU = 58.0                    # usable capacity of the car this happened to
 
 
 @pytest.fixture
-def app_ctx():
+def app_ctx(fresh_app_modules):
     d = tempfile.mkdtemp(prefix='evct-detect-')
-    os.environ['EV_DATA_DIR'] = d
-    os.environ.setdefault('SECRET_KEY', 'detect-test')
     # 🔴 Only the two modules that read EV_DATA_DIR at import time. Dropping
-    # ``models`` as well would hand the next test file in the run a second
-    # SQLAlchemy registry while it still holds the first one — every mapping
-    # it made at collection time then belongs to a database that no longer
-    # exists. (test_sync_audit.py does drop them, which is why running it
-    # before test_shelly_link.py fails; this file does not add to that.)
-    for mod in [m for m in list(sys.modules) if m.startswith(('app', 'config'))]:
-        sys.modules.pop(mod, None)
+    # ``models`` as well would hand the code under test a second SQLAlchemy
+    # registry while this file still holds the first one. Put back after the
+    # test (conftest.fresh_app_modules), so no later file inherits them.
+    fresh_app_modules(('app', 'config'), EV_DATA_DIR=d,
+                      SECRET_KEY=os.environ.get('SECRET_KEY') or 'detect-test')
     from app import create_app
     a = create_app()
     with a.app_context():
