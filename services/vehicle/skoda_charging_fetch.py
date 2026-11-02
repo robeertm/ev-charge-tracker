@@ -71,7 +71,7 @@ def fetch_skoda_charging(days: int = 90,
     don't match are inserted with ``needs_review=True``.
     """
     from services.vehicle.myskoda_client import MySkodaSync, HAS_MYSKODA
-    from models.database import AppConfig, Vehicle
+    from models.database import db as _db, AppConfig, Vehicle
 
     out = {'inserted': 0, 'skipped_dedup': 0, 'periods_seen': 0,
            'sessions_seen': 0, 'days_requested': days}
@@ -82,7 +82,7 @@ def fetch_skoda_charging(days: int = 90,
 
     if not (email and password and vin):
         if vehicle_id is not None:
-            v = Vehicle.query.get(vehicle_id)
+            v = _db.session.get(Vehicle, vehicle_id)
             if v is not None:
                 email = email or v.api_username
                 password = password or v.api_password

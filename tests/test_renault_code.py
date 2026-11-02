@@ -184,7 +184,7 @@ out["after"] = r.get_json()
 # Einrichtungsassistent: Code per ajax, Antwort als JSON (zweites Konto)
 fake.install(setattr, tfa=True)
 with app.app_context():
-    v = Vehicle.query.get(vid); v.api_username = "second@example.invalid"; db.session.commit()
+    v = db.session.get(Vehicle, vid); v.api_username = "second@example.invalid"; db.session.commit()
 out["wiz_need"] = c.post("/vehicles/%%d/test" %% vid, data={"ajax": "1"}).get_json()
 out["wiz_wrong"] = c.post("/vehicles/%%d/code" %% vid, data={"ajax": "1", "code": "999999"}).get_json()
 out["wiz_ok"] = c.post("/vehicles/%%d/code" %% vid, data={"ajax": "1", "code": "123456"}).get_json()

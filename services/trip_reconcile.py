@@ -65,8 +65,8 @@ def _brand_supports_trip_info(vehicle_id=None) -> bool:
     """
     brand = ''
     if vehicle_id is not None:
-        from models.database import Vehicle
-        v = Vehicle.query.get(vehicle_id)
+        from models.database import db as _db, Vehicle
+        v = _db.session.get(Vehicle, vehicle_id)
         if v is not None and v.api_brand:
             brand = v.api_brand.lower()
     if not brand:

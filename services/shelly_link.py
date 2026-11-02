@@ -706,7 +706,7 @@ def hole_versaeumtes_nach(mode, specs=None, pv_co2=None):
     tally = {'applied': 0, 'retyped': 0, 'co2': 0}
     _pv_g = pv_co2() if callable(pv_co2) else pv_co2
     for wc in rows:
-        charge = Charge.query.get(wc.charge_id)
+        charge = db.session.get(Charge, wc.charge_id)
         if charge is None:
             continue
         if wc.applied_at is None:
@@ -785,8 +785,8 @@ def _default_specs(vehicle_id):
     average loss the app falls back to before it has learned anything.
     """
     from config import Config
-    from models.database import Vehicle
-    v = Vehicle.query.get(vehicle_id) if vehicle_id else None
+    from models.database import db, Vehicle
+    v = db.session.get(Vehicle, vehicle_id) if vehicle_id else None
     bk = float(getattr(v, 'battery_kwh', None) or 0) or float(
         getattr(Config, 'BATTERY_CAPACITY_KWH', 0) or 0) or None
     return bk, 0.88

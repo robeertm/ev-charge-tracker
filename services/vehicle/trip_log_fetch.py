@@ -103,8 +103,8 @@ def fetch_day_trip_info(target_date: date, vehicle_id=None) -> dict:
     # from the legacy AppConfig path.
     veh = None
     if vehicle_id is not None:
-        from models.database import Vehicle
-        veh = Vehicle.query.get(vehicle_id)
+        from models.database import db as _db, Vehicle
+        veh = _db.session.get(Vehicle, vehicle_id)
         if veh is None:
             out['skipped_reason'] = f'vehicle_id {vehicle_id} not found'
             return out

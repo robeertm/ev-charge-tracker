@@ -21,9 +21,9 @@ def _vehicle_field(vehicle_id, attr, appconfig_key, default):
     requiring every caller to plumb vehicle_id through five layers.
     """
     try:
-        from models.database import Vehicle
+        from models.database import db as _db, Vehicle
         if isinstance(vehicle_id, int):
-            v = Vehicle.query.get(vehicle_id)
+            v = _db.session.get(Vehicle, vehicle_id)
             if v is not None and getattr(v, attr) is not None:
                 return type(default)(getattr(v, attr))
             if v is not None and not _is_original_vehicle(vehicle_id):
@@ -97,9 +97,9 @@ def get_soh_baseline(vehicle_id=None) -> float:
     installs) and finally to 100.
     """
     try:
-        from models.database import Vehicle
+        from models.database import db as _db, Vehicle
         if isinstance(vehicle_id, int):
-            v = Vehicle.query.get(vehicle_id)
+            v = _db.session.get(Vehicle, vehicle_id)
             if v is not None and v.battery_soh_baseline:
                 return float(v.battery_soh_baseline) or 100.0
             if v is not None and not _is_original_vehicle(vehicle_id):
@@ -199,9 +199,9 @@ def get_recup_rate_kwh_per_km(vehicle_id=None):
         return measured, 'measured'
     # Configured fallback: per-vehicle row first, then AppConfig.
     try:
-        from models.database import Vehicle
+        from models.database import db as _db, Vehicle
         if isinstance(vehicle_id, int):
-            v = Vehicle.query.get(vehicle_id)
+            v = _db.session.get(Vehicle, vehicle_id)
             if v is not None and v.recuperation_kwh_per_km:
                 return float(v.recuperation_kwh_per_km), 'configured'
         v = (Vehicle.query.filter_by(is_archived=False)

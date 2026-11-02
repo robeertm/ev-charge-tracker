@@ -510,12 +510,12 @@ class AppConfig(db.Model):
 
     @staticmethod
     def get(key, default=None):
-        entry = AppConfig.query.get(key)
+        entry = db.session.get(AppConfig, key) if key is not None else None
         return entry.value if entry else default
 
     @staticmethod
     def set(key, value):
-        entry = AppConfig.query.get(key)
+        entry = db.session.get(AppConfig, key)
         if entry:
             entry.value = str(value)
         else:

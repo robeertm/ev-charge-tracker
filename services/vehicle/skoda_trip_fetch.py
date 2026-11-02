@@ -71,7 +71,7 @@ def fetch_skoda_trips(days: int = 30,
     ``daily_trips``, ``trips_seen``, optional ``error``).
     """
     from services.vehicle.myskoda_client import MySkodaSync, HAS_MYSKODA
-    from models.database import AppConfig, Vehicle
+    from models.database import db as _db, AppConfig, Vehicle
 
     out = {'added': 0, 'updated': 0, 'daily_trips': 0, 'trips_seen': 0,
            'days_requested': days}
@@ -83,7 +83,7 @@ def fetch_skoda_trips(days: int = 30,
     # Resolve credentials
     if not (email and password and vin):
         if vehicle_id is not None:
-            v = Vehicle.query.get(vehicle_id)
+            v = _db.session.get(Vehicle, vehicle_id)
             if v is not None:
                 email = email or v.api_username
                 password = password or v.api_password
@@ -110,7 +110,7 @@ def fetch_skoda_trips(days: int = 30,
         vin = vins[0]
         out['vin_discovered'] = vin
         if vehicle_id is not None:
-            v = Vehicle.query.get(vehicle_id)
+            v = _db.session.get(Vehicle, vehicle_id)
             if v is not None and not (v.api_vin or '').strip():
                 v.api_vin = vin
                 db.session.commit()

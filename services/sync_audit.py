@@ -131,11 +131,12 @@ def _describe(row, hoechster, km, art: str) -> dict:
 
 def audit(vehicle_ids: Optional[List[int]] = None) -> dict:
     """Report per vehicle. ``{'vehicles': [...], 'total': n}``."""
-    from models.database import Vehicle
+    from models.database import db, Vehicle
     if vehicle_ids is None:
         fahrzeuge = Vehicle.query.order_by(Vehicle.id.asc()).all()
     else:
-        fahrzeuge = [Vehicle.query.get(v) for v in vehicle_ids]
+        fahrzeuge = [db.session.get(Vehicle, v) if v is not None else None
+                     for v in vehicle_ids]
     out, gesamt = [], 0
     for v in fahrzeuge:
         if v is None:

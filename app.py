@@ -1163,7 +1163,7 @@ def _active_vehicle_api(vehicle_id=None):
     if vehicle_id is None:
         picked = _active_vehicle_id()
         vehicle_id = picked if isinstance(picked, int) else None
-    v = Vehicle.query.get(vehicle_id) if isinstance(vehicle_id, int) else None
+    v = db.session.get(Vehicle, vehicle_id) if isinstance(vehicle_id, int) else None
     if v is None:
         # Fleet view ('all') or no selection yet: act on the first
         # non-archived car, which is what the picker itself defaults to.
@@ -1192,7 +1192,7 @@ def _vehicle_attr(vehicle_id, attr, fallback):
     """
     from models.database import Vehicle
     if isinstance(vehicle_id, int):
-        v = Vehicle.query.get(vehicle_id)
+        v = db.session.get(Vehicle, vehicle_id)
         if v is not None and getattr(v, attr) is not None:
             return getattr(v, attr)
     v = (Vehicle.query.filter_by(is_archived=False)
@@ -1422,7 +1422,7 @@ def _active_vehicle_id():
     if raw is not None:
         try:
             vid = int(raw)
-            if Vehicle.query.get(vid) is not None:
+            if db.session.get(Vehicle, vid) is not None:
                 return vid
         except (ValueError, TypeError):
             pass
@@ -1448,7 +1448,7 @@ def _resolved_vehicle_filter():
         return None, None
     if raw is None:
         return None, None
-    return raw, Vehicle.query.get(raw)
+    return raw, db.session.get(Vehicle, raw)
 
 
 def _thg_quotas_for_picker():
@@ -1748,7 +1748,7 @@ def _save_vehicle_sync(status, battery_kwh, raw_json='', vehicle_id=None):
         try:
             from services.unit_history import note_reported_unit
             from models.database import Vehicle as _UV
-            _veh = _UV.query.get(vehicle_id)
+            _veh = db.session.get(_UV, vehicle_id)
             if _veh is not None:
                 note_reported_unit(db, _veh, status.distance_unit)
         except Exception as _ue:
@@ -3311,7 +3311,7 @@ def register_routes(app):
         active_vid = _active_vehicle_id()  # 'all' | int | None
         active_vehicle = None
         if isinstance(active_vid, int):
-            active_vehicle = Vehicle.query.get(active_vid)
+            active_vehicle = db.session.get(Vehicle, active_vid)
 
         # THG reminder: Jan 1 – Mar 31, scoped per-vehicle in v3.0. In
         # fleet view we warn if ANY non-archived vehicle is missing a
@@ -3364,7 +3364,7 @@ def register_routes(app):
         from models.database import Vehicle
         vid = _int(request.form.get('vehicle_id'))
         if vid:
-            v = Vehicle.query.get_or_404(vid)
+            v = db.get_or_404(Vehicle, vid)
         else:
             v = Vehicle()
         # What the sign-in pause (login_state) depends on: new credentials
@@ -3497,7 +3497,7 @@ def register_routes(app):
         """Toggle the ``is_archived`` flag. Archived vehicles drop out
         of the active picker but their history stays in fleet aggregates."""
         from models.database import Vehicle
-        v = Vehicle.query.get_or_404(vid)
+        v = db.get_or_404(Vehicle, vid)
         v.is_archived = not v.is_archived
         if v.is_archived and not v.retired_at:
             v.retired_at = date.today()
@@ -3512,7 +3512,7 @@ def register_routes(app):
         — not just at archive/sale — so the owner can print a current SoH proof
         whenever a buyer asks."""
         from models.database import Vehicle
-        v = Vehicle.query.get_or_404(vid)
+        v = db.get_or_404(Vehicle, vid)
         from services.battery_cert_service import generate_certificate
         from services.i18n import get_language, set_language, SUPPORTED_LANGUAGES
         # ?lang=en lets the owner pull the certificate in another language
@@ -3577,7 +3577,7 @@ def register_routes(app):
         estimate with its range and basis, ``unavailable`` what the BMS of
         this car does not give and why. Unmeasured values are null, never 0."""
         from models.database import Vehicle
-        Vehicle.query.get_or_404(vid)
+        db.get_or_404(Vehicle, vid)
         from services.battery_cert_service import (
             compute_battery_health, describe_unavailable, estimate_none_text)
         d = compute_battery_health(vid)
@@ -3623,7 +3623,7 @@ def register_routes(app):
             sel = None
         active = None
         if sel:
-            active = Vehicle.query.get(sel)
+            active = db.session.get(Vehicle, sel)
         if active is None:
             active = next((v for v in vehicles if not v.is_archived), None) or \
                 (vehicles[0] if vehicles else None)
@@ -3687,7 +3687,7 @@ def register_routes(app):
         from models.database import Vehicle
         from services.vehicle.obd_decode import (
             profile_for_brand, get_profile, PROFILES, wire_header)
-        v = Vehicle.query.get_or_404(vid)
+        v = db.get_or_404(Vehicle, vid)
         # Explicit override via ?profile= wins; else derive from brand.
         key = request.args.get('profile') or profile_for_brand(v.brand or v.api_brand)
         prof = get_profile(key)
@@ -3736,7 +3736,7 @@ def register_routes(app):
         from models.database import Vehicle, ObdReading
         from services.vehicle.obd_decode import decode, profile_for_brand
         import json as _json
-        v = Vehicle.query.get_or_404(vid)
+        v = db.get_or_404(Vehicle, vid)
         data = request.get_json(silent=True) or {}
         frames = data.get('frames') or {}
         if not isinstance(frames, dict) or not frames:
@@ -3803,7 +3803,7 @@ def register_routes(app):
         the browser can render every gauge in real time (CarScanner-style)."""
         from models.database import Vehicle
         from services.vehicle.obd_decode import decode, profile_for_brand
-        v = Vehicle.query.get_or_404(vid)
+        v = db.get_or_404(Vehicle, vid)
         data = request.get_json(silent=True) or {}
         frames = data.get('frames') or {}
         if not isinstance(frames, dict) or not frames:
@@ -3825,7 +3825,7 @@ def register_routes(app):
         Returns flash with success/error so the user can sanity-check
         their setup right from the Fahrzeuge table."""
         from models.database import Vehicle
-        v = Vehicle.query.get_or_404(vid)
+        v = db.get_or_404(Vehicle, vid)
         _ajax = request.form.get('ajax') == '1'
         from services.vehicle.catalog import credentials_of, credentials_present
         if not credentials_present(v.api_brand, v.api_username,
@@ -3873,7 +3873,7 @@ def register_routes(app):
         """Take the e-mail code Renault/Dacia sent, finish the sign-in."""
         from models.database import Vehicle
         from services.vehicle.catalog import credentials_of
-        v = Vehicle.query.get_or_404(vid)
+        v = db.get_or_404(Vehicle, vid)
         if (v.api_brand or '').lower() not in ('renault', 'dacia'):
             return redirect('/settings#sec-fleet')
         error = None
@@ -3913,7 +3913,7 @@ def register_routes(app):
         """
         from models.database import Vehicle
         from services.vehicle.skoda_public_api import SkodaApiError, get_vehicle
-        v = Vehicle.query.get_or_404(vid)
+        v = db.get_or_404(Vehicle, vid)
         data = request.get_json(silent=True) or request.form
         key = (data.get('api_key') or '').strip()
         vin = (data.get('vin') or v.api_vin or '').strip().upper()
@@ -3963,7 +3963,7 @@ def register_routes(app):
         from models.database import Vehicle
         from services.vehicle.connector_pleos import REPLACES
         from services.vehicle.pleos_api import PleosError, pick_vehicle, reset_state
-        v = Vehicle.query.get_or_404(vid)
+        v = db.get_or_404(Vehicle, vid)
         data = request.get_json(silent=True) or request.form
         cid = (data.get('client_id') or '').strip()
         secret = (data.get('client_secret') or '').strip()
@@ -4014,7 +4014,7 @@ def register_routes(app):
     def api_vehicle_remote_optin(vid):
         """Turn remote control on or off for one vehicle. Opt-in, per car."""
         from models.database import Vehicle
-        v = Vehicle.query.get_or_404(vid)
+        v = db.get_or_404(Vehicle, vid)
         data = request.get_json(silent=True) or request.form
         want = str(data.get('enabled', '')).lower() in ('1', 'true', 'yes', 'on')
         v.remote_control_enabled = want
@@ -4033,7 +4033,7 @@ def register_routes(app):
         """
         from models.database import Vehicle
         from services.vehicle.base import SENSITIVE_COMMANDS, remote_commands_of
-        v = Vehicle.query.get_or_404(vid)
+        v = db.get_or_404(Vehicle, vid)
         cmds = []
         try:
             from services.vehicle import get_connector
@@ -4072,7 +4072,7 @@ def register_routes(app):
         from services.vehicle.base import (RemoteNotSupported, SENSITIVE_COMMANDS,
                                            remote_commands_of)
         from services.vehicle.catalog import credentials_of, credentials_present
-        v = Vehicle.query.get_or_404(vid)
+        v = db.get_or_404(Vehicle, vid)
 
         if not v.remote_control_enabled:
             return jsonify({'ok': False, 'kind': 'remote_disabled',
@@ -4116,7 +4116,7 @@ def register_routes(app):
         """Manual one-shot sync for a single vehicle. Same path as the
         background loop's _sync_one_vehicle, just on demand."""
         from models.database import Vehicle
-        v = Vehicle.query.get_or_404(vid)
+        v = db.get_or_404(Vehicle, vid)
         from services.vehicle.catalog import credentials_of, credentials_present
         if not credentials_present(v.api_brand, v.api_username,
                                    v.api_password, v.api_vin):
@@ -4149,7 +4149,7 @@ def register_routes(app):
         from models.database import (
             Vehicle, Charge, VehicleSync, ParkingEvent, VehicleTrip, MaintenanceEntry,
         )
-        v = Vehicle.query.get_or_404(vid)
+        v = db.get_or_404(Vehicle, vid)
         in_use = (
             Charge.query.filter_by(vehicle_id=vid).count()
             + VehicleSync.query.filter_by(vehicle_id=vid).count()
@@ -4185,7 +4185,7 @@ def register_routes(app):
             vid = int(raw)
         except (TypeError, ValueError):
             return jsonify({'error': 'invalid vehicle_id'}), 400
-        if Vehicle.query.get(vid) is None:
+        if db.session.get(Vehicle, vid) is None:
             return jsonify({'error': 'vehicle not found'}), 404
         session['vehicle_filter'] = vid
         return jsonify({'ok': True, 'vehicle_id': vid})
@@ -4317,7 +4317,7 @@ def register_routes(app):
                 # inserting a new row. Prevents duplicate rows per session
                 # and keeps the running timer intact after the redirect.
                 existing_id = _int(request.form.get('charge_id'))
-                charge = Charge.query.get(existing_id) if existing_id else None
+                charge = db.session.get(Charge, existing_id) if existing_id else None
                 is_update = charge is not None
                 # v3.0.15: server-side double-submit guard. The Stop +
                 # Save buttons had no debounce, so a 3× tap (the user's
@@ -4581,7 +4581,7 @@ def register_routes(app):
             if not getattr(charge, 'wallbox_charge_id', None):
                 return
             from models.database import WallboxCharge
-            wc = WallboxCharge.query.get(charge.wallbox_charge_id)
+            wc = db.session.get(WallboxCharge, charge.wallbox_charge_id)
             if wc is None:
                 return
             wc.charge_id = None
@@ -4688,7 +4688,7 @@ def register_routes(app):
     # ── EDIT / DELETE ──────────────────────────────────────────
     @app.route('/edit/<int:charge_id>', methods=['GET', 'POST'])
     def edit_charge(charge_id):
-        charge = Charge.query.get_or_404(charge_id)
+        charge = db.get_or_404(Charge, charge_id)
 
         if request.method == 'POST':
             try:
@@ -4787,7 +4787,7 @@ def register_routes(app):
 
     @app.route('/delete/<int:charge_id>', methods=['POST'])
     def delete_charge(charge_id):
-        charge = Charge.query.get_or_404(charge_id)
+        charge = db.get_or_404(Charge, charge_id)
         # A wallbox reading attached to this entry must be released, not left
         # pointing at a row that no longer exists: it would stay "matched"
         # forever, never be offered to the charge the user logs instead, and
@@ -4856,7 +4856,7 @@ def register_routes(app):
                 # v3.0.155: a car's history recorded in miles → km (or back)
                 from models.database import Vehicle as _UVeh
                 from services import unit_history as _uh
-                _veh = _UVeh.query.get(_int(request.form.get('vehicle_id')) or 0)
+                _veh = db.session.get(_UVeh, _int(request.form.get('vehicle_id')) or 0)
                 if _veh is not None:
                     _dir = 'mi_to_km' if action == 'units_convert' else 'km_to_mi'
                     try:
@@ -5012,7 +5012,11 @@ def register_routes(app):
                     flash(t('flash.error', error=e), 'danger')
 
             elif action == 'delete_thg':
-                thg = ThgQuota.query.get(request.form.get('thg_id'))
+                try:
+                    _thg_id = int(request.form.get('thg_id'))
+                except (TypeError, ValueError):
+                    _thg_id = None
+                thg = db.session.get(ThgQuota, _thg_id) if _thg_id is not None else None
                 if thg:
                     db.session.delete(thg)
                     db.session.commit()
@@ -5336,7 +5340,7 @@ def register_routes(app):
         _picker_v = None
         _api_active_vid = _active_vehicle_id()
         if isinstance(_api_active_vid, int):
-            _picker_v = _SetV.query.get(_api_active_vid)
+            _picker_v = db.session.get(_SetV, _api_active_vid)
         if _picker_v is None:
             _picker_v = (_SetV.query.filter_by(is_archived=False)
                          .order_by(_SetV.id.asc()).first())
@@ -5509,10 +5513,10 @@ def register_routes(app):
     def api_wallbox_charge(charge_id):
         """The meter's reading for one of our charges, if there is one."""
         from models.database import Charge, WallboxCharge
-        c = Charge.query.get_or_404(charge_id)
+        c = db.get_or_404(Charge, charge_id)
         if not c.wallbox_charge_id:
             return jsonify({'ok': True, 'reading': None})
-        wc = WallboxCharge.query.get(c.wallbox_charge_id)
+        wc = db.session.get(WallboxCharge, c.wallbox_charge_id)
         return jsonify({'ok': True, 'reading': wc.to_dict() if wc else None})
 
     @app.route('/api/wallbox/charge/<int:charge_id>/curve')
@@ -5525,10 +5529,10 @@ def register_routes(app):
         """
         from models.database import Charge, WallboxCharge
         from services import shelly_link as wl
-        c = Charge.query.get_or_404(charge_id)
+        c = db.get_or_404(Charge, charge_id)
         if not c.wallbox_charge_id:
             return jsonify({'ok': False, 'error': 'no wallbox reading'}), 200
-        wc = WallboxCharge.query.get(c.wallbox_charge_id)
+        wc = db.session.get(WallboxCharge, c.wallbox_charge_id)
         if wc is None:
             return jsonify({'ok': False, 'error': 'no wallbox reading'}), 200
         try:
@@ -5545,8 +5549,8 @@ def register_routes(app):
         from models.database import db, Charge, WallboxCharge
         from services import shelly_link as wl
         undo = bool((request.get_json(silent=True) or {}).get('undo'))
-        c = Charge.query.get_or_404(charge_id)
-        wc = WallboxCharge.query.get(c.wallbox_charge_id) if c.wallbox_charge_id else None
+        c = db.get_or_404(Charge, charge_id)
+        wc = db.session.get(WallboxCharge, c.wallbox_charge_id) if c.wallbox_charge_id else None
         if wc is None:
             return jsonify({'ok': False, 'error': 'no wallbox reading'}), 200
         bk, eff = _wallbox_specs(c.vehicle_id)
@@ -5570,13 +5574,13 @@ def register_routes(app):
         from models.database import db, Charge, Vehicle, WallboxCharge
         from services import shelly_link as wl
         data = request.get_json(silent=True) or {}
-        wc = WallboxCharge.query.get_or_404(int(data.get('reading_id') or 0))
+        wc = db.get_or_404(WallboxCharge, int(data.get('reading_id') or 0))
         raw = data.get('charge_id')
         if raw in (None, '', 0, '0'):
             # Detaching: the reading goes back to being unmatched and the
             # charge keeps whatever it said before the adoption.
             if wc.charge_id:
-                old = Charge.query.get(wc.charge_id)
+                old = db.session.get(Charge, wc.charge_id)
                 if old is not None:
                     bk, eff = _wallbox_specs(old.vehicle_id)
                     wl.unapply_measurement(wc, old, bk, eff)
@@ -5594,7 +5598,7 @@ def register_routes(app):
         # what happened.
         if str(raw) == 'new':
             vid = int(data.get('vehicle_id') or 0)
-            v = Vehicle.query.get(vid) if vid else None
+            v = db.session.get(Vehicle, vid) if vid else None
             if v is None:
                 return jsonify({'ok': False, 'error': 'unknown car'}), 200
             c, grund = wl.auf_wunsch_anlegen(wc, v, wl.settings())
@@ -5611,7 +5615,7 @@ def register_routes(app):
             db.session.commit()
             return jsonify({'ok': True, 'state': wc.match_state,
                             'charge': c.to_dict()})
-        c = Charge.query.get_or_404(int(raw))
+        c = db.get_or_404(Charge, int(raw))
         if c.wallbox_charge_id and c.wallbox_charge_id != wc.id:
             return jsonify({'ok': False,
                             'error': 'that charge already has a wallbox reading'}), 200
@@ -5642,7 +5646,7 @@ def register_routes(app):
         """
         from models.database import db, WallboxCharge
         data = request.get_json(silent=True) or {}
-        wc = WallboxCharge.query.get_or_404(int(data.get('reading_id') or 0))
+        wc = db.get_or_404(WallboxCharge, int(data.get('reading_id') or 0))
         if wc.match_state == 'matched':
             return jsonify({
                 'ok': False,
@@ -5669,7 +5673,7 @@ def register_routes(app):
         """Charges that could be this reading — what the picker offers."""
         from models.database import Vehicle, WallboxCharge
         from services import shelly_link as wl
-        wc = WallboxCharge.query.get_or_404(reading_id)
+        wc = db.get_or_404(WallboxCharge, reading_id)
         cfg = wl.settings()
         cands = wl._candidates(wc, wl.linked_vehicles(wc.device_key),
                                cfg['tolerance_min'])
@@ -5772,7 +5776,7 @@ def register_routes(app):
         explanation of the manufacturer's reserve-capacity quirk."""
         import json as _json
         from services.stats_service import scale_soh, get_soh_baseline
-        sync = VehicleSync.query.get_or_404(sync_id)
+        sync = db.get_or_404(VehicleSync, sync_id)
         raw_parsed = None
         raw_error = None
         if sync.raw_json:
@@ -5788,7 +5792,7 @@ def register_routes(app):
         brand_key = ''
         try:
             from models.database import Vehicle as _Vd2
-            _vd2 = _Vd2.query.get(sync.vehicle_id) if sync.vehicle_id else None
+            _vd2 = db.session.get(_Vd2, sync.vehicle_id) if sync.vehicle_id else None
             brand_key = (_vd2.api_brand or '') if _vd2 is not None else ''
         except Exception:
             logger.warning('raw detail: could not resolve the vehicle',
@@ -5952,7 +5956,7 @@ def register_routes(app):
 
     @app.route('/api/charge/<int:charge_id>/odometer', methods=['POST'])
     def api_update_odometer(charge_id):
-        charge = Charge.query.get_or_404(charge_id)
+        charge = db.get_or_404(Charge, charge_id)
         data = request.get_json()
         charge.odometer = int(data['odometer']) if data.get('odometer') else None
         db.session.commit()
@@ -5963,7 +5967,7 @@ def register_routes(app):
         """Return a single Charge's fields as JSON for the in-place edit
         modal in the history list (v3.0.24). Mirrors Charge.to_dict() and
         adds the needs_review flag the modal uses to mark the form."""
-        charge = Charge.query.get_or_404(charge_id)
+        charge = db.get_or_404(Charge, charge_id)
         d = charge.to_dict()
         d['needs_review'] = bool(charge.needs_review)
         d['vehicle_id'] = charge.vehicle_id
@@ -6063,7 +6067,7 @@ def register_routes(app):
             vid_arg = request.args.get('vehicle_id')
             if vid_arg:
                 try:
-                    v = Vehicle.query.get(int(vid_arg))
+                    v = db.session.get(Vehicle, int(vid_arg))
                     if v is not None:
                         v.api_password = state['token']
                         db.session.commit()
@@ -6100,7 +6104,7 @@ def register_routes(app):
         if ok and token:
             if vid:
                 try:
-                    v = Vehicle.query.get(int(vid))
+                    v = db.session.get(Vehicle, int(vid))
                     if v is not None:
                         v.api_brand = brand
                         v.api_password = token
@@ -7052,7 +7056,7 @@ def register_routes(app):
         week's worth of history.
         """
         from models.database import ParkingEvent
-        evt = ParkingEvent.query.get_or_404(event_id)
+        evt = db.get_or_404(ParkingEvent, event_id)
 
         def _iso(dt):
             return dt.isoformat() if dt else None
@@ -7186,7 +7190,7 @@ def register_routes(app):
         sdk_trip_id = data.get('sdk_trip_id')
         if not sdk_trip_id:
             return jsonify({'error': 'sdk_trip_id_required'}), 400
-        row = VehicleTrip.query.get(sdk_trip_id)
+        row = db.session.get(VehicleTrip, sdk_trip_id)
         if row is None:
             return jsonify({'error': 'sdk_trip_not_found'}), 404
         if not row.start_time:
@@ -7243,8 +7247,8 @@ def register_routes(app):
             _classify_location, _haversine_m, _load_locations,
         )
 
-        ev_from = ParkingEvent.query.get_or_404(from_id)
-        ev_to = ParkingEvent.query.get_or_404(to_id)
+        ev_from = db.get_or_404(ParkingEvent, from_id)
+        ev_to = db.get_or_404(ParkingEvent, to_id)
         if ev_from.vehicle_id != ev_to.vehicle_id:
             return jsonify({'error': 'vehicle_mismatch'}), 400
         if not ev_from.departed_at or not ev_to.arrived_at:
@@ -7371,8 +7375,8 @@ def register_routes(app):
         from models.database import ParkingEvent, VehicleSync
         from services.trips_service import _classify_location
 
-        ev_from = ParkingEvent.query.get_or_404(from_id)
-        ev_to = ParkingEvent.query.get_or_404(to_id)
+        ev_from = db.get_or_404(ParkingEvent, from_id)
+        ev_to = db.get_or_404(ParkingEvent, to_id)
         if ev_from.vehicle_id != ev_to.vehicle_id:
             return jsonify({'error': 'vehicle_mismatch'}), 400
         if not ev_from.departed_at or not ev_to.arrived_at:
@@ -7637,7 +7641,7 @@ def register_routes(app):
         if target_vid is None:
             picker = _active_vehicle_id()
             if isinstance(picker, int):
-                v = Vehicle.query.get(picker)
+                v = db.session.get(Vehicle, picker)
                 if v is not None and (v.api_brand or '').lower() == 'skoda':
                     target_vid = picker
         if target_vid is None:
@@ -7684,7 +7688,7 @@ def register_routes(app):
         if target_vid is None:
             picker = _active_vehicle_id()
             if isinstance(picker, int):
-                v = Vehicle.query.get(picker)
+                v = db.session.get(Vehicle, picker)
                 if v is not None and (v.api_brand or '').lower() == 'skoda':
                     target_vid = picker
         if target_vid is None:
@@ -8073,7 +8077,7 @@ def register_routes(app):
         to populate from. The MaintenanceEntry model has no to_dict()
         helper, so the field shape is built here once."""
         from models.database import MaintenanceEntry
-        e = MaintenanceEntry.query.get_or_404(entry_id)
+        e = db.get_or_404(MaintenanceEntry, entry_id)
         return jsonify({
             'id': e.id,
             'date': e.date.isoformat() if e.date else None,

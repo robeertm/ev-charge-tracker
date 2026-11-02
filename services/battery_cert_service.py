@@ -59,7 +59,7 @@ import tempfile
 from datetime import date, datetime
 from statistics import median
 
-from models.database import Charge, Vehicle, ObdReading
+from models.database import db, Charge, Vehicle, ObdReading
 from services import units as _U
 from services import battery_analysis as BA
 from services.stats_service import (
@@ -569,7 +569,7 @@ def compute_battery_health(vehicle_id):
     a future API / preview). Never raises on sparse data — missing signals
     come back as ``None`` and the caller renders "n/a".
     """
-    vehicle = Vehicle.query.get(vehicle_id)
+    vehicle = db.session.get(Vehicle, vehicle_id) if vehicle_id is not None else None
     if vehicle is None:
         return None
 

@@ -439,7 +439,7 @@ c = app.test_client()
 page = c.get('/settings').get_data(as_text=True)
 r = c.post('/api/vehicle/%%d/pleos/switch' %% vid, json={'client_id': 'cid', 'client_secret': %(sent)r})
 with app.app_context():
-    v = Vehicle.query.get(vid)
+    v = db.session.get(Vehicle, vid)
     print(json.dumps({'answer': r.get_json(), 'brand': v.api_brand, 'user': v.api_username,
                       'pw': v.api_password, 'vin': v.api_vin,
                       'cfg_brand': AppConfig.get('vehicle_api_brand', ''),

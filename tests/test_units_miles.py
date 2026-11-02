@@ -342,7 +342,7 @@ def test_an_odometer_survives_conversion_and_undo_exactly(file_db):
     before = _snapshot(db, v.id)
     assert convert(db, v, 'mi_to_km', reason='settings')['ok']
     assert convert(db, v, 'mi_to_km', reason='settings') == {'ok': False, 'reason': 'already'}
-    assert convert(db, Vehicle.query.get(v.id), 'km_to_mi', reason='settings')['ok']
+    assert convert(db, db.session.get(Vehicle, v.id), 'km_to_mi', reason='settings')['ok']
     back = _snapshot(db, v.id)
     for col, vals in before.items():
         if col.endswith(('distance_km', 'avg_speed_kmh', 'kwh_per_100km')):

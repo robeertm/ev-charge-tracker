@@ -162,7 +162,7 @@ def test_platzhalter_wird_durch_kilometerstand_befreit():
         pe = _platzhalter(v.id, odo=91871)
         _sync(v.id, odo=91928)                      # 57 km weitergefahren
         assert release_stuck_parking_events() == 1
-        assert _m().ParkingEvent.query.get(pe.id).departed_at is not None
+        assert _m().db.session.get(_m().ParkingEvent, pe.id).departed_at is not None
     finally:
         ctx.pop()
 
@@ -176,7 +176,7 @@ def test_platzhalter_ohne_kilometerbeweis_bleibt_offen():
         pe = _platzhalter(v.id, odo=91871)
         _sync(v.id, odo=91871)                      # keinen Meter bewegt
         assert release_stuck_parking_events() == 0
-        assert _m().ParkingEvent.query.get(pe.id).departed_at is None
+        assert _m().db.session.get(_m().ParkingEvent, pe.id).departed_at is None
     finally:
         ctx.pop()
 
@@ -199,7 +199,7 @@ def test_auch_ein_beschrifteter_parkvorgang_wird_befreit():
         pe = _platzhalter(v.id, odo=91871, etikett='home')
         _sync(v.id, odo=91928)                      # 57 km weitergefahren
         assert release_stuck_parking_events() == 1
-        assert _m().ParkingEvent.query.get(pe.id).departed_at is not None
+        assert _m().db.session.get(_m().ParkingEvent, pe.id).departed_at is not None
     finally:
         ctx.pop()
 
@@ -215,7 +215,7 @@ def test_ein_beschrifteter_parkvorgang_ohne_kilometerbeweis_bleibt_offen():
         pe = _platzhalter(v.id, odo=91871, etikett='home')
         _sync(v.id, odo=91871)
         assert release_stuck_parking_events() == 0
-        assert _m().ParkingEvent.query.get(pe.id).departed_at is None
+        assert _m().db.session.get(_m().ParkingEvent, pe.id).departed_at is None
     finally:
         ctx.pop()
 
@@ -231,8 +231,8 @@ def test_der_juengste_halt_bleibt_offen_auch_wenn_ein_alter_befreit_wird():
         neu_pe = _platzhalter(v.id, odo=57248, etikett='work')
         _sync(v.id, odo=57248)                      # steht da, wo neu_pe oeffnete
         assert release_stuck_parking_events() == 1
-        assert _m().ParkingEvent.query.get(alt_pe.id).departed_at is not None
-        assert _m().ParkingEvent.query.get(neu_pe.id).departed_at is None
+        assert _m().db.session.get(_m().ParkingEvent, alt_pe.id).departed_at is not None
+        assert _m().db.session.get(_m().ParkingEvent, neu_pe.id).departed_at is None
     finally:
         ctx.pop()
 
@@ -247,8 +247,8 @@ def test_fremdes_fahrzeug_bleibt_unberuehrt():
         _sync(a.id, odo=180)                        # nur a ist gefahren
         _sync(b.id, odo=200)
         assert release_stuck_parking_events() == 1
-        assert _m().ParkingEvent.query.get(pa.id).departed_at is not None
-        assert _m().ParkingEvent.query.get(pb.id).departed_at is None
+        assert _m().db.session.get(_m().ParkingEvent, pa.id).departed_at is not None
+        assert _m().db.session.get(_m().ParkingEvent, pb.id).departed_at is None
     finally:
         ctx.pop()
 
@@ -265,7 +265,7 @@ def test_odo_rettung_greift_bei_kia_ohne_frisches_gps():
         # GPS da, aber mit 90 min altem ECU-Zeitstempel -> nicht frisch.
         s = _sync(v.id, odo=91928, lat=51.11, lon=13.92, gps_alter_min=90)
         update_parking_from_sync(s)
-        assert _m().ParkingEvent.query.get(pe.id).departed_at is not None, \
+        assert _m().db.session.get(_m().ParkingEvent, pe.id).departed_at is not None, \
             'der Platzhalter haette geschlossen werden muessen'
     finally:
         ctx.pop()
@@ -284,7 +284,7 @@ def test_mit_frischem_gps_bleibt_der_bewaehrte_weg():
         # Frisches GPS (2 min alt) an einem anderen Ort.
         s = _sync(v.id, odo=91928, lat=51.1120, lon=13.9194, gps_alter_min=2)
         update_parking_from_sync(s)
-        geschlossen = _m().ParkingEvent.query.get(pe.id)
+        geschlossen = _m().db.session.get(_m().ParkingEvent, pe.id)
         assert geschlossen.departed_at is not None
         # Und der neue Parkvorgang hat echte Koordinaten, keinen Sentinel:
         PE = _m().ParkingEvent
@@ -320,7 +320,7 @@ def test_auto_ohne_gps_zeitstempel_behaelt_seinen_ort():
         update_parking_from_sync(s)
 
         PE = _m().ParkingEvent
-        assert PE.query.get(pe.id).departed_at is not None, \
+        assert _m().db.session.get(PE, pe.id).departed_at is not None, \
             'der alte Parkvorgang haette schliessen muessen'
         neu = PE.query.filter(PE.id != pe.id).order_by(PE.id.desc()).first()
         assert neu is not None, 'es haette ein neuer Parkvorgang entstehen muessen'
@@ -354,7 +354,7 @@ def test_fehlender_zeitstempel_bleibt_streng_wenn_das_auto_sonst_einen_liefert()
         update_parking_from_sync(s)
 
         PE = _m().ParkingEvent
-        assert PE.query.get(pe.id).departed_at is not None
+        assert _m().db.session.get(PE, pe.id).departed_at is not None
         neu = PE.query.filter(PE.id != pe.id).order_by(PE.id.desc()).first()
         assert neu is not None and neu.label == 'unknown', \
             'ohne Vertrauen in die Koordinate muss ein Platzhalter entstehen'
@@ -388,7 +388,7 @@ def test_platzhalter_schliesst_auch_wenn_die_koordinate_misstraut_wird():
         s = _sync(v.id, odo=91928, lat=51.1120, lon=13.9194, gps_alter_min=2)
         update_parking_from_sync(s)
         PE = _m().ParkingEvent
-        assert PE.query.get(pe.id).departed_at is not None, \
+        assert _m().db.session.get(PE, pe.id).departed_at is not None, \
             'der Platzhalter haette schliessen muessen'
         neu_pe = (PE.query.filter(PE.id != pe.id)
                   .order_by(PE.id.desc()).first())
@@ -414,8 +414,8 @@ def test_ohne_kilometerbeweis_bleibt_der_waechter_streng():
         s = _sync(v.id, odo=91871, lat=51.1120, lon=13.9194, gps_alter_min=2)
         update_parking_from_sync(s)
         PE = _m().ParkingEvent
-        assert PE.query.get(pe.id).departed_at is None, 'haette offen bleiben muessen'
-        assert PE.query.get(pe.id).label == 'unknown'
+        assert _m().db.session.get(PE, pe.id).departed_at is None, 'haette offen bleiben muessen'
+        assert _m().db.session.get(PE, pe.id).label == 'unknown'
         assert PE.query.count() == vorher, 'kein neuer Parkvorgang ohne Beweis'
     finally:
         ctx.pop()

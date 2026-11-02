@@ -218,8 +218,8 @@ def update_parking_from_sync(sync, seen_at=None) -> Optional[ParkingEvent]:
     # Brand lookup: Vehicle row first, AppConfig as legacy fallback.
     brand = ''
     if veh_id is not None:
-        from models.database import Vehicle
-        _v = Vehicle.query.get(veh_id)
+        from models.database import db as _db, Vehicle
+        _v = _db.session.get(Vehicle, veh_id)
         if _v is not None and _v.api_brand:
             brand = _v.api_brand.lower()
     if not brand:
@@ -1392,8 +1392,8 @@ def get_trips(limit: Optional[int] = None,
     # what brand it was — which describes the first vehicle only.
     brand = ''
     if vehicle_id is not None:
-        from models.database import Vehicle as _Vb
-        _vb = _Vb.query.get(vehicle_id)
+        from models.database import db as _db, Vehicle as _Vb
+        _vb = _db.session.get(_Vb, vehicle_id)
         if _vb is not None and _vb.api_brand:
             brand = _vb.api_brand.lower()
     if not brand:
@@ -1408,10 +1408,10 @@ def get_trips(limit: Optional[int] = None,
     static_battery_kwh = 64.0   # Niro EV default; overridden by Vehicle.battery_kwh
     static_consumption_kwh_per_km = 0.18  # ~18 kWh/100km, typical EV
     try:
-        from models.database import Vehicle, VehicleSync
+        from models.database import db as _db, Vehicle, VehicleSync
         _vrow = None
         if vehicle_id is not None:
-            _vrow = Vehicle.query.get(vehicle_id)
+            _vrow = _db.session.get(Vehicle, vehicle_id)
         else:
             _vrow = (Vehicle.query.filter_by(is_archived=False)
                      .order_by(Vehicle.id.asc()).first())

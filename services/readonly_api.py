@@ -287,8 +287,8 @@ def _charge_times(c):
     """
     if getattr(c, 'wallbox_charge_id', None):
         try:
-            from models.database import WallboxCharge
-            wc = WallboxCharge.query.get(c.wallbox_charge_id)
+            from models.database import db, WallboxCharge
+            wc = db.session.get(WallboxCharge, c.wallbox_charge_id)
             if wc is not None and wc.start_ts and wc.end_ts:
                 return (datetime.fromtimestamp(wc.start_ts).astimezone().isoformat(timespec='seconds'),
                         datetime.fromtimestamp(wc.end_ts).astimezone().isoformat(timespec='seconds'))

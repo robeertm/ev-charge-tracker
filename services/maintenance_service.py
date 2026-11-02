@@ -37,7 +37,7 @@ def add_entry(date_, item_type, title=None, odometer_km=None, cost_eur=None,
 
 
 def update_entry(entry_id: int, **fields) -> Optional[MaintenanceEntry]:
-    entry = MaintenanceEntry.query.get(entry_id)
+    entry = db.session.get(MaintenanceEntry, entry_id) if entry_id is not None else None
     if not entry:
         return None
     for k, v in fields.items():
@@ -48,7 +48,7 @@ def update_entry(entry_id: int, **fields) -> Optional[MaintenanceEntry]:
 
 
 def delete_entry(entry_id: int) -> bool:
-    entry = MaintenanceEntry.query.get(entry_id)
+    entry = db.session.get(MaintenanceEntry, entry_id) if entry_id is not None else None
     if not entry:
         return False
     db.session.delete(entry)

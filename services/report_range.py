@@ -347,10 +347,10 @@ def build_report(start: date, end: date, lang: str = 'de',
     # v2.29: per-vehicle fossil reference when scoped, else AppConfig.
     fossil_co2_per_km = 164.0
     try:
-        from models.database import Vehicle as _V
+        from models.database import db as _db, Vehicle as _V
         _vrow = None
         if vehicle_id is not None:
-            _vrow = _V.query.get(vehicle_id)
+            _vrow = _db.session.get(_V, vehicle_id)
         if _vrow is None:
             _vrow = (_V.query.filter_by(is_archived=False)
                      .order_by(_V.id.asc()).first())

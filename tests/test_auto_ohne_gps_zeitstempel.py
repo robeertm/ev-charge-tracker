@@ -148,7 +148,7 @@ def test_01_gleicher_ort_schreibt_last_seen_fort_ohne_gps_zeitstempel():
         pe = _halt(v.id, ORT_A, odo=34606, wann=AN_WORK)
         s = _sync(v.id, odo=34606, wann=NOCH_WORK, ort=ORT_A)
         update_parking_from_sync(s)
-        frisch = _m().ParkingEvent.query.get(pe.id)
+        frisch = _m().db.session.get(_m().ParkingEvent, pe.id)
         assert frisch.last_seen_at == NOCH_WORK, (
             'last_seen_at blieb bei %s stehen' % frisch.last_seen_at)
     finally:
@@ -171,7 +171,7 @@ def test_02_wer_sonst_zeitstempel_schickt_bleibt_streng():
         pe = _halt(v.id, ORT_A, odo=34606, wann=AN_WORK)
         s = _sync(v.id, odo=34606, wann=NOCH_WORK, ort=ORT_A)   # kein Zeitstempel
         update_parking_from_sync(s)
-        frisch = _m().ParkingEvent.query.get(pe.id)
+        frisch = _m().db.session.get(_m().ParkingEvent, pe.id)
         assert frisch.last_seen_at == AN_WORK, (
             'das Echo hat last_seen_at auf %s gezogen' % frisch.last_seen_at)
     finally:
@@ -189,7 +189,7 @@ def test_03_ein_veralteter_zeitstempel_bleibt_veraltet():
         s = _sync(v.id, odo=34606, wann=NOCH_WORK, ort=ORT_A,
                   gps_alter_min=90)
         update_parking_from_sync(s)
-        assert _m().ParkingEvent.query.get(pe.id).last_seen_at == AN_WORK
+        assert _m().db.session.get(_m().ParkingEvent, pe.id).last_seen_at == AN_WORK
     finally:
         ctx.pop()
 
@@ -212,7 +212,7 @@ def test_04_halt_zerfaellt_nicht_zu_dauer_null():
         pe = _halt(v.id, ORT_A, odo=34606, wann=AN_WORK)
         update_parking_from_sync(_sync(v.id, 34606, NOCH_WORK, ort=ORT_A))
         update_parking_from_sync(_sync(v.id, 34629, OHNE_GPS, ort=None))
-        frisch = _m().ParkingEvent.query.get(pe.id)
+        frisch = _m().db.session.get(_m().ParkingEvent, pe.id)
         assert frisch.departed_at is not None, 'haette geschlossen werden muessen'
         assert frisch.departed_at > frisch.arrived_at, (
             'Halt mit Dauer null: an=%s ab=%s' % (frisch.arrived_at,
@@ -247,7 +247,7 @@ def test_05_platzhalter_wird_nicht_beschriftet_wenn_weitergefahren():
         pe = _platzhalter(v.id, odo=34629, wann=OHNE_GPS)
         update_parking_from_sync(_sync(v.id, 34665, WIEDER_GPS, ort=ORT_B))
 
-        alt = M.ParkingEvent.query.get(pe.id)
+        alt = M.db.session.get(M.ParkingEvent, pe.id)
         assert alt.departed_at is not None, (
             'der Platzhalter blieb offen, obwohl 36 km Beweis vorliegen')
         neu = (M.ParkingEvent.query
@@ -276,7 +276,7 @@ def test_06_platzhalter_wird_beschriftet_wenn_das_auto_stand():
         pe = _platzhalter(v.id, odo=34629, wann=OHNE_GPS)
         update_parking_from_sync(_sync(v.id, 34629, WIEDER_GPS, ort=ORT_B))
 
-        frisch = M.ParkingEvent.query.get(pe.id)
+        frisch = M.db.session.get(M.ParkingEvent, pe.id)
         assert frisch.departed_at is None, 'haette offen bleiben muessen'
         assert frisch.arrived_at == OHNE_GPS
         assert frisch.label != 'unknown', 'haette beschriftet werden muessen'
@@ -295,7 +295,7 @@ def test_07_ein_kilometer_genuegt_noch_nicht_als_beweis():
         v = _auto()
         pe = _platzhalter(v.id, odo=34629, wann=OHNE_GPS)
         update_parking_from_sync(_sync(v.id, 34629, WIEDER_GPS, ort=ORT_B))
-        assert M.ParkingEvent.query.get(pe.id).departed_at is None
+        assert M.db.session.get(M.ParkingEvent, pe.id).departed_at is None
         assert M.ParkingEvent.query.count() == 1
     finally:
         ctx.pop()
@@ -381,7 +381,7 @@ def test_09_halt_mit_dauer_null_wird_am_beweis_aufgezogen():
         M.db.session.commit()
         _sync(v.id, odo=34606, wann=NOCH_WORK, ort=ORT_A)
         assert repariere_halte_ohne_dauer() == 1
-        assert M.ParkingEvent.query.get(pe.id).departed_at == NOCH_WORK
+        assert M.db.session.get(M.ParkingEvent, pe.id).departed_at == NOCH_WORK
     finally:
         ctx.pop()
 
@@ -403,7 +403,7 @@ def test_10_ohne_beweis_bleibt_der_halt_wie_er_ist():
         M.db.session.commit()
         _sync(v.id, odo=34629, wann=NOCH_WORK, ort=ORT_B)
         assert repariere_halte_ohne_dauer() == 0
-        assert M.ParkingEvent.query.get(pe.id).departed_at == AN_WORK
+        assert M.db.session.get(M.ParkingEvent, pe.id).departed_at == AN_WORK
     finally:
         ctx.pop()
 
@@ -431,7 +431,7 @@ def test_11_ein_beweis_nach_dem_naechsten_halt_zaehlt_nicht():
         # Beweis am alten Ort, aber ERST NACH der Ankunft des naechsten Halts:
         _sync(v.id, odo=34606, wann=WIEDER_GPS, ort=ORT_A)
         assert repariere_halte_ohne_dauer() == 0
-        assert M.ParkingEvent.query.get(pe.id).departed_at == AN_WORK
+        assert M.db.session.get(M.ParkingEvent, pe.id).departed_at == AN_WORK
     finally:
         ctx.pop()
 
@@ -454,7 +454,7 @@ def test_12_zurueckdatierte_ankunft_des_laufenden_halts_wird_gerichtet():
         _sync(v.id, odo=34665, wann=WIEDER_GPS, ort=ORT_B, soc=23)
         assert repariere_zurueckdatierte_ankunft() == 1
 
-        alt = M.ParkingEvent.query.get(pe.id)
+        alt = M.db.session.get(M.ParkingEvent, pe.id)
         assert alt.departed_at is not None, 'der falsche Abschnitt blieb offen'
         assert alt.label == 'unknown' and alt.lat == 0.0, (
             'der Abschnitt behielt einen Ort, den er nie hatte')
@@ -484,7 +484,7 @@ def test_13_stand_das_auto_wirklich_dort_wird_nichts_gerichtet():
         M.db.session.commit()
         _sync(v.id, odo=34629, wann=WIEDER_GPS, ort=ORT_B)
         assert repariere_zurueckdatierte_ankunft() == 0
-        assert M.ParkingEvent.query.get(pe.id).arrived_at == OHNE_GPS
+        assert M.db.session.get(M.ParkingEvent, pe.id).arrived_at == OHNE_GPS
         assert M.ParkingEvent.query.count() == 1
     finally:
         ctx.pop()
@@ -513,7 +513,7 @@ def test_14_ein_geschlossener_halt_wird_nicht_umgeschrieben():
         M.db.session.commit()
         _sync(v.id, odo=34665, wann=WIEDER_GPS, ort=ORT_B)
         assert repariere_zurueckdatierte_ankunft() == 0
-        assert M.ParkingEvent.query.get(pe.id).arrived_at == OHNE_GPS
+        assert M.db.session.get(M.ParkingEvent, pe.id).arrived_at == OHNE_GPS
         assert M.ParkingEvent.query.count() == 1
     finally:
         ctx.pop()
@@ -531,7 +531,7 @@ def test_15_ein_platzhalter_ohne_ort_wird_nicht_gerichtet():
         pe = _platzhalter(v.id, odo=34629, wann=OHNE_GPS)
         _sync(v.id, odo=34665, wann=WIEDER_GPS, ort=ORT_B)
         assert repariere_zurueckdatierte_ankunft() == 0
-        assert M.ParkingEvent.query.get(pe.id).departed_at is None
+        assert M.db.session.get(M.ParkingEvent, pe.id).departed_at is None
     finally:
         ctx.pop()
 
@@ -592,7 +592,7 @@ def test_17_gleicher_kilometerstand_an_ANDEREM_ort_ist_kein_beweis():
         # Gleicher Kilometerstand, aber ein ganz anderer Ort:
         _sync(v.id, odo=34606, wann=NOCH_WORK, ort=ORT_B)
         assert repariere_halte_ohne_dauer() == 0
-        assert M.ParkingEvent.query.get(pe.id).departed_at == AN_WORK
+        assert M.db.session.get(M.ParkingEvent, pe.id).departed_at == AN_WORK
     finally:
         ctx.pop()
 
@@ -621,7 +621,7 @@ def test_18_ein_halt_auf_dem_sentinel_wird_nicht_gerichtet():
         # ~78 m vom Sentinel entfernt, also innerhalb SAME_PLACE_M von 0,0:
         _sync(v.id, odo=34665, wann=WIEDER_GPS, ort=(0.0005, 0.0005))
         assert repariere_zurueckdatierte_ankunft() == 0
-        frisch = M.ParkingEvent.query.get(pe.id)
+        frisch = M.db.session.get(M.ParkingEvent, pe.id)
         assert frisch.departed_at is None
         assert M.ParkingEvent.query.count() == 1
     finally:
@@ -650,7 +650,7 @@ def test_19_am_selben_ort_mit_HOEHEREM_kilometerstand_ist_kein_beweis():
         M.db.session.commit()
         _sync(v.id, odo=34629, wann=NOCH_WORK, ort=ORT_A)   # 23 km dazwischen
         assert repariere_halte_ohne_dauer() == 0
-        assert M.ParkingEvent.query.get(pe.id).departed_at == AN_WORK
+        assert M.db.session.get(M.ParkingEvent, pe.id).departed_at == AN_WORK
     finally:
         ctx.pop()
 
@@ -703,7 +703,7 @@ def test_21_ohne_zwischensync_endet_der_halt_am_beweisenden_sync():
         v = _auto()
         pe = _halt(v.id, ORT_A, odo=34549, wann=AN_WORK)
         update_parking_from_sync(_sync(v.id, 34557, OHNE_GPS, ort=None))
-        frisch = _m().ParkingEvent.query.get(pe.id)
+        frisch = _m().db.session.get(_m().ParkingEvent, pe.id)
         assert frisch.departed_at == OHNE_GPS, (
             'Abfahrt steht auf %s' % frisch.departed_at)
         assert frisch.departed_at > frisch.arrived_at, 'Halt mit Dauer null'
@@ -722,7 +722,7 @@ def test_22_mit_bestaetigung_am_ort_gewinnt_die_bestaetigung():
         pe = _halt(v.id, ORT_A, odo=34606, wann=AN_WORK)
         update_parking_from_sync(_sync(v.id, 34606, NOCH_WORK, ort=ORT_A))
         update_parking_from_sync(_sync(v.id, 34629, OHNE_GPS, ort=None))
-        frisch = _m().ParkingEvent.query.get(pe.id)
+        frisch = _m().db.session.get(_m().ParkingEvent, pe.id)
         assert frisch.departed_at == NOCH_WORK, (
             'die Bestaetigung am Ort wurde uebergangen: %s' % frisch.departed_at)
     finally:
