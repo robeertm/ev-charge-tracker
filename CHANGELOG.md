@@ -1,5 +1,18 @@
 # Changelog
 
+## v3.0.184 (2026-11-02)
+
+### Renault/Dacia keeps its sign-in between polls instead of signing in on every poll
+
+The Gigya login token, person id and JWT are kept in the account's private
+state file (0600, written atomically); an expired JWT is renewed from the
+login token, and the password is sent only when there is no token or Gigya
+refuses it. The account list is asked once a day. New credentials or the
+Test button drop the kept sign-in. A rejected password now engages the
+sign-in pause (1/3/6/12/24 h) like Kia/Hyundai, and a sign-in that fails for
+a passing reason (5xx, timeout, network) is not retried by the background
+loop for 5 min, 15 min, 1 h, then 4 h; "Sync now" is never held back. Each
+
 ## v3.0.183 (2026-11-02)
 
 ### Date trips by the car's own capture time and let unchanged polls confirm a stop
