@@ -486,7 +486,8 @@ def _do_sync(app):
                 continue
             brand = v.api_brand        # read before a rollback expires the row
             try:
-                r = _sync_one_vehicle(app, v)
+                with login_state.background_sync():
+                    r = _sync_one_vehicle(app, v)
                 if r is not None:
                     results.append(r)
                     _note_vendor_block(v.id, None)

@@ -21,9 +21,12 @@ Two problems this answers:
   only held within one tick, so an install whose stored token had run out
   signed in — and was refused — 96 times a day, each refusal pushing the
   manufacturer account toward a captcha or a lockout. After a rejected
-  credential (``token_expired`` / ``credentials_rejected``, Kia/Hyundai
-  connector only) the background loop now skips automatic sign-ins for
-  that car: 1 h, 3 h, 6 h, 12 h, then 24 h per further rejection.
+  credential (``token_expired`` / ``credentials_rejected``) the background
+  loop now skips automatic sign-ins for that car: 1 h, 3 h, 6 h, 12 h,
+  then 24 h per further rejection. Kia/Hyundai since 3.0.182; Renault/Dacia
+  since their connector keeps its sign-in between polls — for those two
+  only a refusal the connector itself names (``kind`` on the exception)
+  counts, never a "401" read off some data error.
 
   The pause lives in memory only, like the 9035 vendor-block pause in the
   connector, and is merely mirrored into the record for display. A restart
@@ -38,6 +41,7 @@ import json
 import logging
 import re
 import threading
+from contextlib import contextmanager
 from datetime import datetime, timedelta
 
 logger = logging.getLogger(__name__)
@@ -53,6 +57,8 @@ STATES = (
 BRAKE_STATES = frozenset({'token_expired', 'credentials_rejected'})
 #: Only the connector whose rejections were measured to pile up.
 BRAKE_BRANDS = frozenset({'kia', 'hyundai'})
+#: Braked only on a refusal the connector states as ``kind`` itself.
+KIND_BRAKE_BRANDS = frozenset({'renault', 'dacia'})
 #: Pause per consecutive rejection; the last step repeats (cap).
 PAUSE_STEPS_H = (1, 3, 6, 12, 24)
 
@@ -62,6 +68,26 @@ _lock = threading.Lock()
 _paused_until: dict = {}     # vid -> datetime
 _reject_streak: dict = {}    # vid -> consecutive rejections since last ok/lift
 _pause_logged: set = set()   # vids whose current pause already wrote its line
+_bg = threading.local()      # set while the background loop syncs a car
+
+
+@contextmanager
+def background_sync():
+    """Marks the calls inside as the background loop's (not "sync now").
+
+    A connector may hold back a sign-in it would repeat too soon (Renault's
+    back-off after a 5xx) — but only for the loop, never for a person.
+    """
+    prev = getattr(_bg, 'on', False)
+    _bg.on = True
+    try:
+        yield
+    finally:
+        _bg.on = prev
+
+
+def in_background() -> bool:
+    return bool(getattr(_bg, 'on', False))
 
 
 # ── classification ────────────────────────────────────────────────────
@@ -304,8 +330,10 @@ def note_failure(vid, brand, exc) -> None:
         now = datetime.now()
         state = classify(exc)
         paused = None
-        if (state in BRAKE_STATES
-                and (brand or '').strip().lower() in BRAKE_BRANDS):
+        b = (brand or '').strip().lower()
+        if state in BRAKE_STATES and (
+                b in BRAKE_BRANDS
+                or (b in KIND_BRAKE_BRANDS and getattr(exc, 'kind', None) == state)):
             paused = _engage(vid, now)
         else:
             paused = paused_until(vid, now)

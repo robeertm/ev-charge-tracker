@@ -1826,6 +1826,7 @@
   "renault.err_data_denied": "Connexion réussie, mais Renault ne transmet pas les données de cette voiture (accès refusé) et n’en indique pas la raison. À vérifier : l’application My Renault / My Dacia affiche-t-elle le niveau de batterie ? La région correspond-elle au pays de votre compte ? Les services connectés sont-ils actifs ?",
   "renault.partial_no_soc": "Données partielles de Renault : pas de niveau de batterie ni d’état de charge — le kilométrage et la position sont lus.",
   "renault.err_2fa": "Renault/Dacia demande un code de confirmation par e-mail pour ce compte. Ouvrez Paramètres → Véhicules et appuyez sur « Tester la connexion » : Renault vous envoie alors le code, à saisir dans l’application.",
+  "renault.err_signin_wait": "La connexion à Renault/Dacia est perturbée en ce moment (le serveur ne répond pas ou renvoie une erreur). La prochaine tentative automatique aura lieu après {time} ; « Synchroniser maintenant » fonctionne tout de suite.",
   "set.api_region_cn": "Chine",
   "set.api_region_de": "Allemagne",
   "set.api_region_at": "Autriche",

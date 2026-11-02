@@ -1826,6 +1826,7 @@
   "renault.err_data_denied": "Sesión iniciada, pero Renault no entrega los datos de este coche (acceso denegado) y no indica el motivo. Comprueba: ¿muestra la app My Renault / My Dacia el nivel de batería? ¿Coincide la región con el país de tu cuenta? ¿Están activos los servicios conectados?",
   "renault.partial_no_soc": "Solo datos parciales de Renault: sin nivel de batería ni estado de carga; se leen el kilometraje y la posición.",
   "renault.err_2fa": "Renault/Dacia pide un código de confirmación por correo para esta cuenta. Abre Ajustes → Vehículos y pulsa «Probar conexión»: Renault te enviará el código, que introduces en la app.",
+  "renault.err_signin_wait": "El inicio de sesión en Renault/Dacia falla en este momento (el servidor no responde o devuelve un error). El próximo intento automático será después de las {time}; «Sincronizar ahora» funciona de inmediato.",
   "set.api_region_cn": "China",
   "set.api_region_de": "Alemania",
   "set.api_region_at": "Austria",

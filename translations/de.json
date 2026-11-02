@@ -1826,6 +1826,7 @@
   "renault.err_data_denied": "Anmeldung erfolgreich, aber Renault gibt die Daten dieses Autos nicht heraus (Zugriff verweigert) und nennt keinen Grund. Bitte prüfen: Zeigt die App My Renault / My Dacia den Batteriestand? Passt die Region zum Land deines Kontos? Sind die Connected Services aktiv?",
   "renault.partial_no_soc": "Nur Teildaten von Renault: kein Batteriestand, kein Ladezustand — Tachostand und Position werden gelesen.",
   "renault.err_2fa": "Renault/Dacia verlangt für dieses Konto einen Bestätigungscode per E-Mail. Öffne Einstellungen → Fahrzeuge und drücke „Verbindung testen“: Renault schickt dir dann den Code, den du in der App eingibst.",
+  "renault.err_signin_wait": "Die Anmeldung bei Renault/Dacia ist gerade gestört (Server antwortet nicht oder mit Fehler). Der nächste automatische Versuch kommt nach {time}; „Jetzt synchronisieren“ geht sofort.",
   "set.api_region_cn": "China",
   "set.api_region_de": "Deutschland",
   "set.api_region_at": "Österreich",
