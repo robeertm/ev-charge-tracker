@@ -147,7 +147,7 @@
                 <i class="bi bi-exclamation-triangle"></i> {{ t('raw.raw_parse_error') }}: {{ detail.raw_error }}
             </div>
             {% endif %}
-            <pre id="rawJson" style="margin:0; padding:1rem; max-height: 70vh; overflow:auto; font-size: 0.8rem; background: #f8f9fa;">{{ detail.raw_pretty }}</pre>
+            <pre id="rawJson" class="bg-body-tertiary" style="margin:0; padding:1rem; max-height: 70vh; overflow:auto; font-size: 0.8rem;">{{ detail.raw_pretty }}</pre>
         </div>
     </div>
 {% endif %}

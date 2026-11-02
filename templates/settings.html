@@ -854,7 +854,7 @@
                         </div>
                         <div class="col-sm-6">
                             <label class="form-label">{{ t('set.pv_co2_calc') }}</label>
-                            <div class="form-control bg-light fw-bold" id="pvCo2Result">—</div>
+                            <div class="form-control bg-body-tertiary fw-bold" id="pvCo2Result">—</div>
                         </div>
                     </div>
                     <button type="submit" name="action" value="save_pv" class="btn btn-primary">
@@ -1876,9 +1876,9 @@
                         <div class="operator-row border rounded p-2">
                             <input type="hidden" name="op_builtin" value="1">
                             <div class="d-flex align-items-center gap-2 mb-2">
-                                <input type="text" class="form-control form-control-sm fw-semibold" name="op_name"
-                                       value="{{ op }}" readonly style="background:#f8f9fa;">
-                                <span class="badge bg-light text-muted border flex-shrink-0">{{ t('set.operators_builtin_badge') }}</span>
+                                <input type="text" class="form-control form-control-sm fw-semibold bg-body-tertiary" name="op_name"
+                                       value="{{ op }}" readonly>
+                                <span class="badge bg-body-tertiary text-muted border flex-shrink-0">{{ t('set.operators_builtin_badge') }}</span>
                             </div>
                             <div class="row g-2">
                                 <div class="col-6">
@@ -2313,7 +2313,7 @@
                 </div>
                 <div class="small text-muted mt-2" id="sslStatus"></div>
                 <div class="small mt-2" id="sslCertInfo" style="display:none">
-                    <div class="border rounded p-2 bg-light">
+                    <div class="border rounded p-2 bg-body-tertiary">
                         <div><strong>{{ t('set.ssl_subject') }}:</strong> <span id="sslSubject"></span></div>
                         <div><strong>{{ t('set.ssl_valid_until') }}:</strong> <span id="sslValidUntil"></span></div>
                         <div class="text-muted" style="font-size:0.7rem; word-break:break-all">
@@ -2742,7 +2742,7 @@
 
                 <div id="sysupd-log-wrap" class="mt-3" style="display:none;">
                     <label class="form-label small fw-bold">{{ t('set.sysupd_log_title') }}</label>
-                    <pre id="sysupd-log" class="small bg-light p-2 border rounded" style="max-height:300px;overflow:auto;white-space:pre-wrap;"></pre>
+                    <pre id="sysupd-log" class="small bg-body-tertiary p-2 border rounded" style="max-height:300px;overflow:auto;white-space:pre-wrap;"></pre>
                 </div>
             </div>
         </div>
