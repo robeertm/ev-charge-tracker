@@ -1,5 +1,14 @@
 # Changelog
 
+## v3.0.185 (2026-11-02)
+
+### Home Assistant: detect charging and charge power from pack current, and stop trusting impossible odometer readings
+
+A car that reaches Home Assistant through an OBD dongle (XPENG G6 over WiCAN) has no "charging" entity. The Home Assistant connector now recognises pack current, pack voltage and speed, and works out whether the car is charging: current of at least 1 A in the charging sense while the car stands still. Regeneration while driving has the same sign as charging and no longer counts. Without a speed entity the plug state, or two quiet polls with an unchanged odometer, must confirm it. A real charging, plug or power entity always wins.
+The sign of the pack current is disputed between public sources, so negative = charging is the default and the connector turns it round for a car whose state of charge twice rose at standstill with the current in the other sense; the learned sense is remembered and shown in the diagnostics. Charge power is |V x A| when both are plausible and stays empty without the pack voltage instead of being guessed.
+Odometer readings that cannot be true are dropped for that poll: 0 after a value, a value below the last one, a jump faster than 250 km/h on average, and the known false value 25 089 (a service echo read as a number).
+The XPENG browser-OBD profile reads the odometer only from a reply that starts with the right service echo, ignores 0 and 25 089, and uses the 3-byte value only when its top byte is believable (else the 2-byte one). The pack-current comment no longer claims positive = charging.
+
 ## v3.0.184 (2026-11-02)
 
 ### Renault/Dacia keeps its sign-in between polls instead of signing in on every poll
