@@ -48,7 +48,8 @@ Built for EV owners who want **full control over their charging data** — runs 
 >   derived from your own inputs and may be wrong.
 >
 > Not affiliated with, endorsed by, or supported by any vehicle manufacturer.
-> Product and brand names belong to their respective owners.
+> Product and brand names belong to their respective owners. Names are used only
+> to identify compatibility; trademarks belong to their owners.
 
 ---
 
