@@ -5378,6 +5378,8 @@ def register_routes(app):
         return render_template('settings.html',
                                battery_chemistries=[(k, v[0]) for k, v in _CHEM.items()],
                                unit_vehicles=_unit_vehicles(),
+                               sheet_xlsx=_sheet_xlsx_available(),
+                               sheet_last_import=_sheet_last_import(),
                                region_cfg=_region_cfg(),
                                entsoe_key=AppConfig.get('entsoe_api_key', ''),
                                ocm_key=AppConfig.get('ocm_api_key', ''),
@@ -8221,51 +8223,243 @@ def register_routes(app):
         }
         return jsonify(preview)
 
+    # ── CHARGES ↔ SPREADSHEET (export, edit elsewhere, import back) ──
+    # services/charge_sheet.py holds the logic; these routes only add the
+    # request handling. The legacy /api/export/csv now hands out the same
+    # file: it carries the stable ID, and the old header-matching import
+    # still reads it (its aliases cover every column name).
+    def _sheet_filters(args):
+        """vehicle=<id>|all, from=/to=YYYY-MM-DD — anything unreadable is
+        simply no filter."""
+        vid = None
+        raw = (args.get('vehicle') or '').strip()
+        if raw.isdigit():
+            vid = int(raw)
+        def _d(key):
+            try:
+                return date.fromisoformat((args.get(key) or '').strip())
+            except ValueError:
+                return None
+        return vid, _d('from'), _d('to')
+
+    def _sheet_download(kind):
+        from services import charge_sheet as _cs
+        from services.i18n import get_language
+        from flask import Response
+        vid, d_from, d_to = _sheet_filters(request.args)
+        charges = _cs.query_charges(vid, d_from, d_to)
+        stamp = datetime.now().strftime('%Y%m%d')
+        if kind == 'xlsx':
+            if not _cs.xlsx_available():
+                return jsonify({'error': t('sheet.err_file_xlsx_unsupported')}), 501
+            body = _cs.export_xlsx(charges)
+            mime = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+        else:
+            body = _cs.export_csv(charges, _cs.decimal_comma_for(get_language()))
+            mime = 'text/csv; charset=utf-8'
+        return Response(body, mimetype=mime, headers={
+            'Content-Disposition': f'attachment; filename=ev-charges-{stamp}.{kind}',
+            'Cache-Control': 'no-store',
+        })
+
     @app.route('/api/export/csv')
     def export_csv():
-        """Export all charges as CSV."""
-        import csv
-        import io
-        charges = Charge.query.order_by(Charge.date).all()
-        output = io.StringIO()
-        writer = csv.writer(output, delimiter=';')
-        # Header names must match the FIELD_ALIASES in import_gsheet.py so
-        # that exporting and re-importing is a lossless round-trip.
-        writer.writerow([
-            'Datum', 'Uhrzeit', 'km-Stand', 'EUR/kWh', 'kWh', 'Kosten',
-            'Typ', 'Von%', 'Bis%', 'Geladen%',
-            'Verlust_kWh', 'Verlust%', 'CO2_g/kWh', 'CO2_kg',
-            'Anbieter', 'Ort', 'Lat', 'Lon', 'Notizen',
-        ])
-        for c in charges:
-            writer.writerow([
-                c.date.strftime('%d.%m.%Y') if c.date else '',
-                f"{c.charge_hour:02d}:00" if c.charge_hour is not None else '',
-                c.odometer if c.odometer is not None else '',
-                f"{c.eur_per_kwh:.2f}" if c.eur_per_kwh is not None else '',
-                f"{c.kwh_loaded:.3f}" if c.kwh_loaded is not None else '',
-                f"{c.total_cost:.2f}" if c.total_cost is not None else '',
-                c.charge_type or '',
-                c.soc_from if c.soc_from is not None else '',
-                c.soc_to if c.soc_to is not None else '',
-                c.soc_charged if c.soc_charged is not None else '',
-                f"{c.loss_kwh:.3f}" if c.loss_kwh is not None else '',
-                f"{c.loss_pct:.2f}" if c.loss_pct is not None else '',
-                c.co2_g_per_kwh if c.co2_g_per_kwh is not None else '',
-                f"{c.co2_kg:.2f}" if c.co2_kg is not None else '',
-                c.operator or '',
-                c.location_name or '',
-                f"{c.location_lat:.6f}" if c.location_lat is not None else '',
-                f"{c.location_lon:.6f}" if c.location_lon is not None else '',
-                c.notes or '',
-            ])
-        from flask import Response
-        return Response(
-            output.getvalue(),
-            mimetype='text/csv',
-            headers={'Content-Disposition': 'attachment;filename=ladevorgaenge_export.csv'}
+        """Export all charges as CSV (kept for old links and bookmarks)."""
+        return _sheet_download('csv')
+
+    @app.route('/api/charges/export.csv')
+    def charges_export_csv():
+        return _sheet_download('csv')
+
+    @app.route('/api/charges/export.xlsx')
+    def charges_export_xlsx():
+        return _sheet_download('xlsx')
+
+    def _sheet_write_guard():
+        """Writes from this feature come from the settings page's own
+        script. A custom header cannot be sent cross-site without a CORS
+        preflight this app never answers, so a forged form post from
+        another page is refused before anything is read. (Who may write
+        at all is decided by the login guard, as for every other route.)"""
+        if request.headers.get('X-Requested-With') != 'XMLHttpRequest':
+            return jsonify({'error': t('sheet.err_file_forbidden')}), 403
+        return None
+
+    class _UploadRefused(Exception):
+        def __init__(self, response):
+            super().__init__('upload refused')
+            self.response = response
+
+    def _sheet_upload() -> tuple:
+        """(bytes, filename) of the uploaded file; raises _UploadRefused
+        with the error response when there is none or it is too large."""
+        from services import charge_sheet as _cs
+        limit = _cs.MAX_UPLOAD_BYTES
+        too_large = (jsonify({'error': t('sheet.err_file_too_large',
+                                         mb=limit // (1024 * 1024))}), 413)
+        if request.content_length and request.content_length > limit + 64 * 1024:
+            raise _UploadRefused(too_large)
+        up = request.files.get('sheet_file')
+        if not up or not up.filename:
+            raise _UploadRefused((jsonify({'error': t('sheet.err_file_empty')}), 400))
+        raw = up.stream.read(limit + 1)
+        if len(raw) > limit:
+            raise _UploadRefused(too_large)
+        return raw, up.filename
+
+    def _sheet_plan(raw):
+        from services import charge_sheet as _cs
+        picker = _active_vehicle_id()
+        return _cs.build_plan(
+            raw,
+            default_vehicle_id=picker if isinstance(picker, int) else None,
+            battery_kwh_fn=lambda vid: _get_battery_kwh(vehicle_id=vid),
+            efficiency_fn=lambda vid: _get_charge_efficiency(vehicle_id=vid),
         )
 
+    def _sheet_field_label(col):
+        key = {'odometer_km': 'set.field_odometer'}.get(col)
+        if key:
+            return t(key)
+        if col in ('vehicle_id', 'charge_end_hour', 'start_fee_eur',
+                   'blocking_fee_eur', 'delete', 'id'):
+            return t('sheet.field_' + col)
+        return t('set.field_' + col)
+
+    def _sheet_plan_for_ui(plan, limit=500):
+        """The plan as JSON for the preview: translated reasons and labels,
+        unchanged rows only counted, at most ``limit`` rows listed."""
+        from services import charge_sheet as _cs
+        from services.i18n import get_language
+        comma = _cs.decimal_comma_for(get_language())
+
+        def _show(col, v):
+            return _cs.display_value(col, v, comma)
+        rows = []
+        for r in plan['rows']:
+            if r['status'] == 'unchanged':
+                continue
+            if len(rows) >= limit:
+                break
+            item = {'line': r['line'], 'status': r['status'], 'id': r.get('id'),
+                    'date': r.get('date') or ''}
+            if r['status'] == 'invalid':
+                item['errors'] = [
+                    {'field': col, 'label': _sheet_field_label(col),
+                     'text': t('sheet.err_' + code,
+                               id=r.get('duplicate_of', ''),
+                               line=r.get('duplicate_of_line', ''))}
+                    for col, code in r['errors']]
+            else:
+                item['changes'] = [
+                    {'field': ch['field'], 'label': _sheet_field_label(ch['field']),
+                     'old': _show(ch['field'], ch['old']),
+                     'new': _show(ch['field'], ch['new']),
+                     'derived': ch['field'] in _cs.DERIVED_COLUMNS
+                                and ch['field'] != 'total_cost'}
+                    for ch in r.get('changes', [])]
+            rows.append(item)
+        listed = sum(1 for r in plan['rows'] if r['status'] != 'unchanged')
+        return {
+            'ok': True,
+            'format': plan['format'],
+            'delimiter': plan['delimiter'],
+            'has_id_column': plan['has_id_column'],
+            'columns_ignored': plan['columns_ignored'][:30],
+            'summary': plan['summary'],
+            'rows': rows,
+            'more': max(0, listed - len(rows)),
+            'fingerprint': plan['fingerprint'],
+        }
+
+    def _sheet_error(e):
+        return jsonify({'error': t('sheet.err_file_' + e.code, **e.params)}), 400
+
+    @app.route('/api/charges/import/preview', methods=['POST'])
+    def charges_import_preview():
+        from services import charge_sheet as _cs
+        bad = _sheet_write_guard()
+        if bad:
+            return bad
+        try:
+            raw, _name = _sheet_upload()
+        except _UploadRefused as refused:
+            return refused.response
+        try:
+            plan = _sheet_plan(raw)
+        except _cs.SheetError as e:
+            return _sheet_error(e)
+        except Exception:
+            logger.exception('charge sheet preview failed')
+            return jsonify({'error': t('sheet.err_file_unreadable')}), 400
+        return jsonify(_sheet_plan_for_ui(plan))
+
+    @app.route('/api/charges/import/apply', methods=['POST'])
+    def charges_import_apply():
+        from services import charge_sheet as _cs
+        bad = _sheet_write_guard()
+        if bad:
+            return bad
+        try:
+            raw, filename = _sheet_upload()
+        except _UploadRefused as refused:
+            return refused.response
+        try:
+            plan = _sheet_plan(raw)
+        except _cs.SheetError as e:
+            return _sheet_error(e)
+        # Rebuilt against the database as it is now; if that is not what
+        # the user looked at, they have to look again.
+        if plan['fingerprint'] != (request.form.get('fingerprint') or ''):
+            return jsonify({'error': t('sheet.err_file_outdated')}), 409
+        s = plan['summary']
+        if not (s['new'] or s['changed'] or s['delete']):
+            return jsonify({'error': t('sheet.nothing_to_do')}), 400
+        backup_dir = os.path.join(DATA_DIR, 'backups')
+        try:
+            from import_gsheet import _backup_db_before_replace
+            _backup_db_before_replace()
+        except Exception:
+            logger.warning('pre-import database copy failed', exc_info=True)
+        try:
+            result = _cs.apply_plan(plan, backup_dir, filename=filename,
+                                    release_fn=_release_wallbox_reading)
+        except Exception:
+            logger.exception('charge sheet import failed')
+            return jsonify({'error': t('sheet.err_file_apply_failed')}), 500
+        logger.info('charge sheet import: %d new, %d changed, %d deleted',
+                    result['inserted'], result['updated'], result['deleted'])
+        if result['refetch_co2']:
+            try:
+                from services.co2_backfill import start_backfill
+                start_backfill(app, force=True)
+            except Exception:
+                logger.warning('CO2 backfill after import not started', exc_info=True)
+        msg = t('sheet.applied', new=result['inserted'],
+                changed=result['updated'], deleted=result['deleted'])
+        flash(msg, 'success')
+        return jsonify({'ok': True, 'message': msg, 'inserted': result['inserted'],
+                        'updated': result['updated'], 'deleted': result['deleted']})
+
+    @app.route('/api/charges/import/undo', methods=['POST'])
+    def charges_import_undo():
+        from services import charge_sheet as _cs
+        bad = _sheet_write_guard()
+        if bad:
+            return bad
+        backup_dir = os.path.join(DATA_DIR, 'backups')
+        try:
+            result = _cs.undo_last(backup_dir, release_fn=_release_wallbox_reading)
+        except Exception:
+            logger.exception('undo of charge sheet import failed')
+            return jsonify({'error': t('sheet.err_file_apply_failed')}), 500
+        if result is None:
+            return jsonify({'error': t('sheet.undo_none')}), 404
+        msg = t('sheet.undone', removed=result['removed'],
+                restored=result['restored'] + result['recreated'])
+        logger.info('charge sheet import undone: %s', result)
+        flash(msg, 'success')
+        return jsonify({'ok': True, 'message': msg, **result})
 
 def _float(val):
     if val is None or val == '':
@@ -8295,6 +8489,27 @@ def _region_cfg():
         'auto_language': detect_language() or 'de',
         'auto_unit': _units.unit_for(country) if country else 'km',
     }
+
+
+def _sheet_xlsx_available():
+    from services.charge_sheet import xlsx_available
+    return xlsx_available()
+
+
+def _sheet_last_import():
+    """What the undo button needs to say about the newest import, or None."""
+    try:
+        from services.charge_sheet import last_import
+        j = last_import(os.path.join(DATA_DIR, 'backups'))
+    except Exception:
+        logger.warning('could not read the last charge import', exc_info=True)
+        return None
+    if not j:
+        return None
+    when = (j.get('applied_at') or j.get('created_at') or '').replace('T', ' ')[:16]
+    return {'when': when, 'new': len(j.get('inserted_ids') or []),
+            'changed': len(j.get('updated_ids') or []),
+            'deleted': len(j.get('deleted_ids') or [])}
 
 
 def _unit_vehicles():

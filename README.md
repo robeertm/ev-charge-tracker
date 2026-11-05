@@ -107,6 +107,12 @@ state of health — and a battery certificate as a PDF.*
 ![Logs](docs/screenshots/logs.png)
 *Auto-refreshing log window with level filter, search and CSV download.*
 
+### Export, edit, import back
+![Export and import of charges](docs/screenshots/export-import.png)
+*Export charges to CSV or XLSX, fix them in a spreadsheet, and import the file
+again: a preview lists what is new, changed (old → new), to be deleted or
+invalid before anything is saved — and the last import can be undone.*
+
 ### Settings
 ![Settings](docs/screenshots/settings.png)
 *Vehicle API, sync window, GHG quota, ENTSO-E, HTTPS, PV — all from the UI, no
@@ -223,6 +229,7 @@ never mix with a real history.
 - **ENTSO-E integration** — fetch hourly CO2 grid intensity for Germany, auto-backfill missing values
 - **Open-Meteo** — daily mean temperatures for the range calculator and weather correlation, with DB cache (no key, no rate limits)
 - **Nominatim reverse geocoding** — for street addresses on parking events and charge locations, with permanent DB cache and ToS-compliant rate limiter
+- **Spreadsheet round trip for charges** — Settings > Database exports every charge (optionally one vehicle or a date range) as CSV (UTF-8 with BOM, `;` separator, the decimal mark of your language) or XLSX, each row with its stable `id`. Edit the file anywhere and import it back: rows are matched by `id`, rows without one become new charges, and a charge is deleted only when its `delete` column says yes — rows missing from the file are kept. The preview shows new / changed (field: old → new) / unchanged / invalid (row + reason) before you confirm. Checks: required fields, numbers and ranges (kWh and costs ≥ 0, start SoC ≤ end SoC, hours 0–23), date formats, duplicate IDs and duplicate charges. Cost, loss and CO₂ are recalculated the way the edit form does. Every import first copies the database and writes a journal, and **Undo last import** puts every touched charge back. Text cells starting with `=`, `+`, `-` or `@` are prefixed with `'` on export so a spreadsheet does not run them as formulas
 - **CSV import with live preview** — upload your Google Sheet or exported CSV in Settings, get a dry-run preview showing detected delimiter, column mapping (per-column dropdown to correct misdetections), per-row action badges (`new` / `update` / `duplicate` / `empty` / `error`), and an error list with line numbers. Only when you hit "Import" does the data actually land in the DB. Automatic dedup by (date, hour, kWh) with 0.1 kWh tolerance
 - **OBD/ELM327 via the browser** — Web Serial / Web Bluetooth transport with a data-driven PID table per vehicle family: `kia_hyundai_ext` (7E4, Kona/e-Niro/Soul), `xpeng`, `jaguar_ipace`, `mg_saic` (ZS EV/MG5) + `mg_mulan` (MG4), `byd_atto` (Atto 3/Dolphin, little-endian), `nissan_leaf` (LBC, KWP service 21), `renault_zoe_ph1` + `renault_zoe_ph2` (ZE50, 29-bit), `vw_meb` (ID.3/4/5, Enyaq, Born, Q4 — 29-bit), plus a generic `generic_ev` fallback on standard PID 015B. ISO-TP frame reassembly, service 0x21/0x22 + 11-bit/29-bit addressing, raw frames persisted for re-decoding. (Tesla omitted — no standard UDS battery PIDs; needs raw-CAN sniffing)
 - **PV charging support** — third charge type with auto-calculated CO2 from PV system specs
@@ -488,6 +495,14 @@ car acts afterwards.
 **XPENG note:** XPENG has no public brand SDK, so it connects through the [Enode](https://enode.com) aggregator (the same route the community Home Assistant integrations use). Create an Enode app (Client ID + Secret), link your XPENG account once via Enode's hosted flow, then enter the keys under Settings > Vehicle API — brand *XPENG*, Client ID as username, Client Secret as password. Needs no extra package (rides on `requests`). Provides SoC, range, odometer, charging status and location.
 
 ---
+
+## Edit charges in a spreadsheet
+
+1. Settings > Database > **Export charges** > CSV or XLSX
+2. Edit the file. Keep the `id` column; leave it empty for a new charge; write `yes` (or `ja`, `oui`, `sí`, `sì`, `x`, `1`) in `delete` to remove a charge
+3. Settings > Database > **Import edited file** > Preview > Apply
+
+Column names are fixed English keys, independent of the app language. `soc_charged`, `loss_pct` and `co2_kg` are calculated and ignored on import; `total_cost` is recalculated whenever price and kWh are set. Dates may be `YYYY-MM-DD` or `DD.MM.YYYY` (what a spreadsheet writes back); a date like `03/04/2026` that reads both ways is refused unless it matches the stored value. Upload limit 5 MB.
 
 ## Import from Google Sheet
 

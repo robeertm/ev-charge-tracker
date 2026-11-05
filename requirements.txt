@@ -13,6 +13,8 @@ requests>=2.32.3,<3
 matplotlib>=3.8.0
 fpdf2>=2.7.0
 cryptography>=42.0.0  # for self-signed HTTPS cert generation
+openpyxl==3.1.5   # XLSX export/import of charges (CSV works without it)
+defusedxml==0.7.1 # lets openpyxl parse uploaded XLSX safely
 
 # Optional: Vehicle API connectors (install only what you need)
 # hyundai-kia-connect-api>=3.0.0  # Kia UVO / Hyundai Bluelink

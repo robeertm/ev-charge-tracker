@@ -1,5 +1,20 @@
 # Changelog
 
+## v3.0.189 (2026-11-05)
+
+### Export charges to a spreadsheet, edit them, import them back
+
+Settings > Database exports charges as CSV (UTF-8 with BOM, semicolon, decimal mark of the app language) or XLSX, optionally for one vehicle or a date range.
+Every row carries the stable charge ID; the history page's export button now hands out the same file, scoped like the table.
+The new import matches rows by ID: rows without an ID become new charges, and only rows marked yes in the delete column are deleted. Rows missing from the file are kept.
+A preview lists new, changed (field: old → new), unchanged and invalid rows (row number and reason) before anything is saved; applying re-checks that the data still matches the preview.
+Checks: required fields, number ranges (kWh and costs not negative, start SoC not above end SoC, hours 0–23, coordinates), date formats, future dates, duplicate IDs and duplicate charges.
+Cost, loss and CO2 are recalculated the way the edit form does; a changed date or start hour clears the grid intensity so the CO2 backfill fetches it again.
+Before each import the database file is copied and all charges are written to a journal; "Undo last import" restores every charge the import created, changed or deleted.
+Text cells starting with =, +, - or @ are prefixed with an apostrophe on export, so spreadsheets do not run them as formulas; the import removes the prefix again.
+Writes need the web login like every other change, are refused without the page's own request header, and uploads are limited to 5 MB.
+All texts in the six app languages. New dependencies: openpyxl and defusedxml (XLSX; CSV works without them).
+
 ## v3.0.188 (2026-11-02)
 
 ### Readable charge rows in dark mode, correct singular for the key hint, phone-friendly vehicle list

@@ -19,7 +19,12 @@
     <h4 class="mb-0"><i class="bi bi-clock-history"></i> {{ t('hist.title') }}</h4>
     <div class="d-flex gap-2">
         {% if charges.total > 0 %}
-        <a href="/api/export/csv" class="btn btn-sm btn-outline-secondary">
+        {# Same file as Settings → Database: carries the ID, so it can be
+           edited elsewhere and imported back. Scoped like the table. #}
+        {%- set _xp = [] -%}
+        {%- if active_vehicle %}{% set _ = _xp.append('vehicle=' ~ active_vehicle.id) %}{% endif -%}
+        {%- if year %}{% set _ = _xp.append('from=' ~ year ~ '-01-01') %}{% set _ = _xp.append('to=' ~ year ~ '-12-31') %}{% endif %}
+        <a href="/api/charges/export.csv{% if _xp %}?{{ _xp|join('&') }}{% endif %}" class="btn btn-sm btn-outline-secondary">
             <i class="bi bi-download"></i> {{ t('hist.csv_export') }}
         </a>
         {% endif %}

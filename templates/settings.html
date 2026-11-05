@@ -1989,12 +1989,242 @@
             <div class="card-body">
                 <p><strong>{{ t('set.db_entries') }}</strong> {{ total_charges }} {{ t('set.db_charges') }}</p>
                 {% if total_charges > 0 %}
-                <div class="d-flex gap-2 flex-wrap mb-3">
-                    <a href="/api/export/csv" class="btn btn-outline-success">
-                        <i class="bi bi-download"></i> {{ t('set.db_export') }}
-                    </a>
+                <h6><i class="bi bi-table"></i> {{ t('sheet.export_title') }}</h6>
+                <p class="text-muted small">{{ t('sheet.export_desc') }}</p>
+                <form method="GET" action="/api/charges/export.csv" id="sheetExportForm" class="row g-2 align-items-end mb-3">
+                    {% if fleet_vehicles|length > 1 %}
+                    <div class="col-12 col-md-4">
+                        <label class="form-label small mb-1" for="sheetVehicle">{{ t('sheet.filter_vehicle') }}</label>
+                        <select name="vehicle" id="sheetVehicle" class="form-select form-select-sm">
+                            <option value="all">{{ t('sheet.filter_all') }}</option>
+                            {% for v in fleet_vehicles %}
+                            <option value="{{ v.id }}">{{ v.name or ('#' ~ v.id) }}</option>
+                            {% endfor %}
+                        </select>
+                    </div>
+                    {% endif %}
+                    <div class="col-6 col-md-3">
+                        <label class="form-label small mb-1" for="sheetFrom">{{ t('sheet.filter_from') }}</label>
+                        <input type="date" name="from" id="sheetFrom" class="form-control form-control-sm">
+                    </div>
+                    <div class="col-6 col-md-3">
+                        <label class="form-label small mb-1" for="sheetTo">{{ t('sheet.filter_to') }}</label>
+                        <input type="date" name="to" id="sheetTo" class="form-control form-control-sm">
+                    </div>
+                    <div class="col-12 d-flex gap-2 flex-wrap">
+                        <button type="submit" class="btn btn-outline-success btn-sm" formaction="/api/charges/export.csv">
+                            <i class="bi bi-filetype-csv"></i> {{ t('sheet.export_csv') }}
+                        </button>
+                        {% if sheet_xlsx %}
+                        <button type="submit" class="btn btn-outline-success btn-sm" formaction="/api/charges/export.xlsx">
+                            <i class="bi bi-file-earmark-spreadsheet"></i> {{ t('sheet.export_xlsx') }}
+                        </button>
+                        {% endif %}
+                    </div>
+                </form>
+                <hr>
+                {% endif %}
+                <h6><i class="bi bi-arrow-left-right"></i> {{ t('sheet.import_title') }}</h6>
+                <p class="text-muted small mb-1">{{ t('sheet.import_desc') }}</p>
+                <p class="text-muted small">{{ t('sheet.help_columns') }}</p>
+                <div class="mb-2">
+                    <label class="btn btn-outline-secondary w-100 text-start d-flex align-items-center gap-2 position-relative mb-0" style="min-height:2.5rem">
+                        <i class="bi bi-folder2-open"></i>
+                        <span id="sheetFileName" class="text-truncate">{{ t('sheet.choose_file') }}</span>
+                        <input type="file" id="sheetFileInput" name="sheet_file"
+                               accept=".csv,.xlsx,text/csv,text/plain,application/csv,application/vnd.ms-excel,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+                               class="position-absolute top-0 start-0 w-100 h-100"
+                               style="opacity:0;cursor:pointer;font-size:0">
+                    </label>
+                </div>
+                <div class="d-flex gap-2 flex-wrap">
+                    <button type="button" class="btn btn-outline-info btn-sm" id="btnSheetPreview">
+                        <i class="bi bi-eye"></i> {{ t('sheet.preview') }}
+                    </button>
+                </div>
+                <div id="sheetPreviewBox" class="mt-3" style="display:none"></div>
+                {% if sheet_last_import %}
+                <div class="d-flex flex-wrap align-items-center gap-2 mt-3" id="sheetUndoRow">
+                    <span class="small text-muted"><i class="bi bi-clock-history"></i>
+                        {{ t('sheet.last_import', when=sheet_last_import.when, new=sheet_last_import.new,
+                             changed=sheet_last_import.changed, deleted=sheet_last_import.deleted) }}</span>
+                    <button type="button" class="btn btn-outline-danger btn-sm ms-md-auto" id="btnSheetUndo">
+                        <i class="bi bi-arrow-counterclockwise"></i> {{ t('sheet.undo') }}
+                    </button>
                 </div>
                 {% endif %}
+                <script>
+                (function() {
+                    const T = {
+                        choose:    {{ t('sheet.choose_file')|tojson }},
+                        loading:   {{ t('sheet.previewing')|tojson }},
+                        no_file:   {{ t('sheet.no_file')|tojson }},
+                        error:     {{ t('sheet.error')|tojson }},
+                        total:     {{ t('sheet.sum_total')|tojson }},
+                        s_new:     {{ t('sheet.sum_new')|tojson }},
+                        s_changed: {{ t('sheet.sum_changed')|tojson }},
+                        s_unchanged: {{ t('sheet.sum_unchanged')|tojson }},
+                        s_delete:  {{ t('sheet.sum_delete')|tojson }},
+                        s_invalid: {{ t('sheet.sum_invalid')|tojson }},
+                        col_line:  {{ t('sheet.col_line')|tojson }},
+                        col_id:    {{ t('sheet.col_id')|tojson }},
+                        st_new:    {{ t('sheet.status_new')|tojson }},
+                        st_changed:{{ t('sheet.status_changed')|tojson }},
+                        st_delete: {{ t('sheet.status_delete')|tojson }},
+                        st_invalid:{{ t('sheet.status_invalid')|tojson }},
+                        computed:  {{ t('sheet.computed')|tojson }},
+                        more:      {{ t('sheet.more')|tojson }},
+                        ignored:   {{ t('sheet.ignored_columns')|tojson }},
+                        no_id:     {{ t('sheet.no_id_column')|tojson }},
+                        invalid_note: {{ t('sheet.invalid_note')|tojson }},
+                        nothing:   {{ t('sheet.nothing_changed')|tojson }},
+                        apply:     {{ t('sheet.apply')|tojson }},
+                        applying:  {{ t('sheet.applying')|tojson }},
+                        backup:    {{ t('sheet.backup_note')|tojson }},
+                        cancel:    {{ t('sheet.cancel')|tojson }},
+                        undo_confirm: {{ t('sheet.undo_confirm')|tojson }},
+                    };
+                    const input = document.getElementById('sheetFileInput');
+                    const nameEl = document.getElementById('sheetFileName');
+                    const box = document.getElementById('sheetPreviewBox');
+                    const btn = document.getElementById('btnSheetPreview');
+                    const HDR = { 'X-Requested-With': 'XMLHttpRequest' };
+                    let lastPlan = null;
+
+                    function esc(s) {
+                        return String(s == null ? '' : s)
+                            .replace(/&/g, '&amp;').replace(/</g, '&lt;')
+                            .replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+                    }
+                    function fail(msg) {
+                        box.style.display = '';
+                        box.innerHTML = `<div class="alert alert-danger small py-2 mb-0">${esc(T.error)}: ${esc(msg)}</div>`;
+                    }
+                    input.addEventListener('change', () => {
+                        const f = input.files && input.files[0];
+                        nameEl.textContent = f ? f.name : T.choose;
+                        box.style.display = 'none';
+                        box.innerHTML = '';
+                        lastPlan = null;
+                    });
+                    const BADGE = { new: 'bg-success', changed: 'bg-primary', delete: 'bg-danger', invalid: 'bg-warning text-dark' };
+                    function badge(st) {
+                        return `<span class="badge ${BADGE[st] || 'bg-secondary'}">${esc(T['st_' + st] || st)}</span>`;
+                    }
+                    function details(r) {
+                        if (r.status === 'invalid') {
+                            return r.errors.map(e => `<div><span class="fw-semibold">${esc(e.label)}:</span> ${esc(e.text)}</div>`).join('');
+                        }
+                        if (r.status === 'delete') return '';
+                        return r.changes.map(c => {
+                            const tag = c.derived ? ` <span class="text-muted">(${esc(T.computed)})</span>` : '';
+                            const arrow = r.status === 'new'
+                                ? `${esc(c.new)}`
+                                : `<span class="text-muted text-decoration-line-through">${esc(c.old || '—')}</span> → <span class="fw-semibold">${esc(c.new || '—')}</span>`;
+                            return `<div><span class="text-muted">${esc(c.label)}:</span> ${arrow}${tag}</div>`;
+                        }).join('');
+                    }
+                    function render(p) {
+                        const s = p.summary;
+                        const todo = s.new + s.changed + s.delete;
+                        const cell = (label, val, cls) =>
+                            `<div class="col-4 col-md-2"><div class="text-muted">${esc(label)}</div><div class="fw-bold ${cls}">${val}</div></div>`;
+                        let html = `<div class="row g-2 small mb-3">
+                            ${cell(T.total, s.total, '')}
+                            ${cell(T.s_new, s.new, 'text-success')}
+                            ${cell(T.s_changed, s.changed, 'text-primary')}
+                            ${cell(T.s_unchanged, s.unchanged, 'text-secondary')}
+                            ${cell(T.s_delete, s.delete, 'text-danger')}
+                            ${cell(T.s_invalid, s.invalid, 'text-warning')}
+                        </div>`;
+                        if (!p.has_id_column) {
+                            html += `<div class="alert alert-info small py-2 mb-2"><i class="bi bi-info-circle"></i> ${esc(T.no_id)}</div>`;
+                        }
+                        if (p.columns_ignored && p.columns_ignored.length) {
+                            html += `<div class="small text-muted mb-2"><i class="bi bi-dash-square"></i> ${esc(T.ignored)}: ${p.columns_ignored.map(c => `<code>${esc(c)}</code>`).join(', ')}</div>`;
+                        }
+                        if (s.invalid) {
+                            html += `<div class="alert alert-warning small py-2 mb-2"><i class="bi bi-exclamation-triangle"></i> ${esc(T.invalid_note)}</div>`;
+                        }
+                        if (p.rows.length) {
+                            // A list rather than a table: the details column
+                            // needs the width, and on a phone a five-column
+                            // table squeezed it to a word per line.
+                            html += `<div class="list-group mb-2 small sheet-preview-list">`;
+                            for (const r of p.rows) {
+                                const d = details(r);
+                                html += `<div class="list-group-item px-3 py-2">
+                                    <div class="d-flex flex-wrap align-items-center column-gap-3 row-gap-1">
+                                        ${badge(r.status)}
+                                        <span class="fw-semibold">${esc(r.date) || '—'}</span>
+                                        <span class="text-muted">${esc(T.col_line)} ${r.line}</span>
+                                        <span class="text-muted">${esc(T.col_id)} ${r.id != null ? esc(r.id) : '—'}</span>
+                                    </div>
+                                    ${d ? `<div class="d-flex flex-wrap column-gap-4 row-gap-1 mt-1">${d}</div>` : ''}
+                                </div>`;
+                            }
+                            html += `</div>`;
+                            if (p.more) html += `<div class="small text-muted mb-2">${esc(T.more.replace('{n}', p.more))}</div>`;
+                        }
+                        if (todo) {
+                            html += `<div class="d-flex flex-wrap align-items-center gap-2 mt-2">
+                                <button type="button" class="btn btn-primary btn-sm" id="btnSheetApply"><i class="bi bi-check2-circle"></i> ${esc(T.apply.replace('{n}', todo))}</button>
+                                <button type="button" class="btn btn-outline-secondary btn-sm" id="btnSheetCancel">${esc(T.cancel)}</button>
+                                <span class="small text-muted">${esc(T.backup)}</span>
+                            </div>`;
+                        } else if (!s.invalid) {
+                            html += `<div class="alert alert-success small py-2 mb-0"><i class="bi bi-check-circle"></i> ${esc(T.nothing)}</div>`;
+                        }
+                        box.innerHTML = html;
+                        box.style.display = '';
+                        const ap = document.getElementById('btnSheetApply');
+                        if (ap) ap.addEventListener('click', apply);
+                        const cn = document.getElementById('btnSheetCancel');
+                        if (cn) cn.addEventListener('click', () => { box.style.display = 'none'; box.innerHTML = ''; });
+                    }
+                    async function post(url, fd) {
+                        const r = await fetch(url, { method: 'POST', body: fd, headers: HDR });
+                        const data = await r.json().catch(() => ({}));
+                        if (!r.ok) throw new Error(data.error || r.status);
+                        return data;
+                    }
+                    btn.addEventListener('click', async () => {
+                        const f = input.files && input.files[0];
+                        if (!f) { alert(T.no_file); return; }
+                        const fd = new FormData();
+                        fd.append('sheet_file', f);
+                        box.style.display = '';
+                        box.innerHTML = `<div class="text-muted small"><span class="spinner-border spinner-border-sm"></span> ${esc(T.loading)}</div>`;
+                        try { lastPlan = await post('/api/charges/import/preview', fd); render(lastPlan); }
+                        catch (e) { fail(e.message); }
+                    });
+                    async function apply() {
+                        const f = input.files && input.files[0];
+                        if (!f || !lastPlan) return;
+                        const ap = document.getElementById('btnSheetApply');
+                        ap.disabled = true;
+                        ap.innerHTML = `<span class="spinner-border spinner-border-sm"></span> ${esc(T.applying)}`;
+                        const fd = new FormData();
+                        fd.append('sheet_file', f);
+                        fd.append('fingerprint', lastPlan.fingerprint);
+                        try {
+                            await post('/api/charges/import/apply', fd);
+                            location.hash = 'sec-database';
+                            location.reload();
+                        } catch (e) { fail(e.message); }
+                    }
+                    const undo = document.getElementById('btnSheetUndo');
+                    if (undo) undo.addEventListener('click', async () => {
+                        if (!confirm(T.undo_confirm)) return;
+                        undo.disabled = true;
+                        try {
+                            await post('/api/charges/import/undo', new FormData());
+                            location.hash = 'sec-database';
+                            location.reload();
+                        } catch (e) { undo.disabled = false; fail(e.message); }
+                    });
+                })();
+                </script>
                 <hr>
                 <h6><i class="bi bi-upload"></i> {{ t('set.db_import_title') }}</h6>
                 <p class="text-muted small">{{ t('set.db_import_desc') }}</p>
