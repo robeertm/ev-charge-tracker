@@ -26,7 +26,6 @@ import json
 import os
 import subprocess
 import sys
-import tempfile
 from datetime import date
 
 import pytest
@@ -194,7 +193,7 @@ def test_a_spreadsheet_resave_with_semicolon_bom_comma_and_dotted_dates_is_read(
 
 
 # ── changes ───────────────────────────────────────────────────────────
-def test_edited_fields_are_reported_old_to_new_and_derived_values_follow(app):
+def test_edited_fields_are_reported_old_to_new_and_derived_values_follow(app, tmp_path):
     with app.app_context():
         rows = _csv_rows(_export(True))
         hdr = rows[0]
@@ -215,7 +214,7 @@ def test_edited_fields_are_reported_old_to_new_and_derived_values_follow(app):
         assert plan['summary']['unchanged'] == 3
 
         cid = row['id']
-        S.apply_plan(plan, tempfile.mkdtemp())
+        S.apply_plan(plan, str(tmp_path))
         c = db.session.get(Charge, cid)
         assert c is not None
         assert c.kwh_loaded == 40.5 and c.notes == 'fixed price'
@@ -244,7 +243,7 @@ def test_a_missing_column_leaves_the_field_alone(app):
         assert plan['summary']['changed'] == 0
 
 
-def test_new_rows_are_added_and_only_marked_rows_are_deleted(app):
+def test_new_rows_are_added_and_only_marked_rows_are_deleted(app, tmp_path):
     with app.app_context():
         before = Charge.query.count()
         rows = _csv_rows(_export(True))
@@ -260,7 +259,7 @@ def test_new_rows_are_added_and_only_marked_rows_are_deleted(app):
         plan = _plan(_to_csv(keep))
         s = plan['summary']
         assert (s['new'], s['delete'], s['unchanged'], s['invalid']) == (1, 1, 1, 0), plan['rows']
-        res = S.apply_plan(plan, tempfile.mkdtemp())
+        res = S.apply_plan(plan, str(tmp_path))
         assert (res['inserted'], res['deleted']) == (1, 1)
         # Left-out rows are still there: 4 − 1 deleted + 1 new.
         assert Charge.query.count() == before
@@ -270,7 +269,7 @@ def test_new_rows_are_added_and_only_marked_rows_are_deleted(app):
 
 
 # ── refused rows ──────────────────────────────────────────────────────
-def test_invalid_rows_are_refused_with_line_and_reason(app):
+def test_invalid_rows_are_refused_with_line_and_reason(app, tmp_path):
     with app.app_context():
         rows = _csv_rows(_export(True))
         hdr = rows[0]
@@ -309,7 +308,7 @@ def test_invalid_rows_are_refused_with_line_and_reason(app):
         assert _by_line(plan, 14)['status'] == 'new'
 
         before = _all_rows()
-        S.apply_plan(plan, tempfile.mkdtemp())
+        S.apply_plan(plan, str(tmp_path))
         after = _all_rows()
         assert after[:len(before)] == before, 'refused rows must not touch anything'
         assert len(after) == len(before) + 1
@@ -335,7 +334,7 @@ def test_a_file_without_a_date_header_is_refused_as_a_whole(app):
 
 
 # ── backup and undo ───────────────────────────────────────────────────
-def test_undo_restores_the_state_before_the_import(app):
+def test_undo_restores_the_state_before_the_import(app, tmp_path):
     with app.app_context():
         before = _all_rows()
         rows = _csv_rows(_export(True))
@@ -347,7 +346,7 @@ def test_undo_restores_the_state_before_the_import(app):
         new[hdr.index('date')] = '2026-10-30'
         new[hdr.index('kwh_loaded')] = '5'
         rows.append(new)
-        backup_dir = tempfile.mkdtemp()
+        backup_dir = str(tmp_path)
         plan = _plan(_to_csv(rows))
         res = S.apply_plan(plan, backup_dir)
         assert (res['inserted'], res['updated'], res['deleted']) == (1, 1, 1)
@@ -364,13 +363,13 @@ def test_undo_restores_the_state_before_the_import(app):
         assert S.undo_last(backup_dir) is None
 
 
-def test_a_failed_apply_writes_nothing_and_leaves_no_journal(app, monkeypatch):
+def test_a_failed_apply_writes_nothing_and_leaves_no_journal(app, tmp_path, monkeypatch):
     with app.app_context():
         before = _all_rows()
         rows = _csv_rows(_export(True))
         rows[1][rows[0].index('notes')] = 'x'
         plan = _plan(_to_csv(rows))
-        backup_dir = tempfile.mkdtemp()
+        backup_dir = str(tmp_path)
         monkeypatch.setattr(db.session, 'commit',
                             lambda: (_ for _ in ()).throw(RuntimeError('disk full')))
         with pytest.raises(RuntimeError):
@@ -510,8 +509,8 @@ print(json.dumps(out))
 """
 
 
-def test_routes_check_rights_guard_size_and_undo():
-    d = tempfile.mkdtemp(prefix='evct-sheet-')
+def test_routes_check_rights_guard_size_and_undo(tmp_path):
+    d = str(tmp_path)
     env = dict(os.environ, EV_DATA_DIR=d, SECRET_KEY='sheet-test')
     proc = subprocess.run([sys.executable, '-c', _PREAMBLE + _FLOW], cwd=ROOT,
                           env=env, capture_output=True, text=True, timeout=180)
