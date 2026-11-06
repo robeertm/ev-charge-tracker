@@ -319,6 +319,9 @@ back to a key that is published in this repository, which would let anyone
 forge a session on an install that is reachable from outside.
 </details>
 
+The image has its own health check (`/api/health`), so `docker ps` shows
+`healthy` / `unhealthy` even if you run it without this compose file.
+
 **Everyday commands**
 
 ```bash

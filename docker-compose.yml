@@ -30,6 +30,8 @@ services:
       # gets Docker to do nothing else — it has no Docker access at all.
       - ev-updater-inbox:/app/updater-inbox
     healthcheck:
+      # The image carries the same check (HEALTHCHECK in the Dockerfile), so
+      # this block only repeats it explicitly and can be tuned or removed.
       # The app answers /api/health before the setup wizard has been run, so
       # this reports "healthy" on a fresh install too.
       test: ["CMD", "python", "-c",

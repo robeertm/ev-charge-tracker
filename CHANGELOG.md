@@ -1,5 +1,14 @@
 # Changelog
 
+## v3.0.190 (2026-11-06)
+
+### The container image carries its own health check
+
+The Dockerfile now declares a HEALTHCHECK on `/api/health` (every 30 s, 10 s timeout, 40 s start period, 5 retries).
+Until now the check existed only in the bundled docker-compose.yml, so running the published image any other way (plain `docker run`, Portainer, a NAS interface) left the container without a health status.
+The probe uses Python (the image has no curl) and follows `APP_PORT`, so a changed port does not make the container permanently unhealthy.
+The compose file keeps the same values; a new test keeps both in step.
+
 ## v3.0.189 (2026-11-05)
 
 ### Export charges to a spreadsheet, edit them, import them back

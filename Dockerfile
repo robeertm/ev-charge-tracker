@@ -63,4 +63,14 @@ VOLUME ["/app/data"]
 
 EXPOSE 7654
 
+# Liveness probe, built into the image so it works however the container is
+# started (plain `docker run`, Compose, Portainer, a NAS GUI) and not only when
+# the bundled docker-compose.yml is used. /api/health needs no login and
+# answers before the setup wizard has run, so a fresh install reports healthy.
+# Python's urllib is used because the slim base image has neither curl nor
+# wget. The port follows APP_PORT, so a changed port does not turn the
+# container permanently unhealthy. Values match docker-compose.yml.
+HEALTHCHECK --interval=30s --timeout=10s --start-period=40s --retries=5 \
+    CMD ["python", "-c", "import os,sys,urllib.request; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:%s/api/health' % os.environ.get('APP_PORT', '7654'), timeout=5).status == 200 else 1)"]
+
 CMD ["python", "app.py"]
