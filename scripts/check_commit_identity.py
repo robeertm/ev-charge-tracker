@@ -12,8 +12,11 @@ Rules, checked for author AND committer of every commit in the given range:
 * ``*@users.noreply.github.com`` and ``noreply@github.com`` are always fine.
 * An address whose domain has no dot, or ends in ``.local`` / ``.localdomain``
   / ``localhost``, is refused: it is a machine placeholder from some tool.
-* An identity that names the maintainer (by name or by GitHub handle) is
-  refused unless it uses ``MAINTAINER_EMAIL``.
+* An identity that names the maintainer by GitHub handle, or by one of the
+  names listed in the optional file ``~/.ev-tracker-maintainer`` (one name per
+  line, ``#`` for comments; kept outside the repository on purpose), is
+  refused unless it uses a GitHub no-reply address.  Without that file only the
+  handle is checked, so CI runs need nothing private.
 * Everyone else (outside contributors) is left alone: their address is theirs.
 
 Usage::
@@ -29,28 +32,44 @@ The same check runs in CI on every push (``.github/workflows/commit-identity.yml
 """
 from __future__ import annotations
 
+import os
 import subprocess
 import sys
+from pathlib import Path
 from typing import Iterable, List, Optional, Tuple
 
-MAINTAINER_NAMES = {"robert manuwald", "robert", "robeertm"}
 MAINTAINER_HANDLE = "robeertm"
-MAINTAINER_EMAIL = "robeertm@users.noreply.github.com"
+MAINTAINER_EMAIL = f"{MAINTAINER_HANDLE}@users.noreply.github.com"
+NOREPLY_DOMAIN = "users.noreply.github.com"
+#: Optional, outside the repository: further names that identify the maintainer.
+NAMES_FILE = "~/.ev-tracker-maintainer"
 ZERO = "0" * 40
+
+
+def maintainer_names() -> set:
+    """The handle plus names from the optional private file, lower-cased."""
+    names = {MAINTAINER_HANDLE}
+    path = Path(os.environ.get("EV_MAINTAINER_FILE") or os.path.expanduser(NAMES_FILE))
+    try:
+        lines = path.read_text(encoding="utf-8").splitlines()
+    except OSError:
+        return names
+    names |= {ln.strip().lower() for ln in lines if ln.strip() and not ln.lstrip().startswith("#")}
+    return names
 
 
 def problem(name: str, email: str) -> Optional[str]:
     """Return why this identity must not be published, or None when it is fine."""
     n = (name or "").strip().lower()
     e = (email or "").strip().lower()
-    if e == MAINTAINER_EMAIL or e == "noreply@github.com":
+    if e == "noreply@github.com" or e.endswith("@" + NOREPLY_DOMAIN):
         return None
     domain = e.rsplit("@", 1)[-1] if "@" in e else ""
     if not domain or "." not in domain or domain == "localhost" or domain.endswith(
         (".local", ".localdomain", ".localhost")
     ):
         return "machine-local address"
-    names_maintainer = n in MAINTAINER_NAMES or MAINTAINER_HANDLE in e.split("@", 1)[0]
+    names_maintainer = n in maintainer_names() or MAINTAINER_HANDLE in e.split("@", 1)[0]
     if names_maintainer:
         return "maintainer must use the GitHub no-reply address"
     return None
@@ -108,7 +127,7 @@ def main(argv: List[str]) -> int:
         for b in bad:
             print("  " + b, file=sys.stderr)
         print(
-            f"Fix: git config user.name 'Robert Manuwald' && git config user.email {MAINTAINER_EMAIL}\n"
+            f"Fix: git config user.email {MAINTAINER_EMAIL}\n"
             "     then rewrite the commits (e.g. git rebase -r <base> --exec 'git commit --amend --no-edit --reset-author').",
             file=sys.stderr,
         )

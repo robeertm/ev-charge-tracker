@@ -1,5 +1,14 @@
 # Changelog
 
+## v3.0.191 (2026-11-06)
+
+### Commit identity check no longer hard-codes any personal data
+
+The commit identity check (`scripts/check_commit_identity.py`) used to carry the maintainer's full name and mailbox form in its source.
+It now knows only the GitHub handle and accepts any GitHub no-reply address (`<id>+<handle>@users.noreply.github.com` or `<handle>@users.noreply.github.com`).
+Additional names that must not appear with a personal mailbox can be listed, one per line, in an optional file outside the repository (`~/.ev-tracker-maintainer`, or the path in `EV_MAINTAINER_FILE`); without that file, as on CI, only the handle is checked.
+The tests use neutral example names and a temporary file.
+
 ## v3.0.190 (2026-11-06)
 
 ### The container image carries its own health check

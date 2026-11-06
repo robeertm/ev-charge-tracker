@@ -3,6 +3,7 @@ addresses out of the public history.  Placeholder addresses only."""
 from __future__ import annotations
 
 import importlib.util
+import os
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -17,16 +18,47 @@ def _mod():
 
 def test_noreply_addresses_pass():
     m = _mod()
-    assert m.problem("Robert Manuwald", "robeertm@users.noreply.github.com") is None
+    assert m.problem("Maintainer", m.MAINTAINER_EMAIL) is None
+    assert m.problem("Maintainer", "1234+" + m.MAINTAINER_EMAIL) is None
     assert m.problem("GitHub", "noreply@github.com") is None
     assert m.problem("Release Bot", "noreply@github.com") is None
 
 
-def test_maintainer_with_a_personal_mailbox_is_refused():
+def test_maintainer_handle_with_a_personal_mailbox_is_refused():
     m = _mod()
-    assert m.problem("Robert Manuwald", "someone@example.com")
-    assert m.problem("Robert", "git@example.org")
-    assert m.problem("Anyone", "robeertm@example.net")
+    assert m.problem("robeertm", "someone@example.com")
+    assert m.problem("Anyone", m.MAINTAINER_HANDLE + "@example.net")
+
+
+def test_names_from_the_private_file_are_refused(tmp_path):
+    f = tmp_path / "names"
+    f.write_text("# comment\nJane Maintainer\n", encoding="utf-8")
+    old = os.environ.get("EV_MAINTAINER_FILE")
+    os.environ["EV_MAINTAINER_FILE"] = str(f)
+    try:
+        m = _mod()
+        assert m.problem("Jane Maintainer", "someone@example.com")
+        assert m.problem("Jane Maintainer", "jane@users.noreply.github.com") is None
+        assert m.problem("Other Person", "other@example.com") is None
+    finally:
+        if old is None:
+            os.environ.pop("EV_MAINTAINER_FILE")
+        else:
+            os.environ["EV_MAINTAINER_FILE"] = old
+
+
+def test_without_the_file_only_the_handle_counts(tmp_path):
+    old = os.environ.get("EV_MAINTAINER_FILE")
+    os.environ["EV_MAINTAINER_FILE"] = str(tmp_path / "missing")
+    try:
+        m = _mod()
+        assert m.problem("Jane Maintainer", "someone@example.com") is None
+        assert m.problem("robeertm", "someone@example.com")
+    finally:
+        if old is None:
+            os.environ.pop("EV_MAINTAINER_FILE")
+        else:
+            os.environ["EV_MAINTAINER_FILE"] = old
 
 
 def test_machine_placeholders_are_refused():
