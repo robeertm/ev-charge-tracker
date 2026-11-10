@@ -8461,6 +8461,24 @@ def register_routes(app):
         flash(msg, 'success')
         return jsonify({'ok': True, 'message': msg, **result})
 
+    # XPENG Data Act export: upload, preview, apply, undo (v3.0.193)
+    def _data_act_backup():
+        from import_gsheet import _backup_db_before_replace
+        _backup_db_before_replace()
+
+    def _data_act_co2():
+        from services.co2_backfill import start_backfill
+        start_backfill(app, force=True)
+
+    from services import data_act_web as _data_act_web
+    _data_act_web.register(
+        app, data_dir=DATA_DIR, write_guard=_sheet_write_guard,
+        active_vehicle_id=_active_vehicle_id,
+        battery_kwh_fn=lambda vid: _get_battery_kwh(vehicle_id=vid),
+        efficiency_fn=lambda vid: _get_charge_efficiency(vehicle_id=vid),
+        release_fn=_release_wallbox_reading, t=t,
+        backup_fn=_data_act_backup, co2_fn=_data_act_co2)
+
 def _float(val):
     if val is None or val == '':
         return None

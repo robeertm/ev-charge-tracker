@@ -1,5 +1,21 @@
 # Changelog
 
+## v3.0.193 (2026-11-11)
+
+### Import the XPENG data export (EU Data Act)
+
+The export the manufacturer hands out under the EU Data Act (up to three CSV streams of raw signals, one row per second while the car is awake, 7/14/30 days up to yesterday, no GPS, about 340 MB a month) can now be uploaded and turned into trips and charges. New page `/data-act`, linked from Settings > Database.
+
+- **Reading.** ZIP or CSV files, streamed to disk and read row by row with a progress bar; part files (`_part1`, `_part2`, ...) are joined in numeric order, duplicate seconds dropped, placeholder values ("signal not available") ignored. The upload is deleted after the analysis. Millions of rows run in seconds.
+- **Charges** are found from the charging power (joined across the car's naps, split when the car drove in between): kWh as the integral of charging power (cross-checked against pack voltage x current), SoC from/to, peak and average power, AC/DC, odometer. Sessions the manual form would refuse as implausible are skipped.
+- **Trips** are found from gear and speed within the awake periods: distance from the odometer, duration, average and top speed, SoC from/to, consumption and regeneration per 100 km from pack power.
+- **No double counting.** Every imported charge carries a window marker. A charge or trip that overlaps one already there (an earlier export of the same days, a charge filed from live data, a trip from the vehicle cloud) is skipped, completed (only empty fields are filled, nothing the owner entered is overwritten) or extended (a longer window of the same session). Importing the same export twice changes nothing.
+- **Safe.** A preview lists everything first; the database is copied before applying; the last import can be undone (new rows removed, completed rows restored). A VIN that does not match the chosen vehicle is refused unless confirmed.
+- **Unknown layouts.** A file the importer does not recognise is refused with a clear message in the user's language, and the first rows (VIN masked) are kept in the data folder (`data_act/probe`) so the importer can be improved.
+- All texts in the six app languages; distances follow the km/mi setting.
+
+The layout was taken from the public descriptions of the export (file names, columns, units, placeholder values); no real export was at hand. The tests use synthetic files in that layout (20 new tests).
+
 ## v3.0.192 (2026-11-10)
 
 ### Home Assistant connector reads the community XPENG integration

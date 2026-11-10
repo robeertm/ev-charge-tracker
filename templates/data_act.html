@@ -1,0 +1,276 @@
+{% extends "base.html" %}
+{% block title %}{{ t('dataact.title') }} — EV Charge Tracker{% endblock %}
+{% block head %}
+<style>
+.da-wrap { max-width: 920px; margin: 0 auto; }
+.da-steps { counter-reset: da; list-style: none; padding: 0; margin: 0 0 1rem; }
+.da-steps li { counter-increment: da; display: flex; gap: .75rem; align-items: flex-start; padding: .35rem 0; }
+.da-steps li::before { content: counter(da); flex: 0 0 1.6rem; height: 1.6rem; border-radius: 50%;
+    background: var(--bs-primary); color: #fff; font-size: .8rem; font-weight: 600;
+    display: flex; align-items: center; justify-content: center; margin-top: .05rem; }
+.da-drop { border: 2px dashed var(--bs-border-color); border-radius: .5rem; padding: 1.25rem; text-align: center;
+    cursor: pointer; position: relative; transition: border-color .15s, background .15s; }
+.da-drop.over { border-color: var(--bs-primary); background: rgba(13,110,253,.06); }
+.da-drop input { position: absolute; inset: 0; width: 100%; height: 100%; opacity: 0; cursor: pointer; font-size: 0; }
+.da-kpi .kpi-value { font-size: 1.35rem; }
+.da-table td { white-space: nowrap; }
+.da-table th { white-space: normal; vertical-align: bottom; }
+@media (max-width: 575px) { .da-table { font-size: .78rem; } .da-table td, .da-table th { padding-left: .25rem; padding-right: .25rem; } }
+.da-pill { font-size: .72rem; }
+</style>
+{% endblock %}
+{% block content %}
+<div class="da-wrap">
+<h4 class="mb-3"><i class="bi bi-cloud-arrow-up"></i> {{ t('dataact.title') }}</h4>
+
+<div class="card mb-3">
+    <div class="card-body">
+        <p class="text-muted small mb-2">{{ t('dataact.intro') }}</p>
+        <ol class="da-steps small mb-0">
+            <li><span>{{ t('dataact.step1') }}</span></li>
+            <li><span>{{ t('dataact.step2') }}</span></li>
+            <li><span>{{ t('dataact.step3') }}</span></li>
+        </ol>
+    </div>
+</div>
+
+<div class="card mb-3" id="daUploadCard">
+    <div class="card-body">
+        <div class="row g-2 align-items-end mb-3">
+            <div class="col-12 col-md-6">
+                <label class="form-label small mb-1" for="daVehicle">{{ t('dataact.vehicle') }}</label>
+                <select class="form-select form-select-sm" id="daVehicle">
+                    {% for v in vehicles %}
+                    <option value="{{ v.id }}" {% if v.id == default_vehicle %}selected{% endif %}>{{ v.name }}{% if v.is_archived %} ({{ t('dataact.archived') }}){% endif %}</option>
+                    {% endfor %}
+                </select>
+            </div>
+        </div>
+        <label class="da-drop d-block mb-2" id="daDrop">
+            <i class="bi bi-file-earmark-zip fs-2 d-block text-muted"></i>
+            <span id="daDropText">{{ t('dataact.choose') }}</span>
+            <input type="file" id="daFiles" multiple accept=".zip,.csv,application/zip,text/csv,text/plain">
+        </label>
+        <div class="small text-muted mb-2" id="daPicked"></div>
+        <div id="daBar" class="mb-2" style="display:none">
+            <div class="d-flex justify-content-between small text-muted mb-1">
+                <span id="daBarLabel"></span><span id="daBarPct"></span>
+            </div>
+            <div class="progress" style="height:.6rem"><div class="progress-bar" id="daBarFill" style="width:0%"></div></div>
+        </div>
+        <div class="alert alert-danger small py-2 mb-2" id="daError" style="display:none"></div>
+        <div class="d-flex gap-2 flex-wrap">
+            <button type="button" class="btn btn-primary btn-sm" id="daStart" disabled>
+                <i class="bi bi-search"></i> {{ t('dataact.analyse') }}
+            </button>
+            <button type="button" class="btn btn-outline-secondary btn-sm" id="daForce" style="display:none">
+                {{ t('dataact.force') }}
+            </button>
+        </div>
+        <p class="small text-muted mt-2 mb-0"><i class="bi bi-shield-check"></i> {{ t('dataact.privacy') }}</p>
+    </div>
+</div>
+
+<div class="card mb-3" id="daResult" style="display:none">
+    <div class="card-body">
+        <h6 class="mb-2"><i class="bi bi-clipboard-data"></i> {{ t('dataact.result_title') }}</h6>
+        <p class="small text-muted mb-2" id="daMeta"></p>
+        <div class="row g-2 mb-3 da-kpi" id="daKpis"></div>
+        <div id="daLists"></div>
+        <div class="d-flex gap-2 flex-wrap mt-3">
+            <button type="button" class="btn btn-success btn-sm" id="daApply" disabled>
+                <i class="bi bi-check2-circle"></i> {{ t('dataact.apply') }}
+            </button>
+            <button type="button" class="btn btn-outline-secondary btn-sm" id="daCancel">{{ t('sheet.cancel') }}</button>
+        </div>
+        <p class="small text-muted mt-2 mb-0">{{ t('dataact.backup_note') }}</p>
+    </div>
+</div>
+
+{% if last_import %}
+<div class="d-flex flex-wrap align-items-center gap-2 mb-3" id="daUndoRow">
+    <span class="small text-muted"><i class="bi bi-clock-history"></i>
+        {{ t('dataact.last_import', when=last_import.when, new=last_import.new, changed=last_import.changed) }}</span>
+    <button type="button" class="btn btn-outline-danger btn-sm ms-md-auto" id="daUndo">
+        <i class="bi bi-arrow-counterclockwise"></i> {{ t('dataact.undo') }}
+    </button>
+</div>
+{% endif %}
+</div>
+
+<script>
+(function () {
+    const T = {
+        choose: {{ t('dataact.choose')|tojson }},
+        uploading: {{ t('dataact.uploading')|tojson }},
+        reading: {{ t('dataact.reading')|tojson }},
+        deriving: {{ t('dataact.deriving')|tojson }},
+        rows: {{ t('dataact.rows')|tojson }},
+        files: {{ t('dataact.files')|tojson }},
+        window: {{ t('dataact.window')|tojson }},
+        k_charges: {{ t('dataact.kpi_charges')|tojson }},
+        k_trips: {{ t('dataact.kpi_trips')|tojson }},
+        k_kwh: {{ t('dataact.kpi_kwh')|tojson }},
+        k_km: {{ t('dataact.kpi_km')|tojson }},
+        st_new: {{ t('dataact.st_new')|tojson }},
+        st_merge: {{ t('dataact.st_merge')|tojson }},
+        st_extend: {{ t('dataact.st_extend')|tojson }},
+        c_dup: {{ t('dataact.already_there')|tojson }},
+        c_live: {{ t('dataact.already_live')|tojson }},
+        c_bad: {{ t('dataact.implausible')|tojson }},
+        h_charges: {{ t('dataact.h_charges')|tojson }},
+        h_trips: {{ t('dataact.h_trips')|tojson }},
+        col_when: {{ t('dataact.col_when')|tojson }},
+        col_kwh: {{ t('dataact.col_kwh')|tojson }},
+        col_soc: {{ t('dataact.col_soc')|tojson }},
+        col_power: {{ t('dataact.col_power')|tojson }},
+        col_dist: {{ t('dataact.col_dist')|tojson }},
+        col_dur: {{ t('dataact.col_dur')|tojson }},
+        col_cons: {{ t('dataact.col_cons')|tojson }},
+        nothing: {{ t('dataact.nothing')|tojson }},
+        applying: {{ t('dataact.applying')|tojson }},
+        err: {{ t('sheet.error')|tojson }},
+        undo_confirm: {{ t('dataact.undo_confirm')|tojson }},
+        min: {{ t('dataact.min')|tojson }},
+    };
+    const F = {{ (100|dist)|float }} / 100, UNIT = {{ dist_unit()|tojson }};
+    const $ = id => document.getElementById(id);
+    let files = [], job = null, force = false;
+    const fmt = (n, d = 0) => n == null ? '–' : Number(n).toLocaleString(undefined, {maximumFractionDigits: d, minimumFractionDigits: d});
+    const esc = s => String(s).replace(/[&<>"]/g, c => ({'&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;'}[c]));
+    const when = ts => new Date(ts * 1000).toLocaleString(undefined, {dateStyle: 'short', timeStyle: 'short'});
+    const day = ts => new Date(ts * 1000).toLocaleDateString(undefined, {dateStyle: 'medium'});
+    const dayS = ts => new Date(ts * 1000).toLocaleDateString(undefined, {day: 'numeric', month: 'numeric'});
+    const hm = ts => new Date(ts * 1000).toLocaleTimeString(undefined, {hour: '2-digit', minute: '2-digit'});
+    function bar(label, frac) {
+        $('daBar').style.display = '';
+        $('daBarLabel').textContent = label;
+        const p = Math.round(frac * 100);
+        $('daBarPct').textContent = p + ' %';
+        $('daBarFill').style.width = p + '%';
+    }
+    function fail(msg, force_btn) {
+        $('daBar').style.display = 'none';
+        const e = $('daError'); e.textContent = msg; e.style.display = '';
+        $('daStart').disabled = !files.length;
+        $('daForce').style.display = force_btn ? '' : 'none';
+    }
+    function pick(list) {
+        files = Array.from(list);
+        $('daPicked').textContent = files.length
+            ? T.files.replace('{n}', files.length).replace('{mb}', fmt(files.reduce((a, f) => a + f.size, 0) / 1048576, 1)) + ' — ' + files.slice(0, 3).map(f => f.name).join(', ') + (files.length > 3 ? ' …' : '')
+            : '';
+        $('daStart').disabled = !files.length;
+        $('daError').style.display = 'none';
+    }
+    $('daFiles').addEventListener('change', e => pick(e.target.files));
+    const drop = $('daDrop');
+    ['dragenter', 'dragover'].forEach(n => drop.addEventListener(n, e => { e.preventDefault(); drop.classList.add('over'); }));
+    ['dragleave', 'drop'].forEach(n => drop.addEventListener(n, e => { e.preventDefault(); drop.classList.remove('over'); }));
+    drop.addEventListener('drop', e => pick(e.dataTransfer.files));
+
+    function upload() {
+        $('daError').style.display = 'none'; $('daForce').style.display = 'none';
+        $('daStart').disabled = true; $('daResult').style.display = 'none';
+        const fd = new FormData();
+        files.forEach(f => fd.append('export_files', f, f.name));
+        fd.append('vehicle_id', $('daVehicle').value);
+        if (force) fd.append('force', '1');
+        const x = new XMLHttpRequest();
+        x.open('POST', '/api/data-act/upload');
+        x.setRequestHeader('X-Requested-With', 'XMLHttpRequest');
+        x.upload.onprogress = e => { if (e.lengthComputable) bar(T.uploading, e.loaded / e.total); };
+        x.onerror = () => fail(T.err);
+        x.onload = () => {
+            let j = {}; try { j = JSON.parse(x.responseText); } catch (e) {}
+            if (x.status !== 200 || !j.job) return fail(j.error || T.err);
+            job = j.job; poll();
+        };
+        x.send(fd);
+    }
+    async function poll() {
+        try {
+            const r = await fetch('/api/data-act/job/' + job);
+            const j = await r.json();
+            if (!r.ok) return fail(j.error || T.err);
+            if (j.state === 'running') {
+                bar((j.stage === 'derive' ? T.deriving : T.reading).replace('{rows}', fmt(j.rows)), j.progress);
+                return setTimeout(poll, 700);
+            }
+            if (j.state === 'error') return fail(j.error, j.code === 'vin_mismatch');
+            if (j.state === 'ready') { $('daBar').style.display = 'none'; show(j.summary, j.vin_tail); }
+        } catch (e) { fail(T.err); }
+    }
+    function pills(c) {
+        const out = [];
+        for (const [k, lbl] of [['new', T.st_new], ['merge', T.st_merge], ['extend', T.st_extend]])
+            if (c[k]) out.push(`<span class="badge bg-secondary da-pill">${c[k]} ${esc(lbl)}</span>`);
+        return out.join(' ');
+    }
+    function kpi(label, value, cls, sub) {
+        return `<div class="col-6 col-md-3"><div class="card kpi-card border-${cls}"><div class="card-body text-center p-2">
+            <div class="kpi-label">${esc(label)}</div><div class="kpi-value text-${cls}">${value}</div>
+            <div class="small text-muted">${sub || '&nbsp;'}</div></div></div></div>`;
+    }
+    function show(s, tail) {
+        const c = s.counts.charges, t = s.counts.trips;
+        const addC = (c.new || 0) + (c.merge || 0) + (c.extend || 0);
+        const addT = (t.new || 0) + (t.extend || 0);
+        const skipC = (c.dup || 0), skipT = (t.dup || 0), live = (t.live || 0), bad = (c.implausible || 0);
+        $('daMeta').textContent = [s.model, tail ? '…' + tail : '', T.window.replace('{from}', day(s.window[0])).replace('{to}', day(s.window[1])), T.rows.replace('{n}', fmt(s.rows))].filter(Boolean).join(' · ');
+        $('daKpis').innerHTML =
+            kpi(T.k_charges, addC, 'success', pills(c)) + kpi(T.k_kwh, fmt(s.kwh, 1), 'info', '') +
+            kpi(T.k_trips, addT, 'primary', pills(t)) + kpi(T.k_km, fmt(s.km * F, 0) + ' ' + esc(UNIT), 'secondary', '');
+        let h = '';
+        const notes = [];
+        if (skipC || skipT) notes.push(T.c_dup.replace('{n}', skipC + skipT));
+        if (live) notes.push(T.c_live.replace('{n}', live));
+        if (bad) notes.push(T.c_bad.replace('{n}', bad));
+        if (notes.length) h += `<p class="small text-muted mb-2"><i class="bi bi-info-circle"></i> ${esc(notes.join(' · '))}</p>`;
+        const cs = s.rows_ui.charges, ts = s.rows_ui.trips;
+        if (cs.length) {
+            h += `<h6 class="small mt-2">${esc(T.h_charges)}</h6><div class="table-responsive"><table class="table table-sm da-table small"><thead><tr>
+                <th>${esc(T.col_when)}</th><th>${esc(T.col_soc)}</th><th class="text-end">${esc(T.col_kwh)}</th><th class="text-end">${esc(T.col_power)}</th><th class="d-none d-md-table-cell"></th></tr></thead><tbody>` +
+                cs.map(x => `<tr><td>${dayS(x.start)} ${hm(x.start)}<span class="d-none d-sm-inline">–${hm(x.end)}</span></td>
+                    <td>${x.soc_from == null ? '–' : x.soc_from} → ${x.soc_to == null ? '–' : x.soc_to} %</td>
+                    <td class="text-end">${fmt(x.kwh, 1)}</td>
+                    <td class="text-end">${x.type} ${fmt(x.peak_kw, 0)} kW</td>
+                    <td class="d-none d-md-table-cell"><span class="badge bg-secondary da-pill">${esc(T['st_' + x.status])}</span></td></tr>`).join('') + `</tbody></table></div>`;
+        }
+        if (ts.length) {
+            h += `<h6 class="small mt-2">${esc(T.h_trips)}</h6><div class="table-responsive"><table class="table table-sm da-table small"><thead><tr>
+                <th>${esc(T.col_when)}</th><th class="text-end">${esc(T.col_dist)}</th><th class="text-end d-none d-sm-table-cell">${esc(T.col_dur)}</th><th>${esc(T.col_soc)}</th><th class="text-end">${esc(T.col_cons)}</th><th class="d-none d-md-table-cell"></th></tr></thead><tbody>` +
+                ts.map(x => `<tr><td>${dayS(x.start)} ${hm(x.start)}</td>
+                    <td class="text-end">${fmt(x.distance_km * F, 1)} ${esc(UNIT)}</td>
+                    <td class="text-end d-none d-sm-table-cell">${Math.round(x.duration / 60)} ${esc(T.min)}</td>
+                    <td>${x.soc_from == null ? '–' : x.soc_from} → ${x.soc_to == null ? '–' : x.soc_to} %</td>
+                    <td class="text-end">${x.consumption == null ? '–' : fmt(x.consumption / F, 1)}</td>
+                    <td class="d-none d-md-table-cell"><span class="badge bg-secondary da-pill">${esc(T['st_' + x.status])}</span></td></tr>`).join('') + `</tbody></table></div>`;
+        }
+        if (!addC && !addT) h += `<div class="alert alert-info small py-2 mb-0">${esc(T.nothing)}</div>`;
+        $('daLists').innerHTML = h;
+        $('daApply').disabled = !(addC || addT);
+        $('daResult').style.display = '';
+        $('daStart').disabled = false;
+    }
+    $('daStart').addEventListener('click', () => { force = false; upload(); });
+    $('daForce').addEventListener('click', () => { force = true; upload(); });
+    $('daCancel').addEventListener('click', () => { $('daResult').style.display = 'none'; job = null; });
+    $('daApply').addEventListener('click', async () => {
+        $('daApply').disabled = true; $('daApply').textContent = T.applying;
+        try {
+            const r = await fetch('/api/data-act/apply/' + job, {method: 'POST', headers: {'X-Requested-With': 'XMLHttpRequest'}});
+            const j = await r.json();
+            if (!r.ok) { $('daApply').disabled = false; return fail(j.error || T.err); }
+            location.reload();
+        } catch (e) { fail(T.err); }
+    });
+    const u = $('daUndo');
+    if (u) u.addEventListener('click', async () => {
+        if (!confirm(T.undo_confirm)) return;
+        const r = await fetch('/api/data-act/undo', {method: 'POST', headers: {'X-Requested-With': 'XMLHttpRequest'}});
+        if (r.ok) location.reload(); else { const j = await r.json(); fail(j.error || T.err); }
+    });
+})();
+</script>
+{% endblock %}

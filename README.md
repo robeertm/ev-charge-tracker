@@ -113,6 +113,12 @@ state of health — and a battery certificate as a PDF.*
 again: a preview lists what is new, changed (old → new), to be deleted or
 invalid before anything is saved — and the last import can be undone.*
 
+### Import the XPENG data export
+![Import of the XPENG data export](docs/screenshots/data-act-import.png)
+*Upload the export requested under the EU Data Act (ZIP or the CSV files). The tracker
+derives trips and charges from the raw signals and shows what is new before anything is
+saved; the same export imported twice adds nothing.*
+
 ### Settings
 ![Settings](docs/screenshots/settings.png)
 *Vehicle API, sync window, GHG quota, ENTSO-E, HTTPS, PV — all from the UI, no
@@ -230,6 +236,7 @@ never mix with a real history.
 - **Open-Meteo** — daily mean temperatures for the range calculator and weather correlation, with DB cache (no key, no rate limits)
 - **Nominatim reverse geocoding** — for street addresses on parking events and charge locations, with permanent DB cache and ToS-compliant rate limiter
 - **Spreadsheet round trip for charges** — Settings > Database exports every charge (optionally one vehicle or a date range) as CSV (UTF-8 with BOM, `;` separator, the decimal mark of your language) or XLSX, each row with its stable `id`. Edit the file anywhere and import it back: rows are matched by `id`, rows without one become new charges, and a charge is deleted only when its `delete` column says yes — rows missing from the file are kept. The preview shows new / changed (field: old → new) / unchanged / invalid (row + reason) before you confirm. Checks: required fields, numbers and ranges (kWh and costs ≥ 0, start SoC ≤ end SoC, hours 0–23), date formats, duplicate IDs and duplicate charges. Cost, loss and CO₂ are recalculated the way the edit form does. Every import first copies the database and writes a journal, and **Undo last import** puts every touched charge back. Text cells starting with `=`, `+`, `-` or `@` are prefixed with `'` on export so a spreadsheet does not run them as formulas
+- **XPENG Data Act import (v3.0.193)** — Settings > Database links to a page that takes the export requested at the manufacturer's data portal (ZIP or the three CSV streams, 7/14/30 days, large files are streamed and the upload is deleted after analysis). The export holds raw signals once a second and no GPS, so trips (distance, SoC, consumption, regeneration) and charges (kWh as the integral of charging power, SoC from/to, peak power, AC/DC) are derived from them. Overlapping exports and live data are never counted twice: a charge or trip that overlaps one already there is skipped, completed (only empty fields are filled) or extended, nothing is overwritten. Preview first, database copy before applying, undo for the last import. A file in a layout the importer does not know is refused with a clear message and a short head of it (VIN masked) is kept in the data folder so the importer can be improved
 - **CSV import with live preview** — upload your Google Sheet or exported CSV in Settings, get a dry-run preview showing detected delimiter, column mapping (per-column dropdown to correct misdetections), per-row action badges (`new` / `update` / `duplicate` / `empty` / `error`), and an error list with line numbers. Only when you hit "Import" does the data actually land in the DB. Automatic dedup by (date, hour, kWh) with 0.1 kWh tolerance
 - **OBD/ELM327 via the browser** — Web Serial / Web Bluetooth transport with a data-driven PID table per vehicle family: `kia_hyundai_ext` (7E4, Kona/e-Niro/Soul), `xpeng`, `jaguar_ipace`, `mg_saic` (ZS EV/MG5) + `mg_mulan` (MG4), `byd_atto` (Atto 3/Dolphin, little-endian), `nissan_leaf` (LBC, KWP service 21), `renault_zoe_ph1` + `renault_zoe_ph2` (ZE50, 29-bit), `vw_meb` (ID.3/4/5, Enyaq, Born, Q4 — 29-bit), plus a generic `generic_ev` fallback on standard PID 015B. ISO-TP frame reassembly, service 0x21/0x22 + 11-bit/29-bit addressing, raw frames persisted for re-decoding. (Tesla omitted — no standard UDS battery PIDs; needs raw-CAN sniffing)
 - **PV charging support** — third charge type with auto-calculated CO2 from PV system specs
