@@ -478,7 +478,10 @@ target, range, plug and charging state), an OBD dongle such as the WiCAN Pro ove
 (state of charge, odometer, pack values, 12 V), or a later official integration. Give the
 car's entities one shared start (e.g. `sensor.xpeng_g6_soc`, `sensor.xpeng_g6_odometer`,
 `device_tracker.xpeng_g6`) and enter that prefix; *Test connection* lists the entities it
-picked. A container on a NAS may not resolve `*.ts.net` names — use the LAN address.
+picked. The community XPENG integration for Home Assistant is understood as well (device
+renamed so every entity starts with `xpeng_g6`): state of charge, odometer, range, charging
+state and power, plug, position, and the integration's own *last data update* as the data
+time. A real charging entity always wins over the pack-current guess made for dongles. A container on a NAS may not resolve `*.ts.net` names — use the LAN address.
 
 **Škoda note:** Škoda is retiring the unofficial app API in October 2026. The app now
 speaks the official [MyŠkoda Public API](https://public.api.connect.skoda-auto.cz/docs):

@@ -1,5 +1,19 @@
 # Changelog
 
+## v3.0.192 (2026-11-10)
+
+### Home Assistant connector reads the community XPENG integration
+
+For an XPENG G6 whose data reaches Home Assistant through the community custom integration (device named so that every entity starts with `xpeng_g6`), the connector now recognises that integration's entities and no longer has to guess:
+
+- **Charging** comes from the integration's charging state (`Disconnected`, `Connected`, `Charging`, `Complete`, `Idle`, `Scheduled`). "Connected" now means a cable, not a charge. The compact layout's charging switch is used when present. A real charging entity always wins over the pack-current guess made for OBD dongles.
+- **Data freshness** is the integration's own *last data update* (normalised to UTC), not the moment Home Assistant wrote the state, which keeps moving while the car's sign-in is lost. Without that entity the old behaviour stays.
+- **Position time** is derived from the tracker's own fix age, so the parking-event freshness gate sees how old the fix really is.
+- The sign-in flag and the integration's polling status are carried in the raw reading, so a lost account shows up next to the frozen values.
+- Look-alikes are no longer picked: "range added by the last charge" is not the range, the charger's voltage and current are not the traction pack's.
+
+28 new tests use entity ids, units and state words taken from the integration's code (version 0.6.44); every existing WiCAN and core-integration test still passes.
+
 ## v3.0.191 (2026-11-06)
 
 ### Commit identity check no longer hard-codes any personal data

@@ -144,6 +144,7 @@ _SPEED_WORDS = ('speed', 'geschwindigkeit', 'velocity', 'vehicle_speed')
 _NOT_SPEED = ('max', 'limit', 'avg', 'average', 'fan', 'wind', 'target', 'set')
 _SPEED_UNITS = {'km/h': 1.0, 'kph': 1.0, 'kmh': 1.0, 'km/hr': 1.0,
                 'mph': 1.609344, 'mi/h': 1.609344, 'm/s': 3.6}
+_NOT_RANGE = ('added', 'last', 'fast')         # "range added by the last charge" is no range
 _NOT_SOC = _WORDS['target'] + _WORDS['aux'] + ('health', 'soh', 'temp', 'voltage', 'current')
 
 
@@ -233,6 +234,47 @@ def _is_on(state) -> Optional[bool]:
              'notcharging', 'complete', 'completed', 'stopped', 'ready', '0'):
         return False
     return None
+
+
+# ── the community XPENG integration (HA custom component, XPENG G6) ──────
+# It publishes ``sensor.<prefix>_charging_state`` as an enum with the words
+# below. They are NOT the plug/charging words ``_is_on`` knows: "Connected"
+# means cable in, not charging. ``Idle``/``Scheduled`` say nothing about the
+# cable, ``Error`` nothing about anything.
+_XP_STATE = {            # word -> (charging, plugged)
+    'charging': (True, True),
+    'connected': (False, True),
+    'complete': (False, True),
+    'disconnected': (False, False),
+    'idle': (False, None),
+    'scheduled': (False, None),
+}
+
+
+def _xp_charge_state(state):
+    """``(charging, plugged)`` for an XPENG-integration charging-state word, else (None, None)."""
+    return _XP_STATE.get(str(state or '').strip().lower(), (None, None))
+
+
+def _is_xp_charge_state(attrs: dict) -> bool:
+    """The enum sensor of the XPENG integration: its ``options`` carry its own words."""
+    opts = {str(o).strip().lower() for o in (attrs.get('options') or [])}
+    return {'charging', 'disconnected'} <= opts
+
+
+def _utc_iso(value) -> Optional[str]:
+    """An ISO 8601 stamp with an offset as ``YYYY-MM-DDTHH:MM:SS+00:00``, else None."""
+    s = str(value or '').strip()
+    if not s or s.lower() in _NO_VALUE:
+        return None
+    try:
+        from datetime import datetime, timezone
+        dt = datetime.fromisoformat(s.replace('Z', '+00:00'))
+    except ValueError:
+        return None
+    if dt.tzinfo is None:
+        return None                     # a stamp without offset is a guess
+    return dt.astimezone(timezone.utc).isoformat()
 
 
 def _km(value, unit) -> Optional[float]:
@@ -454,7 +496,7 @@ class HomeAssistantConnector(VehicleConnector):
         for st in data:
             eid = str((st or {}).get('entity_id') or '')
             domain, _, obj = eid.partition('.')
-            if domain in ('sensor', 'binary_sensor', 'device_tracker') and obj.startswith(prefix):
+            if domain in ('sensor', 'binary_sensor', 'device_tracker', 'switch') and obj.startswith(prefix):
                 out.append(st)
         return out
 
@@ -479,11 +521,26 @@ class HomeAssistantConnector(VehicleConnector):
                 if _num(attrs.get('latitude')) is not None and _num(attrs.get('longitude')) is not None:
                     take('location', st)
                 continue
+            if domain == 'switch':          # the XPENG integration's compact layout: the charging switch
+                if rest == 'charging':
+                    take('charging', st)
+                continue
             if domain == 'binary_sensor':
                 if dc == 'battery_charging':
                     take('charging', st)
                 elif dc == 'plug':
                     take('plug', st)
+                elif rest == 'credentials_valid':
+                    take('credentials_valid', st)
+                continue
+            if _is_xp_charge_state(attrs):      # enum with the integration's own words
+                take('charging_state', st)
+                continue
+            if rest == 'last_data_update' and dc == 'timestamp':
+                take('data_time', st)           # when the CAR last reported, not when HA looked
+                continue
+            if rest == 'polling_status':
+                take('polling_status', st)
                 continue
             if dc == 'battery' and unit == '%' and not _has(rest, _NOT_SOC):
                 take('soc', st)
@@ -491,7 +548,7 @@ class HomeAssistantConnector(VehicleConnector):
                     and _has(rest, _WORDS['odometer']):
                 take('odometer', st)
             elif dc in ('distance',) and unit.lower() in ('km', 'mi', 'm') \
-                    and _has(rest, _WORDS['range']):
+                    and _has(rest, _WORDS['range']) and not _has(rest, _NOT_RANGE):
                 take('range', st)
             elif dc == 'power' and _has(rest, ('charging', 'charge', 'lade', 'ladeleistung')):
                 take('power', st)
@@ -507,10 +564,13 @@ class HomeAssistantConnector(VehicleConnector):
         for st in states:
             eid = st['entity_id']
             domain, _, obj = eid.partition('.')
-            if domain == 'device_tracker':
+            if domain not in ('sensor', 'binary_sensor'):
                 continue
             rest = obj[len(prefix):].strip('_') or obj
             attrs = st.get('attributes') or {}
+            if _is_xp_charge_state(attrs) or rest in ('last_data_update', 'polling_status',
+                                                      'credentials_valid'):
+                continue
             unit = str(attrs.get('unit_of_measurement') or '').strip().lower()
             if unit == '%' and _has(rest, _WORDS['target']):
                 take('target', st)
@@ -518,7 +578,8 @@ class HomeAssistantConnector(VehicleConnector):
                 take('soc', st)
             elif unit in ('km', 'mi', 'm') and _has(rest, _WORDS['odometer']):
                 take('odometer', st)
-            elif unit in ('km', 'mi', 'm') and _has(rest, _WORDS['range']):
+            elif unit in ('km', 'mi', 'm') and _has(rest, _WORDS['range']) \
+                    and not _has(rest, _NOT_RANGE):
                 take('range', st)
             elif unit in ('w', 'kw') and _has(rest, _WORDS['power']):
                 take('power', st)
@@ -551,6 +612,8 @@ class HomeAssistantConnector(VehicleConnector):
         parts = []
         for role, key in names:
             st = roles.get(role)
+            if role == 'charging' and not st:
+                st = roles.get('charging_state')
             if role == 'location' and not st and roles.get('lat') and roles.get('lon'):
                 st = roles['lat']
             parts.append(f"{_t(key)}: {st['entity_id'] if st else '—'}")
@@ -621,6 +684,13 @@ class HomeAssistantConnector(VehicleConnector):
 
         charging = _is_on(v(roles.get('charging')))
         plugged = _is_on(v(roles.get('plug')))
+        # the XPENG integration's own state word fills what the switch / plug entity
+        # leave open (the plug entity is "unknown" while a schedule waits).
+        cs_charging, cs_plugged = _xp_charge_state(v(roles.get('charging_state')))
+        if charging is None:
+            charging = cs_charging
+        if plugged is None:
+            plugged = cs_plugged
         power = _num(v(roles.get('power')))
         if power is not None and str(u(roles.get('power')) or '').lower() == 'w':
             power = power / 1000.0
@@ -660,13 +730,28 @@ class HomeAssistantConnector(VehicleConnector):
 
         used = [st for st in roles.values() if st]
         stamps = [str(st.get('last_updated') or st.get('last_changed') or '') for st in used]
+        # Freshness: the integration says when the car last reported. HA's own
+        # last_updated only says when HA wrote the state, which a frozen car
+        # (sign-in lost) keeps refreshing. Without that entity, HA's stamp stays.
+        data_iso = _utc_iso(v(roles.get('data_time')))
+        last_updated = data_iso if roles.get('data_time') else (max(stamps) if any(stamps) else None)
+        # The GPS fix time: the tracker's own age of the fix, counted back from
+        # the moment HA wrote that state.
+        fix_ts = None
+        if loc and lat is not None:
+            fa = _num((loc.get('attributes') or {}).get('fix_age_s'))
+            written = _utc_iso(loc.get('last_updated'))
+            if fa is not None and fa >= 0 and written:
+                from datetime import datetime, timedelta
+                fix_ts = (datetime.fromisoformat(written) - timedelta(seconds=fa)).isoformat()
+        creds = _is_on(v(roles.get('credentials_valid')))
         units_seen = {str(u(roles.get(r)) or '').lower() for r in ('odometer', 'range') if roles.get(r)}
 
         outside = _num(v(roles.get('outside')))
         if outside is not None and str(u(roles.get('outside')) or '') == '°F':
             outside = round((outside - 32) * 5 / 9, 1)
 
-        return VehicleStatus(
+        status = VehicleStatus(
             soc_percent=int(round(soc)) if soc is not None else None,
             odometer_km=int(odo) if odo is not None else None,
             is_charging=bool(charging),
@@ -676,7 +761,7 @@ class HomeAssistantConnector(VehicleConnector):
             charge_limit_ac=int(target) if target is not None else None,
             location_lat=lat,
             location_lon=lon,
-            last_updated=max(stamps) if any(stamps) else None,
+            last_updated=last_updated,
             vehicle_name=self._prefix(),
             distance_unit=('mi' if units_seen & {'mi', 'mile', 'miles'} else
                            'km' if units_seen & {'km'} else None),
@@ -699,8 +784,17 @@ class HomeAssistantConnector(VehicleConnector):
                 },
                 'outside_temperature_c': outside,
                 'lock_status_known': False,
+                # XPENG integration: is the car's account still signed in, and what
+                # does the integration say about its own polling.
+                'credentials_valid': creds,
+                'polling_status': v(roles.get('polling_status')),
+                'charge_state_word': v(roles.get('charging_state')),
+                'data_time': data_iso,
             },
         )
+        if fix_ts:
+            status.location_last_updated_at = fix_ts
+        return status
 
     # ── UI metadata ───────────────────────────────────────────────────
     @staticmethod
