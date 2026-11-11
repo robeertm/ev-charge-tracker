@@ -1,5 +1,12 @@
 # Changelog
 
+## v3.0.194 (2026-11-11)
+
+### Fixed
+
+- The GitHub link in Settings > About showed a link text that did not match the repository it points to and carried a personal account name. The text now shows the real repository path.
+- The "no private names" test now checks for forbidden identifiers without any local file: the repository carries only SHA-256 hashes of a few words that must never appear, and every word of every tracked file is compared against them. Previously the check depended entirely on a list kept outside the repository, so a fresh clone or CI run checked nothing and a missing entry went unnoticed. `EV_PRIVATE_NAMES_REQUIRED=1` turns a missing local list into a failure; `--hash <word>` prints the hash for a new entry.
+
 ## v3.0.193 (2026-11-11)
 
 ### Import the XPENG data export (EU Data Act)

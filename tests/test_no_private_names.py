@@ -21,14 +21,21 @@ blocklist does not itself publish what it blocks:
 
     ~/.ev-tracker-private-names      one term per line, # for comments
 
-Without that file this half is skipped. For anyone who is not the
-maintainer that is the right answer — it is a guard for whoever knows
-which words are real.
+Without that file this half is skipped (set ``EV_PRIVATE_NAMES_REQUIRED=1``
+to make a missing file a failure instead).
+
+**A third check needs no file at all:** the repository carries the SHA-256
+of a few identifiers that must never appear as a word (the maintainer's
+account name in its spelled-out form, as it once did in a link text). Every
+word of every tracked file is hashed and compared. A hash does not publish
+the word, and the check works in CI and on a fresh clone. Add one with
+``python3 tests/test_no_private_names.py --hash <word>``.
 
 Run with:
   python3 tests/test_no_private_names.py
 Exit code is non-zero if any check fails.
 """
+import hashlib
 import os
 import re
 import subprocess
@@ -52,6 +59,11 @@ ERLAUBT = (
     # They live for the length of one workflow job and name no machine.
     'ev-neu', 'ev-alt', 'ev-auf',
 )
+
+#: sha256 of lower-case words (letters/digits only) that must not occur.
+VERBOTEN_HASHES = {
+    '26015552d60161dc1762e5092166ecb5e5219f7a886278d0658d6983ad376f7a',
+}
 
 BLOCKLISTE = Path(os.path.expanduser('~/.ev-tracker-private-names'))
 
@@ -88,6 +100,10 @@ def textdateien():
             continue
 
 
+if len(sys.argv) == 3 and sys.argv[1] == '--hash':
+    print(hashlib.sha256(sys.argv[2].lower().encode()).hexdigest())
+    sys.exit(0)
+
 print("\n== no hostname of a real installation ==")
 token = re.compile(r'\bev-[a-z][a-z0-9-]{1,20}')
 fremd = []
@@ -103,8 +119,23 @@ if fremd:
     print("  (a legitimate new name goes into ERLAUBT above, on purpose: "
           "that way somebody decides rather than nobody noticing)")
 
+print("\n== no forbidden identifier (hash check, needs no file) ==")
+_gefunden = []
+for name, text in textdateien():
+    if name == 'tests/test_no_private_names.py':
+        continue
+    for nr, zeile in enumerate(text.split('\n'), 1):
+        for w in set(re.findall(r'[a-z0-9]+', zeile.lower())):
+            if hashlib.sha256(w.encode()).hexdigest() in VERBOTEN_HASHES:
+                _gefunden.append(f'{name}:{nr}')
+check(not _gefunden,
+      f"none of the {len(VERBOTEN_HASHES)} hashed identifiers appears"
+      + ("" if not _gefunden else f" — at: {sorted(set(_gefunden))[:8]}"))
+
 print("\n== no real place or person from an installation ==")
-if not BLOCKLISTE.is_file():
+if not BLOCKLISTE.is_file() and os.environ.get('EV_PRIVATE_NAMES_REQUIRED') == '1':
+    check(False, f"{BLOCKLISTE.name} is required (EV_PRIVATE_NAMES_REQUIRED=1) but missing")
+elif not BLOCKLISTE.is_file():
     print(f"  (no {BLOCKLISTE} — this half is for whoever knows which "
           "words are real, and is skipped without it)")
 else:
