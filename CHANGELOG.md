@@ -1,5 +1,24 @@
 # Changelog
 
+## v3.0.195 (2026-11-18)
+
+### Leapmotor directly from Leapmotor Mate (experimental)
+
+New brand **Leapmotor (Mate)** for owners who run the open-source self-hosted app *Leapmotor Mate* (for example as a container on a NAS) and have no Home Assistant and no MQTT broker. The tracker talks to Mate's own web server on the home network; nothing else is needed and nothing has to be installed.
+
+- **Setup:** Mate's address (e.g. `http://192.168.1.20:4000`) and, only if one is set in Mate, its login password. *Test connection* says what Mate holds (charges, trips, latest SoC, odometer, charging right now) or explains what is wrong: wrong address or port, Mate refusing a non-home host name without a password, password missing or wrong, login brake after wrong attempts, Mate not set up yet, Mate in demo mode.
+- **What is read:** Mate's finished charges and trips (the CSV exports Mate offers under its settings) and its charge-in-progress panel. These read what Mate has already stored, so polling never makes Mate call the manufacturer's cloud and never wakes the car. Nothing is written to Mate.
+- **Status:** SoC and odometer as of the last finished drive or charge, with the time the car reported them; while a charge runs, charging state plus live SoC and power when Mate's panel shows them.
+- **Charges are filed automatically** from Mate's own detection: start/end, SoC from/to, AC/DC, peak power, odometer, position, and energy in the order the owner can trust most (the charger's figure typed into Mate, then the wallbox meter Mate read, then the battery side the car reported, with a note saying which). Each filed charge carries a marker, so the same charge is never filed twice; a charge that overlaps one already in the tracker (typed by hand, from a wallbox, from an import) is left alone; new rows wait for review like every detected charge. For this brand the snapshot-based charge detection stands aside, so a charge is never counted twice.
+- **Guards for the B10:** a SoC outside 0-100 % is no reading, an odometer of 0 or one running backwards is ignored, a "charge" whose SoC fell (vehicle-to-load) or that added nothing is skipped, an impossible peak power is dropped, a column Mate renames becomes a missing value rather than an error, and a Mate in demo mode is refused so a sample car is never filed as yours.
+- Help texts and messages in all six app languages.
+
+### Home Assistant route: vehicle-to-load power is never charging power
+
+Leapmotor Mate's Home Assistant entities include `v2l_power` and `climate_power` next to `charge_power`. When the charging-power entity was missing, the word match took any power entity, and a positive power read as "charging": a car powering devices over V2L would have been booked as a charge. Power entities for V2L/V2H, climate, heater, motor, outlet and similar are now excluded. The Home Assistant route stays documented for owners who already run Home Assistant; the prefix help now points Mate users without Home Assistant to the new brand.
+
+22 new tests run against a local stand-in that answers like Mate (invented data, no real car); the formats were also checked against Mate's own code running in demo mode.
+
 ## v3.0.194 (2026-11-11)
 
 ### Fixed

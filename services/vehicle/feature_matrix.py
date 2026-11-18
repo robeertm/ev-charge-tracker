@@ -229,6 +229,17 @@ MATRIX = {
         'location':        'partial',
         'charge_limits':   'partial',
     },
+
+    # v3.0.195 (experimental): Leapmotor via a Leapmotor Mate install.
+    # SoC and odometer as of the last finished drive/charge (no range in
+    # Mate's exports), charging live from Mate's charge panel, finished
+    # charges filed with place, AC/DC and peak power from Mate's own
+    # detection. No remote control, nothing written back.
+    'leapmotor_mate': {
+        'soc_range_odo':   'partial',
+        'live_status':     'partial',
+        'location':        'partial',   # per filed charge, no live position
+    },
 }
 
 

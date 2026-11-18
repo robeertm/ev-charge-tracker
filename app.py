@@ -1862,7 +1862,8 @@ def _save_vehicle_sync(status, battery_kwh, raw_json='', vehicle_id=None):
     # session, create a needs_review Charge from the is_charging window.
     try:
         if (result is not None and result is new_sync
-                and _prev_is_charging and not result.is_charging):
+                and _prev_is_charging and not result.is_charging
+                and not _records_own_charges(vehicle_id)):
             _detect_auto_charge(result)
     except Exception as e:
         logger.warning(f"Auto-charge detection failed: {e}")
@@ -1874,7 +1875,8 @@ def _save_vehicle_sync(status, battery_kwh, raw_json='', vehicle_id=None):
     # above never fires. Infer the charge from a SoC jump between two
     # consecutive parked syncs (odometer unchanged) instead.
     try:
-        if result is not None and result is new_sync:
+        if (result is not None and result is new_sync
+                and not _records_own_charges(vehicle_id)):
             _detect_auto_charge_from_soc_rise(result)
     except Exception as e:
         logger.warning(f"SoC-rise auto-charge detection failed: {e}")
@@ -1928,6 +1930,26 @@ def _push_charge_notice(c, how):
         )
     except Exception as e:
         logger.debug(f"charge notice not sent: {e}")
+
+
+def _records_own_charges(vehicle_id):
+    """True when this car's data source files finished charges itself.
+
+    Leapmotor Mate (v3.0.195) measures each charge from the car's own
+    signals and hands over the finished session; the sync files it with a
+    marker. Guessing the same charge again from two snapshots could only
+    add a duplicate, so the snapshot detectors stand aside for such a car.
+    Decided per vehicle from its connector class, never by brand name."""
+    if vehicle_id is None:
+        return False
+    try:
+        from models.database import Vehicle
+        from services.vehicle.registry import _DESCRIBED
+        v = db.session.get(Vehicle, vehicle_id)
+        cls = _DESCRIBED.get((getattr(v, 'api_brand', '') or '').strip().lower())
+        return bool(getattr(cls, 'records_own_charges', False))
+    except Exception:
+        return False
 
 
 def _detect_auto_charge(end_sync):

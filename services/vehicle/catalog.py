@@ -122,6 +122,10 @@ BRANDS: List[Brand] = [
     # vendor API a private owner can use, the XPENG G6 among them.
     # An integration, not a maker: it must never be printed as the make.
     Brand('homeassistant', 'Home Assistant', None, integration=True),
+    # v3.0.195 (experimental): Leapmotor read straight from a self-hosted
+    # Leapmotor Mate install over its local web server — no Home Assistant,
+    # no MQTT broker, nothing to install. The make is Leapmotor.
+    Brand('leapmotor_mate', 'Leapmotor (Mate)', None, maker='Leapmotor'),
 ]
 
 # XPENG used to be deliberately absent from the list above: it

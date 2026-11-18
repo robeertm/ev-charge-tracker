@@ -146,6 +146,13 @@ _SPEED_UNITS = {'km/h': 1.0, 'kph': 1.0, 'kmh': 1.0, 'km/hr': 1.0,
                 'mph': 1.609344, 'mi/h': 1.609344, 'm/s': 3.6}
 _NOT_RANGE = ('added', 'last', 'fast')         # "range added by the last charge" is no range
 _NOT_SOC = _WORDS['target'] + _WORDS['aux'] + ('health', 'soh', 'temp', 'voltage', 'current')
+# Power that is not the charging power (v3.0.195). Leapmotor Mate publishes
+# ``v2l_power`` (W) and ``climate_power`` (W) next to ``charge_power``; the
+# bare word "power" in pass 2 took whichever came first, and a positive
+# power reads as "charging" in _to_status — a B10 feeding a kettle over V2L
+# would have been booked as a charge. Other sources name the same things.
+_NOT_POWER = ('v2l', 'v2h', 'v2g', 'vtol', 'climate', 'hvac', 'heater', 'heating', 'discharge', 'discharging',
+              'motor', 'outlet', 'socket', 'consumption', 'regen', 'aux', 'compressor')
 
 
 def _t(key, **kw):
@@ -550,7 +557,8 @@ class HomeAssistantConnector(VehicleConnector):
             elif dc in ('distance',) and unit.lower() in ('km', 'mi', 'm') \
                     and _has(rest, _WORDS['range']) and not _has(rest, _NOT_RANGE):
                 take('range', st)
-            elif dc == 'power' and _has(rest, ('charging', 'charge', 'lade', 'ladeleistung')):
+            elif dc == 'power' and _has(rest, ('charging', 'charge', 'lade', 'ladeleistung')) \
+                    and not _has(rest, _NOT_POWER):
                 take('power', st)
             elif _is_pack_current(rest, dc, unit):
                 take('pack_current', st)
@@ -581,7 +589,7 @@ class HomeAssistantConnector(VehicleConnector):
             elif unit in ('km', 'mi', 'm') and _has(rest, _WORDS['range']) \
                     and not _has(rest, _NOT_RANGE):
                 take('range', st)
-            elif unit in ('w', 'kw') and _has(rest, _WORDS['power']):
+            elif unit in ('w', 'kw') and _has(rest, _WORDS['power']) and not _has(rest, _NOT_POWER):
                 take('power', st)
             elif unit == 'v' and _has(rest, _WORDS['aux']):
                 take('aux_v', st)

@@ -79,6 +79,7 @@ _CONNECTOR_MODULES = [
     'connector_skoda_public',
     'connector_pleos',
     'connector_homeassistant',
+    'connector_leapmotor_mate',
 ]
 for _mod in _CONNECTOR_MODULES:
     try:

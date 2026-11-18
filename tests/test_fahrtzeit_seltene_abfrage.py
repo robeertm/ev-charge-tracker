@@ -218,8 +218,11 @@ def test_04b_andere_connectoren_setzen_kein_captured_at():
     for f in sorted(os.listdir(vz)):
         if f.startswith('connector_') and f.endswith('.py'):
             gefunden[f] = bool(re.search(r'captured_at\s*=', open(os.path.join(vz, f), encoding='utf-8').read()))
-    pruefe('nur der Renault-Connector setzt captured_at',
-           sorted(k for k, v in gefunden.items() if v), ['connector_renault.py'])
+    # v3.0.195: Leapmotor Mate nennt die Zeit, zu der das Auto den Wert
+    # gemeldet hat (Ende der letzten Fahrt bzw. Ladung) — genau dieser Anker.
+    pruefe('nur Renault und Leapmotor Mate setzen captured_at',
+           sorted(k for k, v in gefunden.items() if v),
+           ['connector_leapmotor_mate.py', 'connector_renault.py'])
     # und das Feld hat den Standard None
     from services.vehicle.base import VehicleStatus
     pruefe('Standard None', VehicleStatus().captured_at, None)

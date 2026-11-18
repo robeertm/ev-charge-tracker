@@ -119,6 +119,11 @@ invalid before anything is saved — and the last import can be undone.*
 derives trips and charges from the raw signals and shows what is new before anything is
 saved; the same export imported twice adds nothing.*
 
+### Leapmotor via Leapmotor Mate (experimental)
+![Setting up a Leapmotor read from Leapmotor Mate](docs/screenshots/leapmotor-mate.png)
+*Pick "Leapmotor (Mate)" in the car wizard, enter the address of your Leapmotor Mate, and the
+test says what Mate holds. Finished charges are filed automatically, never twice.*
+
 ### Settings
 ![Settings](docs/screenshots/settings.png)
 *Vehicle API, sync window, GHG quota, ENTSO-E, HTTPS, PV — all from the UI, no
@@ -230,13 +235,14 @@ never mix with a real history.
 - **Certificate inline on the OBD page** — the real PDF is embedded live under the OBD readout (not an HTML rebuild, so preview and export never drift), with a grade badge and an "export as PDF" button
 
 ### Integrations
-- **15 vehicle brands** via API (see table below) — auto-fetch SoC, odometer, charging status
+- **17 vehicle brands** via API plus any car Home Assistant knows (see table below) — auto-fetch SoC, odometer, charging status
 - **Brand feature matrix** in Settings — 10-item green/yellow/red grid per brand (SoC, GPS, 12V, SoH, recuperation, 30-day consumption, doors, climate, tires, live status). No more "wait, why isn't my car showing X" surprises.
 - **ENTSO-E integration** — fetch hourly CO2 grid intensity for Germany, auto-backfill missing values
 - **Open-Meteo** — daily mean temperatures for the range calculator and weather correlation, with DB cache (no key, no rate limits)
 - **Nominatim reverse geocoding** — for street addresses on parking events and charge locations, with permanent DB cache and ToS-compliant rate limiter
 - **Spreadsheet round trip for charges** — Settings > Database exports every charge (optionally one vehicle or a date range) as CSV (UTF-8 with BOM, `;` separator, the decimal mark of your language) or XLSX, each row with its stable `id`. Edit the file anywhere and import it back: rows are matched by `id`, rows without one become new charges, and a charge is deleted only when its `delete` column says yes — rows missing from the file are kept. The preview shows new / changed (field: old → new) / unchanged / invalid (row + reason) before you confirm. Checks: required fields, numbers and ranges (kWh and costs ≥ 0, start SoC ≤ end SoC, hours 0–23), date formats, duplicate IDs and duplicate charges. Cost, loss and CO₂ are recalculated the way the edit form does. Every import first copies the database and writes a journal, and **Undo last import** puts every touched charge back. Text cells starting with `=`, `+`, `-` or `@` are prefixed with `'` on export so a spreadsheet does not run them as formulas
 - **XPENG Data Act import (v3.0.193)** — Settings > Database links to a page that takes the export requested at the manufacturer's data portal (ZIP or the three CSV streams, 7/14/30 days, large files are streamed and the upload is deleted after analysis). The export holds raw signals once a second and no GPS, so trips (distance, SoC, consumption, regeneration) and charges (kWh as the integral of charging power, SoC from/to, peak power, AC/DC) are derived from them. Overlapping exports and live data are never counted twice: a charge or trip that overlaps one already there is skipped, completed (only empty fields are filled) or extended, nothing is overwritten. Preview first, database copy before applying, undo for the last import. A file in a layout the importer does not know is refused with a clear message and a short head of it (VIN masked) is kept in the data folder so the importer can be improved
+- **Leapmotor via Leapmotor Mate (v3.0.195, experimental)** — reads a self-hosted Leapmotor Mate directly over the home network (no Home Assistant, no MQTT broker): SoC, odometer, charging state, and every finished charge filed automatically from Mate's own detection, never twice
 - **CSV import with live preview** — upload your Google Sheet or exported CSV in Settings, get a dry-run preview showing detected delimiter, column mapping (per-column dropdown to correct misdetections), per-row action badges (`new` / `update` / `duplicate` / `empty` / `error`), and an error list with line numbers. Only when you hit "Import" does the data actually land in the DB. Automatic dedup by (date, hour, kWh) with 0.1 kWh tolerance
 - **OBD/ELM327 via the browser** — Web Serial / Web Bluetooth transport with a data-driven PID table per vehicle family: `kia_hyundai_ext` (7E4, Kona/e-Niro/Soul), `xpeng`, `jaguar_ipace`, `mg_saic` (ZS EV/MG5) + `mg_mulan` (MG4), `byd_atto` (Atto 3/Dolphin, little-endian), `nissan_leaf` (LBC, KWP service 21), `renault_zoe_ph1` + `renault_zoe_ph2` (ZE50, 29-bit), `vw_meb` (ID.3/4/5, Enyaq, Born, Q4 — 29-bit), plus a generic `generic_ev` fallback on standard PID 015B. ISO-TP frame reassembly, service 0x21/0x22 + 11-bit/29-bit addressing, raw frames persisted for re-decoding. (Tesla omitted — no standard UDS battery PIDs; needs raw-CAN sniffing)
 - **PV charging support** — third charge type with auto-calculated CO2 from PV system specs
@@ -432,6 +438,7 @@ needed.
 | **Porsche** | `pyporscheconnectapi` | Username / Password |
 | **XPENG** | *(none — built-in)* | Enode Client ID / Secret |
 | **Home Assistant** (any car HA knows) | none — reads HA's REST API | HA address + long-lived token + entity prefix ⁵ |
+| **Leapmotor (Mate)** — experimental | none — reads a self-hosted Leapmotor Mate | Mate address + Mate password if one is set ⁶ |
 
 After installing, configure credentials in Settings > Vehicle API. Optional background sync polls your vehicle at a configurable interval (1-12h).
 
@@ -489,6 +496,23 @@ picked. The community XPENG integration for Home Assistant is understood as well
 renamed so every entity starts with `xpeng_g6`): state of charge, odometer, range, charging
 state and power, plug, position, and the integration's own *last data update* as the data
 time. A real charging entity always wins over the pack-current guess made for dongles. A container on a NAS may not resolve `*.ts.net` names — use the LAN address.
+
+**⁶ Leapmotor (Mate), experimental:** Leapmotor has no public API for private owners. If you
+run the open-source self-hosted app [Leapmotor Mate](https://github.com/Protossblaster/leapmotor-mate)
+(e.g. as a container on a NAS), the tracker reads the car straight from Mate's web server — no
+Home Assistant, no MQTT broker. Enter Mate's address, e.g. `http://192.168.1.20:4000`, and Mate's
+login password only if you set one in Mate. Without a password Mate answers only to home-network
+addresses (an IP address, a single-label name, `.local`/`.lan`), so use the IP address.
+The tracker reads Mate's finished charges and trips (the same CSV exports Mate offers in its
+settings) and its charge-in-progress panel; it never writes to Mate, and reading never makes Mate
+call the manufacturer's cloud or wake the car. You get SoC and odometer as of the last finished
+drive or charge, charging state with live SoC and power while a charge runs, and every finished
+charge filed automatically (SoC from/to, AC/DC, peak power, odometer, position, kWh — the charger
+figure typed into Mate, else the wallbox meter, else the battery side). Each filed charge carries a
+marker, so nothing is filed twice, and a charge that overlaps one you already have is left alone.
+No range (not in Mate's exports), no remote control. If you already run Home Assistant with Mate's
+MQTT discovery, the **Home Assistant** brand (footnote ⁵) works too; vehicle-to-load power is
+never mistaken for charging power there.
 
 **Škoda note:** Škoda is retiring the unofficial app API in October 2026. The app now
 speaks the official [MyŠkoda Public API](https://public.api.connect.skoda-auto.cz/docs):
@@ -590,7 +614,7 @@ Languages:
 - **Frontend:** Bootstrap 5.3 (with dark mode), Chart.js
 - **PDF:** matplotlib + fpdf2
 - **Data:** ENTSO-E Transparency Platform API
-- **Vehicle APIs:** hyundai-kia-connect-api, teslapy, renault-api, pypolestar, saic-ismart-client-ng, pySmartHashtag, pyporscheconnectapi, carconnectivity; XPENG via the Enode aggregator (REST over `requests`, no extra package)
+- **Vehicle APIs:** hyundai-kia-connect-api, teslapy, renault-api, pypolestar, saic-ismart-client-ng, pySmartHashtag, pyporscheconnectapi, carconnectivity; XPENG via the Enode aggregator (REST over `requests`, no extra package); Leapmotor via a self-hosted Leapmotor Mate (plain HTTP, standard library)
 
 ---
 
