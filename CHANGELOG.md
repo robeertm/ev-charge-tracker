@@ -1,5 +1,17 @@
 # Changelog
 
+## v3.0.197 (2026-11-18)
+
+### Leapmotor (Mate): trips in the trip log, real clock times on charges, honest sync message
+
+Three findings from a real Leapmotor B10 on Mate 5.0.0:
+
+- **The trip log stayed empty.** The log is built from GPS positions the tracker polls, and Mate's trips export has none (its charge export does). The finished trips Mate already lists are now filed as trip-log rows: date, start time, duration, distance and average speed, read on every sync (background and the trip log's "Sync now"). They show without start and destination, or with the ones the parking history can infer. A trip is filed once; a trip another source already has for the same time (vehicle cloud, data export) is left alone. Rows from impossible values (no distance, more than 3000 km, a drive over 24 h, still open) are skipped.
+- **Charge times.** A charge row only has whole hours (the CO2 figure is calculated per grid hour), so a charge from 13:05 to 13:52 is stored as 13:00 / 13:00 — for Mate charges as for hand-typed ones. The exact times were already in the marker as Unix seconds; the note of every newly filed charge now also carries them readable (`13:05–13:52`, `(+1 d)` when it ends the next day). Charges filed earlier keep their marker, which holds the same information. Minutes in the database itself would touch the whole app and is a separate decision.
+- **The "Sync now" message named the wrong brand.** The text shown on the trip log after a manual sync said the car's maker had returned no GPS position, whatever car was set up. It is brand-neutral now in all six languages. For a Leapmotor (Mate) car "Sync now" additionally files Mate's charges and trips right away and says what it found: trips in Mate's export, new trips filed, new charges filed — or that Mate holds no finished trip yet and that its trips carry no GPS position.
+
+8 new tests (parsing guards, filing once, overlap with another source, two cars, the trip log showing the rows, clock text in the note, message texts in every language).
+
 ## v3.0.196 (2026-11-18)
 
 ### Fixed: Kia/Hyundai trips ended at "Unknown location" since 2026-11-10

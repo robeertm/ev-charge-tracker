@@ -973,6 +973,8 @@
         syncing:        {{ t('trips.tb_syncing')|tojson }},
         synced_with_gps:{{ t('trips.tb_synced_with_gps')|tojson }},
         synced_no_gps:  {{ t('trips.tb_synced_no_gps')|tojson }},
+        synced_mate:    {{ t('trips.tb_synced_mate')|tojson }},
+        synced_mate_none: {{ t('trips.tb_synced_mate_none')|tojson }},
         sync_failed:    {{ t('trips.tb_sync_failed')|tojson }},
         backfilling:    {{ t('trips.tb_backfilling')|tojson }},
         backfilled:     {{ t('trips.tb_backfilled')|tojson }},
@@ -1000,7 +1002,15 @@
             const r = await fetch('/api/trips/sync_now', { method: 'POST' });
             const data = await r.json();
             if (data.ok) {
-                if (data.has_location) {
+                if (data.mate) {
+                    // Leapmotor Mate: no GPS for this brand; say what was read and filed.
+                    const m = data.mate, tn = (m.trips && m.trips.new) || 0,
+                          cn = (m.charges && m.charges.new) || 0;
+                    setStatus(m.trips_read === 0 ? T_TB.synced_mate_none
+                        : T_TB.synced_mate.replace('{read}', m.trips_read)
+                            .replace('{new}', tn).replace('{charges}', cn));
+                    if (tn || cn) setTimeout(() => location.reload(), 2500);
+                } else if (data.has_location) {
                     setStatus(T_TB.synced_with_gps + ' (' + data.lat.toFixed(5) + ', ' + data.lon.toFixed(5) + ')');
                     setTimeout(() => location.reload(), 1500);
                 } else {

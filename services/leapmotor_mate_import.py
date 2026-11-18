@@ -34,8 +34,19 @@ def marker(s) -> str:
     return 'leapmotor-mate:%d@%d-%d' % (s['id'] or 0, s['start'], s['end'])
 
 
+def clock_text(s) -> str:
+    """The real start and end as clock times, e.g. ``13:05–13:52``.
+
+    A charge row only has whole hours (the CO₂ figure is per grid hour); the
+    note carries the minutes so they can be read without decoding the marker."""
+    a, b = datetime.fromtimestamp(s['start']), datetime.fromtimestamp(s['end'])
+    text = '%s–%s' % (a.strftime('%H:%M'), b.strftime('%H:%M'))
+    days = (b.date() - a.date()).days
+    return text + (' (+%d d)' % days if days > 0 else '')
+
+
 def _note(s) -> str:
-    parts = [marker(s)]
+    parts = [marker(s), clock_text(s)]
     if s.get('kwh') is not None:
         parts.append('%s kWh from %s' % (s['kwh'], _SOURCE_NOTE.get(s.get('kwh_source'), '?')))
     if s.get('peak_kw') is not None:
@@ -136,3 +147,76 @@ def import_sessions(vehicle_id, sessions, battery_kwh=None, efficiency=None) -> 
     if n['new'] or n['updated']:
         logger.info('Leapmotor Mate import for vehicle %s: %s', vehicle_id, n)
     return n
+
+
+TRIP_SOURCE = 'leapmotor_mate'
+
+
+def import_trips(vehicle_id, trips) -> dict:
+    """File Mate's finished trips as trip-log rows. Returns counts. Commits.
+
+    Mate's trips export has no coordinates, so a row has date, start time,
+    duration and distance; the trip log shows it without start and
+    destination (or with the ones the parking history can infer). A trip is
+    filed once (same start time); one that overlaps a trip already in the
+    log — from the vehicle's cloud, a data export — is left alone."""
+    from models.database import db, VehicleTrip
+
+    n = {'new': 0, 'dup': 0, 'overlap': 0}
+    if not trips or vehicle_id is None:
+        return n
+    lo = datetime.fromtimestamp(min(t['start'] for t in trips)) - timedelta(days=1)
+    hi = datetime.fromtimestamp(max(t['end'] for t in trips)) + timedelta(days=1)
+    rows = VehicleTrip.query.filter(VehicleTrip.vehicle_id == vehicle_id,
+                                    VehicleTrip.start_time >= lo,
+                                    VehicleTrip.start_time <= hi).all()
+    windows = []
+    for r in rows:
+        a = r.start_time
+        mins = (r.drive_minutes or 0) + (r.idle_minutes or 0)
+        windows.append((a, a + timedelta(minutes=mins)))
+    for t in trips:
+        a = datetime.fromtimestamp(t['start']).replace(microsecond=0)
+        b = datetime.fromtimestamp(t['end'])
+        if any(w0 == a for w0, _ in windows):
+            n['dup'] += 1
+            continue
+        if any(w0 <= b and w1 >= a for w0, w1 in windows):
+            n['overlap'] += 1
+            continue
+        db.session.add(VehicleTrip(
+            vehicle_id=vehicle_id, trip_date=a.date(), start_time=a,
+            drive_minutes=t['minutes'], idle_minutes=0, distance_km=t['km'],
+            avg_speed_kmh=t.get('avg_kmh'), source=TRIP_SOURCE,
+            fetched_at=datetime.now()))
+        windows.append((a, b))
+        n['new'] += 1
+    db.session.commit()
+    if n['new']:
+        logger.info('Leapmotor Mate trips for vehicle %s: %s', vehicle_id, n)
+    return n
+
+
+def import_all(vehicle_id, connector, battery_kwh=None, efficiency=None) -> dict:
+    """What a read of ``connector`` left behind, filed: charges and trips.
+
+    Shared by the background sync and the trip log's "sync now" button.
+    Each part fails on its own; the result says what was read and filed."""
+    from models.database import db
+    res = {'charges': None, 'trips': None,
+           'charges_read': len(getattr(connector, 'charge_sessions', None) or []),
+           'trips_read': int(getattr(connector, 'trip_rows_read', 0) or 0),
+           'trips_usable': len(getattr(connector, 'trip_sessions', None) or [])}
+    try:
+        res['charges'] = import_sessions(
+            vehicle_id, getattr(connector, 'charge_sessions', None) or [],
+            battery_kwh, efficiency)
+    except Exception as e:
+        db.session.rollback()
+        logger.warning('Leapmotor Mate: charge import failed: %s', e)
+    try:
+        res['trips'] = import_trips(vehicle_id, getattr(connector, 'trip_sessions', None) or [])
+    except Exception as e:
+        db.session.rollback()
+        logger.warning('Leapmotor Mate: trip import failed: %s', e)
+    return res

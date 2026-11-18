@@ -7846,8 +7846,18 @@ def register_routes(app):
                                       raw_json=_json.dumps(status.raw_data, default=str),
                                       vehicle_id=_stamp_vid)
             log_sync_result(status, mode_label='force', source='manual')
+            mate = None
+            if getattr(connector, 'records_own_charges', False):
+                # Leapmotor Mate: file its charges and trips now, and say
+                # what was read (the trip log has no GPS for this brand).
+                from services.leapmotor_mate_import import import_all
+                mate = import_all(_stamp_vid, connector,
+                                  _get_battery_kwh(vehicle_id=_stamp_vid),
+                                  _get_charge_efficiency(vehicle_id=_stamp_vid))
             return jsonify({
                 'ok': True,
+                'brand': brand,
+                'mate': mate,
                 'has_location': sync.location_lat is not None,
                 'lat': sync.location_lat,
                 'lon': sync.location_lon,

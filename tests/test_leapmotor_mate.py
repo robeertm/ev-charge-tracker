@@ -484,6 +484,108 @@ def test_home_assistant_route_never_books_v2l_as_charging_power():
     roles = c.map_entities(without_charge_power + [st(p + 'charge_power', '7.2', 'kW', 'power')])
     assert roles['power']['entity_id'] == p + 'charge_power'
 
+# ── v3.0.197: clock times in the note, trips in the trip log, honest message ──
+def _trips():
+    t, _ = M.parse_trips(list(csv.DictReader(io.StringIO(_csv(TRIP_COLS, TRIPS)))))
+    return t
+
+
+def test_the_note_carries_the_real_clock_times(app):
+    from models.database import Charge
+    from services.leapmotor_mate_import import import_sessions, MARK_RE
+    import_sessions(1, _sessions(), 67.0, 0.9)
+    fast = Charge.query.filter(Charge.notes.like('leapmotor-mate:12@%')).one()
+    a = datetime.fromtimestamp(_sessions()[-1]['start']).strftime('%H:%M')
+    assert ' · %s–' % a in fast.notes and MARK_RE.search(fast.notes)
+    overnight = Charge.query.filter(Charge.notes.like('leapmotor-mate:10@%')).one()
+    assert '(+1 d)' in overnight.notes          # 22:00 → 05:30 next day
+
+
+def test_trips_are_parsed_with_guards():
+    trips = _trips()
+    assert [t['id'] for t in trips] == [3, 4, 5]
+    t5 = trips[-1]
+    assert t5['km'] == 31.5 and t5['minutes'] == 40 and t5['avg_kmh'] == 47.2
+    rows = [dict(id=1, started_at=_iso(2026, 11, 1, 8), ended_at='', distance_km=5),
+            dict(id=2, started_at=_iso(2026, 11, 1, 8), ended_at=_iso(2026, 11, 1, 9),
+                 distance_km=0),
+            dict(id=3, started_at=_iso(2026, 11, 1, 8), ended_at=_iso(2026, 11, 1, 9),
+                 distance_km='', start_odometer_km=100, end_odometer_km=112.5),
+            dict(id=4, started_at=_iso(2026, 11, 1, 8), ended_at=_iso(2026, 11, 1, 9),
+                 distance_km=99999)]
+    got, skipped = M.parse_trips(rows)
+    assert [t['id'] for t in got] == [3] and got[0]['km'] == 12.5 and skipped == 3
+
+
+def test_trips_are_filed_once_and_overlaps_are_left_alone(app):
+    from models.database import db, VehicleTrip
+    from services.leapmotor_mate_import import import_trips
+    n = import_trips(1, _trips())
+    assert n['new'] == 3 and VehicleTrip.query.count() == 3
+    row = VehicleTrip.query.order_by(VehicleTrip.start_time.desc()).first()
+    assert row.distance_km == 31.5 and row.drive_minutes == 40
+    assert row.source == 'leapmotor_mate' and row.vehicle_id == 1
+    n2 = import_trips(1, _trips())
+    assert n2 == {'new': 0, 'dup': 3, 'overlap': 0}
+    # a trip another source already has (overlapping window) is not doubled
+    VehicleTrip.query.delete()
+    t = _trips()[-1]
+    a = datetime.fromtimestamp(t['start'] + 300)
+    db.session.add(VehicleTrip(vehicle_id=1, trip_date=a.date(), start_time=a,
+                               drive_minutes=30, idle_minutes=0, distance_km=30.0,
+                               source='sdk_day_trip_info'))
+    db.session.commit()
+    n3 = import_trips(1, [t])
+    assert n3['overlap'] == 1 and VehicleTrip.query.count() == 1
+
+
+def test_a_second_car_keeps_its_own_trips(app):
+    from models.database import db, Vehicle, VehicleTrip
+    from services.leapmotor_mate_import import import_trips
+    v = Vehicle()
+    v.name, v.is_archived, v.api_brand = 'T03', False, 'leapmotor_mate'
+    db.session.add(v)
+    db.session.commit()
+    import_trips(1, _trips())
+    n = import_trips(v.id, _trips())
+    assert n['new'] == 3 and VehicleTrip.query.count() == 6
+
+
+def test_import_all_reports_what_was_read_and_filed(app):
+    from types import SimpleNamespace
+    from services.leapmotor_mate_import import import_all
+    c = SimpleNamespace(charge_sessions=_sessions(), trip_sessions=_trips(), trip_rows_read=3)
+    r = import_all(1, c, 67.0, 0.9)
+    assert r['trips_read'] == 3 and r['trips']['new'] == 3 and r['charges']['new'] == 3
+    r2 = import_all(1, c, 67.0, 0.9)
+    assert r2['trips']['new'] == 0 and r2['charges']['new'] == 0
+
+
+def test_the_trip_log_shows_the_filed_trips_without_gps(app):
+    from services.leapmotor_mate_import import import_trips
+    from services.trips_service import get_trips
+    import_trips(1, _trips())
+    shown = get_trips(vehicle_id=1)
+    assert len(shown) == 3
+    assert [t['km'] for t in shown] == [31.5, 120.0, 40.0]       # newest first
+    assert all(t['source'] == 'sdk' for t in shown)
+
+
+def test_the_connector_keeps_the_trips_after_a_read(mate):
+    c = _conn(mate.url)
+    c.get_status()
+    assert len(c.trip_sessions) == 3 and c.trip_rows_read == 3
+
+
+def test_sync_message_names_no_brand_but_mate_messages_exist_everywhere():
+    for lang in LANGS:
+        d = json.load(open(os.path.join(ROOT, 'translations', lang + '.json'), encoding='utf-8'))
+        assert 'Kia' not in d['trips.tb_synced_no_gps'], lang
+        assert sorted(re.findall(r'\{(\w+)\}', d['trips.tb_synced_mate'])) == \
+            ['charges', 'new', 'read'], lang
+        assert d['trips.tb_synced_mate_none'], lang
+
+
 
 # ── texts ─────────────────────────────────────────────────────────────
 def test_every_text_exists_in_every_language_with_the_same_placeholders():

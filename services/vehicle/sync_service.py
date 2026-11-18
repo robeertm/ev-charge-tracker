@@ -423,12 +423,13 @@ def _sync_one_vehicle(app, vehicle):
 
     # v3.0.195: a source that measures whole charges itself (Leapmotor
     # Mate) hands them over here; they are filed once, with a marker.
+    # v3.0.197: its finished trips too (the trip log has no GPS for it).
     if getattr(connector, 'records_own_charges', False):
         try:
             from app import _get_charge_efficiency
-            from services.leapmotor_mate_import import import_sessions
-            import_sessions(vehicle.id, getattr(connector, 'charge_sessions', None) or [],
-                            battery_kwh, _get_charge_efficiency(vehicle_id=vehicle.id))
+            from services.leapmotor_mate_import import import_all
+            import_all(vehicle.id, connector, battery_kwh,
+                       _get_charge_efficiency(vehicle_id=vehicle.id))
         except Exception as e:
             from models.database import db as _db
             _db.session.rollback()

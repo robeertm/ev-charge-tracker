@@ -233,6 +233,47 @@ def parse_charges(rows: list) -> tuple:
     return out, skipped
 
 
+TRIP_MAX_KM = 3000.0                  # one drive; a bigger figure is a unit slip
+TRIP_MAX_MINUTES = 24 * 60
+
+
+def parse_trips(rows: list) -> tuple:
+    """``(trips, skipped)`` from Mate's trips export.
+
+    A trip: ``{'id', 'start', 'end', 'minutes', 'km', 'avg_kmh', 'soc_from',
+    'soc_to', 'odo_from', 'odo_to'}``. Mate's export carries no coordinates,
+    so a trip has times, duration and distance only. ``skipped`` counts rows
+    that are no usable drive (still open, no times, no distance)."""
+    out, skipped = [], 0
+    for r in rows:
+        start, end = _epoch(r.get('started_at')), _epoch(r.get('ended_at'))
+        if not start or not end or end < start or end - start > TRIP_MAX_MINUTES * 60:
+            skipped += 1
+            continue
+        odo_from, odo_to = _odo(r.get('start_odometer_km')), _odo(r.get('end_odometer_km'))
+        km = _num(r.get('distance_km'))
+        if (km is None or km <= 0) and odo_from is not None and odo_to is not None \
+                and odo_to > odo_from:
+            km = odo_to - odo_from
+        if km is None or km <= 0 or km > TRIP_MAX_KM:
+            skipped += 1
+            continue
+        minutes = int(round((end - start) / 60.0))
+        try:
+            rid = int(_num(r.get('id')) or 0) or None
+        except (TypeError, ValueError):
+            rid = None
+        out.append({
+            'id': rid, 'start': start, 'end': end, 'minutes': minutes,
+            'km': round(km, 1),
+            'avg_kmh': round(km / (minutes / 60.0), 1) if minutes >= 1 else None,
+            'soc_from': _soc(r.get('start_soc')), 'soc_to': _soc(r.get('end_soc')),
+            'odo_from': odo_from, 'odo_to': odo_to,
+        })
+    out.sort(key=lambda t: t['start'])
+    return out, skipped
+
+
 def latest_reading(charges: list, trip_rows: list) -> dict:
     """The newest SoC and odometer Mate has, and when the car reported them.
 
@@ -318,6 +359,8 @@ class LeapmotorMateConnector(VehicleConnector):
         super().__init__(credentials)
         self.charge_sessions: list = []
         self.skipped_charges = 0
+        self.trip_sessions: list = []
+        self.trip_rows_read = 0
 
     # ── plumbing ──────────────────────────────────────────────────────
     def _base(self) -> str:
@@ -459,7 +502,9 @@ class LeapmotorMateConnector(VehicleConnector):
                 raise
             live = {'charging': False, 'soc': None, 'power_kw': None}
         sessions, skipped = parse_charges(charge_rows)
+        trips, trips_skipped = parse_trips(trip_rows)
         return {'sessions': sessions, 'skipped': skipped, 'trip_rows': trip_rows,
+                'trips': trips, 'trips_skipped': trips_skipped,
                 'charge_rows': len(charge_rows), 'live': live}
 
     # ── the interface ─────────────────────────────────────────────────
@@ -507,6 +552,8 @@ class LeapmotorMateConnector(VehicleConnector):
             logger.warning(f"Leapmotor Mate: odometer per charge not attached: {e}")
         self.charge_sessions = data['sessions']
         self.skipped_charges = data['skipped']
+        self.trip_sessions = data['trips']
+        self.trip_rows_read = len(data['trip_rows'])
         reading = latest_reading(data['sessions'], data['trip_rows'])
         live = data['live']
         soc = live['soc'] if live['charging'] and live['soc'] is not None else reading['soc']
