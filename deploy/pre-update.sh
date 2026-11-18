@@ -55,11 +55,12 @@ done
 PYTHONPATH="$APP_DIR" "$PY_BIN" - <<'PY'
 import sys
 try:
-    from services.charge_gate import charge_state
+    from services.charge_gate import charge_state, record
     zustand = charge_state()
 except Exception as e:                      # fail closed, with the reason
     print("pre-update: Ladezustand nicht feststellbar (%s) — verschoben" % e)
     sys.exit(1)
+record(zustand, 'pre-update')              # charge_gate.log, never raises
 if zustand['charging']:
     print("pre-update: Fahrzeug laedt (%s, Stand %s) — Update verschoben"
           % (zustand['reason'], zustand['row_at']))

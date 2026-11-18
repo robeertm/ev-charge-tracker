@@ -226,4 +226,5 @@ def test_the_image_installs_a_renault_api_that_knows_the_code():
     req = (ROOT / 'requirements-vehicles.txt').read_text(encoding='utf-8')
     assert 'renault-api>=0.6.1' in req
     from services.vehicle.catalog import PACKAGES
-    assert 'renault-api>=0.6.1' in PACKAGES['renault']
+    # The spec may carry an upper bound (scripts/check_dependency_bounds.py).
+    assert any(p.startswith('renault-api>=0.6.1') for p in PACKAGES['renault'])

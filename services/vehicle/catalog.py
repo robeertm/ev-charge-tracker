@@ -143,26 +143,27 @@ BRANDS: List[Brand] = [
 # (tests/test_vehicle_catalog.py checks that too).
 PACKAGES: Dict[str, List[str]] = {
     # Track the upstream community SDK. 4.26.5 brought the headless CCI
-    # password sign-in; 4.41.1 is the current maintained release, which
-    # restores EU sign-in after the maker's 14 Oct 2026 server change that
-    # had answered HTTP 400 code 9035 (upstream kia_uvo#1939). This is an
+    # password sign-in; 4.41.1 restored EU sign-in after the maker's 14 Oct 2026 server change that
+    # had answered HTTP 400 code 9035 (upstream kia_uvo#1939); 5.2.1 fixes
+    # 5.2.0's false "charging" on the newer status feed, and the cap keeps
+    # the next major from arriving untested. This is an
     # UNOFFICIAL community route the maker works against and may break
     # again — the warning shown to users lives in the credential help and
     # in hk.err_vendor_block. selenium/webdriver-manager stay for the
     # browser-login *fallback*.
-    'hyundai-kia': ['hyundai-kia-connect-api>=4.41.1', 'selenium', 'webdriver-manager'],
-    'vw':          ['carconnectivity', 'carconnectivity-connector-volkswagen'],
-    'skoda':       ['carconnectivity', 'carconnectivity-connector-skoda'],
-    'seatcupra':   ['carconnectivity', 'carconnectivity-connector-seatcupra'],
-    'audi':        ['carconnectivity', 'carconnectivity-connector-audi'],
-    'tesla':       ['teslapy'],
+    'hyundai-kia': ['hyundai-kia-connect-api>=5.2.1,<6', 'selenium>=4,<5', 'webdriver-manager>=4,<5'],
+    'vw':          ['carconnectivity>=0.11.0,<0.12', 'carconnectivity-connector-volkswagen<0.11'],
+    'skoda':       ['carconnectivity>=0.11.0,<0.12', 'carconnectivity-connector-skoda<0.14'],
+    'seatcupra':   ['carconnectivity>=0.11.0,<0.12', 'carconnectivity-connector-seatcupra<0.7'],
+    'audi':        ['carconnectivity>=0.11.0,<0.12', 'carconnectivity-connector-audi<0.4'],
+    'tesla':       ['teslapy>=2.0.0,<3'],
     # 0.6.0 is the first renault-api that can answer Renault's e-mail
     # code (Gigya 403101); the code page needs it.
-    'renault':     ['renault-api>=0.6.1', 'aiohttp'],
-    'polestar':    ['pypolestar'],
-    'mg':          ['saic-ismart-client-ng'],
-    'smart':       ['pySmartHashtag'],
-    'porsche':     ['pyporscheconnectapi'],
+    'renault':     ['renault-api>=0.6.1,<0.7', 'aiohttp>=3.9,<4'],
+    'polestar':    ['pypolestar>=1.0.0,<2'],
+    'mg':          ['saic-ismart-client-ng>=0.5.0,<0.17'],
+    'smart':       ['pySmartHashtag>=0.1.0,<0.16'],
+    'porsche':     ['pyporscheconnectapi>=0.1.0,<0.3'],
 }
 
 

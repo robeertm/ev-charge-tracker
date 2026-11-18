@@ -408,27 +408,22 @@ def _spawn_helper(staging_root: Path, new_version: str = '') -> None:
 
 
 def _vehicle_is_charging_from_sqlite() -> bool:
-    """Best-effort check: read latest VehicleSync.is_charging directly
-    from SQLite, without needing a Flask app context. Returns False on
-    any error (missing DB, unknown schema) so the gate defaults to
-    *allow update* — a read failure must never brick a release.
+    """Ask the one charging gate (``services.charge_gate``).
+
+    This used to be its own query — against a table name that does not
+    exist (``vehicle_sync``), so it swallowed the error and always said
+    "not charging". One definition now, the same one the endpoint and the
+    Watchtower hook use, including the plausibility check of the flag.
+    The decision and its reasons go to ``charge_gate.log``.
     """
-    try:
-        import sqlite3
-        from config import DATA_DIR
-        db_path = os.path.join(DATA_DIR, 'ev_tracker.db')
-        if not os.path.exists(db_path):
-            return False
-        conn = sqlite3.connect(db_path)
-        try:
-            row = conn.execute(
-                "SELECT is_charging FROM vehicle_sync ORDER BY id DESC LIMIT 1"
-            ).fetchone()
-        finally:
-            conn.close()
-        return bool(row and row[0])
-    except Exception:
-        return False
+    from services.charge_gate import charge_state, record
+    zustand = charge_state()
+    record(zustand, 'apply_update')
+    if zustand['charging']:
+        logger.warning(f"charging gate: {zustand['reason']}")
+    elif zustand['reason'].startswith('implausible'):
+        logger.info(f"charging gate overruled the flag: {zustand['reason']}")
+    return bool(zustand['charging'])
 
 
 def apply_update(zip_url: str, new_version: str, force: bool = False,

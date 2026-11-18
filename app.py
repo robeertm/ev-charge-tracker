@@ -6241,8 +6241,13 @@ def register_routes(app):
             # anyway (WAF-blocked). --upgrade + --upgrade-strategy
             # only-if-needed keeps unrelated pinned deps in place so the
             # resolver stays narrow.
+            # The spec comes from the catalog, so the floor (5.2.1) and the
+            # cap (<6) are the same here as in the image.
+            from services.vehicle.catalog import PACKAGES as _PK
+            _sdk = next(p for p in _PK['hyundai-kia']
+                        if p.startswith('hyundai-kia-connect-api'))
             pip_args += ['--upgrade', '--upgrade-strategy', 'only-if-needed',
-                         'hyundai-kia-connect-api>=4.26.5']
+                         _sdk]
         else:
             pip_args += packages
 
@@ -6868,8 +6873,9 @@ def register_routes(app):
         # block in front of an automatic updater.
         force = request.args.get('force') in ('1', 'true', 'yes')
         if not force:
-            from services.charge_gate import charge_state
+            from services.charge_gate import charge_state, record
             lade = charge_state()
+            record(lade, 'update-endpoint')
             if lade['charging']:
                 return jsonify({
                     'error': 'vehicle_charging',

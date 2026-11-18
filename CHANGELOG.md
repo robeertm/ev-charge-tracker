@@ -1,5 +1,25 @@
 # Changelog
 
+## v3.0.198 (2026-11-18)
+
+### Fixed: a false "charging" flag no longer holds every update back
+
+The charging guard (the Watchtower pre-update hook, the update button and the file updater) only looked at the age of the newest "charging" row. Kia/Hyundai library 5.2.0 reported "charging" on every cached status that carried a remaining-charge time, even with the cable out and the car being driven. Because SoC and odometer kept moving, fresh rows kept arriving and one install refused every update for a week.
+
+- **The flag is now checked against the raw values that travel with it**, per vehicle. Any sign of a real charge (power above zero in the last three hours, or SoC rising while the odometer stands) keeps the gate shut. Four independent observations count against the flag: power reported as 0 on every flagged row of the last three hours, the vendor payload saying unplugged / connector not fastened, the odometer rising between two consecutive "charging" syncs, and SoC falling between them.
+- **Conservative:** three of the four must agree to overrule the flag at once. After 24 hours of a flag without any sign of a real charge, two suffice if one of them is physical (driven, or no cable). Missing values are never evidence; mixed values keep the gate shut. Replayed against the history of the two affected installs, every real charge (AC and DC) stayed blocked and the false flag was overruled from its first drive on.
+- **Every refusal and every overruled flag is written, with its reasons, to `charge_gate.log` in the data folder.**
+- Every vehicle's newest row is asked now, not only the newest row of the fleet, so a newer idle row of a second car can no longer hide a running charge.
+- The file updater asked a table name that does not exist and therefore never saw a charge; it now uses the same guard.
+
+### Dependencies: every line is capped, the Kia/Hyundai floor is 5.2.1
+
+- `hyundai-kia-connect-api>=5.2.1,<6` (5.2.0 carries the false flag above). Note: 5.3 already requires Python 3.13, so the 3.12 image resolves 5.2.x.
+- Every requirement in both requirement files, the Dockerfile and the in-app installer is capped below its next major version (for 0.x packages below the next minor). A rebuilt image can no longer jump a major version unannounced, as the Kia/Hyundai library did on 2026-11-10.
+- `scripts/check_dependency_bounds.py` fails the tests when a line has no upper bound or the installer and the image disagree; with `--installed` it lists what an image actually resolved. The promote workflow runs it inside the published image together with the connector tests before `latest` moves.
+
+21 new tests; full suite 1105 passed, 33 skipped.
+
 ## v3.0.197 (2026-11-18)
 
 ### Leapmotor (Mate): trips in the trip log, real clock times on charges, honest sync message

@@ -16,28 +16,38 @@
 # skipped, and the app keeps the brands it can serve.
 
 # Kia UVO / Hyundai Bluelink.
-# >=4.41.1 (needs Python >=3.12; on 3.11 this line is skipped and the app
-# routes users to the browser token). 4.41.1 is the current maintained
-# upstream release, which restores EU sign-in after the maker's 14 Oct 2026
-# server change that had answered HTTP 400 code 9035 (kia_uvo#1939).
-hyundai-kia-connect-api>=4.41.1
+# >=5.2.1 (needs Python >=3.12; on 3.11 this line is skipped and the app
+# routes users to the browser token). 5.x reads every EU car's cached
+# status through a newer feed; 5.2.0 reported "charging" whenever that feed
+# carried a remaining-charge time (cable out, 0 kW), which held the
+# charging guard shut on every update. 5.2.1 fixes it.
+#
+# UPPER BOUNDS ON EVERY LINE. A rebuilt image used to pull whatever was
+# newest: on 10 Nov 2026 this SDK jumped from 4.x to 5.x without anybody
+# choosing it, and its new status format broke place names in the trip log.
+# Every line is therefore capped below the next major version (for 0.x
+# packages, where semver treats each minor as a major, below the next
+# minor). Moving a cap is a deliberate change that runs the connector tests
+# against the image built from it (scripts/check_dependency_bounds.py,
+# promote workflow).
+hyundai-kia-connect-api>=5.2.1,<6
 
 # VW group. `carconnectivity` is the shared base; one connector per brand.
 # All five are needed — the registry registers vw, skoda, seat, cupra AND
 # audi, and each maps to its own connector type at runtime.
-carconnectivity>=0.11.0
-carconnectivity-connector-volkswagen
-carconnectivity-connector-skoda
-carconnectivity-connector-seatcupra
-carconnectivity-connector-audi
+carconnectivity>=0.11.0,<0.12
+carconnectivity-connector-volkswagen<0.11
+carconnectivity-connector-skoda<0.14
+carconnectivity-connector-seatcupra<0.7
+carconnectivity-connector-audi<0.4
 
-teslapy>=2.0.0                 # Tesla
-renault-api>=0.6.1             # Renault / Dacia (0.6: e-mail code / 2FA)
-aiohttp                        # required by renault-api's async client
-pypolestar>=1.0.0              # Polestar
-saic-ismart-client-ng>=0.5.0   # MG (SAIC iSMART)
-pySmartHashtag>=0.1.0          # Smart #1 / #3
-pyporscheconnectapi>=0.1.0     # Porsche Connect
+teslapy>=2.0.0,<3             # Tesla
+renault-api>=0.6.1,<0.7        # Renault / Dacia (0.6: e-mail code / 2FA)
+aiohttp>=3.9,<4                # required by renault-api's async client
+pypolestar>=1.0.0,<2           # Polestar
+saic-ismart-client-ng>=0.5.0,<0.17  # MG (SAIC iSMART)
+pySmartHashtag>=0.1.0,<0.16    # Smart #1 / #3
+pyporscheconnectapi>=0.1.0,<0.3  # Porsche Connect
 
 # XPENG needs no package — its connector rides on `requests` from
 # requirements.txt and talks to the Enode aggregator REST API.

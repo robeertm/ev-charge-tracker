@@ -168,6 +168,48 @@ jobs:
           echo "── jetzt das neue Abbild auf GENAU DIESER Datenbank ──"
           ./.github/rauchprobe.sh "$SLUG:$NEU" "$PWD/probe-auf" ev-auf 17656 "$NEU"
 
+      # 🔴 DIE AUFGELOESTEN BIBLIOTHEKEN GEGEN DIE ANSCHLUSS-TESTS (18.11.2026)
+      # Am 10.11.2026 zog ein gewoehnlicher Neubau die Kia/Hyundai-Bibliothek
+      # 5.x statt 4.x — die Zeile hatte nur eine Untergrenze. Ihr neues
+      # Statusformat brach die Ortsnamen im Fahrtenbuch, und 5.2.0 meldete
+      # dauernd „laedt“, was den Ladewaechter eine Woche lang zuhielt.
+      # Seitdem hat jede Zeile eine Obergrenze, und hier faehrt das
+      # VEROEFFENTLICHTE Abbild mit genau den Versionen, die sein Bau
+      # aufgeloest hat, die Grenzpruefung und die Anschluss-Tests — bevor
+      # :latest wandert.
+      - name: Bibliotheken des Abbilds gegen die Anschluss-Tests
+        run: |
+          set -euo pipefail
+          SLUG="${{ env.REGISTRY }}/${{ steps.repo.outputs.slug }}"
+          docker run --rm --entrypoint sh "$SLUG:${{ steps.fassung.outputs.version }}" -c '
+            set -e
+            cp -r /app /tmp/w && cd /tmp/w
+            pip install -q --no-cache-dir --no-deps pytest pluggy iniconfig
+            python scripts/check_dependency_bounds.py --installed
+            EV_DATA_DIR="$(mktemp -d)" python -m pytest -q -p no:cacheprovider \
+              tests/test_dependency_bounds.py \
+              tests/test_kia_sdk_restore.py \
+              tests/test_kia_anmeldung_nach_typ_einordnen.py \
+              tests/test_unknown_location_newer_feed.py \
+              tests/test_gps_zeitstempel_zeitzone.py \
+              tests/test_auto_ohne_gps_zeitstempel.py \
+              tests/test_skoda_public_api.py \
+              tests/test_renault_connector.py \
+              tests/test_renault_session.py \
+              tests/test_renault_code.py \
+              tests/test_xpeng_connector.py \
+              tests/test_homeassistant_connector.py \
+              tests/test_homeassistant_xpeng_integration.py \
+              tests/test_pleos.py \
+              tests/test_leapmotor_mate.py \
+              tests/test_credential_fields_per_brand.py \
+              tests/test_maker_not_connector.py \
+              tests/test_login_state.py \
+              tests/test_vehicle_catalog.py \
+              tests/test_ladewaechter_plausibel.py \
+              tests/test_update_kommt_von_allein.py
+          '
+
       - name: :latest auf diese Fassung setzen
         run: |
           set -euo pipefail

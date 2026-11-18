@@ -48,10 +48,15 @@ COPY requirements.txt requirements-vehicles.txt ./
 # unchanged `Crypto` namespace, so the MG connector is installed last without
 # its own pin on that one package; its other dependencies join the first
 # resolution so nothing else moves afterwards.
+#
+# Every name below carries an upper bound, like both requirement files —
+# scripts/check_dependency_bounds.py fails the tests when one does not.
 RUN grep -v '^saic-ismart-client-ng' requirements-vehicles.txt > /tmp/rv.txt \
- && pip install --no-cache-dir -r requirements.txt -r /tmp/rv.txt dacite httpx tenacity \
- && pip install --no-cache-dir --no-deps "saic-ismart-client-ng>=0.5.0" \
- && rm /tmp/rv.txt
+ && pip install --no-cache-dir -r requirements.txt -r /tmp/rv.txt \
+        "dacite>=1.8,<2" "httpx>=0.27,<0.29" "tenacity>=8,<10" \
+ && grep '^saic-ismart-client-ng' requirements-vehicles.txt | sed 's/#.*//' > /tmp/mg.txt \
+ && pip install --no-cache-dir --no-deps -r /tmp/mg.txt \
+ && rm /tmp/rv.txt /tmp/mg.txt
 
 # App source.
 COPY . .
