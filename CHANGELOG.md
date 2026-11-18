@@ -1,5 +1,17 @@
 # Changelog
 
+## v3.0.196 (2026-11-18)
+
+### Fixed: Kia/Hyundai trips ended at "Unknown location" since 2026-11-10
+
+The Kia/Hyundai library (5.x, picked up by the image build on 2026-11-10) now reads every EU car's cached status from the manufacturer's newer feed. That payload has no `vehicleLocation` block, and the connector never handed over the fix time the library had already parsed — so every sync was stored without a GPS time. For a car that normally sends one, a missing time is the cache-echo fingerprint, so the driving log filed every destination as an `unknown` placeholder. The forced refresh after a drive did carry a time, but the old raw-payload fallback read that feed's UTC clock as local time, so it looked an hour old (two in summer) and was refused as stale too. Coordinates were stored all along.
+
+- **Connector:** passes the library's own parsed fix time on (`location_last_updated_at`), which knows which feed it read and on which clock. The raw fallback reads that parsed value first.
+- **The newer feed's position never counts as a fresh fix.** Measured on live installs: right after a drive it often still reports the previous parking spot for up to two hours, its time keeps moving while the car stands (cloud contact time, not a fix), and it carries a wrong zone label. It gets no fix time at all, so a future library change cannot turn lagging positions into "fresh" ones.
+- **Self-heal for the driving log** (`heal_unknown_stops`): every boot (last 45 days) and after every sync (last 3 days) the raw syncs of each `unknown` stop are read again. A stop gets its place from (1) a fresh GPS fix of the same stay, (2) a newer-feed position that changed while the odometer stood still (the cloud caught up), or (3) for a car whose newer feed has matched its own fresh fixes in at least 85 % of at least 10 recent comparisons, the feed position of the stay — never when it equals the stop right before (the lagging-feed echo). Every guard of the live upgrade applies (same odometer, agreeing fixes, no teleport echo); whatever fails one stays `unknown` rather than getting a guessed place. Only placeholders are touched; addresses come from the regular geocoder (rate-limited, cached, failed lookups retried with back-off).
+
+15 new tests; the end-to-end one fails on v3.0.195 and passes now.
+
 ## v3.0.195 (2026-11-18)
 
 ### Leapmotor directly from Leapmotor Mate (experimental)

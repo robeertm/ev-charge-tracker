@@ -130,6 +130,10 @@ class VehicleStatus:
     # or an ISO string). Only a connector whose cloud states it explicitly
     # sets it; None everywhere else. Not a change-detection field.
     captured_at: Optional[object] = None
+    # When the car took the GPS fix in ``location_lat``/``location_lon``
+    # (aware or naive datetime, or an ISO string). None when the cloud does
+    # not say. The parking hook's freshness gate reads it.
+    location_last_updated_at: Optional[object] = None
     timestamp: datetime = field(default_factory=datetime.utcnow)
     raw_data: dict = field(default_factory=dict)
 

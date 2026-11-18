@@ -1850,6 +1850,243 @@ def replay_gap_for_every_vehicle(max_days=30) -> dict:
     return raus
 
 
+# v3.0.196: how far back the self-heal looks for ``unknown`` placeholders.
+# Covers a regression that goes unnoticed for weeks; older stays are left
+# alone so a boot never walks the whole history.
+HEAL_UNKNOWN_DAYS = 45
+
+
+# How much of its own history the newer cached feed must have matched before
+# a stay may take its position without other proof (see heal_unknown_stops).
+FEED_TRUST_MIN_PAIRS = 10
+FEED_TRUST_MIN_SHARE = 0.85
+FEED_TRUST_DAYS = 30
+_feed_trust_cache: dict = {}
+
+
+def newer_feed_trusted(vehicle_id, now: Optional[datetime] = None) -> tuple:
+    """Has THIS car's newer cached feed proven itself? -> (bool, pairs, agree)
+
+    A pair is a newer-feed poll followed within 10 min, at the same odometer
+    reading, by a poll with a fresh GPS fix (the forced refresh after a
+    drive). It agrees when both positions lie within ``SAME_PLACE_M``.
+    Trusted from ``FEED_TRUST_MIN_PAIRS`` pairs with at least
+    ``FEED_TRUST_MIN_SHARE`` agreeing, over the last ``FEED_TRUST_DAYS``.
+    Cached per car for an hour — it reads raw payloads.
+    """
+    from models.database import VehicleSync
+    from services.vehicle.gps_time import location_time_from_raw, raw_is_newer_feed
+    now = now or datetime.now()
+    hit = _feed_trust_cache.get(vehicle_id)
+    if hit and abs((now - hit[0]).total_seconds()) < 3600:
+        return hit[1]
+    q = (VehicleSync.query
+         .filter(VehicleSync.timestamp >= now - timedelta(days=FEED_TRUST_DAYS),
+                 VehicleSync.timestamp <= now,
+                 VehicleSync.location_lat.isnot(None),
+                 VehicleSync.location_lon.isnot(None))
+         .order_by(VehicleSync.timestamp.asc()))
+    if vehicle_id is not None:
+        q = q.filter(VehicleSync.vehicle_id == vehicle_id)
+    pairs = agree = 0
+    last_feed = None
+    for s in q.all():
+        pos = (float(s.location_lat), float(s.location_lon))
+        if raw_is_newer_feed(s.raw_json):
+            last_feed = (s.timestamp, s.odometer_km, pos)
+            continue
+        fix_ts = location_time_from_raw(s.raw_json) or s.location_last_updated_at
+        if fix_ts is None:
+            continue
+        if not (-5 <= (s.timestamp - fix_ts).total_seconds() / 60.0 <= STALE_GPS_MAX_MIN):
+            continue
+        if (last_feed is not None and last_feed[1] == s.odometer_km
+                and (s.timestamp - last_feed[0]).total_seconds() <= 600):
+            pairs += 1
+            if _haversine_m(*last_feed[2], *pos) <= SAME_PLACE_M:
+                agree += 1
+        last_feed = None
+    res = (pairs >= FEED_TRUST_MIN_PAIRS and agree >= FEED_TRUST_MIN_SHARE * pairs,
+           pairs, agree)
+    _feed_trust_cache[vehicle_id] = (now, res)
+    return res
+
+
+def _stop_before(evt: ParkingEvent) -> Optional[ParkingEvent]:
+    """The stop right before ``evt`` (any label), same car."""
+    q = (ParkingEvent.query
+         .filter(ParkingEvent.id != evt.id)
+         .filter(ParkingEvent.arrived_at < evt.arrived_at))
+    if evt.vehicle_id is not None:
+        q = q.filter(ParkingEvent.vehicle_id == evt.vehicle_id)
+    return q.order_by(ParkingEvent.arrived_at.desc()).first()
+
+
+def heal_unknown_stops(vehicle_id=None, days: float = HEAL_UNKNOWN_DAYS,
+                       now: Optional[datetime] = None) -> dict:
+    """Put a real place on ``unknown`` placeholders the raw syncs can prove.
+
+    A placeholder is opened when the odometer shows the car drove somewhere
+    but the sync carries no GPS fix the freshness gate trusts. The live hook
+    upgrades it as soon as a later sync of the SAME stay brings a fresh fix.
+    When that was misjudged at the time — the 2026-11 case: the Kia/Hyundai
+    library moved to a newer cached feed, the app could no longer read any
+    fix time, and every drive ended at "Unknown location" — the raw rows
+    still hold the answer. This reads them again with today's rules.
+
+    A pure database pass (no network), idempotent, touching only
+    placeholders: ``label == 'unknown'`` on the sentinel coordinate. Only
+    syncs of the stay count: inside its time window and at the odometer
+    reading the car arrived with (< 1 km off) — a fix taken after the car
+    moved on describes the next stop. Two kinds of proof, in this order:
+
+      1. **A fresh fix** — the car's own fix time (from the raw dump, which
+         holds the library's correctly converted value, else from the row)
+         at most ``STALE_GPS_MAX_MIN`` before the poll. All fresh fixes of
+         the stay must agree (``SAME_PLACE_M``), and the fix must not sit on
+         the previous labelled stop when the odometer advanced since
+         (teleport echo). Exactly the live upgrade's guards.
+      2. **An observed update** — the newer cached feed has no usable fix
+         time and right after a drive often still reports the previous
+         parking spot (``gps_time.is_newer_feed``). But when its position
+         CHANGES while the odometer stands still, the cloud has caught up
+         with this very stay: the position after the last change is where
+         the car stands. The teleport guard applies here too.
+      3. **A feed that has proven itself** — how far the newer feed can be
+         trusted differs per car: measured over a week, one car's feed
+         matched its own fresh fixes to the metre in 22 of 25 polls, another
+         car's in 2 of 24. ``newer_feed_trusted`` asks exactly that of this
+         car's own recent history. Only for a car that passes, a stay whose
+         feed position never moved takes that position — unless it is the
+         position of the stop right before (the echo a lagging feed
+         produces).
+
+    Everything else stays ``unknown``: a wrong place is worse than an honest
+    gap. An open stay heals from feed positions only once the feed has said
+    the same thing twice in a row. Runs on every boot and after every sync (see app.py), so a
+    stay heals as soon as the proof exists. Addresses for healed stays come
+    from the regular geocoder (rate-limited, cached; failed lookups are
+    retried by its maintenance loop with back-off).
+
+    Returns ``{'checked', 'healed', 'healed_fix', 'healed_update',
+    'healed_trusted_feed', 'no_proof', 'disagree', 'echo', 'open'}`` — ``open`` lists
+    ``(event id, reason)`` for every placeholder left as it was.
+    """
+    from models.database import VehicleSync
+    from services.vehicle.gps_time import location_time_from_raw, raw_is_newer_feed
+
+    now = now or datetime.now()
+    out = {'checked': 0, 'healed': 0, 'healed_fix': 0, 'healed_update': 0,
+           'healed_trusted_feed': 0, 'no_proof': 0, 'disagree': 0, 'echo': 0, 'open': []}
+    q = (ParkingEvent.query
+         .filter(ParkingEvent.label == 'unknown',
+                 ParkingEvent.lat == 0.0, ParkingEvent.lon == 0.0,
+                 ParkingEvent.arrived_at >= now - timedelta(days=days))
+         .order_by(ParkingEvent.arrived_at.asc()))
+    if vehicle_id is not None:
+        q = q.filter(ParkingEvent.vehicle_id == vehicle_id)
+    pending = [pe.id for pe in q.all()]
+    locations = _load_locations() if pending else None
+
+    def _echo(pe, lat, lon) -> bool:
+        prev = _previous_labelled_pe(pe)
+        if prev is None or _haversine_m(prev.lat, prev.lon, lat, lon) > SAME_PLACE_M:
+            return False
+        prev_odo = prev.odometer_departed or prev.odometer_arrived
+        return (pe.odometer_arrived is not None and prev_odo is not None
+                and pe.odometer_arrived - prev_odo >= 1)
+
+    for pe_id in pending:
+        pe = db.session.get(ParkingEvent, pe_id)
+        if pe is None or pe.label != 'unknown':
+            continue
+        out['checked'] += 1
+        end = pe.departed_at or now
+        sq = (VehicleSync.query
+              .filter(VehicleSync.timestamp >= pe.arrived_at,
+                      VehicleSync.timestamp <= end,
+                      VehicleSync.location_lat.isnot(None),
+                      VehicleSync.location_lon.isnot(None))
+              .order_by(VehicleSync.timestamp.asc()))
+        if pe.vehicle_id is not None:
+            sq = sq.filter(VehicleSync.vehicle_id == pe.vehicle_id)
+        fresh, feed = [], []
+        for s in sq.all():
+            if (s.odometer_km is not None and pe.odometer_arrived is not None
+                    and abs(s.odometer_km - pe.odometer_arrived) >= 1):
+                continue
+            if not s.location_lat and not s.location_lon:
+                continue
+            pos = (float(s.location_lat), float(s.location_lon))
+            if raw_is_newer_feed(s.raw_json):
+                feed.append(pos)
+                continue
+            # The raw dump first: rows written before v3.0.196 stored a fix
+            # time the app had mis-read (the forced GPS feed's UTC clock
+            # taken for local time). The library's parsed value is truthful.
+            fix_ts = (location_time_from_raw(s.raw_json)
+                      or s.location_last_updated_at)
+            if fix_ts is None:
+                continue
+            age = (s.timestamp - fix_ts).total_seconds() / 60.0
+            if -5 <= age <= STALE_GPS_MAX_MIN:
+                fresh.append(pos)
+
+        if fresh:
+            lat, lon = fresh[0]
+            if any(_haversine_m(lat, lon, la, lo) > SAME_PLACE_M
+                   for la, lo in fresh[1:]):
+                out['disagree'] += 1
+                out['open'].append((pe.id, 'disagree'))
+                continue
+            kind = 'healed_fix'
+        elif not feed:
+            out['no_proof'] += 1
+            out['open'].append((pe.id, 'no_proof'))
+            continue
+        else:
+            # An open stay may still be catching up: wait until the feed has
+            # said the same thing twice in a row.
+            if pe.departed_at is None and (
+                    len(feed) < 2 or _haversine_m(*feed[-2], *feed[-1]) > SAME_PLACE_M):
+                out['no_proof'] += 1
+                out['open'].append((pe.id, 'no_proof'))
+                continue
+            changed = any(_haversine_m(a[0], a[1], b[0], b[1]) > SAME_PLACE_M
+                          for a, b in zip(feed, feed[1:]))
+            lat, lon = feed[-1]
+            if changed:
+                kind = 'healed_update'
+            elif newer_feed_trusted(pe.vehicle_id, now)[0]:
+                # Not an echo of the stop right before this one — the one
+                # failure shape a lagging feed produces.
+                before = _stop_before(pe)
+                if (before is not None and before.label != 'unknown'
+                        and _haversine_m(before.lat, before.lon, lat, lon) <= SAME_PLACE_M):
+                    out['echo'] += 1
+                    out['open'].append((pe.id, 'echo'))
+                    continue
+                kind = 'healed_trusted_feed'
+            else:
+                out['no_proof'] += 1
+                out['open'].append((pe.id, 'no_proof'))
+                continue
+        if _echo(pe, lat, lon):
+            out['echo'] += 1
+            out['open'].append((pe.id, 'echo'))
+            continue
+        label, fav_name = _classify_location(lat, lon, locations)
+        pe.lat = lat
+        pe.lon = lon
+        pe.label = label
+        pe.favorite_name = fav_name
+        pe.address = None          # filled by the geocoder
+        db.session.commit()
+        out['healed'] += 1
+        out[kind] += 1
+    return out
+
+
 def geocode_missing_events(limit: int = 50) -> int:
     """Resolve addresses for parking events that don't yet have one.
 

@@ -676,6 +676,22 @@ def create_app(config_class=Config):
             except Exception as _e:
                 logger.warning(f"v3.0.146 gap replay failed: {_e}")
 
+        # ── v3.0.196: "Unknown location" self-heal on every boot ───────
+        # Placeholders whose place the raw syncs can prove (see
+        # ``heal_unknown_stops``). Deliberately WITHOUT a done-flag: it is a
+        # cheap, idempotent database pass, and a flag set once would never
+        # pick up the next regression of the same shape.
+        try:
+            from services.trips_service import heal_unknown_stops
+            _heil = heal_unknown_stops()
+            if _heil.get('healed'):
+                logger.info(
+                    "v3.0.196: put a place on %d 'unknown' stop(s) from the "
+                    "raw syncs (%s)" % (_heil['healed'], _heil))
+        except Exception as _e:
+            db.session.rollback()
+            logger.warning(f"unknown-stop self-heal failed: {_e}")
+
         # ── v3.0.92 CO2 self-heal on every boot ──────────────────────
         # The v3.0.65 cleanup above fires only once (guarded by its
         # AppConfig flag), so simply *deploying* a new version never
@@ -1630,16 +1646,17 @@ def _extract_location_last_updated(status, raw_json):
             return dt.astimezone().replace(tzinfo=None) if dt.tzinfo else dt
         except ValueError:
             pass
-    # Fallback: parse raw JSON
-    try:
-        import json as _json
-        raw = _json.loads(raw_json) if raw_json else {}
-        t = (((raw.get('data') or {}).get('vehicleLocation') or {}).get('time') or '')
-        if len(t) >= 14:
-            return datetime.strptime(t[:14], '%Y%m%d%H%M%S')
-    except (ValueError, KeyError, AttributeError, TypeError):
-        pass
-    return None
+    # Fallback: the raw payload. 🔴 v3.0.196: the Kia/Hyundai library moved
+    # every car to its newer cached-status feed (library 5.x, picked up by the
+    # image build on 2026-11-10). That feed has no ``data.vehicleLocation``
+    # block, so this fallback found nothing and every sync was stored without
+    # a GPS time. The parking hook reads "this car normally sends one, this
+    # sync does not" as a cache echo, so every drive ended at an ``unknown``
+    # placeholder — the trip log showed "Unknown location" from that day on.
+    # The library's own parsed value sits at the top level of the dump; it is
+    # read first now (see ``services.vehicle.gps_time``).
+    from services.vehicle.gps_time import location_time_from_raw
+    return location_time_from_raw(raw_json)
 
 
 def _extract_captured_at(status):
@@ -1856,6 +1873,16 @@ def _save_vehicle_sync(status, battery_kwh, raw_json='', vehicle_id=None):
         update_parking_from_sync(result, seen_at=_seen_at)
     except Exception as e:
         logger.warning(f"Failed to update parking event: {e}")
+
+    # v3.0.196: every new sync may be the proof a recent ``unknown`` stop was
+    # waiting for — retry those of the last days (database only, cheap).
+    try:
+        if result is not None:
+            from services.trips_service import heal_unknown_stops
+            heal_unknown_stops(vehicle_id=vehicle_id, days=3)
+    except Exception as e:
+        db.session.rollback()
+        logger.warning(f"unknown-stop self-heal failed: {e}")
 
     # v3.0.18: auto-detect a charge the user forgot to log. When charging
     # just ended (is_charging 1→0) and SoC rose by the threshold over the

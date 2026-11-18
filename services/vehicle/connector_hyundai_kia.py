@@ -363,6 +363,7 @@ def _classify_auth_failure(err: Exception, credential: str = '') -> tuple:
 
 
 from .base import VehicleConnector, VehicleStatus, to_km, unit_name
+from .gps_time import is_newer_feed
 from .registry import describe, register
 
 logger = logging.getLogger(__name__)
@@ -762,6 +763,17 @@ class _HyundaiKiaBase(VehicleConnector):
             total_power_regenerated_kwh=vehicle.total_power_regenerated,
             location_lat=vehicle.location_latitude,
             location_lon=vehicle.location_longitude,
+            # v3.0.196: hand over the library's own parsed fix time — it
+            # knows which feed the coordinate came from and on which clock
+            # (the forced GPS feed is UTC, the old cached one region-local).
+            # Without it the app dug the time out of the raw payload, and the
+            # newer cached feed the library reads since 5.x has no field
+            # there at all. That newer feed's position carries no fix time
+            # worth the name (``gps_time.is_newer_feed``), so it gets None:
+            # it may confirm a stop, never prove a fresh fix.
+            location_last_updated_at=(
+                None if is_newer_feed(getattr(vehicle, 'data', None))
+                else getattr(vehicle, 'location_last_updated_at', None)),
             last_updated=str(vehicle.last_updated_at) if vehicle.last_updated_at else None,
             vehicle_name=vehicle.name,
             vehicle_model=vehicle.model,
