@@ -156,13 +156,16 @@ def import_trips(vehicle_id, trips) -> dict:
     """File Mate's finished trips as trip-log rows. Returns counts. Commits.
 
     Mate's trips export has no coordinates, so a row has date, start time,
-    duration and distance; the trip log shows it without start and
-    destination (or with the ones the parking history can infer). A trip is
-    filed once (same start time); one that overlaps a trip already in the
-    log — from the vehicle's cloud, a data export — is left alone."""
+    duration, distance, the SoC at both ends and Mate's place names as text;
+    the trip log shows the place names unless the parking history knows the
+    stop better. A trip is filed once (same start time); one that overlaps a
+    trip already in the log — from the vehicle's cloud, a data export — is
+    left alone. A Mate trip filed before SoC and places were kept gets the
+    EMPTY ones of those four fields filled on the next sync (``filled``);
+    a value already there is never overwritten."""
     from models.database import db, VehicleTrip
 
-    n = {'new': 0, 'dup': 0, 'overlap': 0}
+    n = {'new': 0, 'dup': 0, 'overlap': 0, 'filled': 0}
     if not trips or vehicle_id is None:
         return n
     lo = datetime.fromtimestamp(min(t['start'] for t in trips)) - timedelta(days=1)
@@ -171,15 +174,27 @@ def import_trips(vehicle_id, trips) -> dict:
                                     VehicleTrip.start_time >= lo,
                                     VehicleTrip.start_time <= hi).all()
     windows = []
+    by_start = {}
     for r in rows:
         a = r.start_time
         mins = (r.drive_minutes or 0) + (r.idle_minutes or 0)
         windows.append((a, a + timedelta(minutes=mins)))
+        by_start.setdefault(a, r)
     for t in trips:
         a = datetime.fromtimestamp(t['start']).replace(microsecond=0)
         b = datetime.fromtimestamp(t['end'])
         if any(w0 == a for w0, _ in windows):
             n['dup'] += 1
+            old = by_start.get(a)
+            if old is not None and old.source == TRIP_SOURCE:
+                changed = False
+                for col, key in (('start_soc', 'soc_from'), ('end_soc', 'soc_to'),
+                                 ('start_place', 'place_from'), ('end_place', 'place_to')):
+                    if getattr(old, col) is None and t.get(key) is not None:
+                        setattr(old, col, t.get(key))
+                        changed = True
+                if changed:
+                    n['filled'] += 1
             continue
         if any(w0 <= b and w1 >= a for w0, w1 in windows):
             n['overlap'] += 1
@@ -188,11 +203,13 @@ def import_trips(vehicle_id, trips) -> dict:
             vehicle_id=vehicle_id, trip_date=a.date(), start_time=a,
             drive_minutes=t['minutes'], idle_minutes=0, distance_km=t['km'],
             avg_speed_kmh=t.get('avg_kmh'), source=TRIP_SOURCE,
+            start_soc=t.get('soc_from'), end_soc=t.get('soc_to'),
+            start_place=t.get('place_from'), end_place=t.get('place_to'),
             fetched_at=datetime.now()))
         windows.append((a, b))
         n['new'] += 1
     db.session.commit()
-    if n['new']:
+    if n['new'] or n['filled']:
         logger.info('Leapmotor Mate trips for vehicle %s: %s', vehicle_id, n)
     return n
 

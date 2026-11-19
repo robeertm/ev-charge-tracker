@@ -144,12 +144,30 @@
                 {% set _veh_by_id = {} %}
                 {% for v in fleet_vehicles %}{% set _ = _veh_by_id.update({v.id: v}) %}{% endfor %}
                 {% for tr in trips %}
-                    <tr data-from-id="{{ tr.from.id or '' }}" data-to-id="{{ tr.to.id or '' }}" data-sdk-trip-id="{{ tr.sdk_trip_id or '' }}" data-source="{{ tr.source or 'polled' }}">
+                    {% set _dep = tr.from.departed_at or '' %}
+                    {% set _arr = tr.to.arrived_at or '' %}
+                    {# The tooltip names where the trip's statistics came from. #}
+                    {% set _src_key = {'leapmotor_mate': 'trips.source_mate', 'myskoda': 'trips.source_skoda',
+                                       'data_act': 'trips.source_data_act'}.get(tr.sdk_source, 'trips.source_sdk') %}
+                    <tr data-from-id="{{ tr.from.id or '' }}" data-to-id="{{ tr.to.id or '' }}" data-sdk-trip-id="{{ tr.sdk_trip_id or '' }}" data-source="{{ tr.source or 'polled' }}"
+                        data-start-at="{{ _dep }}" data-end-at="{{ _arr }}"
+                        data-from-place="{{ tr.from.address or '' if not tr.from.id else '' }}" data-to-place="{{ tr.to.address or '' if not tr.to.id else '' }}"
+                        data-soc-from="{{ tr.soc_from if tr.soc_from is not none else '' }}" data-soc-to="{{ tr.soc_to if tr.soc_to is not none else '' }}">
                         <td class="small">
-                            {% if tr.from.departed_at %}{{ tr.from.departed_at[:16] | replace('T', ' ') }}{% endif %}
+                            {% if _dep %}<span class="text-nowrap">{{ _dep[:16] | replace('T', ' ') }}</span>{% endif %}
                             {% if tr.drive_min %}
                             <i class="bi bi-cloud-check text-info ms-1" style="font-size:.75rem"
-                               title="{{ t('trips.source_sdk') }} · {{ tr.drive_min }}min{% if tr.avg_speed_kmh %} · Ø {{ tr.avg_speed_kmh|dist(mi_nd=0) }}{{ speed_unit() }}{% endif %}{% if tr.max_speed_kmh %} · max {{ tr.max_speed_kmh|dist(mi_nd=0) }}{{ speed_unit() }}{% endif %}"></i>
+                               title="{{ t(_src_key) }} · {{ tr.drive_min }}min{% if tr.avg_speed_kmh %} · Ø {{ tr.avg_speed_kmh|dist(mi_nd=0) }}{{ speed_unit() }}{% endif %}{% if tr.max_speed_kmh %} · max {{ tr.max_speed_kmh|dist(mi_nd=0) }}{{ speed_unit() }}{% endif %}"></i>
+                            {% endif %}
+                            {# Arrival and duration (v3.0.199): a trip without parking events
+                               (e.g. from Leapmotor Mate) had no other place showing its end.
+                               Only for trips whose source reports start + duration: on a trip
+                               built from GPS stops the "arrival" is when the next sync saw
+                               the car, which can be hours after it parked. #}
+                            {% if tr.source == 'sdk' and _arr and _arr > _dep %}
+                            <div class="text-muted trip-arrival text-nowrap">→ {% if _arr[:10] == _dep[:10] %}{{ _arr[11:16] }}{% else %}{{ _arr[:16] | replace('T', ' ') }}{% endif %}{% if tr.drive_min %} · {{ tr.drive_min }} min{% endif %}</div>
+                            {% elif tr.drive_min %}
+                            <div class="text-muted trip-arrival text-nowrap">{{ tr.drive_min }} min</div>
                             {% endif %}
                         </td>
                         {% if active_vehicle_filter == 'all' %}
@@ -1390,10 +1408,12 @@
         q('tripEditLat', side).value = d.lat != null ? d.lat.toFixed(6) : '';
         q('tripEditLon', side).value = d.lon != null ? d.lon.toFixed(6) : '';
         if (d.lat != null && d.lon != null) placeMarker(side, d.lat, d.lon);
+        else if (markers[side]) { map.removeLayer(markers[side]); markers[side] = null; }
         updateFavVisibility(side);
     }
 
-    async function openTripEditor(fromId, toId, sdkId) {
+    async function openTripEditor(fromId, toId, sdkId, rowInfo) {
+        rowInfo = rowInfo || {};
         const m = getModal();
         if (!m) { alert('Bootstrap not loaded'); return; }
         ids = { from: fromId, to: toId };
@@ -1409,6 +1429,27 @@
 
         try {
             const results = {};
+            // A side without a parking event (a trip known only from the
+            // car's cloud or Leapmotor Mate) is filled from the trip row
+            // itself: its start/end time, the place name the source gave as
+            // text and its SoC. Saving still materialises the events first
+            // (sdk_create_pes, below) — at exactly these times. Sides with an
+            // event load it from the server, which wins.
+            for (const side of ['from', 'to']) {
+                if (ids[side] != null) continue;
+                const t = side === 'from' ? rowInfo.startAt : rowInfo.endAt;
+                const soc = side === 'from' ? rowInfo.socFrom : rowInfo.socTo;
+                const socNum = soc === '' || soc == null ? null : Math.round(parseFloat(soc));
+                results[side] = {
+                    label: 'other',
+                    address: (side === 'from' ? rowInfo.fromPlace : rowInfo.toPlace) || '',
+                    arrived_at: t || null,
+                    departed_at: side === 'from' ? (t || null) : null,
+                    soc_arrived: side === 'to' && !isNaN(socNum) ? socNum : null,
+                    soc_departed: side === 'from' && !isNaN(socNum) ? socNum : null,
+                    lat: null, lon: null, age_days: 0,
+                };
+            }
             for (const side of ['from', 'to']) {
                 const id = ids[side];
                 if (id == null) continue;
@@ -1457,9 +1498,14 @@
                 if (gapHintEl && gapHintTextEl && gapMin >= 1) {
                     const fmt = (d) => d.toTimeString().slice(0, 5);
                     const short = T_EDIT.gap_short.replace('{min}', gapMin);
-                    const hint = T_EDIT.gap_hint
-                        .replace('{from}', fmt(t1))
-                        .replace('{to}', fmt(t2));
+                    // "No sync data during this window" is about polled
+                    // stops; a side filled from the trip row only gets the
+                    // plain times.
+                    const hint = (ids.from == null || ids.to == null)
+                        ? fmt(t1) + ' → ' + fmt(t2)
+                        : T_EDIT.gap_hint
+                            .replace('{from}', fmt(t1))
+                            .replace('{to}', fmt(t2));
                     gapHintTextEl.innerHTML = '<strong>' + short + '</strong> — ' + hint;
                     gapHintEl.style.display = '';
                 }
@@ -1479,6 +1525,14 @@
             isNaN(fid) ? null : fid,
             isNaN(tid) ? null : tid,
             isNaN(sid) ? null : sid,
+            {
+                startAt: row.dataset.startAt || '',
+                endAt: row.dataset.endAt || '',
+                fromPlace: row.dataset.fromPlace || '',
+                toPlace: row.dataset.toPlace || '',
+                socFrom: row.dataset.socFrom || '',
+                socTo: row.dataset.socTo || '',
+            },
         );
     }
     document.querySelectorAll('.btn-edit-trip').forEach(el => {

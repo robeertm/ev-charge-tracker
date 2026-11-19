@@ -659,6 +659,13 @@ class VehicleTrip(db.Model):
     # VehicleSync, so these two columns stay None there.
     regen_kwh_per_100km = db.Column(db.Float)
     consumption_kwh_per_100km = db.Column(db.Float)
+    # v3.0.199: state of charge and place names at both ends. Only Leapmotor
+    # Mate's trips export carries them (place names as text, no
+    # coordinates); every other source leaves them empty.
+    start_soc = db.Column(db.Float)
+    end_soc = db.Column(db.Float)
+    start_place = db.Column(db.String(120))
+    end_place = db.Column(db.String(120))
     source = db.Column(db.String(32), default='sdk_day_trip_info')
     fetched_at = db.Column(db.DateTime, default=datetime.now)
 

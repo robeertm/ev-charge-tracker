@@ -1,5 +1,20 @@
 # Changelog
 
+## v3.0.199 (2026-11-19)
+
+### Leapmotor (Mate): trips show their end, their SoC and their places
+
+From the first real B10 trip filed via Mate: start time and distance were right, but the trip details had no end time (so the duration could not be checked), no SoC and no start/destination.
+
+- **End time and duration.** Nothing was lost — a filed trip keeps its start and duration, and the end follows from both — but it was printed nowhere: the trip list showed only the departure, and the details dialog loaded both ends from parking events, which a trip without GPS does not have, so it opened empty. The list now shows the arrival and the duration under the departure (`→ 14:51 · 27 min`, with the date when the trip ends on another day) for every trip whose source reports start and duration (Leapmotor Mate, the car's cloud, a vehicle data export). A trip built from GPS stops shows the duration when the car's cloud has one; its arrival is when the next sync saw the car, often well after it parked, so it is not printed as an end time. The details dialog fills a side without a parking event from the trip itself: its start or end time, the place name and the SoC. Saving works as before (it creates the two stops at exactly these times).
+- **SoC.** Mate's trips export carries the SoC at start and end; it was read and dropped when filing. Trips keep both now (two new, empty-by-default columns on the trip table, added by a migration that runs after the older trip-table rebuild, so an old install keeps them) and the list shows the SoC used, as for trips built from GPS.
+- **Start and destination.** Mate's export names both places as text (`start_place`, `end_place`; no coordinates). They are read now (cut to 120 characters; a missing or renamed column is simply empty) and shown instead of "Unknown location". A stop the parking history already knows keeps its own place; Mate's text is the fallback. Without coordinates these trips still do not appear on the map.
+- **Trips filed by v3.0.197/198** get their empty SoC and place fields filled on the next sync. A value already there is never overwritten, and a trip from another source is not touched.
+- **The tooltip over a trip named the wrong source.** It said "direct from the Kia/Hyundai server" for every trip with cloud statistics. It now names where the trip came from: Leapmotor Mate, the Škoda server, or a vehicle data export (all six languages).
+- **Trip CSV export:** a place name a spreadsheet would run as a formula (`=`, `+`, `-`, `@`) gets the usual leading apostrophe; place names can now come from outside.
+
+12 new tests (end time and duration in the rendered list, over midnight, no poll time shown as the end of a GPS trip, SoC and places from a real import, escaped place text, back-filling older trips without overwriting, no back-fill from another source, the dialog fed from the row, an old install's trip table getting the columns, tooltips in all languages, the formula guard).
+
 ## v3.0.198 (2026-11-18)
 
 ### Fixed: a false "charging" flag no longer holds every update back

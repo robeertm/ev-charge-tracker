@@ -241,9 +241,11 @@ def parse_trips(rows: list) -> tuple:
     """``(trips, skipped)`` from Mate's trips export.
 
     A trip: ``{'id', 'start', 'end', 'minutes', 'km', 'avg_kmh', 'soc_from',
-    'soc_to', 'odo_from', 'odo_to'}``. Mate's export carries no coordinates,
-    so a trip has times, duration and distance only. ``skipped`` counts rows
-    that are no usable drive (still open, no times, no distance)."""
+    'soc_to', 'odo_from', 'odo_to', 'place_from', 'place_to'}``. Mate's
+    export carries no coordinates, only the place names as text
+    (``start_place``/``end_place``, each cut to 120 characters; a missing
+    or renamed column is ``None``). ``skipped`` counts rows that are no
+    usable drive (still open, no times, no distance)."""
     out, skipped = [], 0
     for r in rows:
         start, end = _epoch(r.get('started_at')), _epoch(r.get('ended_at'))
@@ -269,6 +271,8 @@ def parse_trips(rows: list) -> tuple:
             'avg_kmh': round(km / (minutes / 60.0), 1) if minutes >= 1 else None,
             'soc_from': _soc(r.get('start_soc')), 'soc_to': _soc(r.get('end_soc')),
             'odo_from': odo_from, 'odo_to': odo_to,
+            'place_from': _text(r.get('start_place'))[:120] or None,
+            'place_to': _text(r.get('end_place'))[:120] or None,
         })
     out.sort(key=lambda t: t['start'])
     return out, skipped

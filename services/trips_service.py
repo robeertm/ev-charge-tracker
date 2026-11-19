@@ -1268,12 +1268,17 @@ def _find_sdk_stats(sdk_rows, pe_departed_at, exclude_ids=None):
 
 
 def _unknown_endpoint_dict(include_departed: bool = False,
-                           time_override: Optional[datetime] = None):
+                           time_override: Optional[datetime] = None,
+                           address: Optional[str] = None):
     """Stub for SDK-fallback trips on historical days where no polling
-    data exists. label='unknown' lets the template render 'Ort unbekannt'."""
+    data exists. label='unknown' lets the template render 'Ort unbekannt'.
+    With ``address`` (a place name the trip's source gave as text, e.g.
+    Leapmotor Mate's export) the stub is labelled 'other' and shows it —
+    still without coordinates."""
     return {
         'id': None, 'lat': None, 'lon': None,
-        'label': 'unknown', 'name': None, 'address': None,
+        'label': 'other' if address else 'unknown', 'name': None,
+        'address': address or None,
         'arrived_at': time_override.isoformat() if time_override else None,
         **({'departed_at': time_override.isoformat() if time_override else None}
            if include_departed else {}),
@@ -1614,6 +1619,7 @@ def get_trips(limit: Optional[int] = None,
             trip['idle_min'] = sdk.idle_minutes
             trip['avg_speed_kmh'] = sdk.avg_speed_kmh
             trip['max_speed_kmh'] = sdk.max_speed_kmh
+            trip['sdk_source'] = sdk.source
             used_sdk_ids.add(sdk.id)
             # MySkoda surfaces regen + consumption as a daily aggregate;
             # the trip_fetch attaches it to every VehicleTrip of that
@@ -1672,13 +1678,25 @@ def get_trips(limit: Optional[int] = None,
         origin_pe = _find_pe_containing(all_events, start)
         dest_pe = _find_pe_containing(all_events, end) or _find_pe_after(all_events, end)
 
+        # A place name the source gave as text (Leapmotor Mate) is only the
+        # fallback: a side the parking history resolves keeps its stop.
+        start_place = getattr(row, 'start_place', None)
+        end_place = getattr(row, 'end_place', None)
         from_dict = (_event_to_dict(origin_pe, include_departed=True, time_override=start)
                      if origin_pe is not None
-                     else _unknown_endpoint_dict(include_departed=True, time_override=start))
+                     else _unknown_endpoint_dict(include_departed=True, time_override=start,
+                                                 address=start_place))
         to_time = end if total_min > 0 else None
         to_dict = (_event_to_dict(dest_pe, time_override=to_time)
                    if dest_pe is not None
-                   else _unknown_endpoint_dict(include_departed=False, time_override=to_time))
+                   else _unknown_endpoint_dict(include_departed=False, time_override=to_time,
+                                               address=end_place))
+        soc_from = getattr(row, 'start_soc', None)
+        soc_to = getattr(row, 'end_soc', None)
+        soc_used = (round(max(soc_from - soc_to, 0), 1)
+                    if soc_from is not None and soc_to is not None else None)
+        if soc_used is not None and soc_used == int(soc_used):
+            soc_used = int(soc_used)    # "−7%", not "−7.0%"
 
         sdk_km = round(row.distance_km, 1) if row.distance_km is not None else None
         # Prefer the day-aggregate regen rate from MySkoda when present
@@ -1695,10 +1713,13 @@ def get_trips(limit: Optional[int] = None,
             'from': from_dict,
             'to':   to_dict,
             'km': sdk_km,
-            'soc_used': None,
+            'soc_used': soc_used,
+            'soc_from': soc_from,
+            'soc_to': soc_to,
             'regen_kwh': sdk_regen,
             'regen_estimated': sdk_regen is not None,
             'source': 'sdk',
+            'sdk_source': row.source,
             'vehicle_id': row.vehicle_id,
             'sdk_trip_id': row.id,
             'drive_min': row.drive_minutes,

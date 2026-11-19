@@ -418,6 +418,26 @@ def create_app(config_class=Config):
             if rebuild_ok:
                 AppConfig.set('vehicle_trips_uq_composite_v3_0_109', 'done')
 
+        # Migrate: SoC + place names at both ends of a trip (v3.0.199, from
+        # Leapmotor Mate's trips export). Must stay BELOW the v3.0.109
+        # rebuild above: that one recreates vehicle_trips with a fixed
+        # column list and would drop these columns again on the same boot.
+        # A fresh inspector, because the rebuild changed the table under the
+        # cached one.
+        try:
+            vt_columns = {c['name'] for c in inspect(db.engine).get_columns('vehicle_trips')}
+            if vt_columns:
+                for col_name, col_type in (('start_soc', 'REAL'), ('end_soc', 'REAL'),
+                                           ('start_place', 'VARCHAR(120)'),
+                                           ('end_place', 'VARCHAR(120)')):
+                    if col_name not in vt_columns:
+                        db.session.execute(text(
+                            f'ALTER TABLE vehicle_trips ADD COLUMN {col_name} {col_type}'))
+                db.session.commit()
+        except Exception as _e:
+            db.session.rollback()
+            logger.warning(f"v3.0.199 vehicle_trips SoC/place columns: {_e}")
+
         # Migrate: add Erstzulassung + gross battery capacity to vehicles
         # (v3.0.74). first_registered_at drives the certificate's calendar
         # age / degradation benchmark; battery_kwh_gross is the informational
@@ -7058,6 +7078,7 @@ def register_routes(app):
         # 🔴 not t(): the loop below names its trips ``t``, which makes ``t``
         # local to this whole function
         from services.i18n import t as _tr
+        from services.charge_sheet import mask_formula as _mask_formula
         writer.writerow([_tr('trips.col_when'), _tr('trips.col_from'), _tr('trips.col_to'),
                          _units.dist_label(), 'SoC %'])
         for t in trips:
@@ -7067,9 +7088,12 @@ def register_routes(app):
             to_label = (t['to'].get('address')
                         or t['to'].get('name')
                         or t['to'].get('label') or '')
+            # Place names can come from outside (a geocoder, Leapmotor
+            # Mate's export): a cell a spreadsheet would run as a formula
+            # gets the usual apostrophe.
             writer.writerow([
                 (t['from']['departed_at'] or '')[:10],
-                from_label, to_label,
+                _mask_formula(from_label), _mask_formula(to_label),
                 _units.dist(t['km'], mi_nd=1) or '', t['soc_used'] or '',
             ])
         from flask import Response

@@ -72,10 +72,10 @@ CHARGES = [   # newest first, like Mate
 TRIPS = [
     dict(id=5, started_at=_iso(2026, 11, 16, 20), ended_at=_iso(2026, 11, 16, 20, 40),
          distance_km=31.5, start_soc=78, end_soc=71, start_odometer_km=10230,
-         end_odometer_km=10261.5),
+         end_odometer_km=10261.5, start_place='Fast charger', end_place="'=Home"),
     dict(id=4, started_at=_iso(2026, 11, 16, 16), ended_at=_iso(2026, 11, 16, 17, 30),
          distance_km=120, start_soc=60, end_soc=31, start_odometer_km=10110,
-         end_odometer_km=10230),
+         end_odometer_km=10230, start_place='Office park ' + 'x' * 200, end_place=''),
     dict(id=3, started_at=_iso(2026, 11, 14, 17), ended_at=_iso(2026, 11, 14, 18),
          distance_km=40, start_soc=40, end_soc=22, start_odometer_km=0, end_odometer_km=0),
 ]
@@ -526,7 +526,7 @@ def test_trips_are_filed_once_and_overlaps_are_left_alone(app):
     assert row.distance_km == 31.5 and row.drive_minutes == 40
     assert row.source == 'leapmotor_mate' and row.vehicle_id == 1
     n2 = import_trips(1, _trips())
-    assert n2 == {'new': 0, 'dup': 3, 'overlap': 0}
+    assert n2 == {'new': 0, 'dup': 3, 'overlap': 0, 'filled': 0}
     # a trip another source already has (overlapping window) is not doubled
     VehicleTrip.query.delete()
     t = _trips()[-1]
@@ -569,6 +569,85 @@ def test_the_trip_log_shows_the_filed_trips_without_gps(app):
     assert len(shown) == 3
     assert [t['km'] for t in shown] == [31.5, 120.0, 40.0]       # newest first
     assert all(t['source'] == 'sdk' for t in shown)
+
+
+# ── v3.0.199: SoC and Mate's place names stay with the trip ──────────
+def test_trips_carry_mates_place_names_and_a_missing_column_is_none():
+    t3, t4, t5 = _trips()
+    assert (t5['place_from'], t5['place_to']) == ('Fast charger', '=Home')   # formula guard
+    assert len(t4['place_from']) == 120 and t4['place_to'] is None
+    assert t3['place_from'] is None and t3['place_to'] is None
+    rows = [dict(id=1, started_at=_iso(2026, 11, 1, 8), ended_at=_iso(2026, 11, 1, 9),
+                 distance_km=5)]           # an export without the two columns at all
+    got, _ = M.parse_trips(rows)
+    assert got[0]['place_from'] is None and got[0]['place_to'] is None
+
+
+def test_mate_trips_keep_soc_and_places(app):
+    from models.database import VehicleTrip
+    from services.leapmotor_mate_import import import_trips
+    from services.trips_service import get_trips
+    import_trips(1, _trips())
+    row = VehicleTrip.query.order_by(VehicleTrip.start_time.desc()).first()
+    assert (row.start_soc, row.end_soc) == (78, 71)
+    assert (row.start_place, row.end_place) == ('Fast charger', '=Home')
+    newest, middle, oldest = get_trips(vehicle_id=1)
+    assert newest['soc_used'] == 7 and newest['sdk_source'] == 'leapmotor_mate'
+    assert newest['from']['address'] == 'Fast charger' and newest['from']['label'] == 'other'
+    assert newest['to']['address'] == '=Home' and newest['to']['label'] == 'other'
+    assert newest['to']['arrived_at'][11:16] == datetime.fromtimestamp(
+        _trips()[-1]['end']).strftime('%H:%M')
+    # a side Mate gave no name for stays honest: unknown
+    assert middle['soc_used'] == 29 and middle['to']['label'] == 'unknown'
+    assert oldest['from']['label'] == 'unknown' and oldest['soc_used'] == 18
+
+
+def test_an_older_trip_gets_soc_and_places_on_the_next_sync(app):
+    from models.database import db, VehicleTrip
+    from services.leapmotor_mate_import import import_trips
+    trips = _trips()
+    # filed by v3.0.197/198: no SoC, no places
+    for t in trips:
+        a = datetime.fromtimestamp(t['start'])
+        db.session.add(VehicleTrip(vehicle_id=1, trip_date=a.date(), start_time=a,
+                                   drive_minutes=t['minutes'], idle_minutes=0,
+                                   distance_km=t['km'], source='leapmotor_mate'))
+    db.session.commit()
+    newest = VehicleTrip.query.order_by(VehicleTrip.start_time.desc()).first()
+    newest.start_place = 'My own name'           # set by the owner: never overwritten
+    db.session.commit()
+    n = import_trips(1, trips)
+    assert n == {'new': 0, 'dup': 3, 'overlap': 0, 'filled': 3}
+    newest = VehicleTrip.query.order_by(VehicleTrip.start_time.desc()).first()
+    assert newest.start_place == 'My own name' and newest.end_place == '=Home'
+    assert (newest.start_soc, newest.end_soc) == (78, 71)
+    assert newest.distance_km == 31.5 and newest.drive_minutes == 40
+    # nothing left to fill: the next sync changes nothing
+    assert import_trips(1, trips)['filled'] == 0
+
+
+def test_a_trip_from_another_source_is_not_filled_from_mate(app):
+    from models.database import db, VehicleTrip
+    from services.leapmotor_mate_import import import_trips
+    t = _trips()[-1]
+    a = datetime.fromtimestamp(t['start'])
+    db.session.add(VehicleTrip(vehicle_id=1, trip_date=a.date(), start_time=a,
+                               drive_minutes=40, idle_minutes=0, distance_km=31.0,
+                               source='sdk_day_trip_info'))
+    db.session.commit()
+    n = import_trips(1, [t])
+    assert n['dup'] == 1 and n['filled'] == 0
+    row = VehicleTrip.query.one()
+    assert row.start_soc is None and row.start_place is None and row.distance_km == 31.0
+
+
+def test_no_trip_tooltip_says_kia_for_a_mate_trip():
+    for lang in LANGS:
+        d = json.load(open(os.path.join(ROOT, 'translations', lang + '.json'), encoding='utf-8'))
+        assert 'Mate' in d['trips.source_mate'] and 'Kia' not in d['trips.source_mate'], lang
+        assert 'Kia' not in d['trips.source_skoda'] and 'Kia' not in d['trips.source_data_act'], lang
+    html = open(os.path.join(ROOT, 'templates', 'trips.html'), encoding='utf-8').read()
+    assert "'leapmotor_mate': 'trips.source_mate'" in html and 't(_src_key)' in html
 
 
 def test_the_connector_keeps_the_trips_after_a_read(mate):
