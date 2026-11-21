@@ -18,12 +18,20 @@
                         </div>
                         <div class="col-6 col-sm-3">
                             <label for="charge_hour" class="form-label fw-bold">{{ t('edit.hour') }}</label>
-                            <select class="form-select" id="charge_hour" name="charge_hour">
-                                <option value="">–</option>
-                                {% for h in range(24) %}
-                                <option value="{{ h }}" {% if charge.charge_hour == h %}selected{% endif %}>{{ "%02d"|format(h) }}:00</option>
-                                {% endfor %}
-                            </select>
+                            <div class="input-group">
+                                <select class="form-select" id="charge_hour" name="charge_hour">
+                                    <option value="">–</option>
+                                    {% for h in range(24) %}
+                                    <option value="{{ h }}" {% if charge.charge_hour == h %}selected{% endif %}>{{ "%02d"|format(h) }}</option>
+                                    {% endfor %}
+                                </select>
+                                <span class="input-group-text px-1">:</span>
+                                <select class="form-select" id="charge_start_min" name="charge_start_min" aria-label="{{ t('input.minute') }}" title="{{ t('input.minute') }}">
+                                    {% for m in range(60) %}
+                                    <option value="{{ m }}" {% if (charge.charge_start_min or 0) == m %}selected{% endif %}>{{ "%02d"|format(m) }}</option>
+                                    {% endfor %}
+                                </select>
+                            </div>
                         </div>
                         {# v3.0.64: optional end hour — when set with
                            start hour the server averages ENTSO-E CO2
@@ -31,12 +39,20 @@
                            start-hour snapshot. #}
                         <div class="col-6 col-sm-3">
                             <label for="charge_end_hour" class="form-label fw-bold">{{ t('edit.end_hour') }}</label>
-                            <select class="form-select" id="charge_end_hour" name="charge_end_hour">
-                                <option value="">–</option>
-                                {% for h in range(24) %}
-                                <option value="{{ h }}" {% if charge.charge_end_hour == h %}selected{% endif %}>{{ "%02d"|format(h) }}:00</option>
-                                {% endfor %}
-                            </select>
+                            <div class="input-group">
+                                <select class="form-select" id="charge_end_hour" name="charge_end_hour">
+                                    <option value="">–</option>
+                                    {% for h in range(24) %}
+                                    <option value="{{ h }}" {% if charge.charge_end_hour == h %}selected{% endif %}>{{ "%02d"|format(h) }}</option>
+                                    {% endfor %}
+                                </select>
+                                <span class="input-group-text px-1">:</span>
+                                <select class="form-select" id="charge_end_min" name="charge_end_min" aria-label="{{ t('input.minute') }}" title="{{ t('input.minute') }}">
+                                    {% for m in range(60) %}
+                                    <option value="{{ m }}" {% if (charge.charge_end_min or 0) == m %}selected{% endif %}>{{ "%02d"|format(m) }}</option>
+                                    {% endfor %}
+                                </select>
+                            </div>
                         </div>
                     </div>
 

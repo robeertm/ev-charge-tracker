@@ -67,7 +67,9 @@ COLUMNS = (
     ('vehicle',          'text', 'info'),
     ('date',             'date', 'input'),
     ('charge_hour',      'int',  'input'),
+    ('charge_start_min', 'int',  'input'),
     ('charge_end_hour',  'int',  'input'),
+    ('charge_end_min',   'int',  'input'),
     ('odometer_km',      'int',  'input'),
     ('charge_type',      'type', 'input'),
     ('kwh_loaded',       3,      'input'),
@@ -108,6 +110,7 @@ _MAX_LEN = {'operator': 64, 'location_name': 200, 'notes': 5000}
 #: Inclusive value ranges checked on new and changed rows.
 _RANGES = {
     'charge_hour': (0, 23), 'charge_end_hour': (0, 23),
+    'charge_start_min': (0, 59), 'charge_end_min': (0, 59),
     'soc_from': (0, 100), 'soc_to': (0, 100),
     'location_lat': (-90, 90), 'location_lon': (-180, 180),
 }

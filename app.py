@@ -181,6 +181,11 @@ def create_app(config_class=Config):
         if 'charge_end_hour' not in columns:
             db.session.execute(text('ALTER TABLE charges ADD COLUMN charge_end_hour INTEGER'))
             db.session.commit()
+        # v3.0.200: minutes inside the charge start/end hour (NULL = :00).
+        for _col in ('charge_start_min', 'charge_end_min'):
+            if _col not in columns:
+                db.session.execute(text(f'ALTER TABLE charges ADD COLUMN {_col} INTEGER'))
+                db.session.commit()
         # v3.0.92: co2_attempts — bounds ENTSO-E backfill retries per
         # charge. Prior versions poisoned a row to co2_g_per_kwh=0 after
         # a single failed lookup ("mark as attempted"), which (a) froze a
@@ -497,6 +502,18 @@ def create_app(config_class=Config):
         #       limits (2 s per request) so a few-hundred-charge
         #       history will take several minutes; that's fine — it
         #       runs as a daemon and only blocks itself.
+        # v3.0.200: charges filed from Leapmotor Mate / a data export carry
+        # their exact window in the note — read the minutes out of it once.
+        if AppConfig.get('charge_min_backfill_v3_0_200', '') != 'done':
+            try:
+                from services.charge_time import backfill_from_markers
+                _n_min = backfill_from_markers(db)
+                db.session.commit()
+                AppConfig.set('charge_min_backfill_v3_0_200', 'done')
+                logger.info(f"v3.0.200: minutes read from the note of {_n_min} charges")
+            except Exception as _e:
+                db.session.rollback()
+                logger.warning(f"v3.0.200 minute backfill failed (will retry): {_e}")
         if AppConfig.get('co2_v3_0_65_cleanup', '') != 'done':
             grid = (Charge.query
                 .filter(Charge.charge_type != 'PV',
@@ -2240,6 +2257,7 @@ def _detect_auto_charge(end_sync):
         # shard may have ended hours later, so re-query ENTSO-E over the
         # widened start..end window for a true time-weighted average.
         merge_target.charge_end_hour = end_sync.timestamp.hour
+        merge_target.charge_end_min = end_sync.timestamp.minute
         if loc_name and not merge_target.location_name:
             merge_target.location_name = loc_name
             merge_target.operator = merge_target.operator or op
@@ -2258,7 +2276,9 @@ def _detect_auto_charge(end_sync):
     gross = _gross_for(soc_from, soc_to, charge_type)
     c = Charge(
         vehicle_id=vid, date=charge_date, charge_hour=start_ts.hour,
+        charge_start_min=start_ts.minute,
         charge_end_hour=end_sync.timestamp.hour,
+        charge_end_min=end_sync.timestamp.minute,
         charge_type=charge_type, soc_from=soc_from, soc_to=soc_to,
         kwh_loaded=gross, eur_per_kwh=eur, operator=op,
         odometer=end_sync.odometer_km,
@@ -2485,6 +2505,7 @@ def _detect_auto_charge_from_soc_rise(end_sync):
         merge_target.odometer = end_sync.odometer_km
         merge_target.created_at = end_sync.timestamp
         merge_target.charge_end_hour = end_sync.timestamp.hour  # v3.0.64
+        merge_target.charge_end_min = end_sync.timestamp.minute
         if loc_name and not merge_target.location_name:
             merge_target.location_name = loc_name
         if op and not merge_target.operator:
@@ -2507,7 +2528,9 @@ def _detect_auto_charge_from_soc_rise(end_sync):
 
     c = Charge(
         vehicle_id=vid, date=charge_date, charge_hour=valley.timestamp.hour,
+        charge_start_min=valley.timestamp.minute,
         charge_end_hour=end_sync.timestamp.hour,
+        charge_end_min=end_sync.timestamp.minute,
         charge_type=charge_type, soc_from=soc_from, soc_to=soc_to,
         kwh_loaded=gross, eur_per_kwh=eur, operator=op,
         odometer=end_sync.odometer_km,
@@ -4436,6 +4459,8 @@ def register_routes(app):
                 charge.date = datetime.strptime(request.form['date'], '%Y-%m-%d').date()
                 charge.charge_hour = _int(request.form.get('charge_hour'))
                 charge.charge_end_hour = _int(request.form.get('charge_end_hour'))
+                from services.charge_time import apply_form as _apply_min
+                _apply_min(charge, request.form)
                 charge.odometer = _units.km_input(request.form.get('odometer'),
                                                   request.form.get('odometer__km'))
                 charge.eur_per_kwh = _float(request.form.get('eur_per_kwh'))
@@ -4773,6 +4798,8 @@ def register_routes(app):
                 charge.date = datetime.strptime(request.form['date'], '%Y-%m-%d').date()
                 charge.charge_hour = _int(request.form.get('charge_hour'))
                 charge.charge_end_hour = _int(request.form.get('charge_end_hour'))
+                from services.charge_time import apply_form as _apply_min
+                _apply_min(charge, request.form)
                 charge.odometer = _units.km_input(request.form.get('odometer'),
                                                   request.form.get('odometer__km'))
                 charge.eur_per_kwh = _float(request.form.get('eur_per_kwh'))
@@ -5766,6 +5793,8 @@ def register_routes(app):
              'vehicle': namen.get(c.vehicle_id, ''),
              'date': c.date.isoformat() if c.date else None,
              'hour': c.charge_hour, 'end_hour': c.charge_end_hour,
+             'start_clock': c.to_dict()['start_clock'],
+             'end_clock': c.to_dict()['end_clock'],
              'kwh_loaded': c.kwh_loaded, 'delta_s': int(delta)}
             for delta, _de, c in cands]})
 

@@ -429,6 +429,7 @@
   "input.start_fee": "Frais de démarrage",
   "input.start_time": "Heure de début",
   "input.end_time": "Heure de fin",
+  "input.minute": "Minute",
   "input.started": "Démarrée",
   "input.started_retroactively": "Communication rétablie — charge lancée rétroactivement à {time}.",
   "input.stop": "Arrêter la charge",

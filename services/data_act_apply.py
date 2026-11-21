@@ -155,6 +155,7 @@ def apply_plan(plan, vehicle_id, data_dir, job_id, battery_kwh=None,
         s, e = _local(c['start']), _local(c['end'])
         values = {
             'date': s.date(), 'charge_hour': s.hour, 'charge_end_hour': e.hour,
+            'charge_start_min': s.minute, 'charge_end_min': e.minute,
             'odometer': c.get('odometer'), 'kwh_loaded': c.get('kwh'),
             'charge_type': c.get('type') or 'AC',
             'soc_from': c.get('soc_from'), 'soc_to': c.get('soc_to'),
@@ -183,6 +184,12 @@ def apply_plan(plan, vehicle_id, data_dir, job_id, battery_kwh=None,
                       'charge_end_hour'):
                 if getattr(row, k) is None and values.get(k) is not None:
                     setattr(row, k, values[k])
+                    if k == 'charge_end_hour':
+                        row.charge_end_min = values['charge_end_min']
+            # The minute of an hour the entry already had is only added
+            # where the hour is the same one (never moves an entered time).
+            if row.charge_hour == values['charge_hour'] and row.charge_start_min is None:
+                row.charge_start_min = values['charge_start_min']
             if not row.charge_type:
                 row.charge_type = values['charge_type']
             row.notes = ((row.notes + '\n') if row.notes else '') + note

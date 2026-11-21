@@ -429,6 +429,7 @@
   "input.start_fee": "Tarifa de inicio",
   "input.start_time": "Hora de inicio",
   "input.end_time": "Hora de fin",
+  "input.minute": "Minuto",
   "input.started": "Iniciada",
   "input.started_retroactively": "Comunicación restaurada — carga iniciada retroactivamente a las {time}.",
   "input.stop": "Detener carga",

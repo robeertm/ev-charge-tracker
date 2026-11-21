@@ -429,6 +429,7 @@
   "input.start_fee": "Tariffa iniziale",
   "input.start_time": "Ora di inizio",
   "input.end_time": "Ora di fine",
+  "input.minute": "Minuto",
   "input.started": "Avviata",
   "input.started_retroactively": "Comunicazione ripristinata — ricarica avviata retroattivamente alle {time}.",
   "input.stop": "Ferma ricarica",

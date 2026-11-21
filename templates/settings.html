@@ -2434,7 +2434,7 @@
                                 <td class="text-muted">${s.row_num}</td>
                                 <td>${actionBadge(s.action, preview.action_labels[s.action] || s.action)}</td>
                                 <td>${escapeHtml(p.date || '')}</td>
-                                <td>${p.charge_hour != null ? String(p.charge_hour).padStart(2, '0') + ':00' : ''}</td>
+                                <td>${p.charge_hour != null ? String(p.charge_hour).padStart(2, '0') + ':' + String(p.charge_start_min || 0).padStart(2, '0') : ''}</td>
                                 <td class="text-end">${p.kwh_loaded != null ? p.kwh_loaded : ''}</td>
                                 <td>${escapeHtml(p.charge_type || '')}</td>
                                 <td>${escapeHtml(p.operator || '')}</td>
@@ -5025,7 +5025,7 @@
                 return '<button type="button" class="btn btn-sm btn-outline-primary mb-1 wbPick" ' +
                     'data-reading="' + esc(id) + '" data-charge="' + esc(c.charge_id) + '">' +
                     esc(c.vehicle || ('#' + c.vehicle_id)) + ' · ' + esc(c.date) + ' ' +
-                    esc(String(c.hour).padStart(2, '0')) + ':00 · ' +
+                    esc(c.start_clock || (String(c.hour).padStart(2, '0') + ':00')) + ' · ' +
                     esc(Number(c.kwh_loaded || 0).toFixed(1)) + ' kWh</button>';
             }).join('') +
             autos.map(function (a) {

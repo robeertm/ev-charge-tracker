@@ -489,7 +489,9 @@ out['no_header'] = up('/api/charges/import/preview', csv_raw, headers={})[0]
 code, p = up('/api/charges/import/preview', csv_raw)
 out['roundtrip'] = (code, p.get('summary'))
 edited = csv_raw.decode('utf-8-sig').replace(';20;', ';25;')
-edited = edited.replace('\\r\\n', '\\r\\n', 1) + ';;;2026-10-02;;;;AC;5;;;;;;;;;;;;;;;;;\\r\\n'
+from services import charge_sheet as _S
+_new = {'date': '2026-10-02', 'charge_type': 'AC', 'kwh_loaded': '5'}
+edited = edited + ';'.join(_new.get(c, '') for c in _S.COLUMN_NAMES) + '\\r\\n'
 code, p = up('/api/charges/import/preview', edited.encode('utf-8'))
 out['preview'] = (code, p.get('summary'))
 out['stale'] = up('/api/charges/import/apply', edited.encode('utf-8'), fingerprint='nope')[0]

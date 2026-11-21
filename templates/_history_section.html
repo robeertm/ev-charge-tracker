@@ -264,20 +264,32 @@
             </div>
             <div class="col-6 col-sm-3">
               <label class="form-label small mb-0 fw-semibold">{{ t('input.start_time') }}</label>
-              <select class="form-select form-select-sm" name="charge_hour" id="chgEditHour">
-                <option value="">–</option>
-                {% for h in range(24) %}<option value="{{ h }}">{{ "%02d"|format(h) }}:00</option>{% endfor %}
-              </select>
+              <div class="input-group input-group-sm">
+                <select class="form-select form-select-sm" name="charge_hour" id="chgEditHour">
+                  <option value="">–</option>
+                  {% for h in range(24) %}<option value="{{ h }}">{{ "%02d"|format(h) }}</option>{% endfor %}
+                </select>
+                <span class="input-group-text px-1">:</span>
+                <select class="form-select form-select-sm" name="charge_start_min" id="chgEditStartMin" aria-label="{{ t('input.minute') }}" title="{{ t('input.minute') }}">
+                  {% for m in range(60) %}<option value="{{ m }}">{{ "%02d"|format(m) }}</option>{% endfor %}
+                </select>
+              </div>
             </div>
             {# v3.0.64: optional end hour. When set with start hour, the
                server averages CO2 across the full window via ENTSO-E
                (time-weighted across bucket-fractions). #}
             <div class="col-6 col-sm-3">
               <label class="form-label small mb-0 fw-semibold">{{ t('input.end_time') }}</label>
-              <select class="form-select form-select-sm" name="charge_end_hour" id="chgEditEndHour">
-                <option value="">–</option>
-                {% for h in range(24) %}<option value="{{ h }}">{{ "%02d"|format(h) }}:00</option>{% endfor %}
-              </select>
+              <div class="input-group input-group-sm">
+                <select class="form-select form-select-sm" name="charge_end_hour" id="chgEditEndHour">
+                  <option value="">–</option>
+                  {% for h in range(24) %}<option value="{{ h }}">{{ "%02d"|format(h) }}</option>{% endfor %}
+                </select>
+                <span class="input-group-text px-1">:</span>
+                <select class="form-select form-select-sm" name="charge_end_min" id="chgEditEndMin" aria-label="{{ t('input.minute') }}" title="{{ t('input.minute') }}">
+                  {% for m in range(60) %}<option value="{{ m }}">{{ "%02d"|format(m) }}</option>{% endfor %}
+                </select>
+              </div>
             </div>
           </div>
 
@@ -532,6 +544,8 @@
             date:    document.getElementById('chgEditDate'),
             hour:    document.getElementById('chgEditHour'),
             endHour: document.getElementById('chgEditEndHour'),
+            startMin: document.getElementById('chgEditStartMin'),
+            endMin:  document.getElementById('chgEditEndMin'),
             type:    document.getElementById('chgEditType'),
             socFrom: document.getElementById('chgEditSocFrom'),
             socTo:   document.getElementById('chgEditSocTo'),
@@ -628,6 +642,8 @@
                 F.date.value    = d.date || '';
                 F.hour.value    = d.charge_hour != null ? d.charge_hour : '';
                 if (F.endHour) F.endHour.value = d.charge_end_hour != null ? d.charge_end_hour : '';
+                if (F.startMin) F.startMin.value = d.charge_start_min != null ? d.charge_start_min : 0;
+                if (F.endMin) F.endMin.value = d.charge_end_min != null ? d.charge_end_min : 0;
                 F.type.value    = d.charge_type || 'AC';
                 F.socFrom.value = d.soc_from != null ? d.soc_from : '';
                 F.socTo.value   = d.soc_to   != null ? d.soc_to   : '';

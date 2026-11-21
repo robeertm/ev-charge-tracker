@@ -429,6 +429,7 @@
   "input.start_fee": "Startkosten",
   "input.start_time": "Starttijd",
   "input.end_time": "Eindtijd",
+  "input.minute": "Minuut",
   "input.started": "Gestart",
   "input.started_retroactively": "Communicatie hersteld — laadbeurt met terugwerkende kracht gestart om {time}.",
   "input.stop": "Laden stoppen",

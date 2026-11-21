@@ -76,6 +76,12 @@ def init_sqlite_pragmas(app, busy_timeout_ms: int = 30000) -> str:
     return mode
 
 
+def _clock(hour, minute):
+    """``HH:MM`` for a stored hour and (possibly empty) minute, else None."""
+    from services.charge_time import clock
+    return clock(hour, minute)
+
+
 class Vehicle(db.Model):
     """Fleet vehicle. Multi-vehicle support landed in v2.29.0 — every
     Charge / VehicleSync / ParkingEvent / VehicleTrip / MaintenanceEntry
@@ -245,6 +251,12 @@ class Charge(db.Model):
     # just the start-hour snapshot. NULL = legacy / single-hour entry
     # (callers must fall back to ``get_co2_intensity`` for those).
     charge_end_hour = db.Column(db.Integer)  # 0-23, hour of charging end
+    # v3.0.200: the minute inside those hours (0-59). NULL = "not known",
+    # read as :00 — every row written before this version, and every source
+    # that only knows the hour. The hours stay the unit the CO2 figure is
+    # calculated in; the minutes only make the clock time exact.
+    charge_start_min = db.Column(db.Integer)
+    charge_end_min = db.Column(db.Integer)
     odometer = db.Column(db.Integer)  # km-Stand bei Ladung
     eur_per_kwh = db.Column(db.Float)
     kwh_loaded = db.Column(db.Float)
@@ -345,6 +357,10 @@ class Charge(db.Model):
             'date': self.date.isoformat() if self.date else None,
             'charge_hour': self.charge_hour,
             'charge_end_hour': self.charge_end_hour,
+            'charge_start_min': self.charge_start_min,
+            'charge_end_min': self.charge_end_min,
+            'start_clock': _clock(self.charge_hour, self.charge_start_min),
+            'end_clock': _clock(self.charge_end_hour, self.charge_end_min),
             'odometer': self.odometer,
             'eur_per_kwh': self.eur_per_kwh,
             'kwh_loaded': self.kwh_loaded,

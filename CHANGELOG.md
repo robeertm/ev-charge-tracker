@@ -1,5 +1,19 @@
 # Changelog
 
+## v3.0.200 (2026-11-21)
+
+### A charge keeps the minute of its start and end
+
+A charge that ran 13:05–13:52 was shown, and stored, as 13:00 to 13:00. It was reported on the Leapmotor (Mate) integration, but it was never specific to it: the charge entry only had whole hours (the CO₂ figure is worked out per grid hour), so every source — Mate, the automatic detection, the home-meter import, a data export, a spreadsheet, and the form you type into — lost the minutes. v3.0.197 only copied the real times into the note.
+
+- **Two new, optional fields on a charge: the minute of the start and of the end.** The hours stay exactly as they were, so the CO₂ calculation, the matching of charges and every statistic work on the same numbers as before. A charge with no minute reads as `:00`, which is what it always was.
+- **Filled by every source that knows the time:** Leapmotor (Mate), the automatic charge detection (from the sync times; a merged charge takes the end of the later part), the home-meter import, the data-export import and the Google-sheet / CSV import (`14:30` in the time column).
+- **Charges already in the database:** the ones filed from Leapmotor (Mate) or from a data export carry their exact window in the note; their minutes are read from it once, on the first start of this version. Nothing else is touched, and a charge you typed by hand stays at `:00` until you set a minute.
+- **Forms:** the new-charge dialog, the edit page and the history edit dialog have a minute field next to every hour (`13 : 05`) instead of an hour list that claimed `13:00`. The new label is translated in all six languages. Clearing an hour clears its minute, and a value outside 0–59 is dropped.
+- **Where the time shows:** the charge API (`start_clock` / `end_clock`), the read-only API (start and end now carry the minutes), the spreadsheet export and import (two new columns; an older file without them leaves the minutes alone, and the range 0–59 is checked), the import preview and the pick list for a home-meter reading.
+
+17 new tests (real app, temporary database): every source above, a charge over midnight, an install from before the columns, the forms, the APIs, the spreadsheet round trip; without the change all 17 are red. The spreadsheet route test builds its new row from the column list instead of counting semicolons.
+
 ## v3.0.199 (2026-11-19)
 
 ### Leapmotor (Mate): trips show their end, their SoC and their places

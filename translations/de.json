@@ -429,6 +429,7 @@
   "input.start_fee": "Startgebühr",
   "input.start_time": "Startzeit",
   "input.end_time": "Endzeit",
+  "input.minute": "Minute",
   "input.started": "Gestartet",
   "input.started_retroactively": "Kommunikation wiederhergestellt — Ladung rückwirkend ab {time} gestartet.",
   "input.stop": "Ladung stoppen",

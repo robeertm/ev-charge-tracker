@@ -146,6 +146,21 @@ def _parse_hour(s):
     return v
 
 
+def _parse_minute(s):
+    """Parse '14:30' → 30 ('14' or '14:00' → 0 is not claimed: only a real
+    minute part counts, otherwise None = "not known")."""
+    if s is None:
+        return None
+    s = str(s).strip()
+    if ':' not in s:
+        return None
+    mm = s.split(':', 2)[1].strip()
+    v = parse_int_safe(mm)
+    if v is None or v < 0 or v > 59:
+        return None
+    return v
+
+
 # ── Header-based column mapping ───────────────────────────
 # Each logical field maps to an ordered tuple of accepted header aliases.
 # Matching is case- and whitespace-insensitive, with a fuzzy fallback for
@@ -380,6 +395,8 @@ def _parse_one_row(row, col_map):
         fields = {
             'date':          charge_date,
             'charge_hour':   _parse_hour(_get('charge_hour')),
+            'charge_start_min': (_parse_minute(_get('charge_hour'))
+                                 if _parse_hour(_get('charge_hour')) is not None else None),
             'odometer':      parse_int_safe(_get('odometer')),
             'eur_per_kwh':   parse_german_float(_get('eur_per_kwh')),
             'kwh_loaded':    parse_german_float(_get('kwh_loaded')),
@@ -488,7 +505,7 @@ def _classify_row(fields, mode, existing_keys_map, seen_in_file):
 
 
 _CHARGE_COLS = {
-    'date', 'charge_hour', 'odometer', 'eur_per_kwh', 'kwh_loaded',
+    'date', 'charge_hour', 'charge_start_min', 'odometer', 'eur_per_kwh', 'kwh_loaded',
     'total_cost', 'charge_type', 'soc_from', 'soc_to', 'soc_charged',
     'loss_kwh', 'loss_pct', 'co2_g_per_kwh', 'co2_kg', 'notes',
     'operator', 'location_name', 'location_lat', 'location_lon',

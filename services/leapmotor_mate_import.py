@@ -37,8 +37,8 @@ def marker(s) -> str:
 def clock_text(s) -> str:
     """The real start and end as clock times, e.g. ``13:05–13:52``.
 
-    A charge row only has whole hours (the CO₂ figure is per grid hour); the
-    note carries the minutes so they can be read without decoding the marker."""
+    The charge row keeps the minutes too (since v3.0.200); the note repeats
+    them in readable form so they can be read without decoding the marker."""
     a, b = datetime.fromtimestamp(s['start']), datetime.fromtimestamp(s['end'])
     text = '%s–%s' % (a.strftime('%H:%M'), b.strftime('%H:%M'))
     days = (b.date() - a.date()).days
@@ -82,6 +82,7 @@ def _values(s):
     soc_to = int(round(s['soc_to'])) if s.get('soc_to') is not None else None
     return {
         'date': start.date(), 'charge_hour': start.hour, 'charge_end_hour': end.hour,
+        'charge_start_min': start.minute, 'charge_end_min': end.minute,
         'odometer': s.get('odometer'), 'kwh_loaded': s.get('kwh'),
         'charge_type': s.get('type') or 'AC', 'soc_from': soc_from, 'soc_to': soc_to,
         'location_lat': s.get('lat'), 'location_lon': s.get('lon'),

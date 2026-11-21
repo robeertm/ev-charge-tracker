@@ -299,11 +299,12 @@ def _charge_times(c):
     if c.charge_hour is None:
         return c.date.isoformat(), None
     base = datetime(c.date.year, c.date.month, c.date.day)
-    start = base.replace(hour=int(c.charge_hour))
+    start = base.replace(hour=int(c.charge_hour), minute=int(c.charge_start_min or 0))
     end = None
     if c.charge_end_hour is not None:
         off = 1 if c.charge_end_hour < c.charge_hour else 0
-        end = base.replace(hour=int(c.charge_end_hour)) + timedelta(days=off)
+        end = (base.replace(hour=int(c.charge_end_hour), minute=int(c.charge_end_min or 0))
+               + timedelta(days=off))
     return _local_iso(start), _local_iso(end)
 
 
