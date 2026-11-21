@@ -1,1 +1,106 @@
-{"exceptions": []}
+{
+ "exceptions": [
+  {
+   "id": "PYSEC-2026-4140",
+   "package": "pyjwt",
+   "reason": "PyJWT is only pulled in by the VAG connectors, which pin pyjwt~=2.13.0 (fixes need 2.14+); the app never uses PyJWKClient, JWK sets or HMAC key loading itself and only decodes tokens issued by the vendor's own servers. Re-check when the connectors lift the pin.",
+   "until": "2027-02-21"
+  },
+  {
+   "id": "PYSEC-2026-4141",
+   "package": "pyjwt",
+   "reason": "PyJWT is only pulled in by the VAG connectors, which pin pyjwt~=2.13.0 (fixes need 2.14+); the app never uses PyJWKClient, JWK sets or HMAC key loading itself and only decodes tokens issued by the vendor's own servers. Re-check when the connectors lift the pin.",
+   "until": "2027-02-21"
+  },
+  {
+   "id": "PYSEC-2026-4142",
+   "package": "pyjwt",
+   "reason": "PyJWT is only pulled in by the VAG connectors, which pin pyjwt~=2.13.0 (fixes need 2.14+); the app never uses PyJWKClient, JWK sets or HMAC key loading itself and only decodes tokens issued by the vendor's own servers. Re-check when the connectors lift the pin.",
+   "until": "2027-02-21"
+  },
+  {
+   "id": "PYSEC-2026-4143",
+   "package": "pyjwt",
+   "reason": "PyJWT is only pulled in by the VAG connectors, which pin pyjwt~=2.13.0 (fixes need 2.14+); the app never uses PyJWKClient, JWK sets or HMAC key loading itself and only decodes tokens issued by the vendor's own servers. Re-check when the connectors lift the pin.",
+   "until": "2027-02-21"
+  },
+  {
+   "id": "PYSEC-2026-4144",
+   "package": "pyjwt",
+   "reason": "PyJWT is only pulled in by the VAG connectors, which pin pyjwt~=2.13.0 (fixes need 2.14+); the app never uses PyJWKClient, JWK sets or HMAC key loading itself and only decodes tokens issued by the vendor's own servers. Re-check when the connectors lift the pin.",
+   "until": "2027-02-21"
+  },
+  {
+   "id": "PYSEC-2026-4145",
+   "package": "pyjwt",
+   "reason": "PyJWT is only pulled in by the VAG connectors, which pin pyjwt~=2.13.0 (fixes need 2.14+); the app never uses PyJWKClient, JWK sets or HMAC key loading itself and only decodes tokens issued by the vendor's own servers. Re-check when the connectors lift the pin.",
+   "until": "2027-02-21"
+  },
+  {
+   "id": "PYSEC-2026-4146",
+   "package": "pyjwt",
+   "reason": "PyJWT is only pulled in by the VAG connectors, which pin pyjwt~=2.13.0 (fixes need 2.14+); the app never uses PyJWKClient, JWK sets or HMAC key loading itself and only decodes tokens issued by the vendor's own servers. Re-check when the connectors lift the pin.",
+   "until": "2027-02-21"
+  },
+  {
+   "id": "PYSEC-2026-4147",
+   "package": "pyjwt",
+   "reason": "PyJWT is only pulled in by the VAG connectors, which pin pyjwt~=2.13.0 (fixes need 2.14+); the app never uses PyJWKClient, JWK sets or HMAC key loading itself and only decodes tokens issued by the vendor's own servers. Re-check when the connectors lift the pin.",
+   "until": "2027-02-21"
+  },
+  {
+   "id": "PYSEC-2026-4148",
+   "package": "pyjwt",
+   "reason": "PyJWT is only pulled in by the VAG connectors, which pin pyjwt~=2.13.0 (fixes need 2.14+); the app never uses PyJWKClient, JWK sets or HMAC key loading itself and only decodes tokens issued by the vendor's own servers. Re-check when the connectors lift the pin.",
+   "until": "2027-02-21"
+  },
+  {
+   "id": "PYSEC-2026-4149",
+   "package": "pyjwt",
+   "reason": "PyJWT is only pulled in by the VAG connectors, which pin pyjwt~=2.13.0 (fixes need 2.14+); the app never uses PyJWKClient, JWK sets or HMAC key loading itself and only decodes tokens issued by the vendor's own servers. Re-check when the connectors lift the pin.",
+   "until": "2027-02-21"
+  },
+  {
+   "id": "PYSEC-2026-4150",
+   "package": "pyjwt",
+   "reason": "PyJWT is only pulled in by the VAG connectors, which pin pyjwt~=2.13.0 (fixes need 2.14+); the app never uses PyJWKClient, JWK sets or HMAC key loading itself and only decodes tokens issued by the vendor's own servers. Re-check when the connectors lift the pin.",
+   "until": "2027-02-21"
+  },
+  {
+   "id": "PYSEC-2026-4151",
+   "package": "pyjwt",
+   "reason": "PyJWT is only pulled in by the VAG connectors, which pin pyjwt~=2.13.0 (fixes need 2.14+); the app never uses PyJWKClient, JWK sets or HMAC key loading itself and only decodes tokens issued by the vendor's own servers. Re-check when the connectors lift the pin.",
+   "until": "2027-02-21"
+  },
+  {
+   "id": "PYSEC-2026-4152",
+   "package": "pyjwt",
+   "reason": "PyJWT is only pulled in by the VAG connectors, which pin pyjwt~=2.13.0 (fixes need 2.14+); the app never uses PyJWKClient, JWK sets or HMAC key loading itself and only decodes tokens issued by the vendor's own servers. Re-check when the connectors lift the pin.",
+   "until": "2027-02-21"
+  },
+  {
+   "id": "PYSEC-2026-4183",
+   "package": "pyjwt",
+   "reason": "PyJWT is only pulled in by the VAG connectors, which pin pyjwt~=2.13.0 (fixes need 2.14+); the app never uses PyJWKClient, JWK sets or HMAC key loading itself and only decodes tokens issued by the vendor's own servers. Re-check when the connectors lift the pin.",
+   "until": "2027-02-21"
+  },
+  {
+   "id": "GHSA-pxh4-856f-4h89",
+   "package": "pyjwt",
+   "reason": "PyJWT is only pulled in by the VAG connectors, which pin pyjwt~=2.13.0 (fixes need 2.14+); the app never uses PyJWKClient, JWK sets or HMAC key loading itself and only decodes tokens issued by the vendor's own servers. Re-check when the connectors lift the pin.",
+   "until": "2027-02-21"
+  },
+  {
+   "id": "PYSEC-2026-4114",
+   "package": "oauthlib",
+   "reason": "oauthlib is only pulled in by the VAG connectors (pin ~=3.3.1; fix is 4.x). The findings concern oauthlib's server-side PKCE and token-endpoint code, which this client-only app never runs. Re-check when the connectors lift the pin.",
+   "until": "2027-02-21"
+  },
+  {
+   "id": "CVE-2026-49272",
+   "package": "oauthlib",
+   "reason": "oauthlib is only pulled in by the VAG connectors (pin ~=3.3.1; fix is 4.x). The findings concern oauthlib's server-side PKCE and token-endpoint code, which this client-only app never runs. Re-check when the connectors lift the pin.",
+   "until": "2027-02-21"
+  }
+ ]
+}

@@ -1,5 +1,14 @@
 # Changelog
 
+## v3.0.203 (2026-11-21)
+
+### Security gate: first findings handled
+
+The new image audit (v3.0.202) found known vulnerabilities and correctly held `:latest` back.
+
+- **Fixed:** Flask 3.1.0 -> 3.1.3 (session cookie / `Vary` header advisories) and the image now upgrades `pip` itself during the build.
+- **Accepted with an expiry (2027-02-21), listed in `security-exceptions.json`:** PyJWT 2.13.0 and oauthlib 3.3.1. Both come in only through the VAG connectors, which pin them (`pyjwt~=2.13.0`, `oauthlib~=3.3.1`) below the fixed releases; the findings concern JWK-set, HMAC-key-loading and server-side OAuth code paths the app does not use. They are re-checked when the connectors lift their pins.
+
 ## v3.0.202 (2026-11-21)
 
 ### Security gate before `:latest`

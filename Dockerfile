@@ -52,6 +52,7 @@ COPY requirements.txt requirements-vehicles.txt ./
 # Every name below carries an upper bound, like both requirement files —
 # scripts/check_dependency_bounds.py fails the tests when one does not.
 RUN grep -v '^saic-ismart-client-ng' requirements-vehicles.txt > /tmp/rv.txt \
+ && pip install --no-cache-dir --upgrade "pip>=25.3,<27" \
  && pip install --no-cache-dir -r requirements.txt -r /tmp/rv.txt \
         "dacite>=1.8,<2" "httpx>=0.27,<0.29" "tenacity>=8,<10" \
  && grep '^saic-ismart-client-ng' requirements-vehicles.txt | sed 's/#.*//' > /tmp/mg.txt \
