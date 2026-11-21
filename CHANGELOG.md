@@ -1,5 +1,11 @@
 # Changelog
 
+## v3.0.204 (2026-11-21)
+
+### README screenshots renewed
+
+The screenshots still showed the interface of v3.0.141 (version badge in the header, older settings, dashboard and charge form). All desktop (1920x1080) and phone (390x844 @2x) images except the driving log, the export/import page, the XPENG import and the Leapmotor (Mate) wizard were re-taken from a freshly seeded demo installation (`tools/seed_demo.py`, English). Only invented demo data is visible.
+
 ## v3.0.203 (2026-11-21)
 
 ### Security gate: first findings handled
