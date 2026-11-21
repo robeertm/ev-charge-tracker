@@ -207,3 +207,37 @@ footer {
 .wb-mix > span {
     height: 100%;
 }
+
+/* ── Phone ergonomics (v3.0.205) ────────────────────────────────────────
+   Every tappable thing is at least 44 px high (Apple/WCAG touch target),
+   and every text input is 16 px so iOS never zooms in on focus. Bootstrap's
+   *-sm sizes and `.input-group-sm > .form-control` are more specific than
+   the rules above, so they are named here explicitly. Checkboxes and
+   switches get 24 px (WCAG 2.2 minimum for in-row controls). Locked by
+   tests/test_mobile_390.py. */
+@media (max-width: 767.98px) {
+    .navbar-brand { display: inline-flex; align-items: center; gap: .4rem; min-height: 44px; }
+    .navbar .nav-link, .settings-sidebar .nav-link { gap: .4rem; }
+    .navbar-toggler { min-height: 44px; min-width: 44px; }
+    .navbar .nav-link,
+    .settings-sidebar .nav-link { display: flex; align-items: center; min-height: 44px; }
+    .btn, .btn-sm,
+    .form-control, .form-control-sm,
+    .form-select, .form-select-sm,
+    .input-group-sm > .form-control,
+    .input-group-sm > .form-select,
+    .input-group-sm > .input-group-text,
+    .input-group-sm > .btn { min-height: 44px; }
+    .btn, .btn-sm { display: inline-flex; align-items: center; justify-content: center; gap: .4rem; }
+    .input-group-sm > .form-control,
+    .input-group-sm > .form-select { font-size: 16px; }
+    .form-check-input { width: 1.5rem; height: 1.5rem; margin-top: 0; }
+    .form-switch .form-check-input { width: 2.75rem; }
+    .page-link { display: flex; align-items: center; justify-content: center; min-height: 44px; min-width: 44px; }
+    summary { display: flex; align-items: center; min-height: 44px; }
+    tr.maintRow td { padding-top: .85rem; padding-bottom: .85rem; }
+    .btn-sm { min-width: 44px; }
+    .leaflet-touch .leaflet-bar a.leaflet-control-zoom-in,
+    .leaflet-touch .leaflet-bar a.leaflet-control-zoom-out { width: 44px !important; height: 44px !important; line-height: 44px !important; }
+    .cert-pdf-link { display: inline-flex; align-items: center; min-height: 44px; }
+}

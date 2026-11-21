@@ -1,5 +1,13 @@
 # Changelog
 
+## v3.0.205 (2026-11-21)
+
+### Phone layout: touch targets and input size
+
+A walk through every main page at 390 px and 1512 px (demo data, all six languages) found no sideways scrolling, but many controls below the 44 px touch size and a few inputs below 16 px (iOS zooms in on those). On phones everything tappable is now at least 44 px high: navbar brand, menu button, buttons (also icon-only ones), selects, text fields, settings tabs, page numbers, map zoom buttons, collapsible headings and the maintenance rows. Checkboxes and switches are 24 px. Coordinate fields inside small input groups (settings) and the log filters are now 16 px. Desktop is unchanged.
+
+New test `tests/test_mobile_390.py` opens the demo installation at 390 px in all six languages and fails on page-wide sideways scrolling, targets below 44 px (checkboxes 24 px) or inputs below 16 px.
+
 ## v3.0.204 (2026-11-21)
 
 ### README screenshots renewed

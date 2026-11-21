@@ -262,7 +262,7 @@
                   title="{{ t('obd.cert_title', default='Batteriezertifikat') }}"></iframe>
           <div class="alert alert-info small mb-0 mt-2">
             {{ t('obd.cert_pdf_fallback', default='Die Vorschau kann in diesem Browser nicht angezeigt werden.') }}
-            <a href="/vehicles/{{ active.id }}/certificate.pdf">{{ t('obd.cert_export', default='Als PDF exportieren') }}</a>
+            <a class="cert-pdf-link" href="/vehicles/{{ active.id }}/certificate.pdf">{{ t('obd.cert_export', default='Als PDF exportieren') }}</a>
           </div>
         </object>
       </div>
