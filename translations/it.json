@@ -923,7 +923,7 @@
   "set.fleet_field_first_registered": "Prima immatricolazione",
   "set.fleet_field_first_registered_hint": "Età della batteria (orologio di calendario per il certificato).",
   "set.fleet_field_fossil_co2": "CO₂ termico g{u_per}",
-  "set.fleet_field_fossil_co2_hint": "Confronto con un veicolo termico equivalente",
+  "set.fleet_field_fossil_co2_hint": "Veicolo termico di riferimento per il risparmio di CO₂ (predefinito: {u_co2_ref}, media UE)",
   "set.fleet_field_max_ac": "AC max kW",
   "set.fleet_field_model": "Modello",
   "set.fleet_field_spec_lookup": "Cerca specifiche (open-ev-data)",

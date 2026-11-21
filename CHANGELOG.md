@@ -1,5 +1,13 @@
 # Changelog
 
+## v3.0.201 (2026-11-21)
+
+### The six language files are checked for parity
+
+A new test (`tests/test_translations_parity.py`, also run against the published image before `:latest` moves) requires that `translations/*.json` have exactly the same keys in all six languages, no empty values, and the same `{placeholders}` in every language.
+
+- **One gap closed:** the hint under the reference-vehicle CO₂ field in the fleet settings lacked its `{u_co2_ref}` default value in French, Spanish, Dutch and Italian; all four now carry it like English and German.
+
 ## v3.0.200 (2026-11-21)
 
 ### A charge keeps the minute of its start and end

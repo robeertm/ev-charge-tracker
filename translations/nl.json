@@ -923,7 +923,7 @@
   "set.fleet_field_first_registered": "Eerste registratie",
   "set.fleet_field_first_registered_hint": "Leeftijd van de accu (kalenderklok voor het certificaat).",
   "set.fleet_field_fossil_co2": "Brandstof-CO₂ g{u_per}",
-  "set.fleet_field_fossil_co2_hint": "Vergelijking met gelijkwaardige brandstofauto",
+  "set.fleet_field_fossil_co2_hint": "Referentie-verbrandingsauto voor CO₂-besparing (standaard: {u_co2_ref}, EU-gemiddelde)",
   "set.fleet_field_max_ac": "AC max kW",
   "set.fleet_field_model": "Model",
   "set.fleet_field_spec_lookup": "Specificaties opzoeken (open-ev-data)",

@@ -207,7 +207,8 @@ jobs:
               tests/test_login_state.py \
               tests/test_vehicle_catalog.py \
               tests/test_ladewaechter_plausibel.py \
-              tests/test_update_kommt_von_allein.py
+              tests/test_update_kommt_von_allein.py \
+              tests/test_translations_parity.py
           '
 
       - name: :latest auf diese Fassung setzen
