@@ -208,7 +208,22 @@ jobs:
               tests/test_vehicle_catalog.py \
               tests/test_ladewaechter_plausibel.py \
               tests/test_update_kommt_von_allein.py \
-              tests/test_translations_parity.py
+              tests/test_translations_parity.py \
+              tests/test_audit_installed.py
+          '
+
+      # 🛡 Sicherheits-Tor (Plan ev-charge-tracker/S2): bekannte Schwachstellen in
+      # genau den Paketen des veroeffentlichten Abbilds, vor :latest. Ausnahmen
+      # nur mit Grund und Ablaufdatum in security-exceptions.json.
+      - name: Schwachstellen-Pruefung der Abbild-Pakete
+        run: |
+          set -euo pipefail
+          SLUG="${{ env.REGISTRY }}/${{ steps.repo.outputs.slug }}"
+          docker run --rm --entrypoint sh "$SLUG:${{ steps.fassung.outputs.version }}" -c '
+            set -e
+            cp -r /app /tmp/w && cd /tmp/w
+            pip install -q --no-cache-dir pip-audit
+            python scripts/audit_installed.py
           '
 
       - name: :latest auf diese Fassung setzen

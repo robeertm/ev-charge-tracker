@@ -1,5 +1,13 @@
 # Changelog
 
+## v3.0.202 (2026-11-21)
+
+### Security gate before `:latest`
+
+- The promote workflow now audits the packages of the published image for known vulnerabilities (`pip-audit`, via `scripts/audit_installed.py`) before `:latest` moves. Accepted findings go into `security-exceptions.json`, each with a reason and an expiry date (at most one year); expired or malformed entries do not count.
+- Release gate: the maintainers' dependency and secret-history scan ran clean on the full history (no findings; unpinned requirement lines are only reported as hints).
+- New test `tests/test_audit_installed.py`.
+
 ## v3.0.201 (2026-11-21)
 
 ### The six language files are checked for parity
