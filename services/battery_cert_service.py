@@ -1203,14 +1203,21 @@ try:
     from fpdf import FPDF
 
     class _CertPDF(FPDF):
-        def __init__(self, head_left='', head_right='', ref=''):
+        def __init__(self, head_left='', head_right='', ref='', _fonts_of=None):
             super().__init__(format='A4')
             self.set_margins(18, 16, 18)
             self.head_left, self.head_right, self.ref = head_left, head_right, ref
             self.total = None       # page count, known on the second pass
             d = _font_dir()
             self.uni = False
-            if d:
+            if _fonts_of is not None and _fonts_of.uni:
+                # Throw-away measuring page: share the already parsed fonts
+                # of an earlier one (parsing six TTFs took ~1.4 s a page and
+                # a report builds dozens of probes). Never used for output —
+                # saving a PDF subsets the font file in place.
+                self.fonts.update(_fonts_of.fonts)
+                self.uni = True
+            elif d:
                 try:
                     self.add_font('Sans', '', os.path.join(d, 'DejaVuSans.ttf'))
                     self.add_font('Sans', 'B', os.path.join(d, 'DejaVuSans-Bold.ttf'))
@@ -1529,7 +1536,7 @@ try:
             first — the box never cuts its own text."""
             x0, w = self.l_margin, self.cw
             inner = w - 2 * pad - (2 if bar else 0)
-            probe = _CertPDF()
+            probe = _CertPDF(_fonts_of=_probe_fonts())
             probe.add_page()
             probe.set_xy(probe.l_margin, 20)
             draw(probe, probe.l_margin, inner)
@@ -1600,8 +1607,18 @@ def _profile_resolution_mv(profile):
     return None
 
 
+_PROBE_FONTS = []
+
+
+def _probe_fonts():
+    """One measuring page whose parsed fonts all probes share."""
+    if not _PROBE_FONTS:
+        _PROBE_FONTS.append(_CertPDF())
+    return _PROBE_FONTS[0]
+
+
 def _probe_pdf():
-    probe = _CertPDF()
+    probe = _CertPDF(_fonts_of=_probe_fonts())
     probe.set_auto_page_break(auto=True, margin=18)
     probe.add_page()
     return probe

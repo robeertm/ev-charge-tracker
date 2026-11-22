@@ -77,3 +77,15 @@ def fresh_app_modules():
             os.environ.pop(key, None)
         else:
             os.environ[key] = value
+
+
+def pytest_configure(config):
+    """Under ``pytest -n N`` keep every test file on one worker.
+
+    Several files are written as a story (a later test reads what an earlier
+    one created, e.g. ``test_wallbox_link_live.py``); the default ``load``
+    distribution split them between workers and made the full run flaky.
+    Without xdist this does nothing."""
+    opt = config.option
+    if getattr(opt, 'dist', None) == 'load' and getattr(opt, 'numprocesses', None):
+        opt.dist = 'loadfile'

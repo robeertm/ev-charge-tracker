@@ -1,5 +1,13 @@
 # Changelog
 
+## v3.0.206 (2026-11-22)
+
+### Faster test run, faster certificate
+
+Measured on a busy machine (`pytest -n 2`, lowest priority): the full run took 31 min before and 8.8 min after. The cause was the certificate PDF: every throw-away measuring page re-read six DejaVu font files (about 1.4 s each, 16 pages per report). Measuring pages now share the fonts of one earlier page; the page that is actually saved still loads its own, because saving subsets the font in place. A single certificate renders in a few seconds instead of minutes under load, and the certificate tests dropped from 386/258/242 s to about 10 s each. Output is unchanged.
+
+Test setup: `tests/conftest.py` keeps every test file on one worker under `pytest -n N`. Some files are a story (a later test reads what an earlier one created), and the default distribution split them, which made the full run fail now and then.
+
 ## v3.0.205 (2026-11-21)
 
 ### Phone layout: touch targets and input size
