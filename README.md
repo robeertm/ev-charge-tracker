@@ -134,21 +134,29 @@ config file to edit.*
 The layout is not a shrunken desktop: cards stack, the table becomes a list,
 and the charts keep their labels.
 
-| Dashboard | Dark mode | New charge |
-| --- | --- | --- |
-| ![Dashboard on a phone](docs/screenshots/mobile/dashboard.png) | ![Dark mode on a phone](docs/screenshots/mobile/dashboard-dark.png) | ![New charge on a phone](docs/screenshots/mobile/input.png) |
+<table>
+<tr><td width="50%" align="center" valign="top"><img src="docs/screenshots/mobile/dashboard.png" width="150" alt="Dashboard on a phone"><br><sub><b>Dashboard</b></sub></td><td width="50%" align="center" valign="top"><img src="docs/screenshots/mobile/dashboard-dark.png" width="150" alt="Dark mode on a phone"><br><sub><b>Dark mode</b></sub></td></tr>
+<tr><td width="50%" align="center" valign="top"><img src="docs/screenshots/mobile/input.png" width="150" alt="New charge on a phone"><br><sub><b>New charge</b></sub></td><td width="50%"></td></tr>
+</table>
 
-| History | Driving log | Vehicle |
-| --- | --- | --- |
-| ![History on a phone](docs/screenshots/mobile/history.png) | ![Driving log on a phone](docs/screenshots/mobile/trips.png) | ![Vehicle on a phone](docs/screenshots/mobile/vehicle.png) |
 
-| Report | Maintenance | Settings |
-| --- | --- | --- |
-| ![Report on a phone](docs/screenshots/mobile/report.png) | ![Maintenance on a phone](docs/screenshots/mobile/maintenance.png) | ![Settings on a phone](docs/screenshots/mobile/settings.png) |
+<table>
+<tr><td width="50%" align="center" valign="top"><img src="docs/screenshots/mobile/history.png" width="150" alt="History on a phone"><br><sub><b>History</b></sub></td><td width="50%" align="center" valign="top"><img src="docs/screenshots/mobile/trips.png" width="150" alt="Driving log on a phone"><br><sub><b>Driving log</b></sub></td></tr>
+<tr><td width="50%" align="center" valign="top"><img src="docs/screenshots/mobile/vehicle.png" width="150" alt="Vehicle on a phone"><br><sub><b>Vehicle</b></sub></td><td width="50%"></td></tr>
+</table>
 
-| Vehicle, dark | OBD | Logs |
-| --- | --- | --- |
-| ![Vehicle dark on a phone](docs/screenshots/mobile/vehicle-dark.png) | ![OBD on a phone](docs/screenshots/mobile/obd.png) | ![Logs on a phone](docs/screenshots/mobile/logs.png) |
+
+<table>
+<tr><td width="50%" align="center" valign="top"><img src="docs/screenshots/mobile/report.png" width="150" alt="Report on a phone"><br><sub><b>Report</b></sub></td><td width="50%" align="center" valign="top"><img src="docs/screenshots/mobile/maintenance.png" width="150" alt="Maintenance on a phone"><br><sub><b>Maintenance</b></sub></td></tr>
+<tr><td width="50%" align="center" valign="top"><img src="docs/screenshots/mobile/settings.png" width="150" alt="Settings on a phone"><br><sub><b>Settings</b></sub></td><td width="50%"></td></tr>
+</table>
+
+
+<table>
+<tr><td width="50%" align="center" valign="top"><img src="docs/screenshots/mobile/vehicle-dark.png" width="150" alt="Vehicle dark on a phone"><br><sub><b>Vehicle, dark</b></sub></td><td width="50%" align="center" valign="top"><img src="docs/screenshots/mobile/obd.png" width="150" alt="OBD on a phone"><br><sub><b>OBD</b></sub></td></tr>
+<tr><td width="50%" align="center" valign="top"><img src="docs/screenshots/mobile/logs.png" width="150" alt="Logs on a phone"><br><sub><b>Logs</b></sub></td><td width="50%"></td></tr>
+</table>
+
 
 <details>
 <summary>Try it with the same data</summary>
