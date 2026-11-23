@@ -103,7 +103,8 @@ def _set_language(data_dir, lang):
 
 def _audit(page, base, path):
     page.goto(base + path, wait_until='load', timeout=60000)
-    page.wait_for_timeout(1000)
+    # settle: web fonts loaded and one frame laid out (instead of a fixed 1 s)
+    page.evaluate("document.fonts.ready.then(() => new Promise(r => requestAnimationFrame(() => requestAnimationFrame(r))))")
     return page.evaluate(AUDIT_JS)
 
 
@@ -116,6 +117,9 @@ def test_phone_layout_in_every_language(phone_app):
         except Exception:
             pytest.skip('no Chromium available')
         ctx = browser.new_context(viewport={'width': 390, 'height': 844}, has_touch=True)
+        # Map tiles are exempt from the audit; not fetching them from the CDN
+        # takes the slowest part out of every /trips load.
+        ctx.route('**://*.tile.openstreetmap.org/**', lambda route: route.abort())
         page = ctx.new_page()
         page.goto(base + '/', wait_until='load')      # first visit redirects to the wizard once
         for lang in LANGS:

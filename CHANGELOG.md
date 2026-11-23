@@ -1,5 +1,15 @@
 # Changelog
 
+## v3.0.208 (2026-11-23)
+
+### Test suite: the night-maintenance test no longer depends on machine load, slow setups shortened
+
+Tests only, the app is unchanged.
+
+- `test_06_nachtwartung_feuert_einmal` patched the global `time.sleep`, so any other thread sleeping during the test advanced its fake clock, and it joined a thread with a 20 s wall-clock limit. It now fakes the clock only for its own thread (stand-in for the module's `time`) and runs the loop inline, bounded by the fake clock itself.
+- `test_units_miles`: the 12 report PDFs are rendered by two interpreters side by side (km / mi) instead of one after the other.
+- `test_mobile_390`: waits for web fonts and a laid-out frame instead of a fixed second per page, and does not fetch map tiles (exempt from the audit anyway). All assertions unchanged.
+
 ## v3.0.207 (2026-11-23)
 
 ### Driving log: stays that were left as "Unknown location" although the syncs held a place

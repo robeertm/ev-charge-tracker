@@ -567,7 +567,8 @@ def test_the_api_stays_in_km_whatever_the_page_shows(server):
 _PDF_RUN = r"""
 import json, os, sys, tempfile
 from datetime import date
-sys.path.insert(0, %(root)r)
+_ARG = json.loads(sys.argv[1])
+sys.path.insert(0, _ARG["root"])
 try:
     import fpdf, matplotlib  # noqa: F401
 except ImportError:
@@ -595,8 +596,8 @@ with app.app_context():
         import pymupdf
     except ImportError:
         pymupdf = None
-    for lang in %(langs)r:
-        for unit in ('km', 'mi'):
+    for lang in _ARG['langs']:
+        for unit in _ARG['units']:
             set_language(lang); units.set_unit(unit)
             units.set_currency({'en': 'USD', 'nl': 'PLN'}.get(lang, 'EUR'))
             try:
@@ -604,7 +605,7 @@ with app.app_context():
                 text = '\n'.join(p.get_text() for p in pymupdf.open(stream=pdf, filetype='pdf')) if pymupdf else None
                 out[lang + '-' + unit] = {'size': len(pdf), 'text': text}
             except Exception as e:
-                out[lang + '-' + unit] = {'error': '%%s: %%s' %% (type(e).__name__, e)}
+                out[lang + '-' + unit] = {'error': '%s: %s' % (type(e).__name__, e)}
 print(json.dumps(out))
 """
 
@@ -617,11 +618,19 @@ def pdf_reports():
     with tempfile.TemporaryDirectory() as d:
         script = os.path.join(d, 'pdf_run.py')
         with open(script, 'w') as fh:
-            fh.write(_PDF_RUN % {'root': ROOT, 'langs': LANGS})
-        r = subprocess.run([sys.executable, script], cwd=ROOT, capture_output=True,
-                           text=True, timeout=300)
-    assert r.returncode == 0, r.stderr[-2000:]
-    return json.loads(r.stdout.strip().splitlines()[-1])
+            fh.write(_PDF_RUN)
+        # One interpreter per unit, side by side: the 12 renders are plain
+        # CPU work (~5 s each) and the two halves share nothing.
+        procs = [subprocess.Popen(
+            [sys.executable, script, json.dumps(dict(root=ROOT, langs=LANGS, units=[u]))],
+            cwd=ROOT, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+            for u in ('km', 'mi')]
+        outs = [p.communicate(timeout=600) + (p.returncode,) for p in procs]
+    merged = {}
+    for stdout, stderr, rc in outs:
+        assert rc == 0, stderr[-2000:]
+        merged.update(json.loads(stdout.strip().splitlines()[-1]))
+    return merged
 
 
 @pytest.mark.parametrize('lang', LANGS)

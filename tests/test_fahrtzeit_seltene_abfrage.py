@@ -280,46 +280,56 @@ def test_06_nachtwartung_feuert_einmal():
         def now(cls, tz=None):
             return uhr['t']
 
+    import threading
+    import types
+    from datetime import timedelta
     aufrufe = []
     schlaf = []
-    orig = (S.datetime, S.time.sleep, S._maybe_daily_trip_reconcile, S._sync_running)
+    eigener = threading.get_ident()
+    orig = (S.datetime, S.time, S._maybe_daily_trip_reconcile, S._sync_running)
+    real_time = S.time
 
-    def _sleep(sek):
-        from datetime import timedelta
-        schlaf.append(sek)
-        uhr['t'] += timedelta(seconds=sek)
-        # genug Zeit nach dem Feuern: 10 Minuten spaeter beenden
-        if uhr['t'] > start.replace(hour=3, minute=10, second=0, microsecond=0) or len(schlaf) > 50:
-            S._sync_running = False
+    class _Zeit:
+        """Stand-in for ``S.time``: only THIS thread gets the fake clock
+        (a patched global ``time.sleep`` was also hit by foreign threads under
+        load); everything else is forwarded."""
+        def __getattr__(self, name):
+            return getattr(real_time, name)
+
+        @staticmethod
+        def sleep(sek):
+            if threading.get_ident() != eigener:
+                return real_time.sleep(sek)
+            schlaf.append(sek)
+            uhr['t'] += timedelta(seconds=sek)
+            # enough time after firing: stop 10 minutes later
+            if uhr['t'] > start.replace(hour=3, minute=10, second=0, microsecond=0) or len(schlaf) > 50:
+                S._sync_running = False
 
     def _rec(app):
         aufrufe.append(uhr['t'])
         if len(aufrufe) >= 5:      # the old loop would go on for hundreds
             S._sync_running = False
 
+    import services.trip_reconcile as TR
+    orig_run = TR.should_run_daily
     try:
         S.datetime = _Dt
-        S.time.sleep = _sleep
+        S.time = _Zeit()
         S._maybe_daily_trip_reconcile = _rec
         S._sync_running = True
         # Startup catch-up must not count: make it a no-op.
-        import services.trip_reconcile as TR
-        orig_run = TR.should_run_daily
         TR.should_run_daily = lambda: False
 
         class _App:
             def app_context(self):
                 import contextlib
                 return contextlib.nullcontext()
-        # Stop after the first night: end the loop once the call happened and
-        # the clock has passed 03:00:01.
-        import threading
-        t = threading.Thread(target=S._nightly_maintenance_loop, args=(_App(),), daemon=True)
-        t.start()
-        t.join(20)
-        assert not t.is_alive(), 'the loop did not end'
+        # Run inline, no thread, no wall-clock join: the fake clock bounds the
+        # loop (>50 sleeps or past 03:10 ends it), so it cannot hang.
+        S._nightly_maintenance_loop(_App())
     finally:
-        S.datetime, S.time.sleep, S._maybe_daily_trip_reconcile, S._sync_running = orig
+        S.datetime, S.time, S._maybe_daily_trip_reconcile, S._sync_running = orig
         TR.should_run_daily = orig_run
     pruefe('genau ein Aufruf', len(aufrufe), 1)
     assert min(schlaf) >= 1, schlaf
