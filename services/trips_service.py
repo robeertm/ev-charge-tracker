@@ -1876,6 +1876,10 @@ def replay_gap_for_every_vehicle(max_days=30) -> dict:
 # alone so a boot never walks the whole history.
 HEAL_UNKNOWN_DAYS = 45
 
+# v3.0.207: how far past a stay's recorded departure a sync at the same
+# odometer reading may still count as evidence for it (see heal_unknown_stops).
+HEAL_WINDOW_GRACE = timedelta(hours=2)
+
 
 # How much of its own history the newer cached feed must have matched before
 # a stay may take its position without other proof (see heal_unknown_stops).
@@ -1998,7 +2002,8 @@ def heal_unknown_stops(vehicle_id=None, days: float = HEAL_UNKNOWN_DAYS,
 
     now = now or datetime.now()
     out = {'checked': 0, 'healed': 0, 'healed_fix': 0, 'healed_update': 0,
-           'healed_trusted_feed': 0, 'no_proof': 0, 'disagree': 0, 'echo': 0, 'open': []}
+           'healed_trusted_feed': 0, 'healed_positioned': 0,
+           'no_proof': 0, 'disagree': 0, 'echo': 0, 'open': []}
     q = (ParkingEvent.query
          .filter(ParkingEvent.label == 'unknown',
                  ParkingEvent.lat == 0.0, ParkingEvent.lon == 0.0,
@@ -2007,7 +2012,31 @@ def heal_unknown_stops(vehicle_id=None, days: float = HEAL_UNKNOWN_DAYS,
     if vehicle_id is not None:
         q = q.filter(ParkingEvent.vehicle_id == vehicle_id)
     pending = [pe.id for pe in q.all()]
-    locations = _load_locations() if pending else None
+
+    # v3.0.207: a stay can be labelled ``unknown`` while it already holds a
+    # real position (any path that wrote the coordinates but not the label).
+    # Such a row needs no proof — the place is known — only its label and
+    # address, which the regular geocoder then fills. The sentinel-only pass
+    # above never looked at it, so it stayed "Unknown location" for good.
+    q2 = (ParkingEvent.query
+          .filter(ParkingEvent.label == 'unknown',
+                  ParkingEvent.lat.isnot(None), ParkingEvent.lon.isnot(None),
+                  db.or_(ParkingEvent.lat != 0.0, ParkingEvent.lon != 0.0),
+                  ParkingEvent.arrived_at >= now - timedelta(days=days)))
+    if vehicle_id is not None:
+        q2 = q2.filter(ParkingEvent.vehicle_id == vehicle_id)
+    positioned = [pe.id for pe in q2.all()]
+    locations = _load_locations() if (pending or positioned) else None
+    for pe_id in positioned:
+        pe = db.session.get(ParkingEvent, pe_id)
+        if pe is None or pe.label != 'unknown':
+            continue
+        pe.label, pe.favorite_name = _classify_location(pe.lat, pe.lon, locations)
+        pe.address = None          # filled by the geocoder
+        db.session.commit()
+        out['checked'] += 1
+        out['healed'] += 1
+        out['healed_positioned'] += 1
 
     def _echo(pe, lat, lon) -> bool:
         prev = _previous_labelled_pe(pe)
@@ -2023,9 +2052,17 @@ def heal_unknown_stops(vehicle_id=None, days: float = HEAL_UNKNOWN_DAYS,
             continue
         out['checked'] += 1
         end = pe.departed_at or now
+        # v3.0.207: the stay's own time window is only an estimate — arrival
+        # and departure are often the vendor's trip times, which can sit
+        # minutes before the first sync that shows the car at the stay's
+        # odometer reading (2026-11: a stay of 16 min whose only fresh fix
+        # came 3 min after its "departure"). The odometer is the real
+        # boundary: a sync at the arrival reading belongs to the stay until
+        # the first one that shows the car moved on. Bounded by
+        # ``HEAL_WINDOW_GRACE`` so a stuck odometer never reaches far.
         sq = (VehicleSync.query
               .filter(VehicleSync.timestamp >= pe.arrived_at,
-                      VehicleSync.timestamp <= end,
+                      VehicleSync.timestamp <= end + HEAL_WINDOW_GRACE,
                       VehicleSync.location_lat.isnot(None),
                       VehicleSync.location_lon.isnot(None))
               .order_by(VehicleSync.timestamp.asc()))
@@ -2033,6 +2070,13 @@ def heal_unknown_stops(vehicle_id=None, days: float = HEAL_UNKNOWN_DAYS,
             sq = sq.filter(VehicleSync.vehicle_id == pe.vehicle_id)
         fresh, feed = [], []
         for s in sq.all():
+            if s.timestamp > end:
+                # Past the recorded departure only the odometer ties a sync
+                # to this stay: same reading, and no sync before it showed
+                # the car gone.
+                if (s.odometer_km is None or pe.odometer_arrived is None
+                        or abs(s.odometer_km - pe.odometer_arrived) >= 1):
+                    break
             if (s.odometer_km is not None and pe.odometer_arrived is not None
                     and abs(s.odometer_km - pe.odometer_arrived) >= 1):
                 continue
@@ -2108,7 +2152,15 @@ def heal_unknown_stops(vehicle_id=None, days: float = HEAL_UNKNOWN_DAYS,
     return out
 
 
-def geocode_missing_events(limit: int = 50) -> int:
+def count_missing_addresses() -> int:
+    """Stops that have a real place but no address yet (retry candidates)."""
+    return (ParkingEvent.query
+            .filter(ParkingEvent.address.is_(None))
+            .filter(ParkingEvent.label != 'unknown')
+            .count())
+
+
+def geocode_missing_events(limit: int = 50, offset: int = 0) -> int:
     """Resolve addresses for parking events that don't yet have one.
 
     Called on /trips page load (background thread) and from /api/trips/geocode_missing.
@@ -2122,6 +2174,7 @@ def geocode_missing_events(limit: int = 50) -> int:
             .filter(ParkingEvent.address.is_(None))
             .filter(ParkingEvent.label != 'unknown')
             .order_by(ParkingEvent.arrived_at.desc())
+            .offset(offset)
             .limit(limit)
             .all())
     if not rows:

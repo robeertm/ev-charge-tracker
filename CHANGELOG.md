@@ -1,5 +1,18 @@
 # Changelog
 
+## v3.0.207 (2026-11-23)
+
+### Driving log: stays that were left as "Unknown location" although the syncs held a place
+
+On one instance a few stays since the vendor library switched to its newer feed (v3.0.196) were still "Unknown location" after the self-heal. The coordinates were in the raw syncs, the address lookup was not at fault (every stay with a position had its address). The self-heal only looked at syncs inside the stay's recorded arrival-to-departure window. Those times are often the vendor's trip times, and the first sync that shows the car at the stay's odometer reading, together with the forced refresh holding the real GPS fix, can arrive a few minutes after the recorded departure. The self-heal saw nothing and left the placeholder.
+
+- The odometer is now the boundary of a stay: syncs at the stay's reading count as evidence until the first sync that shows the car gone (at most 2 h past the recorded departure; without an odometer reading nothing past the departure counts). The proof rules themselves are unchanged (a fresh fix, an observed feed update, or a feed that proved itself for that car; echo and teleport guards stay).
+- A stay labelled "unknown" that already holds a real position gets its label and an empty address slot, so the geocoder fills it.
+- Missing stop addresses are now retried by the background maintenance loop (a few per pass, rate limited, back-off when the service fails) instead of only when the trips page is opened. A stop the geocoder cannot resolve no longer blocks the ones behind it.
+- Stays that cannot be proven stay "Unknown location" on purpose: a feed position that equals the stop before, or a single feed reading of a car whose feed has not proven itself, could be a lagging cloud value, and a wrong place is worse than an honest gap.
+
+No new texts, so nothing to translate. New tests: `tests/test_unknown_stop_window.py`.
+
 ## v3.0.206 (2026-11-22)
 
 ### Faster test run, faster certificate

@@ -193,6 +193,8 @@ _maintenance_running: bool = False
 
 _IDLE_SLEEP_S = 600       # 10 min when no legacy entries are pending
 _RATE_LIMIT_S = 2.0       # between successful rebuilds (2 s > Nominatim's 1 req/s policy)
+_addr_offset = [0]        # rotating window over unresolved stops
+_ADDR_BATCH = 5           # stop addresses retried per maintenance pass
 _BACKOFF_S = 60           # after Nominatim error (typically 429 — block usually clears in minutes)
 
 
@@ -278,6 +280,32 @@ def _maintenance_loop(app) -> None:
                        .first())
                 if row is None:
                     sleep_s = _IDLE_SLEEP_S
+                    # v3.0.207: stops that still lack an address — healed
+                    # placeholders, or a lookup that failed when the trips
+                    # page asked — are retried here, a few per pass, without
+                    # anyone opening the page. Throttled by the shared
+                    # 1.1 s limiter inside ``reverse``; a failing service
+                    # just leaves them for the next pass (back-off).
+                    try:
+                        from services.trips_service import (
+                            geocode_missing_events, count_missing_addresses)
+                        missing = count_missing_addresses()
+                        if missing:
+                            # A stop the geocoder cannot resolve must not
+                            # block the ones behind it: after a fruitless
+                            # pass the window moves on.
+                            n = geocode_missing_events(
+                                limit=_ADDR_BATCH, offset=_addr_offset[0])
+                            _addr_offset[0] = (0 if n or _addr_offset[0] + _ADDR_BATCH >= missing
+                                               else _addr_offset[0] + _ADDR_BATCH)
+                            if n:
+                                logger.info(
+                                    f'Geocode maintenance: filled {n} stop address(es)')
+                            sleep_s = _RATE_LIMIT_S if n else _BACKOFF_S * 5
+                    except Exception as e:
+                        db.session.rollback()
+                        logger.warning(f'Geocode maintenance (stops): {e}')
+                        sleep_s = _BACKOFF_S
                 else:
                     ok = _rebuild_one_legacy_row(row)
                     sleep_s = _RATE_LIMIT_S if ok else _BACKOFF_S
