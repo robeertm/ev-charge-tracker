@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## v3.0.209 (2026-11-26)
+
 ### Browser libraries are served by the app; third-party notices
 
 - **No page loads a script or stylesheet from a CDN any more.** Bootstrap 5.3.3, Bootstrap Icons 1.11.3 (with its font files), Leaflet 1.9.4 (with its marker images), Leaflet.markercluster 1.5.3, Chart.js 4.4.6 and the Chart.js date adapter 3.0.0 now live under `static/vendor/`, in exactly the versions the pages referenced before, each with its licence file. All templates point there. The pages work without a connection to a CDN and no third party learns who opens them. Map tiles are still fetched by the browser from the OpenStreetMap tile servers; the README now says so.
