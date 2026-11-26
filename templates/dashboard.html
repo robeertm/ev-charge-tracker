@@ -1,11 +1,11 @@
 {% extends "base.html" %}
 {% block title %}Dashboard — EV Charge Tracker{% endblock %}
 {% block head %}
-<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.6/dist/chart.umd.min.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/chartjs-adapter-date-fns@3.0.0/dist/chartjs-adapter-date-fns.bundle.min.js"></script>
+<script src="{{ url_for('static', filename='vendor/chartjs-4.4.6/chart.umd.js') }}"></script>
+<script src="{{ url_for('static', filename='vendor/chartjs-adapter-date-fns-3.0.0/chartjs-adapter-date-fns.bundle.min.js') }}"></script>
 {% if vehicle_history_last_gps %}
-<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
-<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<link rel="stylesheet" href="{{ url_for('static', filename='vendor/leaflet-1.9.4/leaflet.css') }}" />
+<script src="{{ url_for('static', filename='vendor/leaflet-1.9.4/leaflet.js') }}"></script>
 {% endif %}
 {% endblock %}
 

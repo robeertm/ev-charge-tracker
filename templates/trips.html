@@ -1,11 +1,11 @@
 {% extends "base.html" %}
 {% block title %}{{ t('trips.title') }} — EV Charge Tracker{% endblock %}
 {% block head %}
-<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
-<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
-<link rel="stylesheet" href="https://unpkg.com/leaflet.markercluster@1.5.3/dist/MarkerCluster.css" />
-<link rel="stylesheet" href="https://unpkg.com/leaflet.markercluster@1.5.3/dist/MarkerCluster.Default.css" />
-<script src="https://unpkg.com/leaflet.markercluster@1.5.3/dist/leaflet.markercluster.js"></script>
+<link rel="stylesheet" href="{{ url_for('static', filename='vendor/leaflet-1.9.4/leaflet.css') }}" />
+<script src="{{ url_for('static', filename='vendor/leaflet-1.9.4/leaflet.js') }}"></script>
+<link rel="stylesheet" href="{{ url_for('static', filename='vendor/leaflet.markercluster-1.5.3/MarkerCluster.css') }}" />
+<link rel="stylesheet" href="{{ url_for('static', filename='vendor/leaflet.markercluster-1.5.3/MarkerCluster.Default.css') }}" />
+<script src="{{ url_for('static', filename='vendor/leaflet.markercluster-1.5.3/leaflet.markercluster.js') }}"></script>
 <style>
 /* Mobile-friendly trip edit modal. v3.0.62: footer-reachability fix
    for iOS Safari portrait mode.

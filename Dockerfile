@@ -62,6 +62,11 @@ RUN grep -v '^saic-ismart-client-ng' requirements-vehicles.txt > /tmp/rv.txt \
 # App source.
 COPY . .
 
+# Licence and third-party notices travel with the image (see
+# scripts/drittlizenzen.py, which writes THIRD-PARTY-NOTICES.md).
+RUN mkdir -p /usr/share/doc/ev-charge-tracker \
+    && cp LICENSE THIRD-PARTY-NOTICES.md /usr/share/doc/ev-charge-tracker/
+
 # SQLite DB and caches live under data/ (see config.py). Declare it as a
 # volume so charge history survives container replacement.
 RUN mkdir -p data

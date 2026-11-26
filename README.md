@@ -17,7 +17,7 @@
 ![Python](https://img.shields.io/badge/python-3.10%2B-blue)
 ![Self-Hosted](https://img.shields.io/badge/self--hosted-yes-green)
 
-Built for EV owners who want **full control over their charging data** — runs locally on your laptop, NAS, or Raspberry Pi. No cloud, no tracking, no subscription. Your data stays on your machine.
+Built for EV owners who want **full control over their charging data** — runs locally on your laptop, NAS, or Raspberry Pi. No cloud account, no tracking, no subscription. Your charge data stays on your machine; the few optional outbound connections are listed under [Network connections](#network-connections).
 
 > ### ⚠️ Please read before installing
 >
@@ -170,7 +170,7 @@ never mix with a real history.
 | Problem | Solution |
 |---|---|
 | Apps from your carmaker only show last 30-90 days | **Lifetime tracking** in your own database |
-| No privacy / data sold to third parties | **100% local** — SQLite file on your machine |
+| No privacy / data sold to third parties | **Your data stays local** — SQLite file on your machine, no telemetry; optional [outbound connections](#network-connections) are listed |
 | Cant compare AC vs DC vs PV cost & CO2 | Built-in **AC/DC/PV split** with separate tariffs |
 | GHG quota payouts not tracked | **THG quota** card deducts payouts from total cost |
 | Manual logging is tedious | **Vehicle API** auto-fills SoC, odometer, charging status |
@@ -615,7 +615,7 @@ Languages:
 ## Tech Stack
 
 - **Backend:** Python 3.10+, Flask, SQLAlchemy, SQLite
-- **Frontend:** Bootstrap 5.3 (with dark mode), Chart.js
+- **Frontend:** Bootstrap 5.3 (with dark mode), Bootstrap Icons, Chart.js, Leaflet — all bundled under `static/vendor/`
 - **PDF:** matplotlib + fpdf2
 - **Data:** ENTSO-E Transparency Platform API
 - **Vehicle APIs:** hyundai-kia-connect-api, teslapy, renault-api, pypolestar, saic-ismart-client-ng, pySmartHashtag, pyporscheconnectapi, carconnectivity; XPENG via the Enode aggregator (REST over `requests`, no extra package); Leapmotor via a self-hosted Leapmotor Mate (plain HTTP, standard library)
@@ -631,6 +631,29 @@ Pull requests welcome! Areas where help is appreciated:
 - Mobile UX improvements
 
 Your commits show your name and e-mail to everyone. Use the address you want public (GitHub's no-reply address works). Pushes are checked by `scripts/check_commit_identity.py` (in CI, and locally after `git config core.hooksPath .githooks`); it only refuses the maintainer's own identities and machine placeholders such as `agent@host`.
+
+---
+
+## Network connections
+
+The pages, scripts, styles, fonts and icons of the web interface are served by the app itself (the browser libraries are bundled under `static/vendor/`); no page loads a script or stylesheet from a CDN. Your charge database, settings and credentials stay on your machine. There is no telemetry, no analytics and no crash reporting, and the app does not contact any server of the developer.
+
+**What does connect out** (verified in the code):
+
+| Connection | From | When | What is sent |
+|---|---|---|---|
+| Map tiles from the OpenStreetMap tile servers (`tile.openstreetmap.org`) | **your browser** | whenever a map is shown (trip map, charge location, dashboard location, home location in Settings) | the tile coordinates and the usual web request data of your browser (IP address, user agent); the tile provider can see which area you look at |
+| Reverse geocoding with Nominatim | the server | for the coordinates of charge and parking locations, to fill in street addresses (results cached permanently, at most one request per second) | the coordinates (5 decimals) and the interface language |
+| Weather history from Open-Meteo | the server | for the weather correlation and range calculator, when home coordinates are known (cached) | the home coordinates (4 decimals) and the date range |
+| Grid CO₂ from ENTSO-E | the server | only after you enter an API token | the token and the bidding zone |
+| Charging-station lookup from Open Charge Map | the server | only after you enter an API key | the location coordinates and your key |
+| Update check on GitHub (`api.github.com`) | the server | when the dashboard or the settings page is opened (the browser caches the answer for 30 minutes per tab); installing an update downloads the release from GitHub | an ordinary HTTPS request for the latest release of this project; your IP address is visible to GitHub |
+| Notifications through ntfy (default server `ntfy.sh`, changeable) or a Telegram bot | the server | only when you enable that channel | the notification text and your topic, or bot token and chat |
+| Vehicle connector | the server | only for the brand you configure | your login or token for that carmaker's cloud service (for XPENG, the Enode aggregator) and the vehicle queries |
+
+Connections to a Shelly Energy Analyzer, Home Assistant or Leapmotor Mate on your own network stay on that network.
+
+**The update check cannot be switched off in the settings.** To keep the app from contacting GitHub, block outbound access to `api.github.com` for it; the settings page then reports that the check could not be made. `EV_UPDATE_MODE=auto` only silences the "update available" notice, and `EV_UPDATE_HOLD` only stops installs; both still check.
 
 ---
 

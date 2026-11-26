@@ -1,5 +1,14 @@
 # Changelog
 
+## [Unreleased]
+
+### Browser libraries are served by the app; third-party notices
+
+- **No page loads a script or stylesheet from a CDN any more.** Bootstrap 5.3.3, Bootstrap Icons 1.11.3 (with its font files), Leaflet 1.9.4 (with its marker images), Leaflet.markercluster 1.5.3, Chart.js 4.4.6 and the Chart.js date adapter 3.0.0 now live under `static/vendor/`, in exactly the versions the pages referenced before, each with its licence file. All templates point there. The pages work without a connection to a CDN and no third party learns who opens them. Map tiles are still fetched by the browser from the OpenStreetMap tile servers; the README now says so.
+- **Guard.** `tests/test_no_external_assets.py` fails when a template or stylesheet references a script, stylesheet, font or image on another host, or a vendored file is missing.
+- **Third-party notices.** `THIRD-PARTY-NOTICES.md` lists every Python package (requirements, vehicle connectors and what pip installs for them), the bundled browser libraries and the container base, with licence texts. `scripts/drittlizenzen.py` generates it; `tests/test_third_party_notices.py` fails when a requirement or vendored library is missing from it. The container image carries the licence and the notices under `/usr/share/doc/ev-charge-tracker/`.
+- **README: "Network connections".** Replaces the claim of a purely local app with the list of connections that remain (map tiles in the browser, Nominatim, Open-Meteo, ENTSO-E, Open Charge Map, GitHub update check, notification channels, vehicle connectors), what is never sent, and the fact that the update check has no off switch in the settings.
+
 ## v3.0.208 (2026-11-23)
 
 ### Test suite: the night-maintenance test no longer depends on machine load, slow setups shortened
