@@ -2,6 +2,11 @@
 
 ## [Unreleased]
 
+### Tests
+
+- Full test run 11:45 -> 6:57 min (`-n 2`, loaded machine; CPU time 346 -> 240 s), same 1103 tests and assertions. The read-only API tests build the seeded data folder once and copy it per test instead of starting the app to seed it every time; the browser tests share one browser per file.
+- Browser tests no longer wait a fixed 1.5-2 s after a click or form submit; they wait for the response, the navigation or the page's own "done" state, so a loaded machine cannot make them fail.
+
 ### Fixed
 
 - Settings on iPhone (WebKit, 390 px): the page scrolled sideways by about 100 px because the "import mode" select in the database card sized itself to its longest option; it now clips inside its box.

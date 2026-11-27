@@ -20,6 +20,7 @@ time (same pattern as test_legacy_config_mirror.py).
 """
 import json
 import os
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -121,9 +122,22 @@ def _new_token(data_dir):
     return token
 
 
+_TEMPLATE = []          # the seeded data folder, built once per worker process
+
+
 def _fresh():
+    """A data folder holding the seeded fixture, private to one test.
+
+    Seeding needs a whole app start (migrations included, several seconds
+    on a loaded machine) and its result is the same for every test, so it
+    is done once and each test gets a byte-for-byte copy of the folder.
+    Nothing is shared: a test that changes its copy never reaches another."""
+    if not _TEMPLATE:
+        template = tempfile.mkdtemp(prefix='evct-ro-template-')
+        _run(template, _SEED + "print(json.dumps({'ok': True}))")
+        _TEMPLATE.append(template)
     d = tempfile.mkdtemp(prefix='evct-ro-')
-    _run(d, _SEED + "print(json.dumps({'ok': True}))")
+    shutil.copytree(_TEMPLATE[0], d, dirs_exist_ok=True)
     return d
 
 

@@ -81,6 +81,19 @@ def live_app():
             proc.kill()
 
 
+@pytest.fixture(scope='module')
+def chromium():
+    """One browser for the whole file. Every test opens its own page (its own
+    context: no cookies, storage or cache shared), so launching a browser
+    per test only cost start-up time."""
+    with playwright_api.sync_playwright() as pw:
+        browser = pw.chromium.launch()
+        try:
+            yield browser
+        finally:
+            browser.close()
+
+
 def _seed_vehicle(data_dir):
     """Write the fixture vehicle straight into the instance's database."""
     import sqlite3
@@ -109,7 +122,7 @@ def _open_settings(page, base):
     page.wait_for_timeout(300)
 
 
-def test_the_remote_optin_switch_actually_reaches_the_server(live_app):
+def test_the_remote_optin_switch_actually_reaches_the_server(live_app, chromium):
     """Click it, and: a request goes out, the switch STAYS on, the command
     buttons unlock, and the database says so. The bug this covers passed
     every one of those four on inspection and failed all four in a
@@ -117,28 +130,31 @@ def test_the_remote_optin_switch_actually_reaches_the_server(live_app):
     base, data_dir = live_app
     _seed_vehicle(data_dir)
     calls, errors = [], []
-    with playwright_api.sync_playwright() as pw:
-        browser = pw.chromium.launch()
-        page = browser.new_page()
-        page.on('pageerror', lambda e: errors.append(str(e)))
-        page.on('response',
-                lambda r: calls.append(r.status) if '/remote-optin' in r.url else None)
-        _open_settings(page, base)
+    page = chromium.new_page()
+    page.on('pageerror', lambda e: errors.append(str(e)))
+    page.on('response',
+            lambda r: calls.append(r.status) if '/remote-optin' in r.url else None)
+    _open_settings(page, base)
 
-        switch = page.query_selector('.rc-optin')
-        assert switch is not None, 'no remote-control switch rendered'
-        button = page.query_selector('.rc-cmd')
-        assert button.is_disabled(), 'commands must be locked while the opt-in is off'
+    switch = page.query_selector('.rc-optin')
+    assert switch is not None, 'no remote-control switch rendered'
+    button = page.query_selector('.rc-cmd')
+    assert button.is_disabled(), 'commands must be locked while the opt-in is off'
 
-        switch.scroll_into_view_if_needed()
+    switch.scroll_into_view_if_needed()
+    # Wait for the page's own signal instead of a fixed pause: the switch is
+    # locked while the request is out and unlocked once the answer has been
+    # applied (a loaded machine needs longer than any fixed pause).
+    with page.expect_response(lambda r: '/remote-optin' in r.url, timeout=60000):
         switch.click()
-        page.wait_for_timeout(1500)
+    page.wait_for_function("() => !document.querySelector('.rc-optin').disabled",
+                           timeout=60000)
 
-        assert calls == [200], f'no request reached the server (got {calls})'
-        assert switch.is_checked(), 'the switch fell back — the server never confirmed'
-        assert not button.is_disabled(), 'commands stayed locked after opting in'
-        assert not errors, errors
-        browser.close()
+    assert calls == [200], f'no request reached the server (got {calls})'
+    assert switch.is_checked(), 'the switch fell back — the server never confirmed'
+    assert not button.is_disabled(), 'commands stayed locked after opting in'
+    assert not errors, errors
+    page.close()
 
     import sqlite3
     con = sqlite3.connect(os.path.join(data_dir, 'ev_tracker.db'))
@@ -148,42 +164,40 @@ def test_the_remote_optin_switch_actually_reaches_the_server(live_app):
     assert stored == 1, 'the opt-in did not survive as data'
 
 
-def test_the_dashboard_only_offers_control_after_the_opt_in(live_app):
+def test_the_dashboard_only_offers_control_after_the_opt_in(live_app, chromium):
     """The dashboard card is prominent by design — so it must not become a
     back door around the decision. With the opt-in off it must not exist;
     with it on, the buttons must work from there too."""
     base, data_dir = live_app
     _seed_vehicle(data_dir)                      # resets the opt-in to 0
     import sqlite3
-    with playwright_api.sync_playwright() as pw:
-        browser = pw.chromium.launch()
-        page = browser.new_page()
-        page.goto(base + '/', wait_until='networkidle', timeout=60000)
-        page.wait_for_timeout(600)
-        assert page.query_selector('[data-remote-vehicle]') is None, \
-            'the dashboard showed controls for a vehicle that never opted in'
+    page = chromium.new_page()
+    page.goto(base + '/', wait_until='networkidle', timeout=60000)
+    page.wait_for_timeout(600)
+    assert page.query_selector('[data-remote-vehicle]') is None, \
+        'the dashboard showed controls for a vehicle that never opted in'
 
-        con = sqlite3.connect(os.path.join(data_dir, 'ev_tracker.db'))
-        con.execute('UPDATE vehicles SET remote_control_enabled=1')
-        con.commit()
-        con.close()
+    con = sqlite3.connect(os.path.join(data_dir, 'ev_tracker.db'))
+    con.execute('UPDATE vehicles SET remote_control_enabled=1')
+    con.commit()
+    con.close()
 
-        calls = []
-        page.on('response',
-                lambda r: calls.append(r.status) if '/remote/' in r.url else None)
-        page.goto(base + '/', wait_until='networkidle', timeout=60000)
-        page.wait_for_timeout(600)
-        card = page.query_selector('[data-remote-vehicle]')
-        assert card is not None, 'no controls on the dashboard after opting in'
+    calls = []
+    page.on('response',
+            lambda r: calls.append(r.status) if '/remote/' in r.url else None)
+    page.goto(base + '/', wait_until='networkidle', timeout=60000)
+    page.wait_for_timeout(600)
+    card = page.query_selector('[data-remote-vehicle]')
+    assert card is not None, 'no controls on the dashboard after opting in'
 
-        btn = page.query_selector('.rc-cmd[data-cmd="charging_start"]')
-        assert btn is not None and not btn.is_disabled()
+    btn = page.query_selector('.rc-cmd[data-cmd="charging_start"]')
+    assert btn is not None and not btn.is_disabled()
+    with page.expect_response(lambda r: '/remote/' in r.url, timeout=60000):
         btn.click()
-        page.wait_for_timeout(1500)
-        # The credentials are fake, so the car refuses — but the request
-        # must REACH the route. That is what this test is about.
-        assert calls, 'the dashboard button sent nothing'
-        browser.close()
+    # The credentials are fake, so the car refuses — but the request
+    # must REACH the route. That is what this test is about.
+    assert calls, 'the dashboard button sent nothing'
+    page.close()
 
 
 def _sichtbare_cred_labels(page):
@@ -193,7 +207,7 @@ def _sichtbare_cred_labels(page):
                     .map(e => e.querySelector('label').textContent.trim())""")
 
 
-def test_the_form_asks_only_for_what_the_chosen_brand_needs(live_app):
+def test_the_form_asks_only_for_what_the_chosen_brand_needs(live_app, chromium):
     """The customer's screen, driven in a browser.
 
     He set up an Enyaq on the official Škoda API — an API key and a VIN,
@@ -204,60 +218,56 @@ def test_the_form_asks_only_for_what_the_chosen_brand_needs(live_app):
     """
     base, data_dir = live_app
     _seed_vehicle(data_dir)
-    with playwright_api.sync_playwright() as pw:
-        browser = pw.chromium.launch()
-        page = browser.new_page()
-        errors = []
-        page.on('pageerror', lambda e: errors.append(str(e)))
-        _open_settings(page, base)
-        page.query_selector_all('[data-edit-vehicle]')[-1].click()
-        page.wait_for_timeout(500)
+    page = chromium.new_page()
+    errors = []
+    page.on('pageerror', lambda e: errors.append(str(e)))
+    _open_settings(page, base)
+    page.query_selector_all('[data-edit-vehicle]')[-1].click()
+    page.wait_for_timeout(500)
 
-        page.select_option('#vf_api_brand', 'skoda_api')
-        page.dispatch_event('#vf_api_brand', 'change')
-        page.wait_for_timeout(300)
-        skoda = _sichtbare_cred_labels(page)
-        assert len(skoda) == 2, f'expected two boxes, got {skoda}'
-        assert any('VIN' in l for l in skoda)
-        assert not any('PIN' in l for l in skoda), skoda
+    page.select_option('#vf_api_brand', 'skoda_api')
+    page.dispatch_event('#vf_api_brand', 'change')
+    page.wait_for_timeout(300)
+    skoda = _sichtbare_cred_labels(page)
+    assert len(skoda) == 2, f'expected two boxes, got {skoda}'
+    assert any('VIN' in l for l in skoda)
+    assert not any('PIN' in l for l in skoda), skoda
 
-        page.select_option('#vf_api_brand', 'kia')
-        page.dispatch_event('#vf_api_brand', 'change')
-        page.wait_for_timeout(300)
-        kia = _sichtbare_cred_labels(page)
-        assert len(kia) == 4, f'expected four boxes, got {kia}'
-        assert any('PIN' in l for l in kia), kia
-        # Kia names its regions, so the box is a list, not free text.
-        assert page.eval_on_selector('#vf_api_region', 'e => e.tagName') == 'SELECT'
+    page.select_option('#vf_api_brand', 'kia')
+    page.dispatch_event('#vf_api_brand', 'change')
+    page.wait_for_timeout(300)
+    kia = _sichtbare_cred_labels(page)
+    assert len(kia) == 4, f'expected four boxes, got {kia}'
+    assert any('PIN' in l for l in kia), kia
+    # Kia names its regions, so the box is a list, not free text.
+    assert page.eval_on_selector('#vf_api_region', 'e => e.tagName') == 'SELECT'
 
-        assert not errors, errors
-        browser.close()
+    assert not errors, errors
+    page.close()
 
 
-def test_switching_brands_in_the_form_does_not_wipe_a_stored_value(live_app):
+def test_switching_brands_in_the_form_does_not_wipe_a_stored_value(live_app, chromium):
     """A box the brand does not use is not sent, and what is not sent is
     not overwritten. Otherwise glancing at another brand would silently
     clear the VIN."""
     base, data_dir = live_app
     _seed_vehicle(data_dir)
     import sqlite3
-    with playwright_api.sync_playwright() as pw:
-        browser = pw.chromium.launch()
-        page = browser.new_page()
-        _open_settings(page, base)
-        page.query_selector_all('[data-edit-vehicle]')[-1].click()
-        page.wait_for_timeout(500)
-        # Tesla asks for an account and a token — no VIN box at all.
-        page.select_option('#vf_api_brand', 'tesla')
-        page.dispatch_event('#vf_api_brand', 'change')
-        page.wait_for_timeout(300)
-        assert page.eval_on_selector('#vf_api_vin', 'e => e.disabled') is True
-        # Rename at the same time: if the save did not happen at all the
-        # VIN would also survive, and the test would pass for no reason.
-        page.fill('#vf_name', 'Enyaq umbenannt')
+    page = chromium.new_page()
+    _open_settings(page, base)
+    page.query_selector_all('[data-edit-vehicle]')[-1].click()
+    page.wait_for_timeout(500)
+    # Tesla asks for an account and a token — no VIN box at all.
+    page.select_option('#vf_api_brand', 'tesla')
+    page.dispatch_event('#vf_api_brand', 'change')
+    page.wait_for_timeout(300)
+    assert page.eval_on_selector('#vf_api_vin', 'e => e.disabled') is True
+    # Rename at the same time: if the save did not happen at all the
+    # VIN would also survive, and the test would pass for no reason.
+    page.fill('#vf_name', 'Enyaq umbenannt')
+    with page.expect_navigation(timeout=60000):
         page.eval_on_selector("form[action='/vehicles/save']", 'f => f.submit()')
-        page.wait_for_timeout(2000)
-        browser.close()
+    page.close()
 
     con = sqlite3.connect(os.path.join(data_dir, 'ev_tracker.db'))
     name, vin = con.execute(
@@ -267,7 +277,7 @@ def test_switching_brands_in_the_form_does_not_wipe_a_stored_value(live_app):
     assert vin == 'TMBTESTVIN000001', f'the stored VIN was lost ({vin!r})'
 
 
-def test_the_data_check_finds_a_foreign_row_and_removes_only_that_one(live_app):
+def test_the_data_check_finds_a_foreign_row_and_removes_only_that_one(live_app, chromium):
     """Drive the clean-up the way its user will.
 
     A row carrying the other car's odometer is planted, then the card is
@@ -291,29 +301,31 @@ def test_the_data_check_finds_a_foreign_row_and_removes_only_that_one(live_app):
     vorher = con.execute('SELECT COUNT(*) FROM vehicle_syncs').fetchone()[0]
     con.close()
 
-    with playwright_api.sync_playwright() as pw:
-        browser = pw.chromium.launch()
-        page = browser.new_page()
-        errors = []
-        page.on('pageerror', lambda e: errors.append(str(e)))
-        page.on('dialog', lambda d: d.accept())
-        _open_settings(page, base)
-        page.eval_on_selector('#sec-syncaudit', 'e => e.scrollIntoView()')
-        page.click('#btnSyncAudit')
-        page.wait_for_timeout(1500)
+    page = chromium.new_page()
+    errors = []
+    page.on('pageerror', lambda e: errors.append(str(e)))
+    page.on('dialog', lambda d: d.accept())
+    _open_settings(page, base)
+    page.eval_on_selector('#sec-syncaudit', 'e => e.scrollIntoView()')
+    page.click('#btnSyncAudit')
+    page.wait_for_selector('.audit-row', timeout=60000)
 
-        kaesten = page.query_selector_all('.audit-row')
-        assert len(kaesten) == 1, f'expected exactly one finding, got {len(kaesten)}'
-        assert not kaesten[0].is_checked(), \
-            'a destructive action must not come pre-ticked'
-        text = page.inner_text('#syncAuditResult')
-        assert '37.750' in text or '37750' in text, text
+    kaesten = page.query_selector_all('.audit-row')
+    assert len(kaesten) == 1, f'expected exactly one finding, got {len(kaesten)}'
+    assert not kaesten[0].is_checked(), \
+        'a destructive action must not come pre-ticked'
+    text = page.inner_text('#syncAuditResult')
+    assert '37.750' in text or '37750' in text, text
 
-        kaesten[0].check()
-        page.click('.audit-del')
-        page.wait_for_timeout(2000)
-        assert not errors, errors
-        browser.close()
+    kaesten[0].check()
+    page.click('.audit-del')
+    # Removal done = the list was fetched again and found nothing left.
+    page.wait_for_selector('#syncAuditResult .alert-success', timeout=60000)
+    page.wait_for_function(
+        "() => document.querySelectorAll('.audit-row').length === 0 && "
+        "!document.getElementById('btnSyncAudit').disabled", timeout=60000)
+    assert not errors, errors
+    page.close()
 
     con = sqlite3.connect(db)
     nachher = con.execute('SELECT COUNT(*) FROM vehicle_syncs').fetchone()[0]
