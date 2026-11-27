@@ -2,6 +2,11 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- Settings on iPhone (WebKit, 390 px): the page scrolled sideways by about 100 px because the "import mode" select in the database card sized itself to its longest option; it now clips inside its box.
+- Settings: the language select no longer cuts "Automatic (browser) (...)" short.
+
 ## v3.0.209 (2026-11-26)
 
 ### Browser libraries are served by the app; third-party notices

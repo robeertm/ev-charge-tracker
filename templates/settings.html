@@ -110,7 +110,7 @@
             <div class="card-body">
                 <form method="POST">
                     <div class="d-flex align-items-center gap-3">
-                        <select class="form-select form-select-sm" name="app_language" style="max-width:260px" onchange="this.form.submit()">
+                        <select class="form-select form-select-sm" name="app_language" style="max-width:320px" onchange="this.form.submit()">
                             {# v3.0.155: "auto" follows the browser; a choice here always wins #}
                             <option value="auto" {% if region_cfg.language == 'auto' %}selected{% endif %}>{{ t('set.auto_browser') }}{% for code, name in supported_languages %}{% if code == region_cfg.auto_language %} ({{ name }}){% endif %}{% endfor %}</option>
                             {% for code, name in supported_languages %}
@@ -2248,7 +2248,7 @@
                     </div>
                     <div class="mb-2">
                         <label class="form-label small mb-1 fw-bold">{{ t('set.db_import_mode') }}</label>
-                        <select name="import_mode" id="importMode" class="form-select form-select-sm">
+                        <select name="import_mode" id="importMode" class="form-select form-select-sm" style="overflow:hidden;text-overflow:ellipsis">
                             <option value="skip" selected>{{ t('set.db_import_mode_skip') }}</option>
                             <option value="update">{{ t('set.db_import_mode_update') }}</option>
                             <option value="append">{{ t('set.db_import_mode_append') }}</option>
