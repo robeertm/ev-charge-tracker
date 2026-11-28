@@ -44,9 +44,9 @@ ORTE = [
 ]
 WARTUNG = [
     ("inspection", "Annual service", 380.0),
-    ("tyres", "Winter tyres fitted", 120.0),
-    ("tyres", "Summer tyres fitted", 120.0),
-    ("hu", "Roadworthiness test", 145.0),
+    ("tires_winter", "Winter tyres fitted", 120.0),
+    ("tires_summer", "Summer tyres fitted", 120.0),
+    ("tuv", "Roadworthiness test", 145.0),
     ("wiper", "Wiper blades replaced", 39.9),
     ("brakes", "Brake fluid change", 89.0),
     ("cabin_filter", "Cabin filter replaced", 55.0),

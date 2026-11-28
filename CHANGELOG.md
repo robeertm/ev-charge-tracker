@@ -4,6 +4,8 @@
 
 ### Fixed
 
+- Maintenance list: the type badge showed the stored key (for example `cabin_filter`); it now shows the translated type name in every language. The demo dataset uses real types.
+- Settings on a phone: the SSL mode buttons wrap instead of widening the page (French and Dutch texts overflowed the card by up to 34 px); the modal close button and the narrow "All" and CO2 buttons reach 44 px.
 - Settings on iPhone (WebKit, 390 px): the page scrolled sideways by about 100 px because the "import mode" select in the database card sized itself to its longest option; it now clips inside its box.
 - Settings: the language select no longer cuts "Automatic (browser) (...)" short.
 

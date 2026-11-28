@@ -75,7 +75,7 @@
                             {% else %}<span class="text-muted">—</span>{% endif %}
                         </td>
                         {% endif %}
-                        <td><span class="badge bg-secondary">{{ e.item_type }}</span></td>
+                        <td><span class="badge bg-secondary">{{ t('maint.type_' ~ e.item_type, default=(e.item_type or '')|replace('_', ' ')|capitalize) }}</span></td>
                         <td>{{ e.title or '—' }}</td>
                         <td class="text-end">{% if e.odometer_km %}{{ '{:,.0f}'.format(e.odometer_km|dist).replace(',', '.') }}{% endif %}</td>
                         <td class="text-end">{% if e.cost_eur %}{{ "%.2f"|format(e.cost_eur) }}{% endif %}</td>

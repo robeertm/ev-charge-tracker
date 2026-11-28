@@ -241,3 +241,12 @@ footer {
     .leaflet-touch .leaflet-bar a.leaflet-control-zoom-out { width: 44px !important; height: 44px !important; line-height: 44px !important; }
     .cert-pdf-link { display: inline-flex; align-items: center; min-height: 44px; }
 }
+
+/* Phone: tap targets of at least 44 px for the modal close button and the
+   narrow icon/"All" buttons; the SSL mode group wraps instead of widening the page. */
+@media (max-width: 576px) {
+    .modal-header .btn-close { padding: 0.875rem; }
+    #btnFetchCo2, [data-preset="all"] { min-width: 44px; }
+    #sslModeGroup { display: flex; flex-wrap: wrap; gap: 0.25rem; }
+    #sslModeGroup > .btn { border-radius: var(--bs-btn-border-radius) !important; flex: 0 1 auto; margin-left: 0 !important; }
+}
